@@ -1,6 +1,6 @@
 /**
  * Builds the rows of the model options selector: one row per option the model
- * declares, with the choices as the provider defined them. A boolean option
+ * declares, with the choices as the harness defined them. A boolean option
  * has no choices of its own, so it is shown as an off/on switch. Its row is
  * marked `boolean`, because a pick is sent back as a boolean, not as "on".
  */

@@ -21,38 +21,28 @@ import {
   type Handler,
   type StubSocket,
 } from "@hercule/client-core/testing";
-import { buildSession, buildThreadsWorld } from "@hercule/client-core/threads/testing";
 import {
   buildAgentStreamTopic,
   buildAgentTapTopic,
   buildSessionStreamTopic,
   GITHUB_CONNECTION_TYPE,
-  MEMORY_CORE,
   type Assistant,
   type Connection,
   type ConversationMessage,
   type Input,
-  type MemoryDocument,
-  type MemoryWriteInput,
   type ModelOption,
+  type ModelProfile,
   type MutableLiveTopic,
-  type OpenRequest,
-  type PluginDetail,
-  type Project,
-  type ProviderInstance,
-  type Resource,
-  type Runner,
-  type RunSummary,
+  type ProviderAccount,
   type Session,
   type SessionSkill,
-  type Signal,
   type Subagent,
   type TapItem,
   type TranscriptRow,
-  type Workspace,
 } from "@hercule/contract";
 import { DEFAULT_APPEARANCE, type TextSizeStep } from "../../ipc/appearance";
 import type { Bridge } from "../../ipc/bridge";
+import type { DesktopPlatform } from "../../ipc/platform/desktop-platform";
 import type {
   Appearance,
   AppearanceSaveOutcome,
@@ -61,6 +51,7 @@ import type {
   EncodedIpcRequest,
   FirstRunProgress,
   FolderPickOutcome,
+  LinkOpenOutcome,
   LocalControllerFindOutcome,
   LocalControllerStartOutcome,
   MenuCommand,
@@ -68,7 +59,19 @@ import type {
   SkillArchiveBuildOutcome,
   SkillFoldersPickOutcome,
 } from "../../ipc/contract";
+import {
+  BOOT_HANDLERS,
+  FIXTURE_APPROVAL_REQUEST,
+  FIXTURE_ACCOUNT_ID,
+  FIXTURE_THREADS,
+  FIXTURE_WORLD,
+  buildSidebarHandlers,
+  FIXTURE_THREAD_IDS,
+  NO_SIDEBAR_RECORDS,
+} from "./fake-controller";
 import { buildRouterContext, type RouterContext } from "./context";
+import { BODY_SILENCE_MS, HEADER_WAIT_MS } from "./controller-client";
+import { SHARED_READ_WINDOW_MS } from "./live";
 import { createAppRouter } from "./router";
 
 /** The address of the stubbed controller. */
@@ -130,6 +133,15 @@ export interface FakeBridge {
  * test passes its own. A save of the Appearance replaces what a later read
  * returns, unless `saveAppearance` answers it as `NotSaved`. Every save is
  * recorded either way.
+ *
+ * `signInReturn` answers the browser's return from an MCP server's sign-in. By
+ * default main cannot listen (`unavailable`), so a sign-in asks for the paste.
+ *
+ * `openLink` answers each link the app opens in the browser (`link.open`),
+ * which is recorded either way. By default the system opens it.
+ *
+ * `platform` is the platform the app says it runs on: a Mac unless a test
+ * passes another.
  */
 export const createFakeBridge = ({
   controllerUrl = null,
@@ -145,6 +157,13 @@ export const createFakeBridge = ({
   firstRun = null,
   appearance = DEFAULT_APPEARANCE,
   saveAppearance = () => Promise.resolve({ _tag: "Saved" }),
+  signInReturn = {
+    listen: () => Promise.resolve({ _tag: "unavailable" }),
+    wait: () => Promise.resolve({ _tag: "cancelled" }),
+    cancel: () => Promise.resolve(undefined),
+  },
+  openLink = () => Promise.resolve({ _tag: "Opened" }),
+  platform = "mac",
 }: {
   readonly controllerUrl?: string | null;
   readonly token?: string | null;
@@ -159,6 +178,9 @@ export const createFakeBridge = ({
   readonly firstRun?: FirstRunProgress | null;
   readonly appearance?: Appearance;
   readonly saveAppearance?: (next: Appearance) => Promise<AppearanceSaveOutcome>;
+  readonly signInReturn?: Bridge["signInReturn"];
+  readonly openLink?: (url: string) => Promise<LinkOpenOutcome>;
+  readonly platform?: DesktopPlatform;
 } = {}): FakeBridge => {
   const tokenWrites: (string | null)[] = [];
   const savedUrls: string[] = [];
@@ -177,6 +199,8 @@ export const createFakeBridge = ({
   const urgentSignalLists: EncodedIpcRequest<"urgentSignals.set">[] = [];
   return {
     bridge: {
+      platform,
+      hiddenWindowDraws: true,
       controllerUrl: {
         read: () => Promise.resolve(controllerUrl),
         save: (url) => {
@@ -266,9 +290,10 @@ export const createFakeBridge = ({
       link: {
         open: ({ url }) => {
           openedLinks.push(url);
-          return Promise.resolve(undefined);
+          return openLink(url);
         },
       },
+      signInReturn,
       menu: {
         onCommand: (listener) => {
           menuListeners.add(listener);
@@ -312,6 +337,23 @@ export const createFakeBridge = ({
 // here with the rest of the harness.
 export { buildErrorBody, type Answer, type Call, type Handler } from "@hercule/client-core/testing";
 
+// The stubbed controller's records and handlers live in a module with no test
+// runner, so the counts check's page can use them too. A test imports them from
+// here with the rest of the harness.
+export {
+  answerSignalQuery,
+  buildFixtureAssistant,
+  buildFixtureAssistantSession,
+  buildMemoryDocument,
+  buildSidebarHandlers,
+  FIXTURE_THREAD_IDS,
+  NO_SIDEBAR_RECORDS,
+  SIDEBAR_FIXTURE,
+  storeMemory,
+  type AssistantRecords,
+  type SidebarRecords,
+} from "./fake-controller";
+
 /** The error `fetch` rejects with when nothing answers at the address. */
 export const refuseConnection = (): never => {
   throw new TypeError("Failed to fetch");
@@ -332,6 +374,10 @@ export const neverAnswer = (): Promise<Answer> => new Promise(() => {});
  * test can call `answer` before the first request has arrived. That reply is
  * kept and answers the first request as soon as it arrives. Without this, the
  * reply would be lost and the request would wait forever.
+ *
+ * The app gives up on a request that gets no answer within `HEADER_WAIT_MS`
+ * of real time. A test that holds a request across steps that can be slow on
+ * a busy machine calls `stopRequestTimeLimit` first.
  */
 export const holdAnswer = (): {
   readonly handler: () => Promise<Answer>;
@@ -362,6 +408,32 @@ export const holdAnswer = (): {
       });
     },
   };
+};
+
+/**
+ * Stops the app's request time limits (`HEADER_WAIT_MS` and `BODY_SILENCE_MS`)
+ * from firing for the rest of the test, so a request that the test holds stays pending
+ * however slowly the test's other steps run. Without it, a busy machine can
+ * take longer than the limit, and the app fails the held request with a
+ * `ConnectionError` the test did not plan. It replaces each timer of either
+ * length with a real timer that never fires by itself, and restores
+ * `setTimeout` when the test ends. Fake timers cannot be used here: Testing
+ * Library's `findBy` and `waitFor` wait on a timer of their own, which a fake
+ * clock never fires. Any other timer of either length is held too.
+ */
+export const stopRequestTimeLimit = (): void => {
+  const realSetTimeout = globalThis.setTimeout;
+  const spy = vi
+    .spyOn(globalThis, "setTimeout")
+    .mockImplementation(((callback: () => void, delay?: number, ...rest: unknown[]) =>
+      realSetTimeout(
+        callback,
+        delay === HEADER_WAIT_MS || delay === BODY_SILENCE_MS ? 2 ** 30 : delay,
+        ...rest,
+      )) as typeof setTimeout);
+  onTestFinished(() => {
+    spy.mockRestore();
+  });
 };
 
 /**
@@ -569,471 +641,6 @@ export const readFieldText = (field: Element): string =>
 export const readFieldPlaceholder = (field: Element): string | null =>
   field.querySelector(":scope > p.is-editor-empty")?.getAttribute("data-placeholder") ?? null;
 
-/** The records the sidebar reads, as the stubbed controller holds them. */
-export interface SidebarRecords {
-  readonly threads: readonly Session[];
-  readonly projects: readonly Project[];
-  readonly workspaces: readonly Workspace[];
-  readonly resources: readonly Resource[];
-  readonly runners: readonly Runner[];
-  readonly providers: readonly ProviderInstance[];
-  /** The signed-in user's name. */
-  readonly username: string;
-  /** The assistants, each with the current session of its main conversation. None when absent. */
-  readonly assistants?: readonly AssistantRecords[];
-  /**
-   * The signals the controller holds, open and resolved. Each view of
-   * Intake reads its own of them (see `answerSignalQuery`). None when absent.
-   */
-  readonly signals?: readonly Signal[];
-  /** The installed plugins. None when absent. */
-  readonly plugins?: readonly PluginDetail[];
-  /** The live sessions that are not threads, such as a run's agent steps'. None when absent. */
-  readonly agentSessions?: readonly Session[];
-  /**
-   * The runs, which the Office reads by status, and as it opens, by
-   * `activeSince`. None when absent.
-   */
-  readonly runs?: readonly RunSummary[];
-  /**
-   * The sessions of the runs' agent steps, exited ones included, which the
-   * Office reads by run. None when absent.
-   */
-  readonly runSessions?: readonly Session[];
-}
-
-/** An assistant as the stubbed controller holds it. */
-export interface AssistantRecords {
-  readonly assistant: Assistant;
-  /** The current session of the assistant's main conversation, or `null` when none has started. */
-  readonly session: Session | null;
-}
-
-/** A controller that holds no threads, projects, workspaces, resources, runners or providers. */
-export const NO_SIDEBAR_RECORDS: SidebarRecords = {
-  threads: [],
-  projects: [],
-  workspaces: [],
-  resources: [],
-  runners: [],
-  providers: [],
-  username: "rogier",
-};
-
-/**
- * Answers a session listing from `records`:
- *
- * - a listing filtered to one conversation, which is how the app reads an
- *   assistant's current session, gets that assistant's session, or none;
- * - a listing filtered to runs gets the sessions of those runs in
- *   `runSessions`;
- * - a listing that holds the threads gets the threads and the sessions of
- *   `agentSessions` of kind `agent`, as the sidebar reads them;
- * - a listing of the sessions that are not threads gets `agentSessions`;
- * - any other listing gets the threads.
- */
-const answerSessionQuery = (records: SidebarRecords, call: Call): Answer => {
-  const params = new URLSearchParams(call.search);
-  const conversationId = params.get("conversationId");
-  const runIds = params.getAll("runId");
-  if (runIds.length > 0) {
-    const items = (records.runSessions ?? []).filter(
-      (session) => session.runId !== null && runIds.includes(session.runId),
-    );
-    return { body: { items } };
-  }
-  if (conversationId === null) {
-    const kinds = params.getAll("kind");
-    if (kinds.includes("thread")) {
-      const partners = (records.agentSessions ?? []).filter((session) => session.kind === "agent");
-      return {
-        body: {
-          items: kinds.includes("agent") ? [...records.threads, ...partners] : records.threads,
-        },
-      };
-    }
-    if (!kinds.includes("agent")) return { body: { items: records.threads } };
-    const activeSince = params.get("activeSince");
-    if (activeSince === null) return { body: { items: records.agentSessions ?? [] } };
-    // The Office reads every session an Agent spawned that had not exited
-    // before `activeSince`: the live ones, and the ones that exited since.
-    const sessions = new Map(
-      [...(records.agentSessions ?? []), ...(records.runSessions ?? [])].map((session) => [
-        session.id,
-        session,
-      ]),
-    );
-    const status = params.get("status");
-    const items = [...sessions.values()].filter(
-      (session) =>
-        (status === null || session.status === status) &&
-        (session.status !== "exited" ||
-          (session.exitedAt !== null && session.exitedAt >= activeSince)),
-    );
-    return { body: { items } };
-  }
-  const session = records.assistants?.find(
-    ({ assistant }) => assistant.mainConversationId === conversationId,
-  )?.session;
-  return { body: { items: session ? [session] : [] } };
-};
-
-/**
- * Answers a signal listing from `signals` as the controller does, in one page
- * with no cursor to a next one:
- *
- * - `to-do`, the default: the open signals not snoozed, or whose snooze has
- *   run out by now;
- * - `later`: the open signals snoozed until after now, soonest first;
- * - `done`: the resolved signals, newest first.
- *
- * A `source` keeps the signals of that plugin's kinds, and a `kind` keeps the
- * signals of that one kind.
- */
-export const answerSignalQuery = (signals: readonly Signal[], call: Call): Answer => {
-  const query = new URLSearchParams(call.search);
-  const view = query.get("view") ?? "to-do";
-  const source = query.get("source");
-  const kind = query.get("kind");
-  const now = Date.now();
-  const snoozed = (signal: Signal): boolean =>
-    signal.snooze !== undefined && Date.parse(signal.snooze.until) > now;
-  const fromSource = signals.filter(
-    (signal) =>
-      (source === null || signal.kind.startsWith(`${source}/`)) &&
-      (kind === null || signal.kind === kind),
-  );
-  const items =
-    view === "done"
-      ? fromSource
-          .filter((signal) => signal.status === "resolved")
-          .toSorted((a, b) => (b.resolution?.at ?? "").localeCompare(a.resolution?.at ?? ""))
-      : view === "later"
-        ? fromSource
-            .filter((signal) => signal.status === "open" && snoozed(signal))
-            .toSorted((a, b) => a.snooze!.until.localeCompare(b.snooze!.until))
-        : fromSource.filter((signal) => signal.status === "open" && !snoozed(signal));
-  return { body: { items } };
-};
-
-/**
- * Returns the handlers that answer the sidebar's reads from `records`: the
- * threads, projects, workspaces, resources, runners, providers, the user, the
- * assistants and each assistant's current session. Each list comes back as
- * one page, with no cursor to a next one.
- *
- * They also answer the three reads a Draft Thread adds, which the app makes
- * whenever it opens at `/`: the settings, with none set, the profiles, and
- * the project's open tasks, of which there are none. And each assistant has
- * an empty core note and no topic, which Settings > Assistants reads.
- */
-export const buildSidebarHandlers = (
-  records: SidebarRecords,
-): Readonly<Record<string, Handler>> => ({
-  "GET /api/v1/sessions": (call) => answerSessionQuery(records, call),
-  "GET /api/v1/assistants": {
-    body: { items: (records.assistants ?? []).map(({ assistant }) => assistant) },
-  },
-  "GET /api/v1/projects": { body: { items: records.projects } },
-  "GET /api/v1/workspaces": { body: { items: records.workspaces } },
-  "GET /api/v1/resources": { body: { items: records.resources } },
-  "GET /api/v1/runners": { body: { items: records.runners } },
-  "GET /api/v1/providers": { body: records.providers },
-  "GET /api/v1/user": { body: { username: records.username } },
-  "GET /api/v1/settings": { body: { controller: {}, user: {} } },
-  "GET /api/v1/profiles": { body: { items: [] } },
-  "GET /api/v1/tasks": { body: { items: [] } },
-  // The shell reads what Tracking follows, for the To do count.
-  "GET /api/v1/tasks/tracking": { body: { rows: [] } },
-  // A draft's composer reads the skills a start would have, for its `$` list.
-  "GET /api/v1/sessions/preview-skills": { body: { items: [], skipped: [] } },
-  // The shell reads the Connections, for New project and the starter threads.
-  "GET /api/v1/connections": { body: { items: [] } },
-  // The shell reads To do for Intake's count, and the plugins for its sources.
-  "GET /api/v1/signals": (call) => answerSignalQuery(records.signals ?? [], call),
-  // The shell reads the Tasks the signals on To do are about (Your work).
-  "GET /api/v1/signals/your-work": { body: { tasks: [] } },
-  "GET /api/v1/plugins": { body: records.plugins ?? [] },
-  // Settings > Intake reads the Ignore Rules each time it opens.
-  "GET /api/v1/ignore-rules": { body: [] },
-  // Settings > Connections reads the event counts each time it opens.
-  "GET /api/v1/events/counts": { body: { connections: [] } },
-  // Intake reads the workflows, whose names label the signals their runs raised.
-  "GET /api/v1/workflows": { body: { items: [] } },
-  // The Office reads the runs that are running and those that are pending,
-  // and as it opens, the runs that had not ended a minute before.
-  "GET /api/v1/runs": (call) => {
-    const params = new URLSearchParams(call.search);
-    const activeSince = params.get("activeSince");
-    const runs = records.runs ?? [];
-    if (activeSince !== null) {
-      const items = runs.filter((run) => !("finishedAt" in run) || run.finishedAt >= activeSince);
-      return { body: { items } };
-    }
-    return { body: { items: runs.filter((run) => run.status === params.get("status")) } };
-  },
-  // Settings > Assistants reads the picked assistant's memory.
-  ...Object.fromEntries(
-    (records.assistants ?? []).flatMap(({ assistant }) =>
-      Object.entries(storeMemory(assistant.id, [buildMemoryDocument(MEMORY_CORE, "")])),
-    ),
-  ),
-});
-
-/** The moment every fixture memory document was last written. */
-const MEMORY_UPDATED_AT = "2026-10-01T09:00:00.000Z";
-
-/**
- * Returns the memory document `name` holding `body`, with its size counted
- * in characters as the controller counts them, `gist`, and `version`.
- */
-export const buildMemoryDocument = (
-  name: string,
-  body: string,
-  gist = "",
-  version = 1,
-): MemoryDocument => ({
-  name,
-  gist,
-  size: [...body].length,
-  body,
-  version,
-  updatedAt: MEMORY_UPDATED_AT,
-});
-
-/**
- * Returns handlers that play the controller's memory of the assistant
- * `assistantId`, on one stored set of documents that starts as `documents`:
- *
- * - the index lists the core note first, then the topics by name;
- * - a document named in `documents` or `newNames` can be read, written and
- *   deleted. A read of one that is not stored answers 404;
- * - a write creates the document when it is not stored, with an empty gist
- *   unless the write sets one, and otherwise replaces its text, and its gist
- *   when the write sets one. The core note keeps an empty gist. Each write
- *   adds one to the version, and a write whose `expectedVersion` is not the
- *   stored version, 0 for a document not stored, answers 409 `conflict`.
- *
- * A handler for the same path, spread after these, answers in its place.
- */
-export const storeMemory = (
-  assistantId: string,
-  documents: readonly MemoryDocument[],
-  newNames: readonly string[] = [],
-): Readonly<Record<string, Handler>> => {
-  let stored = [...documents];
-  const base = `/api/v1/assistants/${assistantId}/memory`;
-  const listEntries = () =>
-    stored
-      .map(({ name, gist, size }) => ({ name, gist, size }))
-      .toSorted((a, b) =>
-        a.name === MEMORY_CORE ? -1 : b.name === MEMORY_CORE ? 1 : a.name < b.name ? -1 : 1,
-      );
-  const handlers: Record<string, Handler> = { [`GET ${base}`]: () => ({ body: listEntries() }) };
-  for (const name of [...documents.map((each) => each.name), ...newNames]) {
-    const path = `${base}/${encodeURIComponent(name)}`;
-    const notFound = { status: 404, body: buildErrorBody("not_found", `no document ${name}`) };
-    handlers[`GET ${path}`] = () => {
-      const document = stored.find((each) => each.name === name);
-      return document === undefined ? notFound : { body: document };
-    };
-    handlers[`PUT ${path}`] = (call) => {
-      const { body, gist, expectedVersion } = call.body as MemoryWriteInput;
-      const previous = stored.find((each) => each.name === name);
-      const version = previous?.version ?? 0;
-      if (expectedVersion !== undefined && expectedVersion !== version) {
-        return {
-          status: 409,
-          body: buildErrorBody(
-            "conflict",
-            `${name} is at version ${String(version)}, not ${String(expectedVersion)}`,
-          ),
-        };
-      }
-      const written = buildMemoryDocument(
-        name,
-        body,
-        name === MEMORY_CORE ? "" : (gist ?? previous?.gist ?? ""),
-        version + 1,
-      );
-      stored = [...stored.filter((each) => each.name !== name), written];
-      return { body: written };
-    };
-    handlers[`DELETE ${path}`] = () => {
-      stored = stored.filter((each) => each.name !== name);
-      return { body: {} };
-    };
-  }
-  return handlers;
-};
-
-/**
- * The ids of client-core's shared fixture world, in the UUIDv7 format the
- * contract accepts, so the records decode when the stubbed controller sends
- * them.
- */
-const WORLD_IDS = {
-  moss: "01a06d02-beff-7037-9f5b-042822015952",
-  cove: "01a06d02-beff-7037-9f5b-042822015953",
-  webshopProject: "01a06d02-7000-7000-8000-000000000001",
-  opsProject: "01a06d02-7000-7000-8000-000000000002",
-  webshop: "01a06d02-7100-7000-8000-000000000001",
-  infra: "01a06d02-7100-7000-8000-000000000002",
-  runbooks: "01a06d02-7100-7000-8000-000000000003",
-  primary: "01a06d02-7200-7000-8000-000000000001",
-  primaryCheckout: "01a06d02-7300-7000-8000-000000000001",
-  thread3f1: "01a06d02-7200-7000-8000-000000000002",
-  thread3f1Checkout: "01a06d02-7300-7000-8000-000000000002",
-  flakyThread: "01a06d02-7400-7000-8000-000000000001",
-  runbookThread: "01a06d02-7400-7000-8000-000000000002",
-};
-
-/** The ids of the threads in `SIDEBAR_FIXTURE`, for a test that opens one. */
-export const FIXTURE_THREAD_IDS = {
-  /** "Write the retry runbook": waiting on a command approval, in the `hercule/thread-3f1` worktree. */
-  runbook: WORLD_IDS.runbookThread,
-  /** "Fix flaky webhook tests": working, in the same worktree. */
-  flaky: WORLD_IDS.flakyThread,
-  /** "Bump the Bun pin": idle, in webshop's main workspace. */
-  bunPin: "01a06d02-7400-7000-8000-000000000003",
-  /** "Rotate the backups key": exited, in the ops project, with no workspace. */
-  backupsKey: "01a06d02-7400-7000-8000-000000000004",
-  /** "Sketch the pricing page": idle, in no project. */
-  pricingPage: "01a06d02-7400-7000-8000-000000000005",
-} as const;
-
-const WORLD = buildThreadsWorld(WORLD_IDS);
-
-/** The permission profile and provider instance every fixture thread names. */
-const PROFILE_ID = "01a06d02-7500-7000-8000-000000000001";
-const INSTANCE_ID = "01a06d02-7600-7000-8000-000000000001";
-
-/** Returns a fixture thread on moss, with ids the contract accepts. */
-const buildFixtureThread = (
-  over: Partial<Session> & { readonly id: string; readonly title: string },
-): Session =>
-  buildSession({
-    runnerId: WORLD.MOSS.id,
-    permissionProfileId: PROFILE_ID,
-    instanceId: INSTANCE_ID,
-    ...over,
-  });
-
-/**
- * Returns a fixture assistant with every field the contract requires. The
- * caller picks its id, name and main conversation, in the UUIDv7 format the
- * contract accepts.
- */
-export const buildFixtureAssistant = (
-  over: Partial<Assistant> & Pick<Assistant, "id" | "name" | "mainConversationId">,
-): Assistant => ({
-  systemPrompt: `You are ${over.name}.`,
-  instanceId: INSTANCE_ID,
-  permissionProfileId: PROFILE_ID,
-  accessMode: "auto-accept-edits",
-  model: null,
-  disallowedTools: [],
-  unenforced: [],
-  heartbeat: { enabled: false, schedule: "0 7-23 * * *", prompt: "Check in.", target: "web" },
-  rotation: { contextFraction: 0.7, maxContextTokens: 200000, dailyAt: "04:00" },
-  reply: "turn-end",
-  createdAt: "2026-09-10T09:00:00.000Z",
-  updatedAt: "2026-09-10T09:00:00.000Z",
-  ...over,
-});
-
-/**
- * Returns a session of `assistant`'s main conversation on moss, idle unless
- * `over` says otherwise.
- */
-export const buildFixtureAssistantSession = (
-  assistant: Assistant,
-  over: Partial<Session> & { readonly id: string },
-): Session =>
-  buildFixtureThread({
-    title: assistant.name,
-    agentId: assistant.id,
-    conversationId: assistant.mainConversationId,
-    ...over,
-  });
-
-const APPROVAL_REQUEST: OpenRequest = {
-  requestId: "req-1",
-  itemId: "tool-1",
-  kind: "command_approval",
-  decisions: ["allow", "deny"],
-  detail: { command: "git push" },
-};
-
-/** The fixture threads, one per `FIXTURE_THREAD_IDS` entry. */
-const FIXTURE_THREADS = {
-  runbook: buildFixtureThread({
-    id: FIXTURE_THREAD_IDS.runbook,
-    title: "Write the retry runbook",
-    status: "busy",
-    openRequests: [APPROVAL_REQUEST],
-    projectId: WORLD.WEBSHOP_PROJECT.id,
-    workspaceId: WORLD.THREAD_3F1.id,
-    createdAt: "2026-09-10T09:05:00.000Z",
-    lastActivityAt: "2026-09-10T09:05:00.000Z",
-  }),
-  flaky: buildFixtureThread({
-    id: FIXTURE_THREAD_IDS.flaky,
-    title: "Fix flaky webhook tests",
-    status: "busy",
-    projectId: WORLD.WEBSHOP_PROJECT.id,
-    workspaceId: WORLD.THREAD_3F1.id,
-    createdAt: "2026-09-10T09:04:00.000Z",
-    lastActivityAt: "2026-09-10T09:04:00.000Z",
-  }),
-  bunPin: buildFixtureThread({
-    id: FIXTURE_THREAD_IDS.bunPin,
-    title: "Bump the Bun pin",
-    projectId: WORLD.WEBSHOP_PROJECT.id,
-    workspaceId: WORLD.PRIMARY.id,
-    createdAt: "2026-09-10T09:03:00.000Z",
-    lastActivityAt: "2026-09-10T09:03:00.000Z",
-  }),
-  backupsKey: buildFixtureThread({
-    id: FIXTURE_THREAD_IDS.backupsKey,
-    title: "Rotate the backups key",
-    status: "exited",
-    projectId: WORLD.OPS_PROJECT.id,
-    exitedAt: "2026-09-10T09:02:00.000Z",
-    createdAt: "2026-09-10T09:02:00.000Z",
-    lastActivityAt: "2026-09-10T09:02:00.000Z",
-  }),
-  pricingPage: buildFixtureThread({
-    id: FIXTURE_THREAD_IDS.pricingPage,
-    title: "Sketch the pricing page",
-    createdAt: "2026-09-10T09:01:00.000Z",
-    lastActivityAt: "2026-09-10T09:01:00.000Z",
-  }),
-};
-
-/**
- * A sidebar with something in every place: two projects, a worktree two
- * threads share, a main workspace, a thread with no workspace, and a thread
- * in no project. One thread waits on an approval, one works, two are idle and
- * one has exited. Each was created when it was last active, so they are
- * listed most recent first by either time, as the controller lists them.
- */
-export const SIDEBAR_FIXTURE: SidebarRecords = {
-  threads: [
-    FIXTURE_THREADS.runbook,
-    FIXTURE_THREADS.flaky,
-    FIXTURE_THREADS.bunPin,
-    FIXTURE_THREADS.backupsKey,
-    FIXTURE_THREADS.pricingPage,
-  ],
-  projects: [WORLD.WEBSHOP_PROJECT, WORLD.OPS_PROJECT],
-  workspaces: [{ ...WORLD.PRIMARY, sessionIds: [FIXTURE_THREAD_IDS.bunPin] }, WORLD.THREAD_3F1],
-  resources: [WORLD.WEBSHOP, WORLD.INFRA, WORLD.RUNBOOKS],
-  runners: [WORLD.MOSS],
-  providers: [],
-  username: "rogier",
-};
-
 /** The reasoning effort the fixture models offer, as their one model option. */
 export const EFFORT_OPTION: ModelOption = {
   id: "effort",
@@ -1048,38 +655,35 @@ export const EFFORT_OPTION: ModelOption = {
 };
 
 /**
- * The provider instance every fixture thread names, as moss probed it: Claude
+ * The Provider Account every fixture thread names, as moss probed it: Claude
  * Code, signed in, with the fixture turns' model as its default, a second
  * model, and an older one. Both current models offer `EFFORT_OPTION`.
  *
  * `SIDEBAR_FIXTURE` leaves it out, so its threads show their model's slug. A
- * test that needs model names adds it to the providers.
+ * test that needs model names adds it to the accounts, and
+ * `FIXTURE_MODEL_PROFILE` to the model profiles.
  */
-export const FIXTURE_INSTANCE: ProviderInstance = {
-  id: INSTANCE_ID,
-  providerId: "claude-code",
-  name: "personal",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
+export const FIXTURE_ACCOUNT: ProviderAccount = {
+  id: FIXTURE_ACCOUNT_ID,
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: "rogier@example.com",
+  planLabel: "Claude Max",
+  defaultHarnessId: "claude-code/claude-code",
+  expiresAt: null,
+  usage: [],
+  failure: null,
+  modelCount: 3,
+  catalogReadAt: "2026-09-10T08:00:00.000Z",
+  catalogError: null,
+  readiness: [
+    { harnessId: "claude-code/claude-code", runnerId: FIXTURE_WORLD.MOSS.id, state: "ready" },
+  ],
   snapshots: [
     {
-      runnerId: WORLD.MOSS.id,
+      runnerId: FIXTURE_WORLD.MOSS.id,
+      harnessId: "claude-code/claude-code",
       probedAt: "2026-09-10T08:00:00.000Z",
       harnessVersion: "2.1.263",
       versionVerdict: "ok",
@@ -1108,6 +712,48 @@ export const FIXTURE_INSTANCE: ProviderInstance = {
       ],
     },
   ],
+  createdAt: "2026-09-08T09:00:00.000Z",
+  updatedAt: "2026-09-08T09:00:00.000Z",
+};
+
+/**
+ * The Model Profile "Main" for `FIXTURE_ACCOUNT`: its two current models in
+ * the order of the account's catalog (the Default Selection leaves out the
+ * legacy one), the fixture turns' model first and the default. Every entry
+ * can run on moss.
+ */
+export const FIXTURE_MODEL_PROFILE: ModelProfile = {
+  id: "01a06d02-7800-7000-8000-000000000001",
+  name: "Main",
+  revision: 1,
+  accounts: [
+    {
+      providerAccountId: FIXTURE_ACCOUNT_ID,
+      harnessId: null,
+      resolvedHarnessId: "claude-code/claude-code",
+      selectionPending: false,
+      entries: FIXTURE_ACCOUNT.snapshots[0]!.models.filter((model) => model.isLegacy !== true).map(
+        (model) => ({
+          providerAccountId: FIXTURE_ACCOUNT_ID,
+          model: model.slug,
+          harnessId: null,
+          resolvedHarnessId: "claude-code/claude-code",
+          name: model.name,
+          options: model.options,
+          imageInput: model.imageInput,
+          problem: null,
+          canGenerateText: true,
+        }),
+      ),
+      newModels: [],
+    },
+  ],
+  defaultEntry: {
+    providerAccountId: FIXTURE_ACCOUNT_ID,
+    model: "claude-sonnet-5",
+    harnessId: null,
+  },
+  dismissedNewModels: [],
   createdAt: "2026-09-08T09:00:00.000Z",
   updatedAt: "2026-09-08T09:00:00.000Z",
 };
@@ -1145,8 +791,8 @@ export interface ThreadRecords {
   readonly skills?: readonly SessionSkill[];
 }
 
-/** A provider event, as a transcript row holds it. */
-type ProviderEvent = TranscriptRow["event"];
+/** A harness event, as a transcript row holds it. */
+type HarnessEvent = TranscriptRow["event"];
 
 /** Removes the fields every event has from each event type of `Event`. */
 type OmitEventBase<Event> = Event extends unknown
@@ -1154,11 +800,11 @@ type OmitEventBase<Event> = Event extends unknown
   : never;
 
 /**
- * A provider event without the fields every event has, which `buildTranscript`
+ * A harness event without the fields every event has, which `buildTranscript`
  * and `buildNextRows` fill in. The specimens' fixtures import it too, as a
  * type only, because this module imports vitest.
  */
-export type EventBody = OmitEventBase<ProviderEvent>;
+export type EventBody = OmitEventBase<HarnessEvent>;
 
 /** One event of a fixture transcript, and how many seconds after the transcript's start it happened. */
 export type TranscriptStep = readonly [seconds: number, event: EventBody];
@@ -1228,7 +874,7 @@ const runItem = (
   item: {
     readonly turnId: string;
     readonly itemId: string;
-    readonly kind: Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
+    readonly kind: Extract<HarnessEvent, { _tag: "item.started" }>["kind"];
     readonly detail?: Record<string, string>;
     readonly text?: { readonly streamKind: TapItem["streamKind"]; readonly delta: string };
   },
@@ -1470,12 +1116,12 @@ export const THREAD_FIXTURES = {
         {
           _tag: "item.started",
           turnId: "turn-1",
-          itemId: APPROVAL_REQUEST.itemId,
+          itemId: FIXTURE_APPROVAL_REQUEST.itemId,
           kind: "command_execution",
           detail: { command: "git push" },
         },
       ],
-      [44, { _tag: "request.opened", request: APPROVAL_REQUEST }],
+      [44, { _tag: "request.opened", request: FIXTURE_APPROVAL_REQUEST }],
     ]),
     inputs: [],
   },
@@ -1528,7 +1174,7 @@ export const THREAD_FIXTURES = {
           _tag: "turn.completed",
           turnId: "turn-1",
           state: "failed",
-          error: "The provider stopped answering: rate limit reached.",
+          error: "The harness stopped answering: rate limit reached.",
         },
       ],
     ]),
@@ -1669,13 +1315,16 @@ export const buildConversationHandlers = (
  * - `POST /api/v1/auth/ws-ticket` answers with a ticket, so the live
  *   connection opens.
  * - The sidebar's reads answer from `NO_SIDEBAR_RECORDS`.
+ * - `GET /api/v1/runner-metrics` answers an empty page, because both Fleet
+ *   pages read their graphs' history as they open.
+ * - `GET /api/v1/initiatives` answers an empty page, because Work reads the
+ *   open Initiatives as it opens and draws no board without them.
  *
  * Any other unstubbed path returns 404, so a test that forgot a route notices.
  */
 export const stubApi = (handlers: Readonly<Record<string, Handler>> = {}): readonly Call[] => {
   const { fetch, calls } = createApiStub({
-    "GET /api/v1/setup": { body: { complete: true } },
-    "POST /api/v1/auth/ws-ticket": { body: { ticket: "ws-ticket" } },
+    ...BOOT_HANDLERS,
     ...buildSidebarHandlers(NO_SIDEBAR_RECORDS),
     ...handlers,
   });
@@ -1687,20 +1336,34 @@ export const stubApi = (handlers: Readonly<Record<string, Handler>> = {}): reado
 export interface LiveStub {
   /** Returns the topics the app is subscribed to on its current socket, oldest first. */
   readonly readTopics: () => readonly string[];
+  /**
+   * Returns how many times the app has subscribed to `topic` on its current
+   * socket, including subscriptions it has ended since. A subscription that
+   * was dropped and made again counts twice, which `readTopics` cannot show.
+   */
+  readonly countSubscriptions: (topic: string) => number;
   /** Checks whether the app's current socket is open. `false` before the app opens one. */
   readonly isConnected: () => boolean;
   /**
-   * Sends the app an invalidation on its subscription to `topic`, naming `ids`
-   * as `kind` (updated when left out). `conversationIds` maps each session a `session` push names to
-   * its conversation, as the controller sends it; leave it out to play a
-   * controller that does not send it. Throws when the app has no socket or no
-   * subscription to `topic`.
+   * Sends the app an invalidation on its subscription to `topic`, naming `ids`.
+   * Throws when the app has no socket or no subscription to `topic`. The
+   * `options` are:
+   *
+   * - `kind`: what happened to the ids; `updated` when left out.
+   * - `conversationIds`: maps each session a `session` push names to its
+   *   conversation, as the controller sends it; leave it out to play a
+   *   controller that does not send it.
+   * - `derived`: marks a `task` push as one the Task's sessions, runs or
+   *   summary caused, with no change to its own record.
    */
   readonly pushInvalidation: (
     topic: MutableLiveTopic,
     ids?: readonly string[],
-    conversationIds?: Readonly<Record<string, string | null>>,
-    kind?: "created" | "updated" | "deleted",
+    options?: {
+      readonly kind?: "created" | "updated" | "deleted";
+      readonly conversationIds?: Readonly<Record<string, string | null>>;
+      readonly derived?: boolean;
+    },
   ) => void;
   /**
    * Sends the app stored rows on its subscription to `session:<sessionId>:stream`,
@@ -1774,7 +1437,7 @@ afterEach(async () => {
  * a `LiveStub` for its live connection. The app builds its live connection
  * with no socket factory of its own, so the stub has to replace the global.
  */
-const buildTestContext = async (
+export const buildTestContext = async (
   fake: FakeBridge,
 ): Promise<{ readonly context: RouterContext; readonly live: LiveStub }> => {
   const sockets: StubSocket[] = [];
@@ -1798,13 +1461,24 @@ const buildTestContext = async (
         .at(-1)
         ?.subscriptions()
         .map((each) => each.topic) ?? [],
+    countSubscriptions: (topic) =>
+      sockets
+        .at(-1)
+        ?.calls("subscribe")
+        .filter((frame) => (frame.payload as { readonly topic: string }).topic === topic).length ??
+      0,
     isConnected: () => sockets.at(-1)?.readyState === 1,
-    pushInvalidation: (topic, ids = [], conversationIds, kind = "updated") => {
+    pushInvalidation: (
+      topic,
+      ids = [],
+      { kind = "updated", conversationIds, derived = false } = {},
+    ) => {
       readSocket().push(topic, {
         _tag: "invalidate",
         ids,
         kind,
         ...(conversationIds === undefined ? {} : { conversationIds }),
+        ...(derived ? { derived: true } : {}),
       });
     },
     pushStreamRows: (sessionId, rows, subagentId) => {
@@ -1851,6 +1525,9 @@ const buildTestContext = async (
       // The stub answers a subscription in a microtask, and the reads the
       // answer starts begin after it is decoded, so let those run first.
       await new Promise((resolve) => setTimeout(resolve, 0));
+      // The pushes gather for `SHARED_READ_WINDOW_MS` before any read starts, so a read they cause
+      // does not exist yet. This timer is set after the window's own, so it ends after it.
+      await new Promise((resolve) => setTimeout(resolve, SHARED_READ_WINDOW_MS));
       await waitFor(() => {
         if (context.queryClient.isFetching() > 0) throw new Error("reads are still running");
       });

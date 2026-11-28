@@ -2,7 +2,7 @@ package dev.hercule.android.ui.assistant
 
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.TranscriptRow
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -16,13 +16,13 @@ import org.junit.Test
 class FindOpenItemTest {
     private var position = 0L
 
-    private fun buildRow(event: ProviderEvent) = TranscriptRow(++position, "2026-09-08T10:00:00.000Z", event)
+    private fun buildRow(event: HarnessEvent) = TranscriptRow(++position, "2026-09-08T10:00:00.000Z", event)
 
     private fun buildStartedRow(itemId: String, kind: ItemKind) =
-        buildRow(ProviderEvent.ItemStarted(turnId = "t1", itemId = itemId, kind = kind))
+        buildRow(HarnessEvent.ItemStarted(turnId = "t1", itemId = itemId, kind = kind))
 
     private fun buildCompletedRow(itemId: String, kind: ItemKind) =
-        buildRow(ProviderEvent.ItemCompleted(turnId = "t1", itemId = itemId, kind = kind, status = ItemStatus.Completed))
+        buildRow(HarnessEvent.ItemCompleted(turnId = "t1", itemId = itemId, kind = kind, status = ItemStatus.Completed))
 
     @Test
     fun `returns null when there are no rows, or every item has completed`() {

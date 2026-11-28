@@ -8,8 +8,9 @@
  * session slot, so none of the session frames carry it.
  */
 import { Schema } from "effect";
+import { MAX_CATALOG_MODELS, ModelDeclaration } from "./models";
 import { OutputSchema } from "./output-schema";
-import { Fact, InstanceId, InstanceSecrets, MAX_MESSAGE_LENGTH } from "./primitives";
+import { Fact, HarnessAccount, MAX_MESSAGE_LENGTH } from "./primitives";
 import { Usage } from "./sessions";
 
 /**
@@ -53,9 +54,9 @@ const NonBlankMessage = Schema.String.check(
   Schema.isMaxLength(MAX_MESSAGE_LENGTH),
 );
 
-/** What one text generation asks the model: the same for every provider. */
+/** What one text generation asks the model: the same for every harness. */
 export const TextGenerationSpec = Schema.Struct({
-  /** The model, as the instance's model list names it. A text generation takes no model options. */
+  /** The model, as the account's model list names it. A text generation takes no model options. */
   model: Fact,
   /** What the model is told to do. Given to the harness as its system prompt. */
   instructions: Text,
@@ -68,19 +69,23 @@ export const TextGenerationSpec = Schema.Struct({
 export type TextGenerationSpec = Schema.Schema.Type<typeof TextGenerationSpec>;
 
 /**
- * Asks the runner to make one text generation on a provider instance. The
- * instance's config and credentials live on the controller, so the request
- * carries them, as `ProbeRequest` does.
+ * Asks the runner to make one text generation for a Provider Account in one
+ * harness. The account's Harness Home, model argument and credential live on
+ * the controller, so the request carries them, as `ProbeRequest` does.
  */
 export const TextGenerationRequest = Schema.Struct({
   _tag: Schema.Literal("textGenerationRequest"),
   requestId: Fact,
-  instanceId: InstanceId,
-  providerId: Fact,
-  config: Schema.Json,
-  /** The instance's credentials, which its config never holds; `{}` when none. */
-  secrets: InstanceSecrets,
+  harnessId: Fact,
+  harnessAccount: HarnessAccount,
   spec: TextGenerationSpec,
+  /**
+   * The account's whole Model Catalog, as `SessionStart.catalogModels` carries
+   * it, with the same meaning of absent and of empty.
+   */
+  catalogModels: Schema.optionalKey(
+    Schema.Array(ModelDeclaration).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
+  ),
 });
 
 export type TextGenerationRequest = Schema.Schema.Type<typeof TextGenerationRequest>;

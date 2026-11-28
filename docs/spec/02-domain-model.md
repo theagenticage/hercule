@@ -1,6 +1,6 @@
 # Domain model
 
-This document pins the shape of every Hercule domain entity: the fields the design tickets fixed, the relationships between entities and which of them are optional, the one fixed status axis each entity carries, the identity rules (Hercule ids versus provider-native and external ids), and the platform events each entity emits. Where another document owns a record's field list (Run, Step record, Notification, SessionSpec, Trigger, event envelope, memory documents, permission profiles), this document keeps purpose, relationships, status axis and identity and links the owner for the fields. Behaviour belongs to the owning subsystem document and is only pointed at here. The vocabulary is the glossary in [GLOSSARY.md](../../GLOSSARY.md); this document does not restate definitions.
+This document pins the shape of every Hercule domain entity: the fields the design tickets fixed, the relationships between entities and which of them are optional, the one fixed status axis each entity carries, the identity rules (Hercule ids versus harness-native and external ids), and the platform events each entity emits. Where another document owns a record's field list (Run, Step record, Notification, SessionSpec, Trigger, event envelope, memory documents, permission profiles), this document keeps purpose, relationships, status axis and identity and links the owner for the fields. Behaviour belongs to the owning subsystem document and is only pointed at here. The vocabulary is the glossary in [GLOSSARY.md](../../GLOSSARY.md); this document does not restate definitions.
 
 ## Model-wide rules
 
@@ -9,7 +9,7 @@ These rules hold for every entity below.
 1. **All links are optional; no mandatory parents.** A session needs no task, run, workspace, or conversation. A run needs no task or workflow. A task needs no project. Every relationship in this document is optional unless it says "required". Rationale: the predecessor's mandatory `task_id` was its biggest structural mistake ([Domain model & ubiquitous language](https://github.com/theagenticage/hercule/issues/6)).
 2. **One fixed status axis per entity, no user-definable domain states.** Where an entity has a status, its enum is fixed by this document or the owning document it links. No entity accepts user-defined states. Kanban-style groupings~~, "needs a call", "proposed", tiers like Now / Today / When you can, and topic tabs~~ are presentation over labels and fixed fields, never domain states. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392): the Intake words this rule listed are retired, and a Proposal is now a Signal of its own, below.)*
 3. **Labels are not states.** Labels are bare strings in a flat namespace, created implicitly on first use. There is no label registry entity; the core blesses no label (shipped workflows may use conventional ones ~~such as `proposed`~~; topics are labels). *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392): `proposed` is retired; a Proposal is a `proposal` Signal and no Task exists until Accept.)* Colours and descriptions of labels are presentation. A label never gates, transitions, or auto-derives a status.
-4. **The controller owns all domain state; runners own material state.** Every entity here is a row in the controller's one SQLite database ([04-state-store.md](./04-state-store.md)). Workspace files, provider-native session data and the runner's event outbox live on runner disk and are referenced from the controller only by id ([03-controller-and-runners.md](./03-controller-and-runners.md), [ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md)).
+4. **The controller owns all domain state; runners own material state.** Every entity here is a row in the controller's one SQLite database ([04-state-store.md](./04-state-store.md)). Workspace files, harness-native session data and the runner's event outbox live on runner disk and are referenced from the controller only by id ([03-controller-and-runners.md](./03-controller-and-runners.md), [ADR 0002](../adr/0002-orchestration-stays-on-the-controller.md)).
 5. **Controller records hold no absolute paths; runner paths are runner-owned facts keyed by id.** The rules are in [04-state-store.md](./04-state-store.md) (Relocatable Data Root).
 6. **Every mutation is actor-stamped** (`user` or `session:<id>`) in the event log; no entity carries a separate audit trail ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)).
 7. **Secrets are references.** Fields marked "secret" hold a reference into the owner-scoped secrets table; the value never appears in any entity row, log line or API response ([13-security.md](./13-security.md)).
@@ -24,15 +24,18 @@ These rules hold for every entity below.
 erDiagram
   PROJECT |o--o{ TASK : "projectId (optional)"
   PROJECT }o--o{ RESOURCE : "spans"
+  INITIATIVE |o--o{ TASK : "initiativeId (optional, at most one)"
+  TASK }o--o{ TASK : "waits on (task_blockers, a DAG)"
+  PROJECT |o--o{ INITIATIVE : "projectId (its lane, optional)"
   CONNECTION |o--o{ RESOURCE : "reached via (optional)"
   RESOURCE ||--o{ CHECKOUT : "working copy of"
   WORKSPACE ||--o{ CHECKOUT : "contains 0..N"
   RUNNER ||--o{ WORKSPACE : "pinned to"
   RUNNER ||--o{ SESSION : "pinned to"
   WORKSPACE |o--o{ SESSION : "cwd (optional)"
-  TASK |o--o{ SESSION : "optional link"
+  TASK |o--o{ SESSION : "taskId (always on a Thread)"
   TASK |o--o{ RUN : "optional link"
-  TASK ||--o{ PROVENANCE_ENTRY : "append-only"
+  TASK ||--o{ PROVENANCE_ENTRY : "never edited"
   PROVENANCE_ENTRY }o--o| EVENT : "eventId (optional)"
   PROVENANCE_ENTRY }o--o| RUN : "runId (optional)"
   WORKFLOW |o--o{ RUN : "stamped from (optional)"
@@ -52,10 +55,19 @@ erDiagram
   AGENT |o--o{ SESSION : "lineage (optional; null = Thread)"
   SESSION }o--|| PERMISSION_PROFILE : "copied at spawn"
   AGENT }o--|| PERMISSION_PROFILE : "bounded by"
-  PROVIDER_INSTANCE ||--o{ AGENT : "runs on"
-  PROVIDER_INSTANCE ||--o{ SESSION : "routing key"
-  PROVIDER_INSTANCE ||--o{ CAPABILITY_SNAPSHOT : "per runner"
+  PROVIDER ||--o{ PROVIDER_ACCOUNT : "account at"
+  PROVIDER_ACCOUNT ||--o{ AGENT : "runs on"
+  PROVIDER_ACCOUNT ||--o{ SESSION : "routing key, with a harness"
+  HARNESS ||--o{ SESSION : "runs in"
+  PROVIDER_ACCOUNT ||--o{ CAPABILITY_SNAPSHOT : "per harness per runner"
   RUNNER ||--o{ CAPABILITY_SNAPSHOT : "probed on"
+  PROVIDER_ACCOUNT ||--o| MODEL_CATALOG : "lists"
+  PROVIDER_ACCOUNT ||--o| ACCOUNT_USAGE : "reported"
+  MODEL_PROFILE }o--o{ PROVIDER_ACCOUNT : "picks models from"
+  PROJECT }o--o| MODEL_PROFILE : "modelProfileId (optional)"
+  PROJECT }o--o{ MCP_SERVER : "mcpServerIds (default for new threads)"
+  SESSION }o--o{ MCP_SERVER : "mcpServers (its own list)"
+  CONNECTION |o--o{ MCP_SERVER : "reached via (plugin servers)"
   ASSISTANT ||--|| AGENT : "specialization of"
   ASSISTANT ||--o{ CONVERSATION : "one per platform container"
   ASSISTANT ||--o{ CHANNEL_BINDING : "reached through"
@@ -65,13 +77,13 @@ erDiagram
   CONNECTION ||--o{ CHANNEL_BINDING : "scope of"
   CONNECTION ||--o{ EVENT : "stamped on"
   PLUGIN ||--o{ CONNECTION : "defines type"
-  PLUGIN ||--o{ PROVIDER_INSTANCE : "registers definition"
+  PLUGIN ||--o{ HARNESS : "registers definition"
+  PLUGIN ||--o{ PROVIDER : "registers definition"
   NOTIFICATION }o--o| RUN : "about (optional)"
   NOTIFICATION }o--o| TASK : "about (optional)"
   NOTIFICATION }o--o| SESSION : "about (optional)"
   SIGNAL }o--o| EVENT : "origin and resolution (optional)"
   SIGNAL }o--o| RUN : "raised by (optional)"
-  SIGNAL ||--o| SNOOZE : "hidden until (optional)"
   IGNORE_RULE ||--o{ IGNORE_RULE_CATCH : "caught"
   IGNORE_RULE_CATCH ||--|| EVENT : "eventId"
   SCREENING }o--|| EVENT : "one per event and kind"
@@ -86,11 +98,15 @@ erDiagram
   SKILL |o--o| SKILL_REVISION : "availableRevisionHash (optional)"
 ```
 
-*(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)*
+*(Diagram amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395): Signal, Snooze, Ignore Rule with its catches, and Screening.)* *(Diagram amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is removed.)*
 
 *(Diagram amended 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665): Discussion, Post, Wiki Page and its revisions.)*
 
 *(Diagram amended 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312): Skill and its Skill Revisions.)*
+
+*(Diagram amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406): Provider instance is replaced by Harness, Provider and Provider Account, with the account's Model Catalog and Account Usage, and Model Profiles that a Project may name; [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md).)*
+
+*(Diagram amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207): MCP Server, named by a Project as a default and by a Session as its own list, and reached through a Connection when a plugin offers it; [ADR 0059](../adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md).)*
 
 In prose, the model has ~~five~~ six clusters:
 
@@ -98,7 +114,7 @@ In prose, the model has ~~five~~ six clusters:
 - **Automation**: Workflow owns Triggers and Steps; a Run freezes an Execution Plan and holds Subscriptions; Events flow through one pipeline stamped with their Connection; Notifications are ~~the output to the user~~ Hercule's own messages to the user, and Signals are what Intake asks of the user (*(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*); Ignore Rules and Screenings decide which events become Signals.
 - **Actors and access**: Agent (with a Permission Profile), Assistant (an Agent plus Conversations, Channel Bindings and Memory), Thread (a session the user drives with no Agent), Platform Identities (owner / trusted), Actor stamps, Session Tokens, API Keys, Grants and Permission Requests.
 - **Organization**: Project spans Resources; Resources are checked out into Workspaces on Runners as Checkouts; Resources may reference the Connection that reaches them. *(Amended 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* The Skill Library holds Skills with their Skill Revisions.
-- **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), Provider instances with Capability Snapshots, Plugins with their state, Connections, Secrets.
+- **Infrastructure and extension**: Controller identity, Runners (with states and capabilities), ~~Provider instances with Capability Snapshots~~ Harnesses, Providers and Provider Accounts (with Capability Snapshots, a Model Catalog and Account Usage), Model Profiles *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, Plugins with their state, Connections, MCP Servers *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)*, Secrets.
 - **Coordination** *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*: per repo Resource, Discussions with their Posts, and a Wiki of Wiki Pages with their revisions. Sessions that edit the same file meet in a Discussion ([19-agent-coordination.md](./19-agent-coordination.md)).
 
 ## Work
@@ -114,27 +130,30 @@ Fields (pinned):
 | `id` | Hercule id | |
 | `title` | string | |
 | `description` | markdown | Enrichment edits this; no comment thread in v1 |
-| `status` | enum | Fixed axis, below |
+| `stage` | enum | *(Added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* `exploring`, `planned`, `building`, `in-review`, `landed`, `done`, `dropped`. Fixed axis, below. The truth about where the Task stands |
+| `status` | enum | A coarse reading of `stage`, below. Written only from the stage |
 | `priority` | enum | `urgent` / `high` / `normal` / `low`; optional, default `normal`; user and agents write the same field through the same op |
 | `labels` | string[] | Bare strings, flat namespace, implicit creation |
 | `projectId` | Hercule id, optional | At most one project |
-| `provenance` | Provenance entry[] | Append-only |
-| `createdAt`, `updatedAt`, `statusChangedAt` | timestamps | `statusChangedAt` moves only when `status` changes |
+| `mcpServers` | *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* the session's own list of MCP Servers ([MCP Server](#mcp-server), below): an array of `{ mcpServerId, name, leftOut }`, empty by default. `name` is the server's name when the entry was written; it never changes. `leftOut` is written only at a start. It is the reason the server was left out at the last start, an `McpServerLeftOutReason`: `"switched-off"`, `"checking"`, `"needs-sign-in"`, `"unreachable"`, `"error"`, `"runner-too-old"`, `"harness-unsupported"` or `"missing-grant"` (the session's profile lacks `mcp.use`). It is `null` when the server could be called at the last start, and also for an entry added since, which has not been checked at a start yet. [21-mcp.md](./21-mcp.md) section 3.8 has the precedence when several reasons apply. Every session kind has the field. Only a Thread's list can be non-empty in v1: the list of an Agent's session, a workflow step's session and an assistant's session is empty until [#222](https://github.com/theagenticage/hercule/issues/222). The list is the session's own copy (rule 9): changing a Project's list or the thread defaults later never touches it. It is not the `mcpServers` of `spec`: that field of the `SessionSpec` holds the one entry that points the harness at the MCP Gateway ([06-providers.md](./06-providers.md) section 4). The rules for who sets the list and what a new session starts with are in the Thread section, below. When `leftOut` is written, and what the gateway serves, is in [21-mcp.md](./21-mcp.md) |
+| `initiativeId` | Hercule id, optional | *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* At most one [Initiative](#initiative). A Task may also wait on other Tasks; that is the `task_blockers` relation below, not a field of the row |
+| `provenance` | Provenance entry[] | Entries are never edited or removed; a merge can move them to another Task ([09-tasks.md](./09-tasks.md#merging-tasks)) |
+| `createdAt`, `updatedAt`, `stageChangedAt`, `statusChangedAt` | timestamps | `stageChangedAt` moves only when `stage` changes, and `statusChangedAt` only when `status` changes |
 | `deletedAt` | timestamp, optional | soft delete: set by `task.delete`, the row stays (Deletion rules, below) |
 
-Not present in v1: assignee, subtasks, task-to-task dependencies, comments, a suggested-priority shadow field (the actor-stamped event log serves that need).
+Not present in v1: assignee, subtasks, comments, a suggested-priority shadow field (the actor-stamped event log serves that need).
 
-Status axis: `open` -> `in-progress` -> `done`, plus `cancelled`. Any-to-any transitions; no state machine enforcement; no core auto-transitions; no completion gating. Status changes only via an explicit `task.update`. "Done means the PR merged" is a shipped-workflow convention implemented by the work run's own signal trigger and a final `task.update` step ([09-tasks.md](./09-tasks.md)). `cancelled` means decided not to do; delete (soft, `deletedAt`) means it should never have existed: the row stays for history, `task.read` answers `not_found`, and the event log keeps the audit (Deletion rules, below).
+Stage axis *(added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029), [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md))*: `exploring`, `planned`, `building`, `in-review`, `landed`, `done`, `dropped`, a fixed list. Status axis: `open` -> `in-progress` -> `done`, plus `cancelled`, a coarse reading of the stage (`exploring` and `planned` are `open`, `building`, `in-review` and `landed` are `in-progress`, `done` is `done`, `dropped` is `cancelled`). `task.update { status }` still works and picks a stage; sending `stage` and `status` together is refused. Any-to-any transitions; no state machine enforcement; no core auto-transitions; no completion gating. A stage, and so a status, changes only via an explicit `task.update`; the one thing the core does by itself is create a Task, at `exploring`, for a Thread that has none to join. "Done means the PR merged" is a shipped-workflow convention implemented by the work run's own signal trigger and a final `task.update` step ([09-tasks.md](./09-tasks.md)). `cancelled` means decided not to do; delete (soft, `deletedAt`) means it should never have existed: the row stays for history, `task.read` answers `not_found`, and the event log keeps the audit (Deletion rules, below).
 
-Relationships: `projectId` optional. Run and Session links to a task live on the Run and Session rows; the task's run and session lists are derived by query. ~~Proposal (a Task labelled `proposed` plus its pending decision Notification) and~~ Topic (a label) ~~are~~ is vocabulary over this row, not a field. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* A Proposal is a `proposal` Signal (below), not a Task: no Task exists until the user presses Accept.
+Relationships: `projectId` and `initiativeId` optional. *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* **Blockers:** a Task waits on other Tasks through `task_blockers (task_id, blocked_by_task_id, created_at, created_by)`, one stored direction owned by the tasks domain, with "blocks" as the inverse read. The edges are always a DAG, a finished blocker stops blocking while its edge stays, and the core gates nothing on them ([09-tasks.md](./09-tasks.md#blockers)). Run and Session links to a task live on the Run and Session rows; the task's run and session lists are derived by query. *(Amended 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* Every Thread has a Task: the core picks one when it writes the Thread, or makes one ([09-tasks.md](./09-tasks.md#threads-and-their-tasks)). A Task is joined to an ephemeral workspace by an explicit row, `task_workspaces`, so that later Threads in the same folder land on the same Task. ~~Proposal (a Task labelled `proposed` plus its pending decision Notification) and~~ Topic (a label) ~~are~~ is vocabulary over this row, not a field. *(Amended 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395), [#392](https://github.com/theagenticage/hercule/issues/392).)* A Proposal is a `proposal` Signal (below), not a Task: no Task exists until the user presses Accept.
 
 Identity: Hercule id only. External refs live in provenance and are never unique across tasks.
 
-Platform events: `task.created` carries a full snapshot; `task.updated` carries `{taskId, changes}` where `changes` holds `{old, new}` per changed scalar field and `{added, removed}` per changed array field; one update op emits exactly one event; provenance-only appends also emit `task.updated`. `task.deleted` carries `{taskId, snapshot}`, the final row, because nothing can read it afterwards. The actor is the envelope's `actor` field, not repeated in the payload ([08-events-and-connections.md](./08-events-and-connections.md), [09-tasks.md](./09-tasks.md)).
+Platform events: `task.created` carries a full snapshot (it fires for the Task the core makes for a Thread too); `task.updated` carries `{taskId, changes}` where `changes` holds `{old, new}` per changed scalar field (`changes.status` whenever the coarse status changes, `changes.stage` for every stage change, and, *(added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036))* `changes.initiativeId`) and `{added, removed}` per changed array field (`changes.blockedBy` lists blocker Task ids); one update op emits exactly one event; provenance-only appends also emit `task.updated`. `task.deleted` carries `{taskId, snapshot}`, the final row, because nothing can read it afterwards. The actor is the envelope's `actor` field, not repeated in the payload ([08-events-and-connections.md](./08-events-and-connections.md), [09-tasks.md](./09-tasks.md)).
 
 ### Provenance entry
 
-Purpose: one append-only record of an event, run or external thing that created or touched a task.
+Purpose: one record of an event, run or external thing that created or touched a task. New entries are only appended, and an entry is never edited or removed. *(Amended 2026-11-07, [#1031](https://github.com/theagenticage/hercule/issues/1031).)* A merge of two Tasks moves the merged Task's entries to the survivor, whole and unchanged ([09-tasks.md](./09-tasks.md#merging-tasks)).
 
 Shape (pinned): `{ ref?: ExternalRef, eventId?: Hercule id, runId?: Hercule id, at: timestamp, actor: Actor }`. Entries are never edited or removed.
 
@@ -143,6 +162,52 @@ External Ref canonical form: a fully-qualified id `<type>:<kind>:<identity>`, fo
 Relationships: `eventId` points into the event log (the referenced event may be TTL-pruned; the entry survives), `runId` into Runs.
 
 An entry MUST carry at least one of `ref`, `eventId`, `runId` (`validation` otherwise; resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)): `{at, actor}` alone says nothing the actor-stamped `task.updated` event does not. A hand-made task simply has an empty provenance list.
+
+### Initiative
+
+*(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* Purpose: the user's own lasting intent, such as "Gift card refunds", that several Tasks serve. A Task belongs to at most one. It is a grouping and a colour on Work, with a target and a close; it carries no behaviour and gates nothing ([ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md)). It is not a Project, which groups materials and is the lane a card sits in, and it is not an outside initiative, which is an External Entity ([External Entity](#external-entity)) and only ever a lane or a filter.
+
+Fields (pinned):
+
+| Field | Type | Notes |
+|---|---|---|
+| `id` | Hercule id | |
+| `name` | string | 1 to 200 characters |
+| `intent` | string | What this is for. 0 to 2000 characters |
+| `target` | string, optional | What finished looks like, when it is a goal. 1 to 200 characters |
+| `targetDate` | timestamp, optional | |
+| `hue` | one of `INITIATIVE_HUES` | The hue of its flag, line and beads: 245, 150, 300, 200, 345, 118, 270, 175, 325, 222, 135, 100 (oklch). The list keeps away from marigold and tomato, which mean things. Create with no hue takes the one used by the fewest open Initiatives, ties in list order |
+| `projectId` | Hercule id, optional | The lane it draws in under "In lanes". Absent, or a project no longer listed: the No project lane |
+| `closedAt` | timestamp, optional | Set when the user closes it. Its Tasks keep their `initiativeId` |
+| `createdAt`, `updatedAt` | timestamps | |
+| `deletedAt` | timestamp, optional | Soft delete, like a Task |
+
+Relationships: a Task names at most one Initiative, and an Initiative may hold Tasks from several projects. A project's soft-delete does not touch its Initiatives. Created, changed, closed, reopened and deleted only by the user, even when a session holds the grant. The operations and the rules for a Task's `initiativeId` are in [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#initiative) and [09-tasks.md](./09-tasks.md#initiatives).
+
+Status axis: none; `closedAt` is a flag, not a state machine. Identity: Hercule id only. Platform events: none. An Initiative announces on the `initiative` live topic only ([14-web-app.md](./14-web-app.md)); a change to a Task's `initiativeId` is a `task.updated`.
+
+### External Entity
+
+*(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032); [ADR 0054](../adr/0054-external-entities-are-durable-records-kept-true-by-polls.md).)*
+
+Purpose: a durable record of one outside thing, such as a pull request or a ticket, kept true by a plugin's polls. It is what the Inbox lists and what Work groups by. It is never a copy of the thing.
+
+Fields: owned by [20 section 1](./20-external-entities.md#1-the-model). One row per canonical External Ref, holding the rendered slots a card draws (identifier, title, status, person, facts) and copies of the kind's `noun`, `card`, `pace` and `patience`, so a card draws after its plugin is gone.
+
+Relationships, all by ref and never by the entity's id, so each outlives pruning:
+
+- **Observation**: one row per ref and Connection. It holds the concerns that Connection reported, whether it can read the ref, and its read bookkeeping. An entity's concern, access and freshness are derived from its observations.
+- **Scan**: one row per Connection and kind, `last_complete_at`.
+- **Relation Claim**: one row per claim that one ref is `part-of` or `linked` to another, by a source, a person or a text, and `current` or `conflicted`. `part-of` is a graph and stays acyclic.
+- **Task link** (`task_entity_links`): one row per Task and ref, written with the Task's provenance and by `takeOn` and `addToWork`. `following` on a link says the user added the thing to Work from nothing that concerned them. `taken_at` says when the user took the thing on through this link (null when they did not): Take on and Add to Work set it, also on a link that a hand-off, a session or a signal made. The link is the relation and provenance stays the history ([09-tasks.md](./09-tasks.md#entity-links)).
+
+Status axes: none stored. `lifecycle` (`open`, `completed`, `abandoned`) is the source's word and Hercule never sets it. Whether a card is on the Inbox, its `access` and `stale` are worked out on read. A card is dismissed by `dismissed_at`, undone by `restore`.
+
+Identity: Hercule id, and `UNIQUE (ref)`. Two Connections that see one thing share one entity. A ref is not unique across Tasks.
+
+Platform events: none. A poll that changes an entity emits no event and raises no signal. The live topic `externalEntity` nudges clients ([14-web-app.md](./14-web-app.md#wire-format)).
+
+Deletion: no operation deletes an entity. A daily sweep prunes one with no concern, no Task link, no open signal and no dismissal after 30 days without change ([20 section 4.3](./20-external-entities.md#43-pruning)). Claims, links and signals key on the ref, so they stay readable.
 
 ### Run
 
@@ -172,7 +237,7 @@ Platform events: `run.completed`, `run.failed`, `run.cancelled`; payloads owned 
 
 Purpose: the executable content a run executes, frozen at run start. Contents: input declarations, the step graph (steps with their `join` and `terminal` flags, edges with conditions and `maxTraversals`), the signal triggers the run will instantiate as Subscriptions (source nodes of the graph), the workspace policy ~~and placement inputs~~ (*amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79)*, below), and the action references. Stored inline on the Run; never shared between runs and never edited. Editing a workflow never affects an existing plan. Shape and validation rules: [07-workflows.md](./07-workflows.md).
 
-*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* The plan is stored inline on the Run as the parsed workflow definition (the contract's `WorkflowDefinition`), `name` and `description` included, so a run can be named and drawn after its workflow is renamed or deleted. There are no placement inputs to freeze: the definition has no `runner` field ~~until agent steps run ([#83](https://github.com/theagenticage/hercule/issues/83))~~. Agent steps run without one: a run with an agent step is pinned to a runner that hosts the Agent's provider instance, as any run with a workspace step is pinned *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83))*.
+*(Amended 2026-09-24, [#79](https://github.com/theagenticage/hercule/issues/79).)* The plan is stored inline on the Run as the parsed workflow definition (the contract's `WorkflowDefinition`), `name` and `description` included, so a run can be named and drawn after its workflow is renamed or deleted. There are no placement inputs to freeze: the definition has no `runner` field ~~until agent steps run ([#83](https://github.com/theagenticage/hercule/issues/83))~~. Agent steps run without one: a run with an agent step is pinned to a runner that ~~hosts the Agent's provider instance~~ can run the Agent's Provider Account in its harness *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, as any run with a workspace step is pinned *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83))*.
 
 #### Step record
 
@@ -186,19 +251,21 @@ Status axis (mirrored from 07), monotonic per record: `pending` (a queued iterat
 
 ### Session
 
-Purpose: one provider-backed agent conversation, resumable and forkable, the only place agent work happens.
+Purpose: one harness-backed agent conversation, resumable and forkable, the only place agent work happens.
 
 Fields (pinned across [#6](https://github.com/theagenticage/hercule/issues/6), [#7](https://github.com/theagenticage/hercule/issues/7), [#12](https://github.com/theagenticage/hercule/issues/12), [#16](https://github.com/theagenticage/hercule/issues/16), [#17](https://github.com/theagenticage/hercule/issues/17); names follow [06-providers.md](./06-providers.md)):
 
 | Field | Notes |
 |---|---|
-| `id` | Hercule id; distinct from any provider-native id |
-| `title` | at most 80 characters, set at spawn. An agent step's session is titled `<workflow name> · <step id>` ([07-workflows.md](./07-workflows.md) section 4.2). Any other session is titled with its opening prompt cut short: the first non-empty line, or the first image's name when the text is blank ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). *(Added 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* **A Thread's title may change once.** The cut-short title is shown at once and is the fallback. At the Thread's first submission, a text generation with the purpose `thread.title` runs in the background, beside the turn, and reads the first message only ([06-providers.md](./06-providers.md) section 14.6). When it succeeds, its title replaces the cut-short one. When text generation is off or the call fails, the cut-short title stays. The call also answers `needsRefinement`, true when the first message leaves the subject unclear; it is stored with the session, null until a generated title is stored (a role-only answer leaves it null), and is not on the contract. A later refinement after the first turn reads it ([#283](https://github.com/theagenticage/hercule/issues/283)). Agent step and assistant sessions keep the title they were given at spawn. *(Amended 2026-10-23, [#827](https://github.com/theagenticage/hercule/issues/827).)* A fork of a Thread (`session.continue`) gets the same call, on its first message, which is its continuation prompt; it used to keep its cut-short title. A fork of an Agent's session gets no call. |
+| `id` | Hercule id; distinct from any harness-native id |
+| `title` | at most 80 characters, set at spawn. An agent step's session is titled `<workflow name> · <step id>` ([07-workflows.md](./07-workflows.md) section 4.2). Any other session is titled with its opening prompt cut short: the first non-empty line, or the first image's name when the text is blank ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). *(Added 2026-10-11, [#282](https://github.com/theagenticage/hercule/issues/282).)* **A Thread's title may change once.** The cut-short title is shown at once and is the fallback. At the Thread's first submission, a text generation with the purpose `thread.title` runs in the background, beside the turn, and reads the first message only ([06-providers.md](./06-providers.md) section 14.6). When it succeeds, its title replaces the cut-short one. When text generation is off or the call fails, the cut-short title stays. The call also answers `needsRefinement`, true when the first message leaves the subject unclear; it is stored with the session, null until a generated title is stored (a role-only answer leaves it null), and is not on the contract. A later refinement after the first turn reads it ([#283](https://github.com/theagenticage/hercule/issues/283)). Agent step and assistant sessions keep the title they were given at spawn. *(Amended 2026-10-23, [#827](https://github.com/theagenticage/hercule/issues/827).)* A fork of a Thread (`session.continue`) gets the same call, on its first message, which is its continuation prompt; it used to keep its cut-short title. A fork of an Agent's session gets no call. *(Added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029).)* A Task the core made for the Thread takes the generated title too, under the conditions in [09-tasks.md](./09-tasks.md#the-tasks-title-follows-the-threads). |
 | `role` | *(Added 2026-10-23, [#827](https://github.com/theagenticage/hercule/issues/827).)* optional, null when there is none: the session's one- or two-word name for its job, such as "review", "tests" or "migration". It is a name, never a permission. `session.spawn` takes it (CLI `--role`): one line, trimmed, not blank, at most 24 characters counted as Unicode code points, and holding no control or format characters (Unicode classes `Cc` and `Cf`), except the zero-width non-joiner and joiner (U+200C, U+200D), which some scripts and emoji need. Anything else is refused as `validation`. A role is set at spawn, or once by the title generation when the session has none. Once set, a role never changes: `session.update` has no `role`. A Thread started without one gets a generated role from the same `thread.title` call that generates its title ([06-providers.md](./06-providers.md) section 14.6). The controller cleans a generated role (line breaks and runs of spaces become one space, control and format characters are removed, except the zero-width non-joiner and joiner) and keeps it only when it then passes the spawn rule above and the session has no role. When spawn gave a role, the generated one is ignored and the spawn role stays. A generated role that fails the rule is dropped, never cut. A session spawned from an Agent gets no call, so its only role is the one `--role` gave. Agent step and assistant sessions have no role. A fork takes no role from its parent. **Display rule, for every Thread:** its role if it has one, else its title cut short. When two or more sessions of one Workspace share a role, ignoring case, clients number them by creation time, ties by session id: `review`, `review 2`, `review 3`, each in its own spelling. This is display only, nothing is stored, and no check at spawn or in the call looks for duplicates (`labelWorkspaceSessions` in `@hercule/client-core` does the numbering, for the desktop header and the sidebar alike). Stored in a nullable `role` column on `sessions`; the migration fills no rows. On the contract `Session` as `role: string \| null`. |
 | `kind` | *(Amended 2026-10-23, [#828](https://github.com/theagenticage/hercule/issues/828).)* required; what the session is, exactly one of `thread`, `agent`, `run`, `assistant`. `thread`: no Agent is behind it (`agentId` is null), and a Thread that a run's step or an assistant started is still a `thread`. `run`: an Agent session that a run's agent step started (`runId` is set). `assistant`: an Agent session that answers an assistant's conversation (`conversationId` is set). `agent`: any other Agent session. It is never stored: `sessions.kind` is a virtual generated column of `agent_id`, `run_id` and `conversation_id` (checked in that order), indexed on `(kind, created_at, id)`, and the migration rewrites no row. `agentId`, `runId` and `conversationId` stay, as the records the session came from. Clients read `kind` instead of testing those ids for null. `session.query` filters by one kind or several (`kind`, repeated in the query string), and by `doneSince` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2). |
 | `agentId` | optional; the Agent whose values were copied at spawn - lineage only, never read through afterwards (rule 9); `null` = a Thread |
 | `permissionProfileId` | required; copied at spawn from the Agent, or for a Thread from the `thread.profileId` setting when the user starts it and from the calling session's profile when a session does; the profile the session token carries |
-| `instanceId` | provider instance; the routing key for the adapter (instance, never provider id) |
+| ~~`instanceId`~~ | ~~provider instance; the routing key for the adapter (instance, never provider id)~~ |
+| `providerAccountId` | *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* the Provider Account the session runs on (who pays); with `harnessId`, the routing key for the adapter. Fixed at start: a session never changes account ([06-providers.md](./06-providers.md)) |
+| `harnessId` | *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* the harness the session runs in, a qualified id; fixed at start, like the account |
 | `runnerId` | pinned where the session starts; never migrates |
 | `workspaceId` | optional; `null` is a workspace-less session |
 | `projectId` | optional; the Project a Thread was opened in - picked before the draft, it bounds the composer's workspaces and groups the thread in the sidebar ([14-web-app.md](./14-web-app.md) §The composer); `null` on agent sessions, whose project is the run's. *(Added 2026-09-11, [#160](https://github.com/theagenticage/hercule/issues/160).)* *(Amended 2026-10-13, [#593](https://github.com/theagenticage/hercule/issues/593): a Thread a session starts takes the calling session's project while that project exists, and none if it was deleted.)* |
@@ -207,7 +274,8 @@ Fields (pinned across [#6](https://github.com/theagenticage/hercule/issues/6), [
 | `modelSelection` | the model and options in force now; seeded from `spec` at spawn and rewritten when a delivered input carries a new one, so resume and fork carry it |
 | `spec` | the controller-authored `SessionSpec`, stored byte-for-byte; fields owned by [06-providers.md](./06-providers.md) section 4 |
 | `nativeSessionId` | from the Session Binding, below |
-| `taskId`, `runId` + `stepId`, `conversationId` | all optional; a session may belong to none. `runId` and `stepId` are set together on an agent step's session, and `session.query` filters by `runId` *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83))* |
+| `taskId` | *(Amended 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029), [ADR 0052](../adr/0052-tasks-have-a-stage-and-threads-join-them.md).)* optional; the Task the session belongs to. A Thread always has one, set when it is written: the Task named in the spawn, the caller's Task, the live Task of its ephemeral workspace, or a new one. An Agent's session joins one by the first three and never creates one. A run step's session takes its run's `taskId`. An assistant's session has none. A harness resume keeps it. The rule is in [09-tasks.md](./09-tasks.md#threads-and-their-tasks). Not required: a session spawned from an Agent may have none |
+| `runId` + `stepId`, `conversationId` | all optional; a session may belong to none. `runId` and `stepId` are set together on an agent step's session, and `session.query` filters by `runId` *(amended 2026-10-04, [#83](https://github.com/theagenticage/hercule/issues/83))* |
 | `parentSessionId` | optional; set when the session was forked from another session (`continue.mode = fork`) |
 | ~~`openRequest`~~ | ~~optional; the Request the harness is parked on - `{ requestId, itemId, kind, decisions, detail }` ([06-providers.md](./06-providers.md) section 6.5), at most one at a time; written by the normalized stream, `null` when nothing is waiting. *(Added 2026-09-13, [#70](https://github.com/theagenticage/hercule/issues/70).)*~~ |
 | `openRequests` | the Requests the session's agents are parked on, oldest first, empty when nothing is waiting. Each is `{ requestId, itemId, kind, decisions, detail, subagentId? }` ([06-providers.md](./06-providers.md) section 6.5); `subagentId` names the asking subagent, absent for the session's own agent. Several can be open at once and each is answered on its own, in any order ([06-providers.md](./06-providers.md) section 13.3). Written by the normalized stream. *(Replaces `openRequest`, 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355); [#353](https://github.com/theagenticage/hercule/issues/353).)* *(Amended 2026-10-06, [#453](https://github.com/theagenticage/hercule/issues/453).)* Each Request a subagent asked also carries `subagentName`, the subagent's name: its Subagent record's `description`, else its `agentType`. It is read from the record every time the session is read, never stored with the Request, so a name the record gains after the Request opened shows on the next read; that change is announced on the `session` topic as well as the `subagent` topic. It is absent when the session's own agent asked, and while the record holds neither field. A client then says "A subagent". The name is on the Request so that a client that reads only sessions, such as the desktop app's notifications, can name the subagent without reading its subagents. *(Amended 2026-10-26, [#770](https://github.com/theagenticage/hercule/issues/770).)* A question Request may carry `async: true`: its agent does not wait on it, so the Request is not a park, and it stays in the list after the agent's turn ends. It leaves when it is answered, when its agent is stopped, when the session exits, or when it is the oldest of more than eight open ones ([06-providers.md](./06-providers.md) section 6.5). Any other Request also leaves when its agent's turn ends. |
@@ -217,21 +285,24 @@ Fields (pinned across [#6](https://github.com/theagenticage/hercule/issues/6), [
 | `toolCalls` | how many tool calls the session made over its whole life: every `item.started` of a tool-call kind on its stream, its own agent's and every subagent's, calls that start a subagent included. Counted as each event is stored, as `Subagent.toolCalls` is. *(Added 2026-10-11, [#549](https://github.com/theagenticage/hercule/issues/549).)* |
 | `done` | optional; on a Thread only, `{ at, by }`: when the user, or a session holding `session.steer`, marked the Thread Done, and the actor who did. Absent on a Thread that is not Done and on every session spawned from an Agent. Being Done changes nothing about the session itself: it is a mark for the client's lists, taken off by `session.reopen` or by any new `session.input`. Not a status, and not the client's derived reading that a session is settled (exited and not resumable). *(Added 2026-10-13, [#626](https://github.com/theagenticage/hercule/issues/626).)* |
 | `reopenedAt` | optional; the last time the Thread was reopened, by `session.reopen` or by input while it was Done. It stays after the Thread is marked Done again. A client sorts Threads on `max(createdAt, reopenedAt)`, so a reopened Thread comes back at the top. *(Added 2026-10-13, [#626](https://github.com/theagenticage/hercule/issues/626).)* |
+| `archived` | *(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* optional; `{ at, by }`: when the user archived the session, and the actor, which is always `user`. Set on a Thread by `session.archive`; and once every Thread of a workspace is archived, on every Agent session of that workspace too, in the same transaction, so a sidebar row is archived whole. Final: nothing clears it. An archived session is never resumed, sent input or reopened, and its transcript stays readable. Archiving a Thread marks it Done first, so an archived Thread always has `done`. Absent on every other session. See [ADR 0050](../adr/0050-archived-threads-and-their-workspaces.md) and [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `session.archive` |
 | timestamps | `createdAt`, `startedAt`, `exitedAt`, `lastActivityAt` *(amended 2026-10-08, [#484](https://github.com/theagenticage/hercule/issues/484): an exit is not activity, so an exited session keeps the time of what it did last and `exitedAt` holds the exit)* (inactivity and absolute timeouts themselves are runner-owned) |
+
+*(Added 2026-11-17, [#736](https://github.com/theagenticage/hercule/issues/736).)* A session also stores a taint flag, `false` by default: whether it has read third-party text ([13-security.md](./13-security.md) section 10). It is internal and is not a field of the Session record that the API returns. Only the controller's `taint` domain writes it.
 
 Session-only grants approved through a Permission Request attach to the Session (see Grant). *(Amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86).)* No grant is copied onto the Session row: the grants a session holds are read as its profile's grants plus the grants of its Permission Requests decided `session`, so they last as long as the Session, resumes on the same profile included. Each request records the profile the session asked under, and only those decided under its current profile count.
 
 *(Amended 2026-09-08, [#66](https://github.com/theagenticage/hercule/issues/66).)* `modelSelection` is a field of its own rather than a read through `spec`, because the two would contradict each other: `spec` is the document the runner was sent and is never rewritten. ~~`parentSessionId` stays null on a resume, which carries on the parent's own provider-native session and so has no second lineage to record.~~ *(A resume mints no session, 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162); `parentSessionId` is set by fork only. The row's `spec` stays the spawn-time document; the `continue` a resume sends rides the frame, not the row.)*
 
-Status axis (consolidated from pinned lifecycle facts, owned by [06-providers.md](./06-providers.md)): `queued` (placement accepted but the runner is at its session cap) | `starting` | `idle` | `busy` (a turn is running; decides whether `sendInput` opens or steers) | `exited`. `resumable` is derived: `exited` and the runner still holds the provider-native state; it becomes false when that runner is retired or wiped.
+Status axis (consolidated from pinned lifecycle facts, owned by [06-providers.md](./06-providers.md)): `queued` (placement accepted but the runner is at its session cap) | `starting` | `idle` | `busy` (a turn is running; decides whether `sendInput` opens or steers) | `exited`. `resumable` is derived: `exited` and the runner still holds the harness-native state; it becomes false when that runner is retired or wiped.
 
 *(Amended 2026-09-10, [#67](https://github.com/theagenticage/hercule/issues/67).)* `queued` also covers a runner that is below its disk watermark, offline, or unreachable - not only one at its session cap.
 
 *(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* `exited` is terminal only where `resumable` is false: a resumable session is resumed in place, under its own id, by the next `session.input` ([06-providers.md](./06-providers.md) section 4.1) - the lazy process the Conversation entry above already describes. `exitedAt` records the last exit, not a final one.
 
-Relationships: requires `instanceId`, `runnerId`, `permissionProfileId`. Everything else optional, `agentId` included. Holds zero or more Subscriptions (registered by the session itself through the API, or migrated from a rotated predecessor in the same Conversation). Owns its Turns and Queued Inputs, and its Subagents *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*. ~~Exactly one Session Token while alive.~~ *(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* Exactly one Session Token while its process runs; none while exited.
+Relationships: requires ~~`instanceId`~~ `providerAccountId`, `harnessId` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, `runnerId`, `permissionProfileId`. Everything else optional, `agentId` included. Holds zero or more Subscriptions (registered by the session itself through the API, or migrated from a rotated predecessor in the same Conversation). Owns its Turns and Queued Inputs, and its Subagents *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*. ~~Exactly one Session Token while alive.~~ *(Amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162).)* Exactly one Session Token while its process runs; none while exited.
 
-Identity: the Hercule session id and the provider-native id (Claude Code session id, Codex thread id, pi session) are separate concepts joined only by the Session Binding. All Hercule references (API, CLI, actor stamps, step records, subscriptions) use the Hercule id.
+Identity: the Hercule session id and the harness-native id (Claude Code session id, Codex thread id, pi session) are separate concepts joined only by the Session Binding. All Hercule references (API, CLI, actor stamps, step records, subscriptions) use the Hercule id. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Antigravity's harness-native id is its ACP session id.
 
 Events: none on the domain event log in v1 (no `session.*` platform events). The session's normalized event stream (`session.*`, `subagent.started` *(added 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355))*, `turn.*`, `item.*`, `content.delta`, `request.*`, `session.usage.updated`, `runtime.*`) is a separate per-session append-only stream, not the domain event log ([04-state-store.md](./04-state-store.md), [06-providers.md](./06-providers.md)).
 
@@ -268,7 +339,7 @@ Fields, all written at ingest in the transaction that appends the event they com
 | `usage` | optional; present only when its report is complete; its Token Usage, the same shape as the Session's, covering itself alone. Absent where the harness reports no exact count for it ([06-providers.md](./06-providers.md) section 13.5): a screen shows that as not reported, never as 0 |
 | timestamps | `startedAt` (its `subagent.started`), `endedAt?` (the end of its last turn; cleared while it runs again) |
 
-*(Added 2026-10-06, [#437](https://github.com/theagenticage/hercule/issues/437).)* The stored record also keeps internal `lastUsageReport`, the `{ source, payload }` from the latest accepted attributed `session.usage.updated` event's `raw`. It is saved in the same transaction as that usage snapshot, survives process exits and starts, and is sent to the adapter on a resume ([06-providers.md](./06-providers.md) section 13.5). A usage event accepted without `raw` clears the saved report; a late event ignored because the session already exited changes neither usage nor the report. The controller never interprets the provider payload, and the public Subagent record never includes this field. This is a persistence boundary, not a secrecy boundary: the original event's raw report remains readable through the transcript.
+*(Added 2026-10-06, [#437](https://github.com/theagenticage/hercule/issues/437).)* The stored record also keeps internal `lastUsageReport`, the `{ source, payload }` from the latest accepted attributed `session.usage.updated` event's `raw`. It is saved in the same transaction as that usage snapshot, survives process exits and starts, and is sent to the adapter on a resume ([06-providers.md](./06-providers.md) section 13.5). A usage event accepted without `raw` clears the saved report; a late event ignored because the session already exited changes neither usage nor the report. The controller never interprets the harness payload, and the public Subagent record never includes this field. This is a persistence boundary, not a secrecy boundary: the original event's raw report remains readable through the transcript.
 
 Its transcript is the part of its session's normalized stream attributed to it, read with the same code as the session's own transcript, which is the part attributed to no subagent ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `transcript.read`). A forked session starts with no subagents.
 
@@ -288,19 +359,33 @@ Fields: `sessionId`, `content` (text; for subscription deliveries also the struc
 
 #### Session Binding
 
-Purpose: the explicit join between a Hercule session and the provider-native object that backs it.
+Purpose: the explicit join between a Hercule session and the harness-native object that backs it.
 
-Shape: `SessionBinding { sessionId, nativeSessionId, instanceId }`, owned by [06-providers.md](./06-providers.md). Returned by `startSession` and by `listSessions` on runner restart for reconciliation; the runner is known from the Session row, not the binding. Provider-native transcripts stay on the runner; the controller's normalized stream is the observable record.
+Shape: `SessionBinding { sessionId, nativeSessionId, ~~instanceId~~ providerAccountId, harnessId }` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, owned by [06-providers.md](./06-providers.md). Returned by `startSession` and by `listSessions` on runner restart for reconciliation; the runner is known from the Session row, not the binding. Harness-native transcripts stay on the runner; the controller's normalized stream is the observable record.
 
 #### Thread
 
 Purpose: a session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. It is the t3-code-style "open a session on this machine" experience, and the whole product for a user who never touches workflows or Intake (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46); [ADR 0030](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)).
 
-Shape: a Session row with `agentId: null`. Nothing else distinguishes it: no thread table, no record that outlives the session, nothing named or reusable. When the user starts it, its spec is assembled from the user's **thread defaults** in the settings store - `thread.instanceId`, `thread.model`, `thread.accessMode`, `thread.profileId` (shipped: the first provider instance with a logged-in snapshot, that instance's default model, `approval-required`, the `unrestricted` profile; [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2) - plus whatever the user changes in the create form for this one thread; form changes are never written back. *(Amended 2026-10-13, [#593](https://github.com/theagenticage/hercule/issues/593): a Thread a session starts has no thread defaults; it takes the calling session's values, below.)* The create form is the composer on a draft thread ([14-web-app.md](./14-web-app.md) §App shell, 2026-09-01): the thread starts on the first message; workspace, checkout, branch, runner, profile, access mode **and provider instance** lock then; model and its options stay live within the instance through `TurnInput.modelSelection` ([06-providers.md](./06-providers.md) section 5; instance lock amended 2026-09-02, [#52](https://github.com/theagenticage/hercule/issues/52)). A Thread is also the one session kind that sees the user's own **User Material** - skills, ~~subagents~~ subagent definitions *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355): a subagent is now something a session runs, so the material is the definitions)*, instructions, commands, settings from a local installation, ~~linked live into the instance home where the placement runner has it~~ read live from each harness's default install locations when the Thread runs on the controller's local runner *(amended 2026-10-04, [#75](https://github.com/theagenticage/hercule/issues/75))* ([06-providers.md](./06-providers.md) §9.1, [ADR 0032](../adr/0032-threads-link-the-users-own-material.md)); every other kind stays isolated. *(Amended 2026-10-13, [#593](https://github.com/theagenticage/hercule/issues/593).)* Two kinds of actor may start one (`session.spawn` without `agentId`) or fork one (`session.continue` on a session with no Agent): the user, and a session actor whose grants hold `thread.start` as well as `session.spawn`. A session without `thread.start` is `forbidden`, naming `thread.start`, and run and plugin actors stay `forbidden` because they have no permission profile to grant it on ([./13-security.md](./13-security.md) section 6.3, [ADR 0030](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)). A Thread a session starts takes its defaults from the calling session, never from the user's thread defaults: the value in the call, else the caller's own, else the instance's default. It takes the caller's instance, permission profile, requested access mode, project (while that project exists; if it was deleted, the Thread gets none) and GitHub Connection, and the caller's model and options when the instance is the caller's; ~~the workspace and the runner are not copied, as for a Thread the user starts without them.~~ *(Amended 2026-10-14, [#688](https://github.com/theagenticage/hercule/issues/688).)* It runs on the caller's runner unless the call names one, and in the caller's workspace unless the call names a workspace or another runner; a spawn from an Agent by a session does the same ([03-controller-and-runners.md](./03-controller-and-runners.md) section 5.4). The caller may override any of them, but a permission profile that grants anything outside the caller's profile grants is refused ([./13-security.md](./13-security.md) section 6.3). Steering an exited Thread with a granted `session.steer` is unchanged. The "local" alias does not apply, because no client resolves it: a call that names no runner is placed by the controller ([03-controller-and-runners.md](./03-controller-and-runners.md) section 5.4).
+Shape: a Session row with `agentId: null`. Nothing else distinguishes it: no thread table, no record that outlives the session, nothing named or reusable. When the user starts it, its spec is assembled from the user's **thread defaults** in the settings store - ~~`thread.instanceId`~~ `thread.providerAccountId`, `thread.harnessId` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, `thread.model`, `thread.accessMode`, `thread.profileId` (shipped: ~~the first provider instance with a logged-in snapshot, that instance's default model~~ the default entry of the first Model Profile *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, `approval-required`, the `unrestricted` profile; [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2) - plus whatever the user changes in the create form for this one thread; form changes are never written back. *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A Thread opened in a Project that names a Model Profile starts in that profile instead: the composer opens on it and picks the user's most recent entry in it, else the profile's default entry ([06-providers.md](./06-providers.md)). This decides only where the draft starts; the thread defaults still cover every other field. *(Amended 2026-10-13, [#593](https://github.com/theagenticage/hercule/issues/593): a Thread a session starts has no thread defaults; it takes the calling session's values, below.)* The create form is the composer on a draft thread ([14-web-app.md](./14-web-app.md) §App shell, 2026-09-01): the thread starts on the first message; workspace, checkout, branch, runner, profile, access mode **and ~~provider instance~~ Provider Account and harness** *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* lock then; model and its options stay live within the ~~instance~~ account and harness through `TurnInput.modelSelection` ([06-providers.md](./06-providers.md) section 5; instance lock amended 2026-09-02, [#52](https://github.com/theagenticage/hercule/issues/52)). A Thread is also the one session kind that sees the user's own **User Material** - skills, ~~subagents~~ subagent definitions *(amended 2026-10-05, [#355](https://github.com/theagenticage/hercule/issues/355): a subagent is now something a session runs, so the material is the definitions)*, instructions, commands, settings from a local installation, ~~linked live into the instance home where the placement runner has it~~ read live from each harness's default install locations when the Thread runs on the controller's local runner *(amended 2026-10-04, [#75](https://github.com/theagenticage/hercule/issues/75))* ([06-providers.md](./06-providers.md) §9.1, [ADR 0032](../adr/0032-threads-link-the-users-own-material.md)); every other kind stays isolated. *(Amended 2026-10-13, [#593](https://github.com/theagenticage/hercule/issues/593).)* Two kinds of actor may start one (`session.spawn` without `agentId`) or fork one (`session.continue` on a session with no Agent): the user, and a session actor whose grants hold `thread.start` as well as `session.spawn`. A session without `thread.start` is `forbidden`, naming `thread.start`, and run and plugin actors stay `forbidden` because they have no permission profile to grant it on ([./13-security.md](./13-security.md) section 6.3, [ADR 0030](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)). A Thread a session starts takes its defaults from the calling session, never from the user's thread defaults: the value in the call, else the caller's own, else the ~~instance's~~ account's default *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*. It takes the caller's ~~instance~~ Provider Account and harness, permission profile, requested access mode, project (while that project exists; if it was deleted, the Thread gets none) and GitHub Connection, and the caller's model and options when the ~~instance is~~ account and harness are the caller's; ~~the workspace and the runner are not copied, as for a Thread the user starts without them.~~ *(Amended 2026-10-14, [#688](https://github.com/theagenticage/hercule/issues/688).)* It runs on the caller's runner unless the call names one, and in the caller's workspace unless the call names a workspace or another runner; a spawn from an Agent by a session does the same ([03-controller-and-runners.md](./03-controller-and-runners.md) section 5.4). The caller may override any of them, but a permission profile that grants anything outside the caller's profile grants is refused ([./13-security.md](./13-security.md) section 6.3). Steering an exited Thread with a granted `session.steer` is unchanged. The "local" alias does not apply, because no client resolves it: a call that names no runner is placed by the controller ([03-controller-and-runners.md](./03-controller-and-runners.md) section 5.4).
 
 *(Amended 2026-09-11, [#160](https://github.com/theagenticage/hercule/issues/160): the draft opens inside a Project, picked first, and the session carries it as `projectId`; the composer's placement choice is one **workspace** selector - the repo's primary Workspace ("Current checkout"), a new ephemeral one, an existing ephemeral one to join, or none - with the branch selector following it, so "checkout" is no longer a selector of its own; the composer carries no profile selector, a Thread always runs as `thread.profileId`; what locks at start is workspace, branch, runner, access mode and instance. The composer section of [14-web-app.md](./14-web-app.md) is normative for the shape.)*
 
-Vocabulary: user-facing copy says "thread" ("Create new thread"). The bare word always means this concept; the provider-native "Codex thread" ([06-providers.md](./06-providers.md)) and the container level "Slack thread" ([12-assistants.md](./12-assistants.md)) are always qualified. "Chat", a non-agentic conversation surface, is a different, post-v1 concept.
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **The MCP Servers of a Thread.** A Thread has its own list ([Session](#session), `mcpServers`); the setting `thread.mcpServerIds` is one more thread default, listed beside `thread.profileId` above. It is an array of MCP Server ids, and unset or empty means no servers. What a new Thread starts with depends on who starts it:
+
+- **A Thread the user starts:** the spawn's `mcpServerIds` when it has them (an explicit empty list stays empty), else the list of its Project, else, for a Thread with no Project, the setting `thread.mcpServerIds`. A Thread in a Project never reads the setting. The composer on a draft Thread shows the list the Thread will start with, and the user changes it there ([14-web-app.md](./14-web-app.md)).
+- **A Thread a session starts, and a fork a session makes** (`session.continue`): a copy of the calling session's own list, when the call has no `mcpServerIds`. A session that holds `mcp.manage` may give an explicit list on `session.spawn`, as the user can.
+- **A fork the user makes:** a copy of its parent's list.
+- **An Agent's session, a workflow step's session and an assistant's session:** an empty list, until [#222](https://github.com/theagenticage/hercule/issues/222).
+
+Rules for every write of a list:
+
+- Every write needs the grant `mcp.manage`, checked inside the operation in addition to the operation's own grant: `project.create` and `project.update` with `mcpServerIds`, `session.spawn` and `session.update` with `mcpServerIds`, and `settings.update` of `thread.mcpServerIds`. `mcp.manage` is a grant only the user gives ([13-security.md](./13-security.md) section 6). A session holds it only when the user put it on the session's profile or approved a Permission Request for it.
+- No list holds two servers with the same name. A write that would make one is refused with `validation`, naming both servers. A write is also refused with `validation` when it names an id that is unknown or was deleted, when it names one id twice, and when it is `mcpServerIds` on a `session.spawn` with `agentId` (until [#222](https://github.com/theagenticage/hercule/issues/222)).
+- `session.update` with `mcpServerIds` works on a Thread that is queued, running or exited, and not on an archived one. It leaves the Thread's model selection alone. On a running session the gateway tells the harness that its tool list changed ([21-mcp.md](./21-mcp.md)).
+- The operations and their CLI flags are in [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md).
+
+Vocabulary: user-facing copy says "thread" ("Create new thread"). The bare word always means this concept; the harness-native "Codex thread" ([06-providers.md](./06-providers.md)) and the container level "Slack thread" ([12-assistants.md](./12-assistants.md)) are always qualified. "Chat", a non-agentic conversation surface, is a different, post-v1 concept.
 
 Status axis: the Session's.
 
@@ -315,19 +400,21 @@ Fields (pinned; defaults resolved 2026-09-01, [Domain model residue](https://git
 | Field | Notes |
 |---|---|
 | `id`, `name`, `systemPrompt` | |
-| `instanceId` | provider instance, required |
+| ~~`instanceId`~~ | ~~provider instance, required~~ |
+| `providerAccountId` | *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* the Provider Account its sessions run on, required. Any model in the account's Model Catalog may be named, whether or not a Model Profile lists it; an Agent never names a Model Profile |
+| `harnessId` | *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* optional; the harness its sessions run in. Absent means the account's default harness at the moment a session starts |
 | `permissionProfileId` | required; shipped defaults: `worker` for agents used in workflow agent steps, `assistant` for assistants |
 | `accessMode` | optional, default `full-access` (agents work in the background; `approval-required` is unworkable there) |
-| `model` | optional `ModelSelection { model, options }`; effort, thinking and the other well-known option ids ride inside `options` ([06-providers.md](./06-providers.md)); absent = the instance's default model from its Capability Snapshot |
-| ~~`mcpServers`~~ | ~~optional standing per-session MCP passthrough; nothing populates it in v1~~ deferred to [#222](https://github.com/theagenticage/hercule/issues/222); the Agent as shipped has no such field *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* |
-| `disallowedTools` | optional list of harness tool families to remove, in a small Hercule vocabulary ~~(`edit`, `write`, `shell`, `web`, ...)~~ each adapter maps to its harness: Claude `disallowedTools`, pi `excludeTools`; Codex declares it `unsupported` in its Capability Snapshot and the UI says so ([06-providers.md](./06-providers.md) section 3). *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* The vocabulary is the closed set `edit`, `write`, `shell`, `web-search`, `web-fetch`, and a value outside it is refused as `validation`. Claude maps all five; pi maps `edit`, `write` and `shell` onto `edit`, `write` and `bash` and has no web tool, so a web family is honoured by absence; Codex declares it unsupported. |
+| `model` | optional `ModelSelection { model, options }`; effort, thinking and the other well-known option ids ride inside `options` ([06-providers.md](./06-providers.md)); absent = ~~the instance's default model from its Capability Snapshot~~ the provider's default model in the account's Model Catalog *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* |
+| ~~`mcpServers`~~ | ~~optional standing per-session MCP passthrough; nothing populates it in v1~~ deferred to [#222](https://github.com/theagenticage/hercule/issues/222); the Agent as shipped has no such field *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The row stays deferred, but what [#222](https://github.com/theagenticage/hercule/issues/222) now means has changed: an Agent, and a workflow step, will name MCP Servers by id, as a session's list does, and the list is copied onto the session at spawn (rule 9). No raw MCP server configuration is ever stored on an Agent or sent to a runner: the harness is given one entry, the MCP Gateway ([21-mcp.md](./21-mcp.md), [06-providers.md](./06-providers.md) section 4). Until then an Agent's session has an empty list |
+| `disallowedTools` | optional list of harness tool families to remove, in a small Hercule vocabulary ~~(`edit`, `write`, `shell`, `web`, ...)~~ each adapter maps to its harness: Claude `disallowedTools`, pi `excludeTools`; Codex declares it `unsupported` in its Capability Snapshot and the UI says so ([06-providers.md](./06-providers.md) section 3). *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* The vocabulary is the closed set `edit`, `write`, `shell`, `web-search`, `web-fetch`, and a value outside it is refused as `validation`. Claude maps all five; pi maps `edit`, `write` and `shell` onto `edit`, `write` and `bash` and has no web tool, so a web family is honoured by absence; Codex declares it unsupported. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Antigravity declares it `unsupported` too, as Codex does. |
 | `createdAt`, `updatedAt` | |
 
-Every value is copied into the Session at spawn (rule 9). Precedence for each default: an explicit per-step or per-spawn value, then the Agent field, then the instance default; the agent step's `accessMode` and `model` are therefore optional overrides ([07-workflows.md](./07-workflows.md) section 4.2). Placement requirements live on the Workflow, per run, never on the Agent or the step ([07-workflows.md](./07-workflows.md) section 4.4). There is no custom-tools field in v1: nothing produces a custom tool to attach (Post-v1).
+Every value is copied into the Session at spawn (rule 9). Precedence for each default: an explicit per-step or per-spawn value, then the Agent field, then the ~~instance~~ account's *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* default; the agent step's `accessMode` and `model` are therefore optional overrides ([07-workflows.md](./07-workflows.md) section 4.2). Placement requirements live on the Workflow, per run, never on the Agent or the step ([07-workflows.md](./07-workflows.md) section 4.4). There is no custom-tools field in v1: nothing produces a custom tool to attach (Post-v1).
 
 Status axis: none.
 
-Relationships: `permissionProfileId` required; `instanceId` required; sessions reference the agent as lineage only. Deleting an agent is refused (`invalid_state`) while any non-`exited` session references it; exited sessions keep the id and render as "deleted agent"; workflows naming it go invalid (Deletion rules, below).
+Relationships: `permissionProfileId` required; ~~`instanceId`~~ `providerAccountId` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* required; sessions reference the agent as lineage only. Deleting an agent is refused (`invalid_state`) while any non-`exited` session references it; exited sessions keep the id and render as "deleted agent"; workflows naming it go invalid (Deletion rules, below).
 
 ### Assistant
 
@@ -409,7 +496,9 @@ Fields: `id`, `name`, token hash (opaque random; never a JWT), `createdAt`, `las
 
 Purpose: a grouping of related work and its materials; may span several resources.
 
-Fields (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)): `id`, `name`, `description?` (markdown), `createdAt`, `updatedAt`, `deletedAt?`. Tasks reference a project through `projectId`; a project spans zero or more Resources through a join table, and a Resource may belong to any number of Projects. There is no default Connection: Resources carry the Connection that reaches them and Workspaces designate the git-identity one. A Project is a way to group information inside Hercule; it carries no behaviour. Soft-deleted like a Task (Deletion rules, below); its tasks keep their `projectId`.
+Fields (resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46)): `id`, `name`, `description?` (markdown), `modelProfileId?` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, `createdAt`, `updatedAt`, `deletedAt?`. Tasks reference a project through `projectId`; a project spans zero or more Resources through a join table, and a Resource may belong to any number of Projects. There is no default Connection: Resources carry the Connection that reaches them and Workspaces designate the git-identity one. A Project is a way to group information inside Hercule; it carries no behaviour~~.~~, with one exception, decided by Rogier on 2026-10-30 ([#406](https://github.com/theagenticage/hercule/issues/406), [ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)): a Project may name one Model Profile, and a new Thread opened in the Project starts in that profile (Thread, above). It decides only where a Thread starts: changing or clearing it later changes no existing Thread, and Agents keep their own account and model. Soft-deleted like a Task (Deletion rules, below); its tasks keep their `projectId`.
+
+*(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **A Project holds two defaults for a new Thread in it:** the Model Profile it opens on (above) and the MCP Servers it starts with. Its field `mcpServerIds` is an array of MCP Server ids, empty by default. It is a default for new Threads only: changing it later never touches a Thread that exists, and changing a Thread's own list never touches the Project. A Project still carries no behaviour. Writing `mcpServerIds` needs the grant `mcp.manage` (Thread, above). Deleting an MCP Server removes it from every Project's list (MCP Server, below).
 
 Status axis: none.
 
@@ -444,6 +533,16 @@ Invariants: at most one primary workspace per (resource, runner). Primaries are 
 *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* Two changes. **Adopt-in-place is not built.** A primary is always a Hercule-managed clone under the runner's storage directory; a checkout the user already has on that machine is never read, written or taken over, and `workspace.provision` takes no path. **A failed primary is superseded, not resurrected.** "At most one primary per (resource, runner)" counts only `provisioning` and `ready`: one that could not be made holds nothing, so the next provision marks it `deleted` - the record of the attempt and the machine's words for it are kept - and opens a fresh row in its place. Primaries are still never torn down by Hercule on request.
 
 *(Amended 2026-09-27, [#263](https://github.com/theagenticage/hercule/issues/263), [ADR 0036](../adr/0036-a-workspace-is-kept-by-leases-its-holders-release.md).)* **A workspace is kept by its leases.** Each session and each run that opens or joins a workspace holds a Workspace Lease on it, active until the holder releases it; at release the holder picks a retention (`none`, `orphan`, `idle`, `inspection`) and the time the workspace is kept until is fixed then. `sessionIds` lists the sessions holding an active lease. `keptUntil` (`Timestamp | null`) is the latest kept-until time of the workspace's leases, set only for an ephemeral workspace that is not deleted and has no active lease; a later settings change does not move it.
+
+*(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* **A workspace records its disk usage.** `diskUsage` is `{ sizeBytes, freesBytes, measuredAt } | null`, as the workspace's runner last measured it ([03-controller-and-runners.md](./03-controller-and-runners.md) section 6.9):
+
+- `sizeBytes`: the disk space the workspace's files take, counted in allocated blocks, not file lengths.
+- `freesBytes`: the part of `sizeBytes` that removing the workspace gives back: the files no other path links to. pnpm hard-links `node_modules` to its store, so those files take space but removing them frees none.
+- `measuredAt`: when the runner measured it.
+
+`diskUsageError` (`string | null`) is why the newest attempt to measure it failed, such as "Measuring took longer than 10 minutes", or null when it succeeded. It is a field of its own so a first attempt can fail with no numbers to keep: a failed attempt leaves `diskUsage` as it was, null included.
+
+`diskUsage` is null until the first successful measurement, and always null for an adopted main workspace, which is the user's own checkout and is never measured. Nothing in it reads Git: it is about files, whatever the checkouts are. Idle time is read from the existing `lastUsedAt`, which a session's start and exit set.
 
 *(Amended 2026-09-16, [#72](https://github.com/theagenticage/hercule/issues/72).)* The user-facing word for a primary is **main workspace**. `primary` is the kind in code, on the wire and in the database; "main workspace" is what every label, menu row and help text a person reads calls it. "Current checkout", "shared checkout" and "main checkout" are retired.
 
@@ -503,7 +602,7 @@ Fields:
 - `approvalEffects`: what in its `SKILL.md` frontmatter can change approvals on Claude Code, `allowedTools` and `hooks` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md) section 2, `skill`). It is read once, when the content is checked, so listing the library reads no file.
 - `createdAt`, `createdBy`: actor stamps. A revision an update check found is stamped `system`.
 - `appliedAt`, `appliedBy`: the last time the revision was applied, and who applied it; `null` when it was never applied. The Skills screen shows them as "applied by Ada, session s_12, 14:02". Applying a revision again overwrites both. The full history of applies is in the audit log, as `skill.applied` entries.
-- `includesThirdPartyContent`: `true` when the session that proposed the revision had read third-party messages ([13-security.md](./13-security.md) section 10). The Skills screen shows "includes third-party content" beside the proposer. It is `false` for every other revision. No session stores that taint yet: the ticket that builds the taint check, [#736](https://github.com/theagenticage/hercule/issues/736), also sets this field, and until then it is always `false`.
+- `includesThirdPartyContent`: `true` when the session that proposed the revision had read third-party messages ([13-security.md](./13-security.md) section 10). The Skills screen shows "includes third-party content" beside the proposer. It is `false` for every other revision. ~~No session stores that taint yet: the ticket that builds the taint check, [#736](https://github.com/theagenticage/hercule/issues/736), also sets this field, and until then it is always `false`.~~ *(Amended 2026-11-17, [#736](https://github.com/theagenticage/hercule/issues/736).)* The session that proposes the revision stores the taint, and `skill.propose` copies it into this field. Until a channel delivers wrapped lines, only a session that a tainted session started or wrote to can be tainted, so the field is `false` in practice.
 
 The files live outside the database, under the Data Root ([04-state-store.md](./04-state-store.md)). The row holds only the facts above. The content rules a revision must meet are with the operations ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md#skill) section 2).
 
@@ -574,7 +673,7 @@ Purpose: one message in a Discussion. It carries its author as `actor` only: a s
 
 ### Wiki Page
 
-Purpose: a page that agents write for the agents after them, in its repository's Wiki. The Wiki is the set of a repo Resource's pages, not a record of its own. A write creates a page or updates one; an update names the revision it read. Every write is a new revision that keeps the whole page with its `actor` and `at`. Revisions and pages are never deleted. Read as `WikiPageSummary` in a listing and as `WikiPage` with its body ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
+Purpose: a page that agents write for the agents after them, in its repository's Wiki. The Wiki is the set of a repo Resource's pages, not a record of its own. A write creates a page or updates one; an update names the revision it read. Every write is a new revision that keeps the whole page with its `actor` and `at`. Revisions and pages are never deleted. *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* "Every write" means every write of a page's content, a create or an update. A page that no longer helps is archived, which writes no revision: it carries who archived it, when and why, leaves the listing and takes no update. Restoring it clears that. A page is read by its id in either state. Read as `WikiPageSummary` in a listing and as `WikiPage` with its body ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
 
 ### Edit
 
@@ -595,20 +694,22 @@ Fields (pinned by [#7](https://github.com/theagenticage/hercule/issues/7), [#8](
 | credential hash | the durable per-runner credential minted at join is an opaque random token stored hashed like every other token ([13-security.md](./13-security.md)); revoked on retire. It is not a row in the secrets table; the `runner` owner kind there is reserved for runner-scoped secrets |
 | `state` | fixed axis, below |
 | `lastSeenAt` | shown honestly while `unreachable` |
-| probed facts | OS/arch, RAM, docker presence, provider binaries and their auth state (credential-file-free probing), toolchains; self-reported at `hello`, never probed from the controller |
+| probed facts | OS/arch, RAM, disk size *(added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972))*, docker presence, ~~provider binaries and their auth state (credential-file-free probing)~~ harness binaries and their versions *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* (sign-in state belongs to a Provider Account and is in its Capability Snapshots, below), toolchains; self-reported at `hello`, never probed from the controller |
 | `labels[]` | free-form user labels; together with probed facts these are the Runner Capabilities placement filters on |
+| metrics | *(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* the Runner Metrics the runner last reported: free disk, available memory, and CPU use over the last minute (average and peak); nullable until the first report. The controller also keeps a history of them, one row per minute, for `retention.runnerMetrics` days ([04-state-store.md](./04-state-store.md)). Replaces `watermark`, the old name of the same report |
+| `diskUsage` | *(Added 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972).)* what the runner last measured outside its workspaces: `{ repositoryCacheBytes, harnessHomeBytes, measuredAt } \| null` ([03-controller-and-runners.md](./03-controller-and-runners.md) section 6.9); null until the first `DiskUsageReport`, and on a runner built before it |
 | `maxConcurrentSessions` | default derived from probed RAM (about one session per 2 GiB, floor 1); user-overridable |
 | protocol facts | negotiated protocol version and capability list from `hello`; last acked sequence number of the runner's outbox |
 
 The controller's auto-joined local runner is an ordinary runner with no distinguishing field; "local" as a placement choice is a client-side alias ([14-web-app.md](./14-web-app.md)). *(Amended 2026-10-02, [#313](https://github.com/theagenticage/hercule/issues/313).)* A client learns which runner that is from `controller.read`'s `localRunnerId`, which the controller reads from its child on every call ([03 §3.4](./03-controller-and-runners.md)), and finds the runner itself in `runner.query`.
 
-Runner-owned, not stored on the controller: the random storage directory created at enrollment, per-workspace paths, inactivity and absolute session timeouts, the disk-space watermark, the event outbox.
+Runner-owned, not stored on the controller: the random storage directory created at enrollment, per-workspace paths, inactivity and absolute session timeouts, ~~the disk-space watermark,~~ the event outbox. *(Amended 2026-11-02, [#972](https://github.com/theagenticage/hercule/issues/972): the disk-space watermark has been the controller's since [#67](https://github.com/theagenticage/hercule/issues/67), `diskWatermarkBytes` on the runner row; the runner only reports its free disk.)*
 
 A fleet-level setting names the **default runner**; promotion does not change it.
 
 Status axis (pinned): `online` / `offline` (announced shutdown: sessions cleanly interrupted and resumable, outbox flushed, work waits) / `unreachable` (silence: state unknown, last seen shown) / `draining` (no new placements, sessions finish) / `retired` (terminal: credential revoked, workspaces marked lost, session records preserved but unresumable). Force-retiring an `unreachable` runner requires explicit confirmation.
 
-Relationships: owns Workspaces and hosts Sessions (both pinned to it); Capability Snapshots are keyed by (provider instance, runner).
+Relationships: owns Workspaces and hosts Sessions (both pinned to it); Capability Snapshots are keyed by ~~(provider instance, runner)~~ (Provider Account, harness, runner) *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*.
 
 Identity: Hercule id plus its credential. Retired runners keep their records; re-enlisting the same machine creates a new Runner with new identity, credential and labels and adopts no workspaces.
 
@@ -620,17 +721,61 @@ Fields: controller `id` and signing key material created at install and carried 
 
 Transient tokens minted by the controller: single-use runner join tokens and single-use promotion tokens. Both are short-lived records, not credentials of any entity.
 
-### Provider instance
+### ~~Provider instance~~
 
-Purpose: one configured provider (definition plus decoded config); the routing key for sessions ([ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md)).
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Provider instance is replaced by Harness, Provider and Provider Account, below, and by Model Profile ([ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)). A Provider instance coupled one harness to one vendor login; now who pays (the account) and what runs it (the harness) are separate.
 
-Fields: `instanceId` (the routing key; never the provider id), `providerId` (the ProviderDefinition id: `claude-code` | `codex` | `pi`), `config` (validated against the definition's `configSchema`; which of its entries live on the controller as logical settings and which the runner resolves to paths is the Conflict recorded in [06-providers.md](./06-providers.md)), `displayName`. A definition with `supportsMultipleInstances: false` has at most one instance. One instance is one login and one isolated provider home per runner.
+~~Purpose: one configured provider (definition plus decoded config); the routing key for sessions ([ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md)).~~
 
-**Capability Snapshot** (per instance x runner): `instanceId`, `runnerId`, `probedAt`, `declared` (copied `DeclaredCapabilities`, including `accessModes: Record<AccessMode, "native" | "unsupported">` and `structuredOutput`), `harnessVersion | null`, `auth {status, identity?, planLabel?, backend?}`, `models: ModelDescriptor[]`. Field lists are owned by [06-providers.md](./06-providers.md). Snapshots live in the controller DB; probing is runner-side and side-effect-free. The earlier `asks-instead` value is withdrawn; fallback between access modes is controller policy, hardcoded and strictly downward ([06-providers.md](./06-providers.md), [13-security.md](./13-security.md), [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md)).
+~~Fields: `instanceId` (the routing key; never the provider id), `providerId` (the ProviderDefinition id: `claude-code` | `codex` | `pi`), `config` (validated against the definition's `configSchema`; which of its entries live on the controller as logical settings and which the runner resolves to paths is the Conflict recorded in [06-providers.md](./06-providers.md)), `displayName`. A definition with `supportsMultipleInstances: false` has at most one instance. One instance is one login and one isolated provider home per runner.~~
 
-Status axis: none on the instance; auth status is a snapshot fact per runner.
+~~**Capability Snapshot** (per instance x runner): `instanceId`, `runnerId`, `probedAt`, `declared` (copied `DeclaredCapabilities`, including `accessModes: Record<AccessMode, "native" | "unsupported">` and `structuredOutput`), `harnessVersion | null`, `auth {status, identity?, planLabel?, backend?}`, `models: ModelDescriptor[]`. Field lists are owned by [06-providers.md](./06-providers.md). Snapshots live in the controller DB; probing is runner-side and side-effect-free. The earlier `asks-instead` value is withdrawn; fallback between access modes is controller policy, hardcoded and strictly downward ([06-providers.md](./06-providers.md), [13-security.md](./13-security.md), [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md)).~~
 
-Relationships: registered by a provider Plugin; referenced by Agents and Sessions; snapshots reference Runners.
+~~Status axis: none on the instance; auth status is a snapshot fact per runner.~~
+
+~~Relationships: registered by a provider Plugin; referenced by Agents and Sessions; snapshots reference Runners.~~
+
+### Harness
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Purpose: the agent program a session runs in: ~~Claude Code, Codex or pi~~ *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Claude Code, Codex, pi or Antigravity, installed on runners ([ADR 0028](../adr/0028-provider-harnesses-are-runner-installed-executables.md)).
+
+Registered by a harness plugin as a `HarnessDefinition`; nothing about it is stored as a row. Fields owned by [06-providers.md](./06-providers.md): a qualified id (`claude-code/claude-code`, [ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)), display name, binary name, declared capabilities, and which providers and Account Kinds it runs, and how. Whether it is installed on a runner, and which version, are that runner's probed facts. Installing one is a Machines action ([03-controller-and-runners.md](./03-controller-and-runners.md)).
+
+Status axis: none.
+
+### Provider
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Purpose: the company that serves models and bills for them: Anthropic, OpenAI, OpenRouter, Z.ai, OpenCode, MiniMax, Google *(added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278))*.
+
+Registered by a provider plugin as a `ProviderDefinition`; nothing about it is stored as a row. Fields owned by [06-providers.md](./06-providers.md): a qualified id (`anthropic/anthropic`), display name, its Account Kinds (each with the setup steps that sign it in and the harnesses the provider allows it in), how it reads a Model Catalog and Account Usage, its Default Selection, and the small model it suggests for Text Generation.
+
+Status axis: none.
+
+### Provider Account
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Purpose: one account at one Provider: who pays. With a harness, the routing key for sessions ([ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)).
+
+Fields (owned by [06-providers.md](./06-providers.md)): `id`, `providerId`, `kind` (one of the provider's Account Kinds), `label` (optional, unique per provider; shown as "Anthropic · Work"), `identity` and `planLabel` (who is signed in, and on which plan), `defaultHarnessId`, `createdAt`, `updatedAt`. A key or token account holds its credential as a Secret owned by the account ([13-security.md](./13-security.md)); a per-machine account holds a login in a Harness Home on each runner it is signed in on. One account is one vendor identity, and never one account per runner. An account migrated from a Provider instance also carries `legacyHomeFolder` and `legacyHomeHarnessId` (the old instance folder and the harness it belongs to), which only the controller reads and no client sees ([04-state-store.md](./04-state-store.md)).
+
+**Capability Snapshot** (per account x harness x runner): what one runner found out about one Provider Account in one harness: signed in or not, as whom, on which plan, and the models it lists. Field lists are owned by [06-providers.md](./06-providers.md). Snapshots live in the controller DB; probing is runner-side and side-effect-free *(added 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278): with the exceptions for Antigravity in [06-providers.md](./06-providers.md) section 3.2)*. Whether a harness is installed, and its version, are runner facts, not snapshot facts. The earlier `asks-instead` value stays withdrawn; fallback between access modes is controller policy, hardcoded and strictly downward ([13-security.md](./13-security.md), [ADR 0007](../adr/0007-provider-adapter-is-a-thin-interface-behind-a-normalized-event-stream.md)).
+
+**Model Catalog** (one per account): the models the account may use, each with the date it was first seen, plus the time of the last successful read and the last error. A failed read keeps the last good list. Owned by [06-providers.md](./06-providers.md).
+
+**Account Usage** (one per account): the latest usage windows or credit the provider reported, each with the time it was read and, for a window, when it resets. One place holds it, and every surface that shows usage reads it there ([06-providers.md](./06-providers.md)).
+
+Status axis: `ready`, `not-signed-in`, `failed` or `no-runner`. Only `failed` is stored, as the account's `failure` (a message and the time it happened), cleared when a new credential or a successful read replaces it; the other three are worked out from its credential and its snapshots ([06-providers.md](./06-providers.md)).
+
+Relationships: belongs to a Provider; referenced by Agents, Assistants, Sessions, the thread defaults, the Text Generation setting and Model Profiles; snapshots reference Runners.
+
+### Model Profile
+
+*(Added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Purpose: a named model menu, picked from Provider Accounts; the menu the composer shows ([ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)).
+
+Fields (owned by [06-providers.md](./06-providers.md)): `id`, `name`, `revision`, `accounts` (in order; each a Provider Account, an optional harness that overrides the account's default, and its entries in order), `defaultEntry`, `dismissedNewModels`. An entry is one model of one account, optionally in a harness of its own. An account may sit in any number of profiles. A write names the revision it read, and a stale one is refused ([06-providers.md](./06-providers.md)).
+
+Status axis: none.
+
+Relationships: references Provider Accounts; a Project may name one. Agents, Assistants, workflow steps and settings never name a Model Profile.
 
 ### Connection
 
@@ -724,15 +869,15 @@ Delivery: the notification center always records; per-sink deliveries are outbox
 
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395); decided by [#388](https://github.com/theagenticage/hercule/issues/388) and [#392](https://github.com/theagenticage/hercule/issues/392); [ADR 0040](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md).)*
 
-Purpose: one thing a person, a system or one of Hercule's agents asks of the user, shown on Intake. A Signal is never a Notification.
+Purpose: one thing a person, a system or one of Hercule's agents asks of the user, ~~shown on Intake~~ shown on the Inbox with the External Entity it is about *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the Intake screen is deleted; a Signal with no entity is reachable with `hercule signal list` only, until follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox)*. A Signal is never a Notification.
 
 Fields: owned by [10 section 9.1](./10-triage-intake-and-notifications.md#91-the-record). A plugin kind is qualified (`github/review-requested`); the core kinds are `proposal`, `offer`, `unsure` and `fyi`. A `proposal` carries the Task that Accept would create; no Task exists until then.
 
 Relationships: raised from one event, or through `signal.raise` by a run, an assistant or the user, naming the events behind it; resolved, optionally, by a later event on its source. The events it names stay alive under the retention rule ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)). Its answers are Bound Actions (above), allowed where an operation's `usableIn` lists `signal.answer`.
 
-Status axis: `open` | `resolved`, resolving once as `decided` or `withdrawn` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). There is no `handled`. Apart from its resolution, only its priority may change, when the user lowers `urgent` to `high`. No operation deletes a Signal in v1.
+Status axis: `open` | `resolved`, resolving once as `decided` or `withdrawn` ([ADR 0027](../adr/0027-a-decision-resolves-when-its-question-is-answered-wherever.md)). There is no `handled`. Apart from its resolution, only its priority may change, when the user lowers `urgent` to `high`. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): nothing lowers a priority any more, since `signal.lowerPriority` is removed; a priority lowered before then stays lowered.)* No operation deletes a Signal in v1.
 
-**Snooze**: a per-user hide-until on one open Signal, never an answer: the Signal stays `open` and its source is not told. One row per snoozed Signal, deleted on unsnooze and when the Signal resolves ([10 section 9.7](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)). Notifications have no snooze.
+~~**Snooze**: a per-user hide-until on one open Signal, never an answer: the Signal stays `open` and its source is not told. One row per snoozed Signal, deleted on unsnooze and when the Signal resolves ([10 section 9.7](./10-triage-intake-and-notifications.md#97-snooze-and-not-urgent)). Notifications have no snooze.~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is retired. A migration drops its table, so a Signal that was snoozed is live again. Neither a Signal nor a Notification can be snoozed.)*
 
 ### Screening
 
@@ -750,7 +895,7 @@ Status axis: `pending` -> `yes` | `no` | `failed`. Pruned with its event, and ne
 
 Purpose: the user's rule that keeps Signals of one plugin kind, with given field values, from being raised. It never applies to a core kind.
 
-Fields: owned by [10 section 9.9](./10-triage-intake-and-notifications.md#99-ignore-rules). Each event it stops leaves one **catch** row naming the rule, so Intake's Everything still says why.
+Fields: owned by [10 section 9.9](./10-triage-intake-and-notifications.md#99-ignore-rules). Each event it stops leaves one **catch** row naming the rule~~, so Intake's Everything still says why~~ *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Everything is retired; `ignoreRule.query` still counts the catches)*.
 
 Status axis: none. A rule is never edited or paused: only the user creates or deletes one, and deleting it works forward only. A catch is pruned with its event, and never keeps that event alive.
 
@@ -760,35 +905,80 @@ Status axis: none. A rule is never edited or paused: only the user creates or de
 
 Purpose: what the controller persists about each installed plugin ([ADR 0006](../adr/0006-plugins-request-capabilities-and-register-contributions-in-code.md)).
 
-Per plugin (pinned): `id` (from the manifest), `enabled` flag, `config` (validated against the manifest's config schema; change or toggle = deactivate plus reactivate), the persisted **contribution catalog** written by `register()` at every boot for every installed plugin regardless of `enabled` (contribution ids per extension point: provider, channel, event source, workflow action), a namespaced **KV store** (string key to JSON value) inside the controller DB, and plugin-owned secrets (owner `plugin`).
+Per plugin (pinned): `id` (from the manifest), `enabled` flag, `config` (validated against the manifest's config schema; change or toggle = deactivate plus reactivate), the persisted **contribution catalog** written by `register()` at every boot for every installed plugin regardless of `enabled` (contribution ids per extension point: ~~provider,~~ harness, provider *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, channel, event source, workflow action, MCP server *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)*), a namespaced **KV store** (string key to JSON value) inside the controller DB, and plugin-owned secrets (owner `plugin`).
 
 Status axis: `enabled` / `disabled`. Disabling removes the plugin's contributions from use everywhere; workflows referencing them fail validation loudly.
 
 Identity: plugin id from the manifest; contributions are referenced by id across the system (a step names an action contribution, a binding names a channel contribution, a Connection names a connection type). A contribution id is the **qualified id** `<pluginId>/<word>`, minted by the host at registration ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)).
 
+### MCP Server
+
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* Purpose: a remote MCP server that offers tools to sessions, and what the controller reaches it with: a plugin's Connection, or its own sign-in when the user added it by URL ([GLOSSARY.md](../../GLOSSARY.md) MCP Server). It is a record on the controller and knows nothing about Projects or Threads: they name it, it does not name them. Sessions reach its tools through the MCP Gateway, never directly. The gateway, the status of a server, credentials for calls to it and its upstream sessions are in [21-mcp.md](./21-mcp.md); the operations are in [11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md); the plugin side is in [05-plugins.md](./05-plugins.md) section 4.5. [ADR 0059](../adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md) holds the reasons.
+
+Fields:
+
+| Field | Notes |
+|---|---|
+| `id` | Hercule id |
+| `name` | an `McpServerName`, fixed at creation and never renamed. The rule is below |
+| `source` | where the server is reached from, one of two kinds: `{ kind: "plugin", contributionId, connectionId }`, a server a plugin offers, reached with the credential of one of its Connections; `contributionId` is the qualified id of the plugin's MCP server contribution ([05-plugins.md](./05-plugins.md) section 4.5). Or `{ kind: "url", url, signIn }`, a server the user added by its address, with `signIn` one of `"none"`, `"token"` or `"oauth"`. Servers added by URL are built by [#1210](https://github.com/theagenticage/hercule/issues/1210). *(Amended 2026-11-21, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* The URL source also has `signInOffered`: `"oauth"`, `"token"` or `null`, what the server's last 401 asked for (`oauth` for a `Bearer` challenge that names OAuth metadata), so a client knows which sign-in to offer ([21-mcp.md](./21-mcp.md#52-a-url-servers-sign-in)). `url` is the address the server is called at, as the URL standard writes it with a trailing host dot and escaped unreserved characters folded; ~~the record shows it with every query value hidden (`?api_key=…`)~~ ([21-mcp.md](./21-mcp.md#23-one-server-per-address-and-account)) *(Amended 2026-11-22, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* Decided by Rogier, 2026-11-22: (c). An address is not a secret: it is shown whole in the record to every reader with `mcp.read`, and in the audit entry to every reader with `event.read`, and nothing of it is removed from answers. A key belongs in the token. |
+| `enabled` | the user's switch. Off is `enabled: false`, never a delete |
+| `status` | `checking`, `ready`, `needs-sign-in`, `unreachable` or `error`. There is no `disabled` status: `enabled` says it, and a client shows "Off" when `enabled` is false. What each value means and what sets it is in [21-mcp.md](./21-mcp.md) |
+| `statusDetail` | `null`, or the reason for the status in words a person can act on |
+| `tools` | what the server listed when it was last checked successfully: an array of `{ name, title?, description }`. Read only |
+| `checkedAt` | `null`, or the time of the last successful list |
+| `createdAt`, `updatedAt` | |
+
+Two things are stored with the record but are not on it:
+
+- **Each tool's full definition** (input schema, output schema, annotations). The gateway answers `tools/list` from them.
+- **A URL server's sign-in** (a pasted token, or OAuth tokens). It is a secret owned by the MCP Server and is never part of the record (Secret, below).
+
+**The name.** An `McpServerName` is lowercase letters and digits with a single `_` between them (`^[a-z0-9]+(_[a-z0-9]+)*$`), 1 to 16 characters, and not `hercule`, which is kept for Hercule's own tools (not in v1). It has no `-` or `.`: Codex turns them into `_`, and a double underscore separates the name from the tool's name in the gateway's tool names. The default is the contribution's bare word for a plugin server (`sentry`), and for a URL server the name the user gives, or else the first label of the host that is not `mcp`, `www` or `api` (`notion`). Two servers may share a name, because a user may have a work and a hobby Sentry. One list never holds two servers of one name (Thread, above).
+
+**One server per address and external account:**
+
+- **A plugin server:** one per contribution and external account. The account is the Connection's `accountId` ([08-events-and-connections.md](./08-events-and-connections.md) section 8.1), not its id. A second one is refused with `conflict`, naming the existing server.
+- **A URL server:** one per normalized URL: the scheme and host in lower case, the default port dropped and a trailing `/` dropped, the path and the query kept. A second account at the same URL is not possible in v1.
+- **An address on a plugin's origin:** adding by URL an address on the `origin` of a plugin's MCP server contribution, such as any URL on `https://mcp.sentry.dev`, is refused with `conflict`. The message points at that Connection's row in Settings > MCP servers. ~~When the user has no Connection of that plugin, or the plugin is switched off, there is no such row: that case is open ([./21-mcp.md](./21-mcp.md#23-one-server-per-address-and-account), [#1210](https://github.com/theagenticage/hercule/issues/1210)).~~ *(Amended 2026-11-21, [#1210](https://github.com/theagenticage/hercule/issues/1210).)* It is refused in every case. With no row, the message points at what makes one: Settings > Connections to connect, reconnect or switch on a Connection, or Settings > Plugins for a plugin that is switched off or failed to start ([./21-mcp.md](./21-mcp.md#23-one-server-per-address-and-account)).
+- **Replace:** when the user switches on a plugin's server while a URL server on the contribution's origin exists, the client offers "Replace". Replace is `mcpServer.update` with `source: { kind: "plugin", ... }` on the URL server. The record keeps its id, its name and every list that names it. It moves to the plugin's Connection, and its own sign-in secrets are deleted. When several URL servers sit on the plugin's origin, the Replace dialog lets the user pick one ([#1210](https://github.com/theagenticage/hercule/issues/1210)).
+
+**Open:** a second account at the same URL. Rogier made it a required follow-up: [#1218](https://github.com/theagenticage/hercule/issues/1218).
+
+Status axis: the `status` above; the owner of the behaviour is [21-mcp.md](./21-mcp.md).
+
+Relationships: a plugin server requires a Connection and the plugin's contribution; a URL server has neither. Named by Projects (`mcpServerIds`), by Sessions (`mcpServers`) and by the setting `thread.mcpServerIds`. Deleting one is in Deletion rules, below.
+
+Identity: Hercule id. The name is a label that can repeat; the uniqueness rule above is on the address and the account.
+
 ### Secret
 
 Purpose: one encrypted value in the owner-scoped secrets table ([ADR 0015](../adr/0015-secrets-are-encrypted-per-value-under-a-keychain-held-master-key.md)).
 
-Fields: `id`, `owner {kind: connection | plugin | runner | core, id}`, `name`, ciphertext (encrypted per value under the machine's Master Key), `createdAt`, `rotatedAt?`. Entities reference secrets by id; values never leave the secrets service except to the consumer that needs them. Enumerable and extractable by the running controller for promotion export. Runner credentials are hashed tokens, not secrets rows; the `runner` owner kind is reserved for runner-scoped secrets. The owner kind for provider-instance secrets is Open in [06-providers.md](./06-providers.md).
+Fields: `id`, `owner {kind: connection | plugin | runner | core | provider-account, id}` *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, `name`, ciphertext (encrypted per value under the machine's Master Key), `createdAt`, `rotatedAt?`. Entities reference secrets by id; values never leave the secrets service except to the consumer that needs them. Enumerable and extractable by the running controller for promotion export. Runner credentials are hashed tokens, not secrets rows; the `runner` owner kind is reserved for runner-scoped secrets. ~~The owner kind for provider-instance secrets is Open in [06-providers.md](./06-providers.md).~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* A Provider Account's key or token is a secret of owner kind `provider-account` ([13-security.md](./13-security.md)). *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A URL MCP Server's sign-in is a secret owned by that server, under the owner kind `mcp-server`, and is refused by the generic `secret.set` and `secret.delete` ([21-mcp.md](./21-mcp.md), [13-security.md](./13-security.md)).
 
 ## Deletion rules
 
 Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/hercule/issues/46).
 
-- **Task and Project soft-delete.** `task.delete` / `project.delete` set `deletedAt`; `read` answers `not_found`, `query` excludes the row (no include-deleted option in v1), provenance and links stay, and `task.deleted { taskId, snapshot }` is emitted. The core withdraws open Notifications whose subject is the deleted task; Runs, Sessions and Tasks keep their `taskId` / `projectId`. A soft-deleted task no longer protects its events from pruning ([04-state-store.md](./04-state-store.md) Retention). These are the two entities whose history the user reads back (Intake, provenance, "why did this exist"), hence soft. Pruning them outright, with their runs and events, after something like a year, is post-v1 fog on the map.
+- **Initiative soft-delete.** *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* `initiative.delete` sets `deletedAt`; `read` answers `not_found` and `query` never lists it. In the same transaction it clears `initiativeId` on each of its Tasks. Closing is not deleting: a closed Initiative stays listed on request and keeps its Tasks.
+- **Task and Project soft-delete.** `task.delete` / `project.delete` set `deletedAt`; `read` answers `not_found`, `query` excludes the row (no include-deleted option in v1), provenance and links stay (*amended 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036): a Task's blocker edges are removed with it*), and `task.deleted { taskId, snapshot }` is emitted. The core withdraws open Notifications whose subject is the deleted task; Runs, Sessions and Tasks keep their `taskId` / `projectId`. A soft-deleted task no longer protects its events from pruning ([04-state-store.md](./04-state-store.md) Retention). These are the two entities whose history the user reads back (Intake, provenance, "why did this exist"), hence soft. Pruning them outright, with their runs and events, after something like a year, is post-v1 fog on the map.
 - **Everything else hard-deletes**, refused with `invalid_state` while something live references the row; historical references keep the id and render as "deleted <entity>". Resource: while a Workspace referencing it is not `deleted | lost`. Workflow: while a Run is non-terminal; runs keep `workflowId` (enforced since [#79](https://github.com/theagenticage/hercule/issues/79): `workflow.delete` is refused while a run of the workflow is `pending` or `running`, and a run that has ended keeps the id and its own plan). Agent: while a Session is not `exited`. Connection: while a Resource, Channel Binding or enabled trigger names it. Assistant: the confirmed cascade of memory, bindings and conversations ([12-assistants.md](./12-assistants.md)); its sessions survive. Runner: never deleted, retired.
+
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* Provider Account joins that list: deleting one is refused with `invalid_state` while an Agent, an Assistant, the Text Generation setting, the thread defaults, or a `queued`, `starting`, `idle` or `busy` session names it; the message lists them. Model Profiles do not block it: the account leaves every profile that holds it. Exited sessions keep the id, and continuing one says the account was deleted. A Model Profile hard-deletes, except the last one, which is refused with `invalid_state`; a Project that named it falls back to the thread defaults ([06-providers.md](./06-providers.md)).
+
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **MCP Server** hard-deletes, and nothing refuses it. In the same transaction it is removed from every Project's `mcpServerIds` and every Session's `mcpServers`. The default list `thread.mcpServerIds` is not rewritten: it drops ids that no longer exist when it is read. Running sessions are told that their tool list changed ([21-mcp.md](./21-mcp.md)). *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* **Connection** is also refused while an MCP Server uses it: the reference kind is `mcpServer`, and the message tells the user to remove the server first ([08-events-and-connections.md](./08-events-and-connections.md) section 8.3).
 
 *(Amended 2026-09-19, [#76](https://github.com/theagenticage/hercule/issues/76).)* Permission Profile joins that list: deleting one is refused with `invalid_state` while an Agent names it, because an Agent without a profile has nothing to bound the sessions it spawns.
 
 *(Added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395).)* The Intake records:
 
 - **Signal**: no operation deletes one in v1. A Signal leaves the user's list by resolving.
-- **Snooze**: deleted on unsnooze and when its Signal resolves.
+- ~~**Snooze**: deleted on unsnooze and when its Signal resolves.~~ *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Snooze is retired.)*
 - **Ignore Rule**: hard-deleted by the user, with nothing to refuse it; its catches stay and keep the rule's text.
 - **Screening** and **Ignore Rule catch**: pruned with their event ([04-state-store.md](./04-state-store.md#event-log-as-audit-log-and-retention)).
 
-*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, Posts, Wiki Pages and their revisions are never deleted, not even with their Resource: they keep its `resourceId` and `repository` and stay readable ([19-agent-coordination.md](./19-agent-coordination.md) section 3.2).
+*(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)* Discussions, Posts, Wiki Pages and their revisions are never deleted, not even with their Resource: they keep its `resourceId` and `repository` and stay readable ([19-agent-coordination.md](./19-agent-coordination.md) section 3.2). *(Amended 2026-11-20, [#1223](https://github.com/theagenticage/hercule/issues/1223).)* An archived Wiki Page is not deleted either: archiving only takes it out of the listing ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3).
 
 *(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)* The Skill Library:
 
@@ -801,7 +991,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 
 | Entity | Axis | Terminal | Owner of the enum |
 |---|---|---|---|
-| Task | `open`, `in-progress`, `done`, `cancelled` (any-to-any) | none enforced | this document |
+| Task *(stage added 2026-11-07, [#1029](https://github.com/theagenticage/hercule/issues/1029))* | `stage`: `exploring`, `planned`, `building`, `in-review`, `landed`, `done`, `dropped` (any-to-any). `status`: `open`, `in-progress`, `done`, `cancelled`, read from the stage | none enforced | this document |
 | Run | `pending`, `running`, `completed`, `failed`, `cancelled` | `completed`, `failed`, `cancelled` | 07 |
 | Step record | `pending`, `running`, `completed`, `failed`, `skipped`, `cancelled` | last four | 07 |
 | Session | `queued`, `starting`, `idle`, `busy`, `exited` (+ derived `resumable`) | ~~`exited`~~ `exited` only where `resumable` is false *(amended 2026-09-12, [#162](https://github.com/theagenticage/hercule/issues/162))* | 06 |
@@ -818,7 +1008,8 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Signal *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `open`, `resolved` (resolution kind `decided` / `withdrawn`; no `handled`) | `resolved` | 10 |
 | Screening *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))* | `pending`, `yes`, `no`, `failed` | `yes`, `no`, `failed` | 10 |
 | Plugin | `enabled`, `disabled` | none | this document |
-| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Resource, Checkout, Provider instance, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, Skill, Skill Revision *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | no status axis | | |
+| MCP Server *(added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207))* | `checking`, `ready`, `needs-sign-in`, `unreachable`, `error`; the user's switch is the separate field `enabled` | none | this document (behaviour in 21) |
+| Agent, Assistant, Conversation, Conversation message, Platform Identity, Project, Initiative, Resource, Checkout, ~~Provider instance~~ Provider Account, Model Profile *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)*, Event, Memory document, Permission Profile, Ignore Rule *(added 2026-10-10, [#395](https://github.com/theagenticage/hercule/issues/395))*, Discussion, Post, Wiki Page *(added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665))*, Skill, Skill Revision *(added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312))* | no status axis | | |
 
 ## Identity rules at a glance
 
@@ -827,12 +1018,15 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 - **A Wiki Page's slug is unique in its repository's Wiki** and never changes; the Hercule id is the key ([19-agent-coordination.md](./19-agent-coordination.md) section 2.3). *(Added 2026-10-14, [#665](https://github.com/theagenticage/hercule/issues/665).)*
 - **A Skill is named by its `name`** on the wire, unique in the Skill Library; its Hercule id stays inside the controller. **A Skill Revision is identified by the hash of its content** (Skill, above). *(Added 2026-10-18, [#312](https://github.com/theagenticage/hercule/issues/312).)*
 - **Sessions copy, never reference** (rule 9): a session's profile and spec are its own; `agentId` is lineage, and `null` means a Thread.
-- **Provider-native ids** (Claude Code session, Codex thread, pi session; native turn ids where they exist) appear only inside the Session Binding and as `providerRefs` on normalized session events.
+- **Harness-native ids** (Claude Code session, Codex thread, pi session; native turn ids where they exist) appear only inside the Session Binding and as `harnessRefs` on normalized session events. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Antigravity's is its ACP session id.
 - **External Refs** are `<type>:<kind>:<identity>`, canonicalized by the plugin that owns the type, with the Connection excluded from the identity and no uniqueness across tasks.
-- **`instanceId`, not provider id,** routes sessions; a Capability Snapshot is keyed by (instance, runner).
+- **A blocker edge is unique on its pair.** *(Added 2026-11-08, [#1036](https://github.com/theagenticage/hercule/issues/1036), [ADR 0056](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md).)* `(task_id, blocked_by_task_id)` is the key of `task_blockers`, and a Task is never its own blocker.
+- **An External Entity is unique on its ref.** *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* One row per canonical ref, so two Connections that see one thing share one record. This is about entities only: the same ref is still carried by many Tasks. Observations, claims and Task links key on the ref, not on the entity's id.
+- ~~**`instanceId`, not provider id,** routes sessions; a Capability Snapshot is keyed by (instance, runner).~~ *(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406).)* **`providerAccountId` with `harnessId`** routes sessions; a Capability Snapshot is keyed by (Provider Account, harness, runner). Harness and provider ids are qualified ids `<pluginId>/<word>` ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)).
 - **Runner identity** is per enrollment: a re-enlisted machine is a new Runner; retired runners keep their records.
 - **Controller identity** is logical (id plus key material), never an address.
 - **Connection types and contributions** are identified by their qualified id `<pluginId>/<word>`, minted by the host ([ADR 0034](../adr/0034-a-catalog-contribution-is-identified-by-its-qualified-id.md)); the Connection itself is a Hercule id.
+- **An MCP Server is a Hercule id; its name is a label that can repeat.** *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A plugin server is unique on its contribution and the Connection's `accountId`, and a URL server on its normalized URL (MCP Server, above). No list holds two servers of one name.
 - **Workspace ids** are controller-side; the path behind a workspace id is a runner-owned fact.
 - **`dedupKey`** is a plugin-supplied idempotency key per Connection, not an identity.
 
@@ -841,7 +1035,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Entity | Kinds | Payload |
 |---|---|---|
 | Task | `task.created` | full snapshot (actor on the envelope) |
-| Task | `task.updated` | `{taskId, changes}`; `{old, new}` per scalar, `{added, removed}` per array; one event per update op |
+| Task | `task.updated` | `{taskId, changes}`; `{old, new}` per scalar (`stage`, and `status` when the coarse status changes), `{added, removed}` per array; one event per update op |
 | Task | `task.deleted` | `{taskId, snapshot}`, the final row |
 | Run | `run.completed`, `run.failed`, `run.cancelled` | owned by [08-events-and-connections.md](./08-events-and-connections.md) |
 | Cron trigger (core emitter) | `cron.tick` | `{workflowId, triggerId, scheduledFor}` *(amended 2026-09-28, [#82](https://github.com/theagenticage/hercule/issues/82): and `previousFiredAt`, [08-events-and-connections.md](./08-events-and-connections.md) section 5.3)* |
@@ -849,7 +1043,7 @@ Resolved 2026-09-01, [Domain model residue](https://github.com/theagenticage/her
 | Permission Request *(added 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86))* | `permission.decided` | `{requestId, sessionId, grant, outcome, operation?}`; a platform event, not an audit entry only, so the asking session's `request` subscription receives it ([13-security.md](./13-security.md) section 11) |
 | Security (audit kinds) | login success/failure, token minted/revoked, permission request raised~~/decided~~ *(amended 2026-10-10, [#86](https://github.com/theagenticage/hercule/issues/86): decided is the platform event above)*, secret created/rotated | [13-security.md](./13-security.md) |
 
-No other entity emits platform events in v1; the set grows additively. Sessions emit into their own normalized stream, not the domain event log. Inbound chat messages are not pipeline events in v1 (Open in [12-assistants.md](./12-assistants.md)).
+No other entity emits platform events in v1; the set grows additively. *(Added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032).)* External Entities emit none: `reconcile` writes records and announces on the live topic only. *(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* MCP Servers emit none either: a write announces on the live topic `mcpServer` ([11-public-api-and-agent-surface.md](./11-public-api-and-agent-surface.md)). Sessions emit into their own normalized stream, not the domain event log. Inbound chat messages are not pipeline events in v1 (Open in [12-assistants.md](./12-assistants.md)).
 
 ## Post-v1
 
@@ -866,7 +1060,7 @@ No other entity emits platform events in v1; the set grows additively. Sessions 
 - Presence-aware notification routing; the sink contract grows additively (device class, presence, receipts).
 - Feedback-driven triage learning feeding assistant memory.
 - Cross-assistant recall as agent-to-agent communication, never shared memory.
-- Custom tools on the Agent: when the agent-tools extension point arrives, custom tools become an Agent field copied into the `SessionSpec` and delivered as in-process MCP on Claude, `dynamicTools` / MCP on Codex, `registerTool` on pi. No v1 writer exists, so no v1 field.
+- Custom tools on the Agent: when the agent-tools extension point arrives, custom tools become an Agent field copied into the `SessionSpec` and delivered as in-process MCP on Claude, `dynamicTools` / MCP on Codex, `registerTool` on pi. No v1 writer exists, so no v1 field. *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The MCP half of the agent-tools extension point is built by [#1207](https://github.com/theagenticage/hercule/issues/1207) and [#1208](https://github.com/theagenticage/hercule/issues/1208): a plugin offers an MCP server, and sessions reach its tools through the MCP Gateway ([05-plugins.md](./05-plugins.md) section 4.5, [21-mcp.md](./21-mcp.md)). An Agent naming MCP Servers is [#222](https://github.com/theagenticage/hercule/issues/222) (Agent, above). Plugin-written custom tools and the skills half stay deferred.
 - Chat: a non-agentic conversation surface (talk to a model, no ability to change anything), distinct from a Thread.
 - Pruning soft-deleted Tasks and Projects outright, with their runs and events, after something like a year.
 
@@ -898,6 +1092,8 @@ Tickets:
 - [Write the Intake changes and the build tickets](https://github.com/theagenticage/hercule/issues/395), deciding tickets #388, #391, #392, #398 and #399
 - [Agent coordination: spec 19, ADR and glossary](https://github.com/theagenticage/hercule/issues/665)
 - [Hercule manages the user's skills, and every runner gets them](https://github.com/theagenticage/hercule/issues/312), written into the spec by [#731](https://github.com/theagenticage/hercule/issues/731)
+- [Write the provider remodel into the specs, CONTEXT.md and an ADR, and its build tickets](https://github.com/theagenticage/hercule/issues/406), deciding [#404](https://github.com/theagenticage/hercule/issues/404) and [#405](https://github.com/theagenticage/hercule/issues/405)
+- [MCP support through a gateway in the controller](https://github.com/theagenticage/hercule/issues/1207)
 
 ADRs:
 
@@ -920,6 +1116,7 @@ ADRs:
 - [ADR 0016 Git credentials derive from Connections](../adr/0016-git-credentials-derive-from-connections.md)
 - [ADR 0017 The web app is a static pure client of the public API](../adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)
 - [ADR 0019 The task model is thin; workflows own task semantics](../adr/0019-the-task-model-is-thin-workflows-own-task-semantics.md)
+- [ADR 0056 Initiatives and blockers are thin structure over Tasks](../adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md)
 - [ADR 0020 Assistant memory is reached only through the API](../adr/0020-assistant-memory-is-reached-only-through-the-api.md)
 - [ADR 0030 Sessions copy their configuration, and a Thread has no Agent](../adr/0030-sessions-copy-their-configuration-and-a-thread-has-no-agent.md)
 - [ADR 0032 Threads link the user's own material, live and wholesale](../adr/0032-threads-link-the-users-own-material.md)
@@ -927,3 +1124,5 @@ ADRs:
 - [ADR 0040 Intake holds Signals; Notifications are Hercule's own messages](../adr/0040-intake-holds-signals-notifications-are-hercules-own-messages.md)
 - [ADR 0043 Agents coordinate through shared Discussions and a per-repo Wiki](../adr/0043-agents-coordinate-through-discussions-and-a-wiki.md)
 - [ADR 0045 Hercule owns the user's skills](../adr/0045-hercule-owns-the-users-skills.md)
+- [ADR 0048 Harnesses and provider accounts are separate](../adr/0048-harnesses-and-provider-accounts-are-separate.md)
+- [ADR 0059 Sessions reach MCP Servers through a gateway in the controller](../adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md)

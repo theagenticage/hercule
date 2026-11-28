@@ -14,7 +14,7 @@ import { uuidFromString, withTransaction } from "../db";
 import { hashToken } from "../credentials";
 import type { ServerHarness } from "../http/testing";
 import { SETUP_TOKEN, completeSetup, del, get, post, send, withServer } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   listFrames,
   waitForFrames,
@@ -137,10 +137,10 @@ const expireJoinToken = async (sql: ServerHarness["sql"], id: string): Promise<v
 const mintJoinToken = async (
   base: string,
   token: string,
-): Promise<{ readonly token: string; readonly expiresAt: string }> => {
+): Promise<{ readonly id: string; readonly token: string; readonly expiresAt: string }> => {
   const response = await post(base, "/api/v1/runners/join-tokens", {}, token);
   expect(response.status, await response.clone().text()).toBe(201);
-  return (await response.json()) as { token: string; expiresAt: string };
+  return (await response.json()) as { id: string; token: string; expiresAt: string };
 };
 
 interface ListedJoinToken {
@@ -227,7 +227,7 @@ describe("GET /runners", () => {
         "version",
         "labels",
         "facts",
-        "watermark",
+        "metrics",
         "maxConcurrentSessions",
         "lastSeenAt",
       ]) {
@@ -342,7 +342,7 @@ describe("GET /runners/{id}", () => {
         "version",
         "labels",
         "facts",
-        "watermark",
+        "metrics",
         "maxConcurrentSessions",
         "lastSeenAt",
         "negotiatedCapabilities",
@@ -373,7 +373,7 @@ describe("GET /runners/{id}", () => {
             harness.sql,
             harness.sql`UPDATE runners
                         SET facts = '{"os":42}',
-                            watermark = 'not json at all',
+                            metrics = 'not json at all',
                             negotiated_capabilities = '{"not":"a list"}'
                         WHERE id = ${uuidFromString(online.id)}`,
           ),
@@ -382,7 +382,7 @@ describe("GET /runners/{id}", () => {
 
       const row = await readRunner(harness.base, token, online.id);
       expect(row.facts).toBeNull();
-      expect(row.watermark).toBeNull();
+      expect(row.metrics).toBeNull();
       expect(row.negotiatedCapabilities).toBeNull();
 
       const page = await listRunners(harness.base, token);
@@ -527,7 +527,7 @@ describe("PATCH /runners/{id}", () => {
     });
   });
 
-  it("rejects a patch that sets facts, state or the watermark", async () => {
+  it("rejects a patch that sets facts, state or the metrics", async () => {
     await withServer(async (harness) => {
       const token = await completeSetup(harness.base);
       const runner = await harness.insertRunner({ name: "iris", connectivity: "online" });
@@ -538,7 +538,7 @@ describe("PATCH /runners/{id}", () => {
         { name: "iris-2", facts: { os: "linux" } },
         { name: "iris-2", connectivity: "unreachable" },
         { name: "iris-2", lifecycle: "retired" },
-        { name: "iris-2", watermark: { diskFreeBytes: 1 } },
+        { name: "iris-2", metrics: { diskFreeBytes: 1 } },
       ]) {
         const response = await patchRunner(harness.base, token, runner.id, body);
         expect(response.status, JSON.stringify(body)).toBe(400);
@@ -591,6 +591,11 @@ describe("POST /runners/join-tokens", () => {
       const second = await mintJoinToken(harness.base, token);
 
       expect(first.token).not.toBe(second.token);
+      // The id answered is the one the list of open tokens shows, so a client
+      // can tell its own token among them.
+      expect((await listJoinTokens(harness.base, token)).map((one) => one.id).sort()).toEqual(
+        [first.id, second.id].sort(),
+      );
       for (const minted of [first, second]) {
         expect(typeof minted.token).toBe("string");
         expect(minted.token.length).toBeGreaterThan(0);
@@ -1209,7 +1214,7 @@ describe("the disk watermark placement checks a runner against", () => {
         Effect.orDie(
           withTransaction(
             harness.sql,
-            harness.sql`UPDATE runners SET watermark = ${JSON.stringify({
+            harness.sql`UPDATE runners SET metrics = ${JSON.stringify({
               diskFreeBytes: 4 * GIB,
               availableMemoryBytes: 16 * GIB,
             })} WHERE id = ${uuidFromString(runner.id)}`,
@@ -1246,8 +1251,8 @@ const FLEET_FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/full"],
   identityPort: 4939,
 };
 
@@ -1260,12 +1265,7 @@ const FLEET_BUDGET_MS = WAIT_DEADLINE_MS * 3 + 10_000;
 
 const withFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
   sharedWithFleet(body, {
-    plugins: [
-      createPluginFixture({
-        id: "providers",
-        definitions: [buildProviderDefinition("full-provider", { token: "t" })],
-      }).plugin,
-    ],
+    plugins: [buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("full")])],
     facts: FLEET_FACTS,
     models: [
       {
@@ -1398,7 +1398,7 @@ describe("retiring a runner that still has sessions", () => {
         });
         await waitUntil("stored the low reading", async () => {
           const runner = await readRunner(arranged.harness.base, arranged.token, arranged.runnerId);
-          return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+          return runner.metrics?.diskFreeBytes === 4 * GIB ? runner : undefined;
         });
         const waiting = await spawnSession(arranged, "no room");
         expect(waiting.status).toBe("queued");

@@ -11,17 +11,17 @@ import { listPackage } from "@electron/asar";
 import { FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
 import { execFile, spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
-import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, onTestFinished } from "vitest";
 import {
   buildAppArgs,
+  buildPackageEnv,
+  findAppArchive,
   findExecutable,
   findPackagedApp,
   writeSettings,
   type PackageKind,
 } from "../../apps/desktop/scripts/packaged-app";
-import { buildAppEnv } from "../../apps/desktop/scripts/processes";
 import {
   createUserDataDirForTest,
   findUnusedLoopbackUrl,
@@ -47,6 +47,8 @@ const RELEASE_FUSES = {
   RunAsNode: "off",
   EnableNodeOptionsEnvironmentVariable: "off",
   EnableNodeCliInspectArguments: "off",
+  // Electron checks the archive's hash on macOS and Windows only. On Linux the
+  // fuse is set but does nothing, so the Linux package has no such protection.
   EnableEmbeddedAsarIntegrityValidation: "on",
   OnlyLoadAppFromAsar: "on",
   // A page loaded from `file:` would otherwise get privileges no page of this
@@ -56,13 +58,15 @@ const RELEASE_FUSES = {
 
 /**
  * Reads every fuse off the packaged app of the given kind, keyed by its name.
+ * The fuses are read from the Electron binary, whose path `@electron/fuses`
+ * turns into the framework's inside a macOS `.app`.
  *
  * A fuse `@electron/fuses` has no name for is keyed `fuse <index>`. The wire
  * stores each fuse as one ASCII character, "1" when it is on and "0" when it
  * is off; a fuse in any other state reads as its character code.
  */
 async function readFuses(kind: PackageKind): Promise<Record<string, string>> {
-  const wire: Record<string, unknown> = await getCurrentFuseWire(findPackagedApp(kind));
+  const wire: Record<string, unknown> = await getCurrentFuseWire(findExecutable(kind));
   return Object.fromEntries(
     Object.entries(wire)
       .filter(([index]) => index !== "version")
@@ -91,7 +95,7 @@ describe("the release package", () => {
   });
 
   it("holds only the three bundles in out/ and package.json in its app.asar", () => {
-    const archive = join(findPackagedApp("release"), "Contents/Resources/app.asar");
+    const archive = findAppArchive("release");
 
     // Main, the preload and the renderer are bundled into out/main,
     // out/preload and out/renderer. Anything else here, such as node_modules,
@@ -107,7 +111,8 @@ describe("the release package", () => {
     expect(unexpected).toEqual([]);
   });
 
-  it("is signed, and its signature verifies", async () => {
+  // codesign exists on macOS only. Linux packages are not signed.
+  it.skipIf(process.platform !== "darwin")("is signed, and its signature verifies", async () => {
     // Fails with codesign's own explanation when the signature is missing,
     // does not cover every file, or does not match the files.
     const { stderr } = await promisify(execFile)("codesign", [
@@ -133,7 +138,7 @@ describe("the release package", () => {
     const userDataDir = createUserDataDirForTest();
     writeSettings(userDataDir, { controllerUrl: await findUnusedLoopbackUrl() });
     const first = spawn(findExecutable("release"), buildAppArgs(userDataDir), {
-      env: buildAppEnv(),
+      env: buildPackageEnv("release"),
       stdio: "ignore",
     });
     onTestFinished(() => {

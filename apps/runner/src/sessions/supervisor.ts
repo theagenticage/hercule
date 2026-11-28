@@ -25,6 +25,7 @@ import * as Exit from "effect/Exit";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import type { WorkspaceChangeObserver } from "../disk-usage";
 import {
   AdapterFailed,
   InputNotDelivered,
@@ -34,7 +35,7 @@ import {
   lintOutputSchema,
   type AdapterError,
   type ExitReason,
-  type ProviderEvent,
+  type HarnessEvent,
   type RunnerToController,
   type SendResult,
   type SessionInput,
@@ -46,14 +47,19 @@ import {
   type SubagentId,
   type WorkspaceStepKey,
 } from "@hercule/protocol";
-import { describeMissingAdapter, type AdapterTurnInput, type ProviderAdapter } from "../providers";
+import {
+  describeMissingAdapter,
+  type AdapterTurnInput,
+  type HarnessAdapter,
+  type SessionUsageReport,
+} from "../harnesses";
 import {
   buildAdapterFailed,
   buildInputStopped,
   buildSessionAlreadyRunning,
   buildSessionNotRunning,
   buildSessionStopping,
-} from "../providers/adapter-error-builders";
+} from "../harnesses/adapter-error-builders";
 import { describeCause, endSentence, now } from "../report";
 import {
   buildLoadedSkills,
@@ -111,6 +117,13 @@ interface RunningStep {
 const SETTLED_STEP_REFUSAL =
   "The step ended before its prompt was delivered, so the prompt was not run.";
 
+/**
+ * How long a usage report that repeats the last one is held back, in
+ * milliseconds. The controller counts a reading older than five minutes as
+ * stale, so an unchanged reading is sent again at that age.
+ */
+const USAGE_REPORT_REFRESH_MS = 5 * 60 * 1000;
+
 /** Builds the error for a start that the runner refuses because it is shutting down. */
 const buildShuttingDown = (): AdapterFailed =>
   buildAdapterFailed("The runner is shutting down, so the session was not started.");
@@ -141,7 +154,7 @@ interface Live {
   readonly inputCancellation: InputCancellation;
   /** Completes when the adapter has bound the harness, before the first input is delivered. */
   readonly harnessReady: Deferred.Deferred<void>;
-  readonly adapter: ProviderAdapter;
+  readonly adapter: HarnessAdapter;
   readonly scratch: string | undefined;
   /** The directory the session's attached images are cached in. Removed with the entry. */
   readonly attachmentsDir: string;
@@ -173,6 +186,12 @@ interface Live {
   readonly inactivityMs: number;
   /** Clock time of the last event of this session while a turn was open. */
   lastEventAt: number;
+  /**
+   * The last usage report sent for this session: its readings without their
+   * `takenAt`, as text, and the clock time it was sent. Undefined until one
+   * is sent. Lets the supervisor skip a report that repeats the last one.
+   */
+  lastUsageReport: { readonly readings: string; readonly sentAt: number } | undefined;
   /**
    * The fiber that stops the session once `inactivityMs` has passed since
    * `lastEventAt`. Undefined while the session is not watched.
@@ -257,6 +276,12 @@ interface Live {
   readonly releaseGithubToken: () => void;
   /** The agent step whose turn runs in this session now, if any. */
   step: RunningStep | undefined;
+  /**
+   * Whether the session's start was reported to the workspace session
+   * observer. `tearDownSession` reports the exit only when it was, so the
+   * two always pair up.
+   */
+  workspaceStartReported: boolean;
 }
 
 /**
@@ -314,6 +339,14 @@ interface ArrivedStart {
    * hold, this is a no-op.
    */
   releaseGithubToken: () => void;
+  /**
+   * Whether the start told the workspace session observer that a session is
+   * about to work in the workspace. The start tells it before resolving the
+   * context, because that is the first step that writes to the workspace. The
+   * start owns the report until the session's entry exists, and ends it when
+   * the start ends before that. Once the entry owns it, this is false.
+   */
+  workspaceStartReported: boolean;
 }
 
 /**
@@ -435,6 +468,9 @@ export interface Supervising {
    * session table and the timers up to date, saves an agent step's outcome,
    * removes the entry of a session that exited, then numbers the event and
    * sends it on the attached connection, or drops it while none is attached.
+   * It also sends every adapter's usage reports on the attached connection,
+   * and drops them in the same way.
+   *
    * Fork it once when the process starts, before the first connection: an
    * adapter's events are not replayed, so one published before the watch
    * subscribes is lost to the supervisor too. It never returns.
@@ -449,6 +485,12 @@ export interface Supervising {
    * runner says goodbye to the controller.
    */
   readonly shutdown: (reason: ExitReason) => Effect.Effect<void>;
+  /**
+   * Tells the observer each time a session starts in a workspace (a change
+   * begins) and exits (it ends), from now on. The observer lives as long as the process, like this
+   * supervisor. A second call replaces the first observer.
+   */
+  readonly observeWorkspaceSessions: (observer: WorkspaceChangeObserver) => void;
 }
 
 /**
@@ -530,7 +572,7 @@ const stageWorkspaceSkills = (
  * the session has no workspace or its workspace has no checkouts.
  */
 interface PreparedStart {
-  readonly adapter: ProviderAdapter;
+  readonly adapter: HarnessAdapter;
   readonly resolved: Resolved;
   /** The plugin folders of the workspace's repository skills, empty when it offers none. */
   readonly repositorySkillsFolders: ReadonlyArray<string>;
@@ -541,7 +583,7 @@ interface PreparedStart {
  * Creates the session supervisor. Call it once per process: the session table
  * and the sequence counter it holds belong to the process, not to a connection.
  */
-export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Supervising => {
+export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Supervising => {
   const live = new Map<string, Live>();
   let lastSeq = 0;
   /**
@@ -562,6 +604,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   // controller has proved its identity. Undefined while no such connection is
   // up, and then the events are dropped (spec 03 section 2.3).
   let attached: Connection | undefined;
+  // Told when a session starts or exits in a workspace. Set by `observeWorkspaceSessions`.
+  let workspaceSessions: WorkspaceChangeObserver | undefined;
   // Whether the attached controller reads `filesEdited` frames. Set with `attached`.
   let attachedReadsFilesEdited = false;
   // The edit watch of each workspace that has one, by workspace id. A watch
@@ -600,7 +644,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
   };
 
   /** Checks whether the adapter holds a session of this id right now. */
-  const isHeldBy = (adapter: ProviderAdapter, sessionId: string): Effect.Effect<boolean> =>
+  const isHeldBy = (adapter: HarnessAdapter, sessionId: string): Effect.Effect<boolean> =>
     Effect.map(adapter.listSessions, (bindings) =>
       bindings.some((binding) => binding.sessionId === sessionId),
     );
@@ -632,9 +676,24 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * attached. Ignores any failure, not only a failed write. A frame that fails
    * to encode then loses one event instead of ending the watch, which would
    * silently drop every session's events for the rest of the process.
+   *
+   * An encoding failure is a defect, and the runner's log gets one warning
+   * for it with the frame's tags and the error's name. It never gets the error's
+   * message or the frame, because a schema message quotes the rejected value,
+   * which may be user text. A failed write is not logged: it only means the
+   * connection is going away.
    */
   const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
-    Effect.ignoreCause(Effect.suspend(() => attached?.send(frame) ?? Effect.void));
+    Effect.suspend(() => attached?.send(frame) ?? Effect.void).pipe(
+      Effect.catchDefect((defect) =>
+        Effect.logWarning(
+          `Dropped a ${frame._tag} frame${
+            frame._tag === "sessionEvent" ? ` (${frame.event._tag})` : ""
+          } that failed its protocol schema: ${defect instanceof Error ? defect.name : "unknown error"}`,
+        ),
+      ),
+      Effect.ignoreCause,
+    );
 
   /** Removes the scratch, image and marks directories of a session, those it has. */
   const removeSessionDirectories = (
@@ -661,6 +720,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       yield* removeSessionDirectories(held);
       yield* removeSessionSkillsFolder(held.sessionSkillsFolder);
       held.releaseGithubToken();
+      if (held.workspaceStartReported && held.workspaceId !== null) {
+        held.workspaceStartReported = false;
+        yield* workspaceSessions?.endChange(held.workspaceId) ?? Effect.void;
+      }
       yield* Deferred.succeed(held.gone, undefined);
     });
 
@@ -811,7 +874,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * clock is updated before the send, so anyone who has seen the frame knows
    * the clock already reflects the event.
    */
-  const sendFittedEvent = (event: ProviderEvent): Effect.Effect<void> =>
+  const sendFittedEvent = (event: HarnessEvent): Effect.Effect<void> =>
     Effect.gen(function* () {
       const held = live.get(event.sessionId);
       if (held !== undefined) {
@@ -935,7 +998,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    *
    * This runs before `fitEventToFrame`, which never drops `editedFiles`.
    */
-  const attachEditedFiles = (event: ProviderEvent): Effect.Effect<ProviderEvent> =>
+  const attachEditedFiles = (event: HarnessEvent): Effect.Effect<HarnessEvent> =>
     Effect.gen(function* () {
       if (event._tag !== "item.completed" || event.kind !== "file_change") return event;
       if (event.status !== "completed") return event;
@@ -961,7 +1024,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * them. The bookkeeping in
    * `sendFittedEvent` sees the events as sent, not as the adapter made them.
    */
-  const sendSequenced = (event: ProviderEvent): Effect.Effect<void> =>
+  const sendSequenced = (event: HarnessEvent): Effect.Effect<void> =>
     sequencing.withPermits(1)(
       Effect.flatMap(attachEditedFiles(event), (attached) =>
         Effect.forEach(fitEventToFrame(attached), sendFittedEvent, { discard: true }),
@@ -973,7 +1036,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
    * start, a completed turn or an exit (`reportWorkspace`). The workspace id
    * is read before the send, because an exit removes the session's entry.
    */
-  const forwardEvent = (event: ProviderEvent): Effect.Effect<void> => {
+  const forwardEvent = (event: HarnessEvent): Effect.Effect<void> => {
     const workspaceId =
       event._tag === "session.started" ||
       event._tag === "session.exited" ||
@@ -994,6 +1057,45 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
       ),
     );
   };
+
+  /**
+   * Sends one adapter's usage report as an `accountUsageReported` frame, beside
+   * the session's events and outside their numbering. Drops the report when no
+   * connection is attached, or when this runner does not host the session: the
+   * report is best effort, and the next one replaces it.
+   *
+   * Also drops a report whose readings equal the last one sent for the
+   * session, ignoring `takenAt`, because harnesses report after every turn
+   * whether or not anything changed. The same readings are sent again once the
+   * last report is `USAGE_REPORT_REFRESH` old: the controller counts a reading
+   * older than that as stale.
+   */
+  const forwardUsageReport = (report: SessionUsageReport): Effect.Effect<void> =>
+    Effect.gen(function* () {
+      const connection = attached;
+      const held = live.get(report.sessionId);
+      if (connection === undefined || held === undefined) return;
+      const readings = JSON.stringify(report.readings, (key: string, value: unknown): unknown =>
+        key === "takenAt" ? undefined : value,
+      );
+      const sentAt = yield* Clock.currentTimeMillis;
+      const last = held.lastUsageReport;
+      if (last?.readings === readings && sentAt - last.sentAt < USAGE_REPORT_REFRESH_MS) return;
+      yield* connection
+        .send({
+          _tag: "accountUsageReported",
+          sessionId: report.sessionId,
+          readings: report.readings,
+        })
+        .pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              held.lastUsageReport = { readings, sentAt };
+            }),
+          ),
+          Effect.ignoreCause,
+        );
+    });
 
   /**
    * Sends a `runtime.error` on the session's own stream, where the user
@@ -1288,10 +1390,10 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             exitReason: undefined,
           });
         }
-        const adapter = adapters.find((one) => one.providerId === frame.providerId);
+        const adapter = adapters.find((one) => one.harnessId === frame.harnessId);
         if (adapter === undefined) {
           return yield* Effect.fail(
-            buildCrashedStartFromText(describeMissingAdapter(frame.providerId)),
+            buildCrashedStartFromText(describeMissingAdapter(frame.harnessId)),
           );
         }
         // Ask the adapter, not the `live` table. In practice the controller
@@ -1407,6 +1509,21 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
             buildCrashedStartFromText,
           );
         }
+        // Resolving the context switches the branch and writes the root
+        // boundary, so the workspace must be marked as used before it, or a
+        // crash in between would leave changed files under a clean mark.
+        if (frame.spec.workspaceId !== null && workspaceSessions !== undefined) {
+          const observer = workspaceSessions;
+          const workspaceId = frame.spec.workspaceId;
+          yield* Effect.uninterruptible(
+            Effect.andThen(
+              observer.beginChange(workspaceId),
+              Effect.sync(() => {
+                arrived.workspaceStartReported = true;
+              }),
+            ),
+          );
+        }
         const resolved = yield* Effect.mapError(
           resolveSessionContext(frame, connection.machine, adapter.binaryName, githubToken),
           buildCrashedStartFromText,
@@ -1514,8 +1631,8 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         const librarySkillsFolder = findLibrarySkillsFolder(arrived);
         const setupTarget = {
           runnerId: connection.runnerId,
-          providerId: frame.providerId,
-          instanceId: frame.spec.instanceId,
+          harnessId: frame.harnessId,
+          providerAccountId: frame.spec.providerAccountId,
         };
         const held: Live = {
           inputCancellation: arrived.inputCancellation,
@@ -1540,6 +1657,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           // Not used until the session is watched: `sendSequenced` sets it
           // together with `inactivity`, on the event that starts the watch.
           lastEventAt: 0,
+          lastUsageReport: undefined,
           inactivity: undefined,
           openTurns: new Set(),
           parkedRequests: new Map(),
@@ -1556,6 +1674,9 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           // entry ends releases it.
           releaseGithubToken: arrived.releaseGithubToken,
           step: undefined,
+          // The report was made while the start was prepared. The entry owns
+          // its end from here on.
+          workspaceStartReported: arrived.workspaceStartReported,
         };
         // In the same step, with no yield between, so a stop finds either the
         // arrived start or this entry, and is never lost between the two.
@@ -1567,6 +1688,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
         arrived.directories = undefined;
         arrived.sessionSkillsFolder = undefined;
         arrived.releaseGithubToken = () => undefined;
+        arrived.workspaceStartReported = false;
         // Check `stopped` again. A shutdown that began after `prepareStart`
         // checked it would not see this session, because `listSessions` and
         // `resolveSessionContext` both yield to other fibers before this
@@ -1617,6 +1739,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
                 ? {}
                 : { checkoutPaths: resolved.checkouts.map((checkout) => checkout.path) }),
               ...(repositorySkillsFolders.length === 0 ? {} : { repositorySkillsFolders }),
+              ...(frame.catalogModels === undefined ? {} : { catalogModels: frame.catalogModels }),
               editMarks:
                 resolved.sessionMarksDir === null || editWatch === undefined
                   ? null
@@ -1781,6 +1904,7 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
           librarySkills: frame.skills ?? [],
           sessionSkillsFolder: undefined,
           releaseGithubToken: () => undefined,
+          workspaceStartReported: false,
         };
         // Added now, not when the work begins, so a stop that arrives while
         // the start waits behind earlier frames of the session finds it.
@@ -1824,6 +1948,12 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
               yield* removeSessionDirectories(arrived.directories);
               yield* removeSessionSkillsFolder(arrived.sessionSkillsFolder);
               arrived.releaseGithubToken();
+              // A start that ended before the session's entry existed still
+              // owes the observer the end of its report.
+              if (arrived.workspaceStartReported && frame.spec.workspaceId !== null) {
+                arrived.workspaceStartReported = false;
+                yield* workspaceSessions?.endChange(frame.spec.workspaceId) ?? Effect.void;
+              }
               yield* Deferred.succeed(arrived.harnessReady, undefined);
               arrivedStarts.delete(arrived);
             }),
@@ -2040,14 +2170,30 @@ export const makeSupervising = (adapters: ReadonlyArray<ProviderAdapter>): Super
     });
 
   return {
-    watch: Stream.runForEach(
-      Stream.mergeAll(
-        adapters.map((adapter) => adapter.events),
-        { concurrency: "unbounded" },
-      ),
-      forwardEvent,
+    watch: Effect.all(
+      [
+        Stream.runForEach(
+          Stream.mergeAll(
+            adapters.map((adapter) => adapter.events),
+            { concurrency: "unbounded" },
+          ),
+          forwardEvent,
+        ),
+        // One consumer per adapter, with no merged stream between: a merge
+        // reads ahead into a buffer, so an adapter's report could be handled
+        // long after the adapter handed it over, possibly on a later connection.
+        Effect.forEach(
+          adapters,
+          (adapter) => Stream.runForEach(adapter.usageReports, forwardUsageReport),
+          { concurrency: "unbounded", discard: true },
+        ),
+      ],
+      { concurrency: "unbounded", discard: true },
     ),
     forConnection,
     shutdown,
+    observeWorkspaceSessions: (observer) => {
+      workspaceSessions = observer;
+    },
   };
 };

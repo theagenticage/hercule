@@ -98,6 +98,12 @@ export interface StepSessionToOpen {
    */
   readonly title: string;
   /**
+   * The Task the step's run works on, or undefined for a run with none. A new
+   * session takes it as it is, even when the Task is finished. A session that
+   * continues `previousSessionId` keeps the Task it already has.
+   */
+  readonly taskId: string | undefined;
+  /**
    * The session an earlier iteration of the step ran in, whose next turn
    * this iteration is, or undefined to start a new session.
    */

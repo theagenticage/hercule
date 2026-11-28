@@ -10,7 +10,16 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Profile, SettingsState } from "@hercule/contract";
-import { buildInstance, buildSnapshot } from "../providers.testing";
+import {
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  buildProviderAccount,
+  ANTHROPIC_IDENTITY,
+  HARNESSES,
+  PROVIDERS,
+  WITH_AGENTS,
+} from "../providers.testing";
 import { buildDraftView, type DraftReads } from "./draft-view";
 import {
   COVE,
@@ -35,44 +44,47 @@ const UNRESTRICTED: Profile = {
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
-  buildSnapshot({
-    runnerId: MOSS.id,
-    models: [
-      {
-        slug: "claude-sonnet-5",
-        name: "Claude Sonnet 5",
-        imageInput: { maxBytes: null },
-        isDefault: true,
-        options: [],
-      },
-      {
-        slug: "claude-opus-5-5",
-        name: "Opus 5.5",
-        imageInput: { maxBytes: null },
-        isDefault: false,
-        options: [],
-      },
-    ],
-  }),
-]);
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: MOSS.id }]);
+
+const MAIN = buildModelProfile(
+  [
+    buildProfileSection(ANTHROPIC_IDENTITY, [
+      buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", { name: "Claude Sonnet 5" }),
+      buildProfileEntry(ANTHROPIC_IDENTITY, "claude-opus-5-5", { name: "Opus 5.5" }),
+    ]),
+  ],
+  {
+    defaultEntry: {
+      providerAccountId: ANTHROPIC_IDENTITY.id,
+      model: "claude-sonnet-5",
+      harnessId: null,
+    },
+  },
+);
+
+/** This Mac, with Claude Code installed, so the account is ready on it. */
+const MOSS_WITH_CLAUDE = { ...MOSS, facts: WITH_AGENTS.facts };
 
 const READS: DraftReads = {
   settings: SETTINGS,
   profiles: [UNRESTRICTED],
-  instances: [CLAUDE],
-  runners: [MOSS, COVE],
+  accounts: [CLAUDE],
+  runners: [MOSS_WITH_CLAUDE, COVE],
   thisMacRunnerId: MOSS.id,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
+  modelProfiles: [MAIN],
   projects: [WEBSHOP_PROJECT, OPS_PROJECT],
   resources: [WEBSHOP, INFRA, RUNBOOKS],
   workspaces: [PRIMARY, THREAD_3F1],
   sessions: [],
+  recent: [],
 };
 
 /** Returns the parts of a draft the lip and the sidebar row show. */
 const readLabels = (...args: Parameters<typeof buildDraftView>) => {
-  const { workspaceLabel, machineLabel, rowPlaceLabel, place } = buildDraftView(...args);
-  return { workspaceLabel, machineLabel, rowPlaceLabel, place };
+  const { workspaceLabel, fields, rowPlaceLabel, place } = buildDraftView(...args);
+  return { workspaceLabel, machineName: fields.machine.name, rowPlaceLabel, place };
 };
 
 describe("buildDraftView", () => {
@@ -81,7 +93,7 @@ describe("buildDraftView", () => {
   it("uses a new workspace before any pick, and names only its machine on the row", () => {
     expect(readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: null }, {})).toEqual({
       workspaceLabel: "New workspace",
-      machineLabel: "moss",
+      machineName: "moss",
       rowPlaceLabel: { clip: "moss", keep: "" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: null, createsWorkspace: true },
     });
@@ -112,7 +124,7 @@ describe("buildDraftView", () => {
       readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id }, {}),
     ).toEqual({
       workspaceLabel: "Main workspace",
-      machineLabel: "moss",
+      machineName: "moss",
       rowPlaceLabel: { clip: "", keep: "main" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: PRIMARY.id, createsWorkspace: false },
     });
@@ -123,7 +135,7 @@ describe("buildDraftView", () => {
       readLabels(READS, { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id }, {}),
     ).toEqual({
       workspaceLabel: "hercule/thread-3f1",
-      machineLabel: "moss",
+      machineName: "moss",
       rowPlaceLabel: { clip: "moss", keep: "" },
       place: { projectId: WEBSHOP_PROJECT.id, workspaceId: THREAD_3F1.id, createsWorkspace: false },
     });

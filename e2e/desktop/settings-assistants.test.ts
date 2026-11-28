@@ -64,6 +64,17 @@ describe("Settings > Assistants", () => {
     const id = (await readAssistantIds(client)).find((each) => !before.includes(each))!;
     const read = async () => (await readAssistantById(client, id))!;
     expect((await read()).heartbeat.enabled).toBe(true);
+    // The page picks the new assistant only after the create returns. Until
+    // then it shows the first one, also named "Hercule", and a click would
+    // change that one. Its tab's link names the assistant it picks.
+    await expect
+      .poll(() =>
+        page
+          .getByRole("navigation", { name: "Choose an assistant" })
+          .locator('[aria-current="page"]')
+          .getAttribute("href"),
+      )
+      .toContain(id);
 
     // The heartbeat's switch, first, so no beat starts a session mid-test.
     const heartbeatSwitch = page.getByRole("switch", { name: "Heartbeat" });

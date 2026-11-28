@@ -3,7 +3,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import {
   buildTextGenerationField,
-  describeTextGenerationFailure,
+  describeTextGenerationProblem,
   formatAccessMode,
   formatRunnerLabel,
 } from "@hercule/client-core";
@@ -11,6 +11,9 @@ import { ACCESS_MODE_CHAIN, type TextGenerationModel } from "@hercule/contract";
 import { rememberSettingsSection } from "../../../../app/last-settings-section";
 import {
   controllerQuery,
+  harnessesQuery,
+  modelProfilesQuery,
+  providerAccountsQuery,
   providersQuery,
   readOnOpen,
   runnersQuery,
@@ -83,8 +86,8 @@ function System(): JSX.Element {
           ))}
         </p>
         <p>
-          A thread asking for a mode its provider does not support runs at the nearest less
-          permissive mode that provider does support. The substitution never goes the other way: a
+          A thread asking for a mode its harness does not support runs at the nearest less
+          permissive mode that harness does support. The substitution never goes the other way: a
           thread never runs more permissively than it asked for.
         </p>
       </section>
@@ -94,21 +97,32 @@ function System(): JSX.Element {
 
 /**
  * Renders the row that picks the model that makes text generations, such as
- * a thread's title. Under it, a quiet line gives the last failure, unless
- * text generation is off or has not failed.
+ * a thread's title. Under it, a quiet line says why text generation does not
+ * work (it cannot run now, or its last call failed), and is left out when
+ * text generation is off or works.
  */
 function TextGenerationRow(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   const { textGeneration } = useSuspenseQuery(controllerQuery(client)).data;
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const model = useSavedSetting(
     client,
     settings.controller["textGeneration.model"] ?? "automatic",
     (value: TextGenerationModel) => ({ controller: { "textGeneration.model": value } }),
   );
-  const { choices, selectedKey } = buildTextGenerationField(model.value, instances, textGeneration);
-  const failure = describeTextGenerationFailure(model.value, textGeneration, new Date());
+  const { choices, selectedKey } = buildTextGenerationField(
+    model.value,
+    providers,
+    accounts,
+    harnesses,
+    modelProfiles,
+    textGeneration,
+  );
+  const problem = describeTextGenerationProblem(model.value, textGeneration, new Date());
   return (
     <>
       <SettingRow
@@ -134,7 +148,7 @@ function TextGenerationRow(): JSX.Element {
           </span>
         )}
       />
-      {failure === null ? null : <p className="set-note">{failure}</p>}
+      {problem === null ? null : <p className="set-note">{problem}</p>}
     </>
   );
 }

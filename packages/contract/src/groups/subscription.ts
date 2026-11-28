@@ -36,7 +36,7 @@ import {
   Unauthenticated,
   Validation,
 } from "../errors";
-import { ExternalRef, Id, Timestamp } from "../ids";
+import { ExternalRef, Id, isExternalRef, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
 import { markShorthand, markShorthandOnItself } from "../shorthand";
@@ -75,9 +75,6 @@ export type SubscriptionTarget = Schema.Schema.Type<typeof TargetValue>;
 const TARGET_FORMS =
   "write run:<run id>, session:<session id>, request:<permission request id>, " +
   "or an External Ref for a ref target: <system>:<kind>:<identity>";
-
-/** Checks whether a typed word is an External Ref, using the schema that owns the grammar. */
-const isExternalRef = Schema.is(ExternalRef);
 
 /**
  * Parses one token into a target. Returns `undefined` when the token is not a

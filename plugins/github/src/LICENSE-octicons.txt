@@ -1,0 +1,39 @@
+The status icons in status-icons.ts are taken from GitHub's Octicons: each is
+the `d` of the paths in the file named below, copied unchanged.
+
+Source:  https://github.com/primer/octicons
+Package: @primer/octicons 19.15.0
+
+  git-pull-request-16.svg        -> PULL_REQUEST_OPEN_ICON
+  git-pull-request-draft-16.svg  -> PULL_REQUEST_DRAFT_ICON
+  git-merge-16.svg               -> PULL_REQUEST_MERGED_ICON
+  git-pull-request-closed-16.svg -> PULL_REQUEST_CLOSED_ICON
+  issue-opened-16.svg            -> ISSUE_OPEN_ICON
+  issue-closed-16.svg            -> ISSUE_CLOSED_ICON
+
+Copied on 2026-11-10. Nothing is fetched from GitHub at build time or at
+runtime.
+
+---
+
+MIT License
+
+Copyright (c) 2025 GitHub Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

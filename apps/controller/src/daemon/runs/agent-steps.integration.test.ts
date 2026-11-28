@@ -18,7 +18,7 @@ import {
   type ActionStepStart,
   type ControllerToRunner,
   type FrameCarryingInput,
-  type ProviderEvent,
+  type HarnessEvent,
   type SessionInput,
   type SessionStart,
   type WorkspaceStepOutcome,
@@ -28,7 +28,7 @@ import { send } from "../../http/testing";
 import { inputRepository } from "../../sessions";
 import { Live } from "../sessions";
 import { WORKSPACE_ACTION_IDS } from "../../plugins";
-import { buildProviderDefinition, createPluginFixture } from "../../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../../plugins/testing";
 import {
   buildCreateStep,
   findStepRecords,
@@ -40,7 +40,7 @@ import {
 import {
   at,
   carriesInput,
-  findInstanceId,
+  findProviderAccountId,
   listInputs,
   listFrames,
   readProfileNamed,
@@ -104,8 +104,8 @@ const STEP_INPUT_FIXED =
 
 /**
  * Runs `body` against a controller with one runner that hosts the test
- * provider, so an Agent on it can run. `plugins` are loaded beside the
- * provider, and the other options go to the controller unchanged.
+ * harness, so an Agent on it can run. `plugins` are loaded beside the
+ * harness, and the other options go to the controller unchanged.
  */
 const withAgentStepFleet = (
   body: (arranged: Arranged) => Promise<void>,
@@ -117,10 +117,7 @@ const withAgentStepFleet = (
 ): Promise<void> =>
   withFleet(body, {
     plugins: [
-      createPluginFixture({
-        id: "providers",
-        definitions: [buildProviderDefinition("test-provider")],
-      }).plugin,
+      buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("test")]),
       ...plugins,
     ],
     facts: FACTS,
@@ -188,7 +185,7 @@ const createSessionPlayer = () => {
       sessionId,
       at,
       ...event,
-    } as ProviderEvent);
+    } as HarnessEvent);
   };
   const turnId = (key: StepKey) => `${key.stepId}-${String(key.iteration)}`;
   const player = {
@@ -197,7 +194,7 @@ const createSessionPlayer = () => {
     reportStarted: (wire: Wire, sessionId: string): void =>
       report(wire, sessionId, {
         _tag: "session.started",
-        providerRefs: { nativeSessionId: `native-${sessionId}` },
+        harnessRefs: { nativeSessionId: `native-${sessionId}` },
       }),
     /** Reports that the turn of a step key has started. */
     startTurn: (wire: Wire, sessionId: string, key: StepKey): void =>
@@ -1088,7 +1085,7 @@ describe("agent steps over the runner socket", () => {
             {
               sessionId: takenSession,
               nativeSessionId: `native-${takenSession}`,
-              instanceId: findInstanceId(arranged, "test-provider"),
+              providerAccountId: findProviderAccountId(arranged, "harnesses/test"),
             },
           ],
         });
@@ -1333,7 +1330,7 @@ describe("agent steps over the runner socket", () => {
               {
                 sessionId,
                 nativeSessionId: `native-${sessionId}`,
-                instanceId: findInstanceId(arranged, "test-provider"),
+                providerAccountId: findProviderAccountId(arranged, "harnesses/test"),
               },
             ],
           });
@@ -1900,6 +1897,71 @@ describe("agent steps over the runner socket", () => {
           }),
         ]);
       });
+    },
+    WAIT_DEADLINE_MS * 2,
+  );
+
+  it(
+    "fails the run with session-failed when the harness the Agent has moved to cannot give the next step's structured result",
+    async () => {
+      const unstructured = buildHarnessDefinition("unstructured", [], {
+        structuredOutput: "unsupported",
+      });
+      await withFleet(
+        async (arranged) => {
+          const { wire } = arranged;
+          const player = createSessionPlayer();
+          const agentId = await createAgent(arranged.harness.base, arranged.token);
+          const runId = await startSentWorkflow(arranged.harness.base, arranged.token, {
+            definition: {
+              name: "Implement, then review",
+              steps: [
+                { id: IMPLEMENT, kind: "agent", agent: agentId, prompt: "Implement the change." },
+                {
+                  id: REVIEW,
+                  kind: "agent",
+                  agent: agentId,
+                  prompt: "Review the change.",
+                  outputSchema: DONE_SCHEMA,
+                },
+              ],
+              edges: [{ from: IMPLEMENT, to: REVIEW }],
+            },
+          });
+          const implementKey = buildStepKey(runId);
+          const implementer = await startStepSession(arranged, player, implementKey);
+          // A run is checked when it starts. The Agent moves to a harness
+          // that cannot give a structured result while the first step runs.
+          const moved = await send("PATCH", arranged.harness.base, `/api/v1/agents/${agentId}`, {
+            body: { providerAccountId: findProviderAccountId(arranged, "plain/unstructured") },
+            token: arranged.token,
+          });
+          expect(moved.status, await moved.clone().text()).toBe(200);
+
+          player.runTurn(wire, implementer, implementKey, answerText("Implemented"));
+
+          const ended = await waitForRunEnded(arranged, runId, "failed");
+          expect(ended).toMatchObject({ failureReason: "session-failed", failedStepId: REVIEW });
+          expect(findStepRecords(ended, REVIEW)).toEqual([
+            expect.objectContaining({
+              status: "failed",
+              error: {
+                code: "session_failed",
+                message:
+                  "The step's session could not be opened: the request is not valid: outputSchema: Harness unstructured cannot give a structured result. Leave out the output schema, or run on another harness.",
+              },
+            }),
+          ]);
+        },
+        {
+          plugins: [
+            buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("test")]),
+            buildPluginWithProviderPerHarness("plain", [unstructured]),
+          ],
+          facts: { ...FACTS, adapters: [...FACTS.adapters, "plain/unstructured"] },
+          models: MODELS,
+        },
+      );
     },
     WAIT_DEADLINE_MS * 2,
   );

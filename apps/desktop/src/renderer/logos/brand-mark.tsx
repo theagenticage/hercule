@@ -9,7 +9,7 @@ const GITHUB_PATH =
  * Renders a brand's mark: the SVG path `path`, drawn on a 24-unit grid,
  * `size` CSS pixels square, in the current text colour. This is how the
  * Bureau book's `brand()` in crew.js draws the mark of every source system
- * and every provider.
+ * and every harness.
  *
  * The mark is hidden from assistive technology: every place that draws one
  * also names the brand in words.

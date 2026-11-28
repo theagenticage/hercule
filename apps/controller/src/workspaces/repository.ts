@@ -17,6 +17,8 @@ import {
   WorkspaceProvision,
   type StartingRevision,
   type CheckoutReport,
+  type WorkspaceDiskUsage,
+  type WorkspaceDiskUsageEntry,
   type WorkspaceReport,
 } from "@hercule/protocol";
 import type {
@@ -36,6 +38,7 @@ import {
   buildKeyset,
   mintUuid,
   buildPage,
+  UUID_PATTERN,
   uuidFromString,
   uuidToString,
   type CursorError,
@@ -62,6 +65,10 @@ export interface StoredWorkspace {
   readonly provisionedAt: string | null;
   readonly lastUsedAt: string | null;
   readonly disposedAt: string | null;
+  /** The latest successful measurement of the workspace's disk usage, or null when none has succeeded. */
+  readonly diskUsage: WorkspaceDiskUsage | null;
+  /** Why the newest attempt to measure the workspace failed, or null. */
+  readonly diskUsageError: string | null;
 }
 
 export interface StoredCheckout {
@@ -119,8 +126,10 @@ export interface WorkspaceHolder {
  *   worktree, because the worktree holds its work.
  * - `inspection`: the inspection window. A failed run, or a run cancelled
  *   with its workspace kept, leaves its workspace for the user to look at.
+ * - `archived`: the archived window. A Thread the user archived keeps its
+ *   workspace only for a short while, because nothing can resume it.
  */
-const Retention = Schema.Literals(["none", "orphan", "idle", "inspection"]);
+const Retention = Schema.Literals(["none", "orphan", "idle", "inspection", "archived"]);
 export type Retention = Schema.Schema.Type<typeof Retention>;
 
 /**
@@ -149,6 +158,13 @@ export const buildReadyClause = (alias: string): string =>
 
 /** The statuses a workspace can still leave. Every other status is final. */
 const LIVE_STATUSES = "('provisioning', 'ready', 'failed', 'disposing')";
+
+/** An archived session with a native session id, as its workspace's removal needs it. */
+export interface StoredArchivedSession {
+  readonly harnessId: string;
+  readonly nativeSessionId: string;
+  readonly providerAccountId: string;
+}
 
 /**
  * A condition on a lease's `workspace_id`, true when a released lease on that
@@ -197,6 +213,10 @@ interface WorkspaceRow {
   readonly last_used_at: string | null;
   readonly disposed_at: string | null;
   readonly retention_policy: WorkspaceRetentionPolicy;
+  readonly size_bytes: number | null;
+  readonly frees_bytes: number | null;
+  readonly disk_usage_measured_at: string | null;
+  readonly disk_usage_error: string | null;
 }
 
 interface CheckoutRow {
@@ -217,7 +237,8 @@ interface CheckoutRow {
 
 const COLUMNS =
   "id, runner_id, kind, status, designated_connection_id, message, created_at, " +
-  "provisioned_at, last_used_at, disposed_at, ownership, path, observed_at, warnings, available, retention_policy, derived_workspace_ids";
+  "provisioned_at, last_used_at, disposed_at, ownership, path, observed_at, warnings, available, retention_policy, derived_workspace_ids, " +
+  "size_bytes, frees_bytes, disk_usage_measured_at, disk_usage_error";
 
 /** The same columns, for the one query that joins the checkouts table. */
 const WORKSPACE_COLUMNS = COLUMNS.split(", ")
@@ -249,6 +270,15 @@ const toWorkspace = (row: WorkspaceRow): StoredWorkspace => ({
   provisionedAt: row.provisioned_at,
   lastUsedAt: row.last_used_at,
   disposedAt: row.disposed_at,
+  diskUsage:
+    row.size_bytes === null || row.frees_bytes === null || row.disk_usage_measured_at === null
+      ? null
+      : {
+          sizeBytes: row.size_bytes,
+          freesBytes: row.frees_bytes,
+          measuredAt: row.disk_usage_measured_at,
+        },
+  diskUsageError: row.disk_usage_error,
 });
 
 const toCheckout = (row: CheckoutRow): StoredCheckout => ({
@@ -278,6 +308,8 @@ const RemovalAudit = Schema.Struct({
   reason: Schema.optionalKey(Retention),
   holder: Schema.optionalKey(Schema.String),
   refusalMessage: Schema.optionalKey(Schema.String),
+  /** Warnings known when the removal was reserved, stored on the workspace once it is deleted. */
+  warnings: Schema.optionalKey(Schema.Array(Schema.String)),
 });
 export type RemovalAudit = Schema.Schema.Type<typeof RemovalAudit>;
 const decodeRemovalAudit = Schema.decodeUnknownEffect(Schema.fromJsonString(RemovalAudit));
@@ -350,10 +382,33 @@ const make = Effect.gen(function* () {
       if (changed) yield* announceChange(id);
     });
 
+  /**
+   * Returns true when a reported checkout of the workspace is on a branch other
+   * than the one stored. A report that cannot read a branch (null) is not a
+   * change. Read it before the report is written.
+   */
+  const reportsOtherBranch = (
+    id: string,
+    checkouts: ReadonlyArray<CheckoutReport>,
+  ): Effect.Effect<boolean, SqlError> =>
+    Effect.gen(function* () {
+      if (checkouts.length === 0) return false;
+      const rows = yield* sql<{ readonly id: Uint8Array; readonly branch: string | null }>`
+        SELECT id, branch FROM checkouts WHERE workspace_id = ${uuidFromString(id)}`;
+      const stored = new Map(rows.map((row) => [uuidToString(row.id), row.branch]));
+      return checkouts.some(
+        (checkout) =>
+          checkout.branch !== null &&
+          stored.has(checkout.checkoutId) &&
+          stored.get(checkout.checkoutId) !== checkout.branch,
+      );
+    });
+
   return {
     one,
     listCheckouts,
     recordCreationFacts,
+    reportsOtherBranch,
 
     /** Returns the frozen removal instruction and its initiating actor, including retained refusals. */
     readRemoval: (id: string): Effect.Effect<Option.Option<StoredRemoval>, SqlError> =>
@@ -411,6 +466,20 @@ const make = Effect.gen(function* () {
         );
       }),
 
+    /**
+     * Adds a warning to the pending removal of a workspace, once, so it is
+     * stored on the workspace when the removal is confirmed. Does nothing when
+     * the workspace is not being removed.
+     */
+    addRemovalWarning: (id: string, warning: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE workspaces SET disposal_audit = json_set(disposal_audit, '$.warnings',
+              json(json_insert(COALESCE(json_extract(disposal_audit, '$.warnings'), '[]'), '$[#]', ${warning})))
+            WHERE id = ${uuidFromString(id)} AND status = 'disposing'
+              AND NOT EXISTS (SELECT 1 FROM json_each(COALESCE(json_extract(disposal_audit, '$.warnings'), '[]'))
+                              WHERE value = ${warning})`,
+      ),
+
     /** Restores the recorded status after refusal while keeping the intent as a retained cleanup reason. */
     refuseRemoval: (
       id: string,
@@ -422,6 +491,101 @@ const make = Effect.gen(function* () {
           disposal_audit = json_set(disposal_audit, '$.refusalMessage', ${message})
           WHERE id = ${uuidFromString(id)} AND status = 'disposing'`;
         yield* announceChange(id);
+      }),
+
+    /**
+     * Returns the ids, among these workspaces, of the archived ones: those
+     * with at least one Thread, every Thread of which is archived. This is the
+     * only definition of an archived workspace. It reads the sessions, never a
+     * lease's retention, and counts main workspaces too. A Thread is a session
+     * with no Agent behind it; `agent_id` is tested rather than `kind` so the
+     * query uses the `sessions_workspace` index instead of scanning every Thread.
+     */
+    listArchivedWorkspaces: (
+      workspaceIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      workspaceIds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly workspace_id: Uint8Array }>`
+              SELECT workspace_id FROM sessions
+              WHERE workspace_id IN ${sql.in(workspaceIds.map(uuidFromString))} AND agent_id IS NULL
+              GROUP BY workspace_id HAVING COUNT(archived_at) = COUNT(*)`,
+            (rows) => rows.map((row) => uuidToString(row.workspace_id)),
+          ),
+
+    /** Returns whether a run holds or held a lease on the workspace and no Thread works in it. */
+    isRunWorkspace: (workspaceId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly run: number }>`
+          SELECT EXISTS (SELECT 1 FROM workspace_leases WHERE workspace_id = ${uuidFromString(workspaceId)} AND holder_kind = 'run')
+            AND NOT EXISTS (SELECT 1 FROM sessions WHERE workspace_id = ${uuidFromString(workspaceId)} AND agent_id IS NULL) AS run`,
+        (rows) => rows[0]?.run === 1,
+      ),
+
+    /**
+     * Returns up to `limit` archived sessions of the workspace that have a
+     * native session id, oldest first, and how many such sessions the
+     * workspace has in all.
+     */
+    listArchivedSessions: (
+      workspaceId: string,
+      limit: number,
+    ): Effect.Effect<
+      { readonly sessions: ReadonlyArray<StoredArchivedSession>; readonly total: number },
+      SqlError
+    > =>
+      Effect.map(
+        sql<{
+          readonly harness_id: string;
+          readonly native_session_id: string;
+          readonly provider_account_id: Uint8Array;
+          readonly total: number;
+        }>`
+          SELECT harness_id, native_session_id, provider_account_id, COUNT(*) OVER () AS total
+          FROM sessions
+          WHERE workspace_id = ${uuidFromString(workspaceId)} AND archived_at IS NOT NULL
+            AND native_session_id IS NOT NULL
+          ORDER BY created_at, id LIMIT ${limit}`,
+        (rows) => ({
+          total: rows[0]?.total ?? 0,
+          sessions: rows.map((row) => ({
+            harnessId: row.harness_id,
+            nativeSessionId: row.native_session_id,
+            providerAccountId: uuidToString(row.provider_account_id),
+          })),
+        }),
+      ),
+
+    /**
+     * Gives an archived workspace back to automatic cleanup. Does nothing to a
+     * primary, which the sweep never deletes.
+     *
+     * - Sets the retention policy to `automatic`.
+     * - Releases again, with `archived`, every released lease whose holder is
+     *   an archived session. Each lease keeps its own release time, and its
+     *   kept-until time is that time plus `windowMs`. An active lease is never
+     *   touched.
+     */
+    returnToAutomaticCleanup: (
+      workspaceId: string,
+      windowMs: number,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const policy = yield* sql`
+          UPDATE workspaces SET retention_policy = 'automatic'
+          WHERE id = ${uuidFromString(workspaceId)} AND kind <> 'primary' AND retention_policy <> 'automatic'
+          RETURNING id`;
+        const leases = yield* sql`
+          UPDATE workspace_leases
+          SET retention = 'archived',
+              kept_until = strftime('%Y-%m-%dT%H:%M:%fZ', released_at, ${`+${String(windowMs / 1000)} seconds`})
+          WHERE workspace_id = ${uuidFromString(workspaceId)} AND released_at IS NOT NULL
+            AND NOT (${sql.literal(NO_RETENTION_CLAUSE)})
+            AND holder_kind = 'session'
+            AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = workspace_leases.holder_id AND s.archived_at IS NOT NULL)
+          RETURNING workspace_id`;
+        if (policy.length > 0 || leases.length > 0) yield* announceChange(workspaceId);
       }),
 
     /** Makes a workspace manual only when the actual stored session is a Thread. */
@@ -572,6 +736,8 @@ const make = Effect.gen(function* () {
           provisionedAt: null,
           lastUsedAt: workspace.at,
           disposedAt: null,
+          diskUsage: null,
+          diskUsageError: null,
         };
       }),
 
@@ -995,6 +1161,75 @@ const make = Effect.gen(function* () {
         `,
         (rows) => rows.map((row) => uuidToString(row.id)),
       ),
+
+    /**
+     * Stores the disk usage a runner reported for its workspaces, and returns
+     * the ids of the workspaces whose stored values changed. Each of those is
+     * announced as updated once the transaction commits.
+     *
+     * Reads the stored values of all the listed workspaces in one statement,
+     * compares them in memory, and writes only the entries that differ. An entry
+     * with no measurement keeps the stored numbers and updates only the error,
+     * because a failed attempt leaves the earlier measurement in place. An
+     * entry for a workspace that does not exist, or that belongs to another
+     * runner, is dropped. So is an entry whose id is not a canonical id: the
+     * protocol lets a runner send any short id, and such an id names no
+     * workspace, so it must not make the whole report fail. A workspace the report does not list is not touched,
+     * so a report cut short by the runner clears nothing. When an id is listed
+     * twice, the last entry counts.
+     */
+    recordDiskUsage: (
+      runnerId: string,
+      entries: ReadonlyArray<WorkspaceDiskUsageEntry>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.gen(function* () {
+        const reported = new Map(
+          entries
+            .filter((entry) => UUID_PATTERN.test(entry.workspaceId))
+            .map((entry) => [entry.workspaceId, entry]),
+        );
+        if (reported.size === 0) return [];
+        const stored = yield* sql<
+          Pick<
+            WorkspaceRow,
+            "id" | "size_bytes" | "frees_bytes" | "disk_usage_measured_at" | "disk_usage_error"
+          >
+        >`
+          SELECT id, size_bytes, frees_bytes, disk_usage_measured_at, disk_usage_error
+          FROM workspaces
+          WHERE runner_id = ${uuidFromString(runnerId)}
+            AND id IN ${sql.in([...reported.keys()].map(uuidFromString))}
+        `;
+        const changed: Array<string> = [];
+        for (const row of stored) {
+          const id = uuidToString(row.id);
+          const entry = reported.get(id)!;
+          // A null measurement means none has succeeded in the runner's memory, which is
+          // not a reason to forget the numbers stored from an earlier success.
+          const sizeBytes = entry.diskUsage?.sizeBytes ?? row.size_bytes;
+          const freesBytes = entry.diskUsage?.freesBytes ?? row.frees_bytes;
+          const measuredAt = entry.diskUsage?.measuredAt ?? row.disk_usage_measured_at;
+          if (
+            sizeBytes === row.size_bytes &&
+            freesBytes === row.frees_bytes &&
+            measuredAt === row.disk_usage_measured_at &&
+            entry.error === row.disk_usage_error
+          ) {
+            continue;
+          }
+          yield* sql`
+            UPDATE workspaces
+            SET size_bytes = ${sizeBytes},
+                frees_bytes = ${freesBytes},
+                disk_usage_measured_at = ${measuredAt},
+                disk_usage_error = ${entry.error}
+            WHERE id = ${row.id}
+          `;
+          yield* announceChange(id);
+          changed.push(id);
+        }
+        return changed;
+      }),
 
     list: (
       request: WorkspacePageRequest,

@@ -7,8 +7,9 @@ import {
   METRICS,
   parseBaseline,
   readMetricName,
-  selectBaselineForThemes,
+  selectBaselineForRun,
 } from "./ui-ratchet.ts";
+import { RUN_WIDE_THEME, UI_SCREENS } from "./ui-screens.ts";
 
 // One key per kind of metric, so each test names what it exercises.
 const HIGHER = "whitehaven/thread/contrast.ink.minLc"; // tolerance 0.05
@@ -157,41 +158,70 @@ describe("METRICS", () => {
   });
 });
 
-describe("selectBaselineForThemes", () => {
+describe("selectBaselineForRun", () => {
+  const first = UI_SCREENS[0]!.name;
+  const other = UI_SCREENS[1]!.name;
+  const third = UI_SCREENS[2]!.name;
   const baseline = {
-    "whitehaven/thread/contrast.ink.minLc": 85,
+    [`whitehaven/${first}/contrast.ink.minLc`]: 85,
+    [`whitehaven/${other}/contrast.ink.minLc`]: 86,
+    [`whitehaven/${third}/contrast.ink.minLc`]: 87,
     "whitehaven/tokens/line.minLc": 30,
-    "nile/thread/contrast.ink.minLc": 80,
-    "end-house/thread/contrast.ink.minLc": 81,
+    [`nile/${first}/contrast.ink.minLc`]: 80,
+    [`nile/${other}/contrast.ink.minLc`]: 82,
+    "nile/tokens/line.minLc": 31,
     "run/glyphs.confusablePairs": 0,
   };
+  const all = UI_SCREENS.map(({ name }) => name);
 
-  it("keeps the keys of the given themes and the run keys when the first theme is among them", () => {
-    expect(Object.keys(selectBaselineForThemes(baseline, ["whitehaven", "styles"]))).toEqual([
-      "whitehaven/thread/contrast.ink.minLc",
+  it("keeps everything of the selected themes and the run keys for a theme run on every screen", () => {
+    expect(Object.keys(selectBaselineForRun(baseline, [RUN_WIDE_THEME, "styles"], all))).toEqual([
+      `whitehaven/${first}/contrast.ink.minLc`,
+      `whitehaven/${other}/contrast.ink.minLc`,
+      `whitehaven/${third}/contrast.ink.minLc`,
       "whitehaven/tokens/line.minLc",
       "run/glyphs.confusablePairs",
     ]);
   });
 
-  it("drops the run keys when the first theme is not among the themes", () => {
-    expect(Object.keys(selectBaselineForThemes(baseline, ["nile", "end-house"]))).toEqual([
-      "nile/thread/contrast.ink.minLc",
-      "end-house/thread/contrast.ink.minLc",
+  it("drops the run keys when the run-wide theme is not selected", () => {
+    expect(Object.keys(selectBaselineForRun(baseline, ["nile"], all))).toEqual([
+      `nile/${first}/contrast.ink.minLc`,
+      `nile/${other}/contrast.ink.minLc`,
+      "nile/tokens/line.minLc",
     ]);
   });
 
-  it("fails on a key of a theme that does not exist, instead of dropping it", () => {
-    expect(() =>
-      selectBaselineForThemes({ ...baseline, "old-theme/thread/target.under24": 0 }, ["nile"]),
-    ).toThrow(/old-theme\/thread\/target.under24/);
+  it("keeps only the selected screens, and no tokens or run keys without the first screen", () => {
+    expect(Object.keys(selectBaselineForRun(baseline, ["whitehaven", "nile"], [other]))).toEqual([
+      `whitehaven/${other}/contrast.ink.minLc`,
+      `nile/${other}/contrast.ink.minLc`,
+    ]);
   });
 
-  it("makes a shard report a missing key of its own themes but not those of other themes", () => {
-    const shard = selectBaselineForThemes(baseline, ["nile", "end-house"]);
-    const current = { "nile/thread/contrast.ink.minLc": 80 };
-    expect(compareWithBaseline(current, shard).missingFromCurrent).toEqual([
-      "end-house/thread/contrast.ink.minLc",
+  it("adds the theme tokens, and the run keys of the run-wide theme, with the first screen", () => {
+    expect(Object.keys(selectBaselineForRun(baseline, [RUN_WIDE_THEME, "nile"], [first]))).toEqual([
+      `whitehaven/${first}/contrast.ink.minLc`,
+      "whitehaven/tokens/line.minLc",
+      `nile/${first}/contrast.ink.minLc`,
+      "nile/tokens/line.minLc",
+      "run/glyphs.confusablePairs",
+    ]);
+  });
+
+  it("fails on a key of a theme or screen that does not exist, instead of dropping it", () => {
+    expect(() =>
+      selectBaselineForRun({ ...baseline, "old-theme/thread/target.under24": 0 }, ["nile"], all),
+    ).toThrow(/old-theme\/thread\/target.under24/);
+    expect(() =>
+      selectBaselineForRun({ ...baseline, "nile/old-screen/target.under24": 0 }, ["nile"], all),
+    ).toThrow(/nile\/old-screen\/target.under24/);
+  });
+
+  it("lets a run report a missing key of its own selection but not of the rest", () => {
+    const selected = selectBaselineForRun(baseline, ["nile"], [other]);
+    expect(compareWithBaseline({}, selected).missingFromCurrent).toEqual([
+      `nile/${other}/contrast.ink.minLc`,
     ]);
   });
 });
@@ -321,5 +351,61 @@ describe("formatReport", () => {
       | glyphs.confusablePairs | 0     |
       "
     `);
+  });
+
+  it("lists the first five elements under a worse key, then how many more, and none under a better key", () => {
+    const current = {
+      "nile/thread/resilience.rest.clippedCharacters": 0,
+      "nile/thread/resilience.textSize.clippedCharacters": 112,
+      "nile/thread/contrast.ink.aboveCeiling": 1,
+    };
+    const baseline = {
+      "nile/thread/resilience.rest.clippedCharacters": 0,
+      "nile/thread/resilience.textSize.clippedCharacters": 100,
+      "nile/thread/contrast.ink.aboveCeiling": 3,
+    };
+    const worseElements = [20, 10, 8, 6, 4, 3, 2].map((characters) => ({
+      element: `span.t${String(characters)}`,
+      contribution: characters,
+    }));
+    const report = formatReport(
+      current,
+      compareWithBaseline(current, baseline),
+      checkTargets(current),
+      {
+        "nile/thread/resilience.textSize.clippedCharacters": worseElements,
+        "nile/thread/contrast.ink.aboveCeiling": [{ element: "p.better", contribution: 96 }],
+      },
+    );
+    expect(report).toContain(
+      [
+        "- `nile/thread/resilience.textSize.clippedCharacters`: 100 -> 112",
+        "  - span.t20: 20",
+        "  - span.t10: 10",
+        "  - span.t8: 8",
+        "  - span.t6: 6",
+        "  - span.t4: 4",
+        "  - and 2 more (out/ui-metrics/elements.json)",
+      ].join("\n"),
+    );
+    expect(report).not.toContain("p.better");
+  });
+
+  it("prints a spacing contribution as a count of off-grid values, not as a share", () => {
+    const current = { "nile/inbox/spacing.onGrid": 0.5 };
+    const baseline = { "nile/inbox/spacing.onGrid": 0.9 };
+    const report = formatReport(
+      current,
+      compareWithBaseline(current, baseline),
+      checkTargets(current),
+      {
+        "nile/inbox/spacing.onGrid": [
+          { element: "div.row: margin-left 5px", contribution: 1 },
+          { element: "div.card: gap 5px, padding-left 6px", contribution: 2 },
+        ],
+      },
+    );
+    expect(report).toContain("  - div.row: margin-left 5px: 1 off-grid value\n");
+    expect(report).toContain("  - div.card: gap 5px, padding-left 6px: 2 off-grid values\n");
   });
 });

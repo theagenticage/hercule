@@ -1,0 +1,674 @@
+/* Settings > Providers, from the prototype `prototype/desktop-settings-
+   providers`, variant I (docs/design/providers-directions/). Its measurements
+   decide; the rules below carry them. The Accounts section is `.provider-
+   accounts`; the account sheet is `.account-sheet`. Class names start with
+   `pa-` so no rule collides with another screen's short names. */
+
+/* The prototype widens the column from Settings' 760px to 1000px and spaces
+   its parts 30px apart, as Connections does for its table. */
+.set-col:has(> .provider-accounts) {
+  gap: 30px;
+  width: min(1000px, 100%);
+}
+
+/* ---------- The section ---------- */
+.provider-accounts > h2 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+/* Settings' lead rule (`.set-sec > p`) is 13px with a 12px gap under it. The
+   prototype's lead is 12px with 2px over it, and its head is a 2px grid, so
+   the cards start 12px under the lead. */
+.provider-accounts > .pa-lead {
+  margin: 2px 0 12px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pa-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+  gap: 8px;
+}
+.pa-empty {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- A card ---------- */
+/* The prototype's card is a box with the button inside it, and feet under
+   the button. The box is `.pa-card`; the button that opens the sheet is
+   `.pa-card-open`. One foot holds the button that fixes the card's state; the
+   other, `.pa-card-profiles`, tells which profiles use the account. A card
+   with neither has no foot, so there the button is the whole box. Hovering a
+   card lights nothing else on the page. */
+.pa-card {
+  position: relative;
+  display: grid;
+  grid-template-rows: 1fr;
+  grid-auto-rows: auto;
+  min-width: 0;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--line-soft),
+    var(--shadow-1);
+  transition:
+    box-shadow var(--dur-2),
+    background var(--dur-2);
+}
+/* The accounts the open profile holds are lit with a ring; the ones it does
+   not hold wait, dimmed, with no fill. */
+.pa-card.is-member {
+  box-shadow:
+    inset 0 0 0 1.5px color-mix(in oklab, var(--ink) 70%, transparent),
+    var(--shadow-1);
+}
+.pa-card.is-out {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+}
+.pa-card.is-out > .pa-card-open {
+  opacity: 0.55;
+  transition: opacity var(--dur-2);
+}
+.pa-card.is-out:hover > .pa-card-open {
+  opacity: 0.85;
+}
+/* A card that needs the user takes the state's tint, as the prototype's does,
+   unless the open profile leaves it out. */
+.pa-card.is-attention:not(.is-out) {
+  background: color-mix(in oklab, var(--you-tint) 60%, var(--raised));
+}
+.pa-card.is-fail:not(.is-out) {
+  background: color-mix(in oklab, var(--fail-tint) 70%, var(--raised));
+}
+.pa-card-open {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  min-width: 0;
+  padding: 11px 12px 10px;
+  border-radius: var(--r-md);
+  text-align: left;
+}
+.pa-card-open.has-foot {
+  padding-bottom: 8px;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+}
+/* The ring goes around the whole card, not around its button alone, which
+   ends at the foot's rule. */
+.pa-card-open:focus-visible {
+  outline: 0;
+}
+.pa-card:has(> .pa-card-open:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.pa-card-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+.pa-card-top > .br {
+  flex: none;
+}
+.pa-card-top b {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Under the name, flush left with the gauge: who is signed in, then the plan,
+   each on a line of its own that ends in an ellipsis when it is too long. */
+.pa-card-line {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* The last line also holds where the account works, at its right end. The
+   text gives way to it first, and it never shrinks. */
+.pa-card-last {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pa-card-last-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The gauge: the prototype's number, then a 4px bar that takes the rest of
+   the row, with the window's name added after it. Each line has the same
+   columns, so the bars of a card line up. */
+.pa-gauge {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+}
+.pa-gauge-row {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 44px;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 18px;
+}
+.pa-gauge-row > .pa-bar {
+  align-self: center;
+}
+.pa-gauge-num {
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pa-gauge-label,
+.pa-gauge-credit {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pa-gauge-row.is-credit .pa-gauge-credit {
+  grid-column: 2 / -1;
+}
+.pa-bar {
+  position: relative;
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.pa-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink);
+}
+.pa-gauge-row.is-attention .pa-bar > i {
+  background: var(--you);
+}
+.pa-gauge-row.is-attention .pa-gauge-num {
+  color: var(--you-ink);
+}
+.pa-gauge-row.is-fail .pa-bar > i {
+  background: var(--fail);
+}
+.pa-gauge-row.is-fail .pa-gauge-num {
+  color: var(--fail-ink);
+}
+.pa-card-sub {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+
+/* The state, in the gauge's place. */
+.pa-card-state {
+  display: grid;
+  gap: 1px;
+  margin-top: 8px;
+}
+.pa-card-state-text {
+  font-size: var(--t-12);
+  font-weight: var(--w-bold);
+}
+.pa-card-state-text.is-attention {
+  color: var(--you-ink);
+}
+.pa-card-state-text.is-fail {
+  color: var(--fail-ink);
+}
+.pa-card-sub.is-attention {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* The foot, as the prototype's `.vi-card-foot` is, holds the button that fixes
+   the card's state, at the right. The button is the prototype's quiet
+   `.vi-use`, in the state's ink so it reads as the fix. */
+.pa-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 8px 0 12px;
+  border-top: 1px solid var(--line-soft);
+}
+.pa-card-fix {
+  display: inline-flex;
+  margin-left: auto;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: var(--r-sm);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pa-card-fix.is-fail {
+  color: var(--fail-ink);
+}
+.pa-card-fix.is-attention {
+  color: var(--you-ink);
+}
+.pa-card-fix:hover {
+  background: var(--hover);
+}
+
+/* The profile foot: the faces of the profiles that hold the account at the
+   left, and at the right whether the open profile holds it. These are the
+   prototype's `.vi-used`, `.vi-out`, `.vi-in` and `.vi-use`. */
+.pa-card-faces {
+  display: inline-flex;
+  align-items: center;
+}
+.pa-card-faces > .profile-face + .profile-face {
+  margin-left: -4px;
+}
+.pa-card-out {
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pa-card-in {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pa-card-use {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0 7px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pa-card-use:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--ink);
+}
+.pa-card-err {
+  margin: 0;
+  padding: 0 12px 8px;
+  color: var(--fail-ink);
+  font-size: var(--t-11);
+  line-height: 1.45;
+}
+
+/* The identity and the plan on one line. The identity gives way first. The
+   plan is cut short too, once the identity is down to six characters: it may
+   take the whole line less that much, and the identity takes what is left. */
+.pa-identity {
+  display: flex;
+  min-width: 0;
+  white-space: pre;
+}
+.pa-identity-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pa-identity-plan {
+  flex: none;
+  max-width: calc(100% - 6ch);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- Where an account works: pips, a count, or "All" ---------- */
+.pa-reach {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 3px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.pa-reach > .ic {
+  margin-right: 2px;
+}
+.pa-reach-all,
+.pa-reach-count {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.pa-reach-count.is-you {
+  color: var(--you-ink);
+}
+.pa-pip {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ink) 58%, transparent);
+}
+.pa-pip.is-you {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--you);
+}
+
+/* ---------- The account sheet ---------- */
+/* On the glass dialog, but the prototype's sheet sits 11vh from the top
+   where `.glass-dialog` sits 18vh, is 500px wide, and is as tall as its
+   content up to 78vh, which the body scrolls inside. */
+.glass-dialog.account-sheet {
+  width: 500px;
+  max-height: 78vh;
+  margin-top: 11vh;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+}
+.pa-sheet-h {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px 12px;
+}
+.pa-sheet-h .icon-btn {
+  margin-left: auto;
+}
+.pa-sheet-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--ink);
+}
+.pa-sheet-title {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.pa-sheet-title h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.pa-sheet-identity {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pa-sheet-b {
+  min-height: 0;
+  padding: 2px 18px 16px;
+  overflow: auto;
+}
+.pa-sheet-f {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.pa-sec {
+  padding: 12px 0;
+  border-top: 1px solid var(--line-soft);
+}
+.pa-sec:first-child {
+  padding-top: 4px;
+  border-top: 0;
+}
+.pa-sec h3 {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* The Name field. The prototype's field is a grid of the field and a hint
+   6px apart. */
+.pa-name {
+  display: grid;
+  gap: 6px;
+}
+.pa-name .field {
+  width: 100%;
+}
+.pa-hint {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.pa-name .fl-err {
+  margin: 0;
+}
+
+/* A machine: icon, name, status, action. The status column also holds who
+   the account is signed in as, which the prototype's 130px column was too
+   narrow for. */
+.pa-machine {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 190px) minmax(70px, auto);
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: var(--t-13);
+}
+.pa-machine > .ic {
+  color: var(--muted);
+}
+.pa-machine-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.pa-machine-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-machine-name small {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.pa-machine-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pa-machine-status.is-you {
+  color: var(--you-ink);
+}
+.pa-machine-status > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pa-machine-act {
+  justify-self: end;
+}
+.pa-machine-err {
+  margin: 0 0 4px 28px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+
+/* The Default harness section: a radio, the harness's mark and its name. The
+   prototype's row is a 32px-high grid of the radio (14px), the mark (16px) and
+   the text, 9px apart, bleeding 8px past the section so the hover wash
+   reaches beyond the text. The prototype puts the reason after the name on
+   the same line; the reasons are sentences, which do not fit beside a name
+   in a 500px sheet, so they sit under it. */
+.pa-harnesses {
+  display: grid;
+  gap: 6px;
+}
+.pa-harness {
+  display: grid;
+  grid-template-columns: 14px 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-height: 32px;
+  margin: 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  font-size: var(--t-13);
+  cursor: pointer;
+}
+.pa-harness > .br {
+  justify-self: center;
+}
+.pa-harness:hover:not(.is-off) {
+  background: var(--hover);
+}
+.pa-harness-text {
+  display: grid;
+  min-width: 0;
+  padding: 4px 0;
+}
+.pa-harness-text b {
+  font-weight: var(--w-medium);
+  line-height: 1.3;
+}
+.pa-harness-text small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  line-height: 1.35;
+}
+.pa-harness.is-off {
+  cursor: default;
+}
+/* The mark is dimmed to the name's faint colour; it is a picture, so it cannot take the colour. */
+.pa-harness.is-off > :not(.choice-box, .pa-harness-text) {
+  opacity: 0.45;
+}
+.pa-harness.is-off .pa-harness-text b {
+  color: var(--faint);
+  font-weight: var(--w-regular);
+  text-decoration: line-through;
+  text-decoration-color: var(--line);
+}
+.pa-harnesses .pa-hint {
+  font-size: var(--t-11);
+}
+.pa-harnesses .fl-err {
+  margin: 0;
+}
+
+/* The Usage section: the prototype's row is a name (90px), a 6px bar, the
+   number (40px) and when the window resets, 10px apart. The prototype's reset
+   column is 96px for a weekday alone; the time that follows it, "resets Mon
+   12:30", needs 124px. */
+.pa-use {
+  display: grid;
+  gap: 2px;
+}
+.pa-use-row {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 40px 124px;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: var(--t-12);
+}
+.pa-use-row b {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.pa-use-row small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-12);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pa-use-bar {
+  position: relative;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--sunken);
+  overflow: hidden;
+}
+.pa-use-bar > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: var(--ink);
+}
+.pa-use-row.is-attention .pa-use-bar > i {
+  background: var(--you);
+}
+.pa-use-row.is-attention b {
+  color: var(--you-ink);
+}
+.pa-use-row.is-fail .pa-use-bar > i {
+  background: var(--fail);
+}
+.pa-use-row.is-fail b {
+  color: var(--fail-ink);
+}
+.pa-use-credit {
+  grid-column: 2 / -1;
+  font-size: var(--t-14);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.pa-use-credit small {
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.pa-use .pa-hint {
+  margin-top: 4px;
+}
+
+/* The Credential section: the state as the card draws it, the expiry, then
+   the button. */
+.pa-cred {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+.pa-cred > .pa-card-state {
+  margin-top: 0;
+}
+.pa-cred-message,
+.pa-cred-expiry {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}

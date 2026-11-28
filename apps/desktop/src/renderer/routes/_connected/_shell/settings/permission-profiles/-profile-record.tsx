@@ -28,7 +28,8 @@ export function ProfileRecord({
   readonly profile: Profile;
   readonly agents: ReadonlyArray<PosedProfileAgent>;
 }): JSX.Element {
-  const { client } = useRouteContext({ from: "/_connected" }).controller;
+  const { controller, bridge } = useRouteContext({ from: "/_connected" });
+  const { client } = controller;
   const name = useSavedProfileField(
     client,
     profile.id,
@@ -36,7 +37,7 @@ export function ProfileRecord({
     (_value, next: string) => next,
     (_latest, next) => ({ name: next }),
   );
-  const nameInput = useTextDraft(name.value, (text) => {
+  const nameInput = useTextDraft(bridge.platform, name.value, (text) => {
     if (text.trim() !== "") name.save(text);
   });
   return (

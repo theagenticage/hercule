@@ -53,6 +53,7 @@ describe("RuntimeNoteLine", () => {
       mayBeRunningTurn: false,
       openRequests: [],
       model: "claude-sonnet-5",
+      isSubagent: false,
     });
 
     const { container } = render(<RuntimeNoteLine note={outsideRuntimeNotes[0]!} />);
@@ -76,5 +77,28 @@ describe("RuntimeNoteLine", () => {
     expect(container.querySelector("p")?.textContent).toBe(
       `${label}Unknown event: turn.plan.updated`,
     );
+  });
+});
+
+describe("RuntimeNoteLine: tone", () => {
+  it("draws a warning in the failure colour when its tone is fail, and a screen reader still hears a warning", () => {
+    const { container } = render(
+      <RuntimeNoteLine
+        note={buildRuntimeNote("MCP servers were left out.", "warning")}
+        tone="fail"
+      />,
+    );
+
+    expect(container.firstElementChild?.className).toContain("text-fail");
+    expect(container.querySelector(".sr-only")?.textContent).toBe("Warning: ");
+  });
+
+  it("keeps a warning quiet by default, and an error in the failure colour", () => {
+    const quiet = render(<RuntimeNoteLine note={buildRuntimeNote("Retrying.", "warning")} />);
+    expect(quiet.container.firstElementChild?.className).toContain("text-muted");
+    cleanup();
+
+    const failed = render(<RuntimeNoteLine note={buildRuntimeNote("It broke.", "error")} />);
+    expect(failed.container.firstElementChild?.className).toContain("text-fail");
   });
 });

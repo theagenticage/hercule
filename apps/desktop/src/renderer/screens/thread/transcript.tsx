@@ -11,17 +11,18 @@
  * the same layout, so the transcript follows in the frame that drew the text,
  * without waiting for React to render.
  *
- * While the reader is at the bottom, the browser's scroll anchoring keeps the
- * view there, on `.transcript-end` below the column (see
- * ../session/transcript.css). A scroll made by a script would show macOS's
- * overlay scroll bar, and a streaming turn would keep it on screen; a
- * scroll made by anchoring does not. What the transcript shares with an
- * assistant's Conversation is in ../session/message-list.
+ * While the reader is at the bottom, a script keeps the view there: the
+ * browser's scroll anchoring is off (see ../session/transcript.css). On macOS
+ * the thin overlay scroll bar therefore shows while a reply streams at the
+ * bottom. What the transcript shares with an assistant's Conversation, the
+ * virtualizer and the rules for who keeps the view, is in
+ * ../session/message-list.
  *
  * The transcript is not a live region: the agent's streaming text would flood
  * a screen reader.
  */
 import {
+  Suspense,
   useCallback,
   useImperativeHandle,
   useState,
@@ -29,7 +30,6 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   resolveBrowserTimezone,
   type Pose,
@@ -37,13 +37,7 @@ import {
   type ThreadItem,
 } from "@hercule/client-core";
 import { buildLook } from "../../faces";
-import {
-  DEFAULT_END_PADDING,
-  HEADER_CLEARANCE,
-  measureBlock,
-  OVERSCAN,
-  useMessageList,
-} from "../session/message-list";
+import { HEADER_CLEARANCE, useMessageList } from "../session/message-list";
 import { UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
@@ -56,6 +50,14 @@ import {
   WaitingNote,
   WorkDivider,
 } from "./blocks";
+import { LazyMcpWarningLine } from "./lazy-mcp-warning-line";
+
+/**
+ * The attribute the embedded layout puts on the item that holds the user's
+ * first message. The start-thread dialog reads it to lift that message from
+ * where the composer was. The page layout never sets it.
+ */
+export const FIRST_MESSAGE_ATTRIBUTE = "data-first-message";
 
 /** The space between two blocks: the book's `.tx { gap: 22px }`. Each block but the first includes it. */
 const BLOCK_GAP = 22;
@@ -88,6 +90,14 @@ const USER_LINE_HEIGHT = 21.7;
  * 210px tile at 4:3, then the 8px gap or margin under it.
  */
 const SENT_IMAGE_ROW_HEIGHT = 166;
+/**
+ * The height one row of context cards adds under a user's bubble, in CSS
+ * pixels: a card (10px padding, the source line, two title lines, the status
+ * line, and the gaps between them), then the 8px gap above it.
+ */
+const CONTEXT_CARD_ROW_HEIGHT = 104;
+/** The height the fold "Context sent with it" adds under the cards, folded, in CSS pixels: its 24px button and the 8px gap above it. */
+const CONTEXT_FOLD_HEIGHT = 32;
 /** The height the sender's chip adds above a bubble another agent sent, in CSS pixels: its 18px row and the 4px under it. */
 const SENDER_ROW_HEIGHT = 22;
 
@@ -105,6 +115,10 @@ const estimateBlockHeight = (block: ThreadBlock): number => {
         40 +
         USER_LINE_HEIGHT * Math.max(1, Math.ceil(block.text.length / USER_CHARS_PER_LINE)) +
         SENT_IMAGE_ROW_HEIGHT * Math.ceil(block.attachments.length / 2) +
+        (block.context === undefined
+          ? 0
+          : CONTEXT_CARD_ROW_HEIGHT * Math.ceil(block.context.things.length / 2) +
+            CONTEXT_FOLD_HEIGHT) +
         (block.senderSessionId === undefined ? 0 : SENDER_ROW_HEIGHT)
       );
     case "agent":
@@ -158,6 +172,12 @@ export interface TranscriptHandle {
  *   stretch's divider for the stretch's `items`: the spawn lines of the
  *   subagents it started. `onScreen` is true while the stretch is in the
  *   visible part of the transcript.
+ * - `layout` is "page" (the default) for a transcript that fills a page,
+ *   with the floating header's clearance above the first block and room
+ *   for the composer below the last. "embedded" is for a transcript in a
+ *   box of its own, such as a dialog: the blocks start at the box's top
+ *   edge, end at its bottom edge, and fill its width. The box gives the
+ *   transcript its height, and the transcript scrolls inside it.
  * - `ref` receives a `TranscriptHandle`.
  */
 export function Transcript({
@@ -171,6 +191,7 @@ export function Transcript({
   onBottomChange,
   lead,
   renderSpawnLines,
+  layout = "page",
   ref,
 }: {
   readonly sessionId: string;
@@ -183,8 +204,16 @@ export function Transcript({
   readonly onBottomChange: (atBottom: boolean) => void;
   readonly lead?: ReactNode;
   readonly renderSpawnLines?: (items: readonly ThreadItem[], onScreen: boolean) => ReactNode;
+  readonly layout?: "page" | "embedded";
   readonly ref?: Ref<TranscriptHandle>;
 }): JSX.Element {
+  "use no memo";
+  // The React Compiler would memoize what this component reads from the
+  // virtualizer, such as the virtual items. The virtualizer is one object
+  // that changes inside while its identity stays the same, so the compiler
+  // would keep showing stale items. The compiler already skips the hook that
+  // creates the virtualizer, but not this component, so it is opted out by
+  // hand.
   const [timezone] = useState(() => resolveBrowserTimezone());
   const today = useStartOfToday();
   // The keys of the work stretches, and of the rows inside them, that the
@@ -201,13 +230,13 @@ export function Transcript({
     });
   }, []);
 
-  // The React Compiler does not memoize this component, because it cannot
-  // see into the virtualizer (see below). These callbacks are memoized by
-  // hand: the virtualizer measures the blocks again whenever `getItemKey`
-  // changes.
+  // The React Compiler does not memoize this component (see the directive
+  // above). These callbacks are memoized by hand: the virtualizer measures
+  // the blocks again whenever `getItemKey` changes.
   // `lead`, when set, is the virtualizer's item 0, and the blocks follow it.
   // The virtualizer asks only for indexes below `count`, which is
   // `blocks.length` plus the lead.
+  const clearance = layout === "page" ? HEADER_CLEARANCE : 0;
   const leadCount = lead === undefined ? 0 : 1;
   const getItemKey = useCallback(
     (index: number) => (index < leadCount ? "lead" : blocks[index - leadCount]!.key),
@@ -220,36 +249,16 @@ export function Transcript({
         : (index === 0 ? 0 : BLOCK_GAP) + estimateBlockHeight(blocks[index - leadCount]!),
     [blocks, leadCount],
   );
-  // The estimated scroll position of the bottom, so the first render mounts
-  // the last blocks rather than the first. Read once, when the virtualizer is
-  // created.
-  const estimateBottomOffset = (): number => {
-    let height = HEADER_CLEARANCE + DEFAULT_END_PADDING;
-    for (let index = 0; index < blocks.length + leadCount; index += 1) {
-      height += estimateSize(index);
-    }
-    return Math.max(0, height - window.innerHeight);
-  };
 
-  const { scrollRef, columnRef, showsScrollbar, noteScroll, scrollToBottom } = useMessageList({
-    composerStack,
-    onBottomChange,
-  });
-
-  // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above and the memoized blocks keep the renders cheap instead.
-  const virtualizer = useVirtualizer({
-    count: blocks.length + leadCount,
-    getScrollElement: () => scrollRef.current,
-    estimateSize,
-    getItemKey,
-    measureElement: measureBlock,
-    overscan: OVERSCAN,
-    scrollMargin: HEADER_CLEARANCE,
-    // The transcript fills the pane, so the window's height is close to its
-    // own until the virtualizer measures it.
-    initialRect: { width: 0, height: window.innerHeight },
-    initialOffset: estimateBottomOffset,
-  });
+  const { virtualizer, scrollRef, columnRef, showsScrollbar, noteScroll, scrollToBottom } =
+    useMessageList({
+      count: blocks.length + leadCount,
+      estimateSize,
+      getItemKey,
+      scrollMargin: clearance,
+      composerStack,
+      onBottomChange,
+    });
 
   useImperativeHandle(ref, () => ({ scrollToBottom }));
 
@@ -260,6 +269,7 @@ export function Transcript({
         return block.senderSessionId === undefined ? (
           <UserMessage
             text={block.text}
+            context={block.context}
             attachments={block.attachments}
             at={block.at}
             timezone={timezone}
@@ -273,6 +283,7 @@ export function Transcript({
           <AgentSentMessage
             senderSessionId={block.senderSessionId}
             text={block.text}
+            context={block.context}
             attachments={block.attachments}
             at={block.at}
             timezone={timezone}
@@ -327,8 +338,8 @@ export function Transcript({
         );
       case "warning":
       case "runtime-notice":
-      case "error":
-        return (
+      case "error": {
+        const note = (
           <RuntimeNote
             kind={block.kind}
             message={block.message}
@@ -337,6 +348,22 @@ export function Transcript({
             today={today}
           />
         );
+        // A warning about MCP servers carries the buttons that fix them. Its code loads the
+        // first time one is drawn, and the line is the plain warning until then.
+        return block.kind === "warning" && block.mcpServers !== undefined ? (
+          <Suspense fallback={note}>
+            <LazyMcpWarningLine
+              entries={block.mcpServers}
+              message={block.message}
+              at={block.at}
+              timezone={timezone}
+              today={today}
+            />
+          </Suspense>
+        ) : (
+          note
+        );
+      }
     }
   };
 
@@ -346,7 +373,10 @@ export function Transcript({
   const visible = virtualizer.range;
   const first = virtualItems[0];
   const last = virtualItems.at(-1);
-  const end = HEADER_CLEARANCE + virtualizer.getTotalSize();
+  const end = clearance + virtualizer.getTotalSize();
+  // Only the embedded layout marks the first message (see FIRST_MESSAGE_ATTRIBUTE).
+  const firstUserBlock = layout === "embedded" ? blocks.findIndex((b) => b.kind === "user") : -1;
+  const firstMessageIndex = firstUserBlock === -1 ? -1 : leadCount + firstUserBlock;
 
   return (
     <section
@@ -355,12 +385,18 @@ export function Transcript({
       aria-label="Transcript"
       onScroll={noteScroll}
     >
-      <div ref={columnRef} className="column tx">
-        {first === undefined || first.start <= HEADER_CLEARANCE ? null : (
-          <div style={{ height: first.start - HEADER_CLEARANCE }} />
+      <div ref={columnRef} className={layout === "page" ? "column tx" : "column tx tx-embedded"}>
+        {first === undefined || first.start <= clearance ? null : (
+          <div style={{ height: first.start - clearance }} />
         )}
         {virtualItems.map(({ index, key }) => (
-          <div key={key} ref={virtualizer.measureElement} data-index={index} className="tx-item">
+          <div
+            key={key}
+            ref={virtualizer.measureElement}
+            data-index={index}
+            {...(index === firstMessageIndex ? { [FIRST_MESSAGE_ATTRIBUTE]: "" } : {})}
+            className="tx-item"
+          >
             {index < leadCount
               ? lead
               : renderBlock(
@@ -371,7 +407,6 @@ export function Transcript({
         ))}
         {last === undefined || last.end >= end ? null : <div style={{ height: end - last.end }} />}
       </div>
-      <div className="transcript-end" />
     </section>
   );
 }

@@ -8,7 +8,7 @@ import {
   type RefObject,
   type ToggleEvent,
 } from "react";
-import { moveMenuFocus } from "./move-menu-focus";
+import { FOCUSABLE_MENU_ITEM_SELECTOR, isMenuFocusKey, moveMenuFocus } from "./move-menu-focus";
 
 /** What `usePopoverMenu` returns: the props of the trigger, the menu and each item. */
 export interface PopoverMenu {
@@ -28,16 +28,21 @@ export interface PopoverMenu {
   /**
    * Returns the props of the item named `item`: its role, its name in
    * `data-item`, and the class that draws it active. A `disabled` item is
-   * marked `aria-disabled`, and the pointer and the arrow keys pass over it.
+   * marked `aria-disabled`, and the pointer and the keys that move the focus
+   * pass over it.
+   * An item that is one of a group of choices passes `checked`, whether it is
+   * the chosen one: its role is then `menuitemradio` and it carries
+   * `aria-checked`.
    */
   readonly buildItemProps: (
     item: string,
-    disabled?: boolean,
+    options?: { readonly disabled?: boolean; readonly checked?: boolean },
   ) => {
-    readonly role: "menuitem";
+    readonly role: "menuitem" | "menuitemradio";
     readonly className: string | undefined;
     readonly "data-item": string;
     readonly "aria-disabled"?: true;
+    readonly "aria-checked"?: boolean;
     readonly onFocus: () => void;
     readonly onPointerEnter: (event: PointerEvent<HTMLElement>) => void;
   };
@@ -47,7 +52,7 @@ export interface PopoverMenu {
 
 /**
  * Returns the props that make a button and an element a popover menu, as
- * Intake's pane menu and the Connections menus draw it.
+ * the Inbox's pane menu and the Connections menus draw it.
  *
  * The menu is the browser's own popover (`popover="auto"`): the browser
  * closes it on Esc and on a click outside it, and CSS places it beside its
@@ -58,7 +63,8 @@ export interface PopoverMenu {
  * - the first item that can be taken gets the focus when the menu opens, so
  *   the arrow keys work at once, and it is drawn active when the menu was
  *   opened by a key;
- * - the arrow keys move the focus, wrapping around at either end;
+ * - the arrow keys move the focus, wrapping around at either end, and Home
+ *   and End move it to the first and the last item;
  * - the item with the focus is drawn active, whether Tab, the arrow keys or
  *   the pointer moved it there, and a disabled item is never drawn active.
  *   The pointer moves the focus to the item it enters, so Enter always takes
@@ -75,9 +81,7 @@ export function usePopoverMenu(): PopoverMenu {
       setActiveItem(null);
       return;
     }
-    const first = event.currentTarget.querySelector<HTMLElement>(
-      "[role='menuitem']:not([aria-disabled='true'])",
-    );
+    const first = event.currentTarget.querySelector<HTMLElement>(FOCUSABLE_MENU_ITEM_SELECTOR);
     first?.focus({ preventScroll: true });
     // The focus above makes the first item active. A menu opened by the
     // pointer starts with no item active, so this replaces that state.
@@ -85,7 +89,7 @@ export function usePopoverMenu(): PopoverMenu {
   };
 
   const handleKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    if (!isMenuFocusKey(event.key)) return;
     event.preventDefault();
     moveMenuFocus(event.currentTarget, event.key);
   };
@@ -100,11 +104,12 @@ export function usePopoverMenu(): PopoverMenu {
       },
     },
     menuProps: { ref: menuRef, id: menuId, onToggle: handleToggle, onKeyDown: handleKeys },
-    buildItemProps: (item, disabled = false) => ({
-      role: "menuitem",
+    buildItemProps: (item, { disabled = false, checked } = {}) => ({
+      role: checked === undefined ? "menuitem" : "menuitemradio",
       className: item === activeItem ? "is-active" : undefined,
       "data-item": item,
       ...(disabled ? { "aria-disabled": true } : {}),
+      ...(checked === undefined ? {} : { "aria-checked": checked }),
       onFocus: () => {
         setActiveItem(disabled ? null : item);
       },

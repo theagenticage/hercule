@@ -8,7 +8,7 @@
  * - the database and its migrations;
  * - the shipped defaults and the master key;
  * - the controller identity;
- * - one provider instance per shipped provider plugin;
+ * - on a fresh install only, the three default Provider Accounts;
  * - the one-time setup URL.
  *
  * Every later boot runs the same sequence. Every step is idempotent, so a
@@ -17,6 +17,7 @@
 import { existsSync, rmSync, writeFileSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Ref from "effect/Ref";
 import type { PlatformError } from "effect/PlatformError";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import type * as Migrator from "effect/sql/Migrator";
@@ -39,17 +40,24 @@ import {
   type SkippedMigrationError,
 } from "./db";
 import { ConnectionService, ConnectionTypes, ConnectionTypesLayer } from "./connections";
+import { refreshStoredStatusesOrLog } from "./external-entities";
 import {
   endStrandedInputsAndReportLostWakeUps,
   ConnectionServiceWithReferencesLayer,
   IngestExecutorLayer,
+  EntityObservationsLayer,
   OpenSignalsLayer,
+  installCardWorkflowsOrLog,
+  ProviderAccountProbingLayer,
   revalidateStoredWorkflowsOrLog,
   RunServiceReferenceLayer,
   DiscussionInputsReferenceLayer,
   SessionEditObserverLayer,
   SessionObserverLayer,
+  TaskServiceWithPortsLayer,
+  WorkflowServiceWithPortsLayer,
   WorkflowValidityObserversLayer,
+  type ProviderAccountProbing,
   type RunServiceReference,
   type DiscussionInputsReference,
 } from "./daemon";
@@ -69,6 +77,7 @@ import {
 import {
   MasterKey,
   masterKeyLayer,
+  openExistingMasterKey,
   Secrets,
   secretsLayer,
   type MasterKeyBackend,
@@ -93,6 +102,9 @@ import {
   type LocalRunnerOptions,
 } from "./runners";
 import { PluginIntake } from "./intake-settings";
+import { RunnerMetricsService, RunnerMetricsServiceLayer } from "./runner-metrics";
+import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "./model-profiles";
+import type { ModelProfileLookup } from "./projects";
 import {
   IngestLoops,
   PluginConfigsLayer,
@@ -102,19 +114,29 @@ import {
   PluginsLayer,
   registry,
 } from "./plugins";
+import { HarnessReleases, HarnessReleasesLayer } from "./harnesses";
 import {
-  ensureProviderInstances,
-  ProviderProbes,
-  ProviderProbesLayer,
-  ProviderService,
-  ProviderServiceLayer,
-} from "./providers";
+  HarnessAccounts,
+  HarnessAccountsLayer,
+  ModelCatalogs,
+  ModelCatalogsLayer,
+  ProviderAccountProbes,
+  ProviderAccountProbesLayer,
+  ProviderAccountRunners,
+  ProviderAccountRunnersLayer,
+  ProviderAccountService,
+  ProviderAccountServiceLayer,
+  ProviderKeyRequestsLayer,
+} from "./provider-accounts";
 import { seed } from "./seed";
+import { makeTelemetryLayer } from "./telemetry";
+import { readSetupComplete } from "./setup";
 import { SessionService, SessionServiceLayer } from "./sessions";
 import { GithubSkillSources, GithubSkillSourcesLayer } from "./skills";
+import { AccountUsage, AccountUsageLayer } from "./usage";
 import { Settings, SettingsLayer, type SettingError } from "./settings";
 import { RunWorkspaceStepActivityLayer } from "./runs";
-import type { WorkflowValidity } from "./workflows";
+import { SHIPPED_WORKFLOWS, type WorkflowValidity } from "./workflows";
 import { WorkspaceService, WorkspaceServiceLayer, type WorkspaceStepActivity } from "./workspaces";
 import type { AgentObserver } from "./agents";
 
@@ -169,11 +191,7 @@ const ensureSetupUrl = (
 ): Effect.Effect<string | undefined, SqlError | HerculeHomeError, SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
-    const rows = yield* sql<{
-      readonly completed_at: string | null;
-    }>`SELECT completed_at FROM setup_state WHERE singleton = 1`;
-
-    if (rows[0]?.completed_at != null) {
+    if (yield* readSetupComplete) {
       // Once setup is complete no token is outstanding, so clear both the file
       // and the row: the column holds a hash only while a token is outstanding.
       yield* withTransaction(
@@ -241,6 +259,7 @@ export interface BootOptions {
  */
 export type ControllerServices =
   | SqlClient.SqlClient
+  | AccountUsage
   | ControllerIdentity
   | Secrets
   | MasterKey
@@ -259,8 +278,15 @@ export type ControllerServices =
   | IngestLoops
   | ConnectionTypes
   | RunnerConnections
-  | ProviderProbes
-  | ProviderService
+  | RunnerMetricsService
+  | HarnessReleases
+  | HarnessAccounts
+  | ModelCatalogs
+  | ModelProfileLookup
+  | ProviderAccountProbes
+  | ProviderAccountRunners
+  | ProviderAccountProbing
+  | ProviderAccountService
   | SessionService
   | WorkspaceService
   | WorkspaceStepActivity
@@ -302,6 +328,21 @@ export const bootWith = <A, E>(
     // If the file did not exist before the driver created it, there is nothing
     // for a pre-migration copy to preserve.
     const databaseExisted = existsSync(paths.databaseFile);
+    // Filled by the set-up below, which opens an existing Master Key before the
+    // migrations, and read by the Master Key layer so the key is read once.
+    const openedMasterKey = yield* Ref.make<CryptoKey | undefined>(undefined);
+    // The local runner starts after the layers are built, and the layers that
+    // sweep the fleet read its id on every sweep. The boot sets the Ref once
+    // the runner is up; until then `LocalRunnerId` reads no id. The sweeps run
+    // from the server `use` starts, which is after the Ref is set, so the
+    // first arrival already finds the runner. Its id can still be unknown for
+    // a moment on the very first start, while the child is joining; the
+    // choice then falls to the first runner that can serve, which is the local
+    // runner itself when it is the only one connected.
+    const startedLocalRunner = yield* Ref.make<LocalRunner | undefined>(undefined);
+    const localRunnerIdLayer = Layer.succeed(LocalRunnerId, {
+      read: () => Ref.getUnsafe(startedLocalRunner)?.runnerId(),
+    });
 
     // The secrets repository is merged into the output rather than only
     // provided to the layers above it: `secret.*` are public operations, so
@@ -322,15 +363,26 @@ export const bootWith = <A, E>(
           CredentialsLayer,
           AuditLogLayer,
           PlatformEventsLayer,
+          // Provider Accounts declares this port and cannot import the Model
+          // Profiles that implement it.
+          ModelProfileMembershipLayer,
+          // Projects declares this port as well, to check that a profile exists.
+          ModelProfileLookupLayer,
           JoinTokensLayer,
           PromotionTokensLayer,
           GithubSkillSourcesLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+          ProviderKeyRequestsLayer.pipe(Layer.provide(FetchHttpClient.layer)),
+          AccountUsageLayer,
           PromotionStateLayer.pipe(
             Layer.provide(Layer.mergeAll(controllerIdentityLayer, AuditLogLayer)),
           ),
         ).pipe(
           Layer.provideMerge(
-            secretsLayer.pipe(Layer.provideMerge(masterKeyLayer(options.masterKeyBackend))),
+            secretsLayer.pipe(
+              Layer.provideMerge(
+                masterKeyLayer(options.masterKeyBackend, undefined, openedMasterKey),
+              ),
+            ),
           ),
         ),
       ),
@@ -339,26 +391,41 @@ export const bootWith = <A, E>(
     /**
      * The plugin host on top of those repositories: it reads secrets and
      * appends to the audit log, so it is built on them rather than merged
-     * beside them. It is also the catalog every layer above reads a provider's
+     * beside them. It is also the catalog every layer above reads a harness's
      * definition from, which is why the fleet is built on it. Each
      * Connection's ingest runs on a fiber of the controller daemon's Ingest
      * Executor, which is built below the host so that it is released after
      * the host has closed every ingest at shutdown.
      */
     const catalog = PluginHostLayer.pipe(
-      Layer.provide([IngestExecutorLayer, OpenSignalsLayer]),
+      Layer.provide([IngestExecutorLayer, OpenSignalsLayer, EntityObservationsLayer]),
       Layer.provideMerge(ConnectionTypesLayer),
       Layer.provideMerge(PluginConfigsLayer),
       Layer.provideMerge(repositories),
     );
 
     /**
-     * One connection map and one probe driver per process: the socket route,
-     * the controller daemon and the sweep after a hello all use the same
-     * `RunnerConnections`.
+     * One connection map and one set of awaited device logins per process:
+     * the socket route, the controller daemon and the sweep after a hello all
+     * use the same `RunnerConnections`, and the sign-in operations and the
+     * inbound driver use the same `ProviderAccountProbing`.
      */
-    const withFleet = ProviderProbesLayer.pipe(
+    const withFleet = ProviderAccountProbingLayer.pipe(
+      // Probing reads the catalogs that the provider's own API lists, which
+      // the provider account service does.
+      Layer.provideMerge(ProviderAccountServiceLayer),
+      // Provides the observer ports that validate the stored workflows
+      // again, and `WorkflowValidity` itself. It sits here because the
+      // provider account service above needs its port, and the services
+      // built on this stack need the others.
+      Layer.provideMerge(WorkflowValidityObserversLayer),
+      Layer.provideMerge(ProviderAccountProbesLayer),
+      Layer.provideMerge(ModelCatalogsLayer),
+      Layer.provideMerge(ProviderAccountRunnersLayer),
+      Layer.provideMerge(localRunnerIdLayer),
+      Layer.provideMerge(HarnessAccountsLayer),
       Layer.provideMerge(RunnerConnectionsLayer),
+      Layer.provideMerge(RunnerMetricsServiceLayer),
       Layer.provideMerge(catalog),
     );
 
@@ -374,6 +441,8 @@ export const bootWith = <A, E>(
       Layer.provide(SessionObserverLayer),
       Layer.provide(SessionEditObserverLayer),
       Layer.provide(ConversationMessagesLayer),
+      // A reopened Thread joins a Task through the task service.
+      Layer.provide(TaskServiceWithPortsLayer),
     );
 
     /**
@@ -392,16 +461,17 @@ export const bootWith = <A, E>(
      * The session service's edit observer reaches `DiscussionInputs` the same
      * way, through `DiscussionInputsReference`.
      *
-     * The plugin and connection services report the changes that can make a
-     * stored workflow invalid through their observer ports, which the
-     * workflows domain's `WorkflowValidity` implements. The workflows domain
-     * depends on both domains, so they are joined here too. The observers are
-     * merged, so the agent service, built with the operations, finds its own
-     * observer, and the boot finds `WorkflowValidity`.
+     * The plugin, connection, agent and provider account services report the
+     * changes that can make a stored workflow invalid through their observer
+     * ports, which the workflows domain's `WorkflowValidity` implements. The
+     * workflows domain depends on these domains, so they are joined in the
+     * stack below, which exposes the observers to the agent service built
+     * with the operations and `WorkflowValidity` to the boot. The boot step
+     * that installs the shipped workflows needs the workflow service and the
+     * task service, which the HTTP routes build again for themselves.
      */
     const withPlugins = Layer.mergeAll(
       PluginsLayer,
-      ProviderServiceLayer,
       sessionService,
       ConnectionServiceWithReferencesLayer,
     ).pipe(
@@ -409,7 +479,9 @@ export const bootWith = <A, E>(
       Layer.provideMerge(RunWorkspaceStepActivityLayer),
       Layer.provideMerge(RunServiceReferenceLayer),
       Layer.provideMerge(DiscussionInputsReferenceLayer),
-      Layer.provideMerge(WorkflowValidityObserversLayer),
+      Layer.provideMerge(WorkflowServiceWithPortsLayer),
+      Layer.provideMerge(TaskServiceWithPortsLayer),
+      Layer.provideMerge(HarnessReleasesLayer.pipe(Layer.provide(FetchHttpClient.layer))),
       Layer.provideMerge(withFleet),
     );
 
@@ -453,16 +525,23 @@ export const bootWith = <A, E>(
 
         // After the migrations and the identity, because a plugin that
         // activates may read its own state and secrets. Before the runner,
-        // because a session's provider is looked up in the catalog.
+        // because a session's harness is looked up in the catalog.
         yield* Effect.flatMap(PluginHost, (host) => host.boot(options.plugins ?? registry));
+        // After the plugins start, because their status tables are read from
+        // the catalog. A plugin may have changed while the controller was
+        // stopped. A failure is logged and the boot goes on.
+        yield* refreshStoredStatusesOrLog;
         // After the plugins start, because a stored workflow is judged
         // against the actions, event kinds and Connection types of the active
         // plugins. A plugin may have changed while the controller was stopped.
         // A failure is logged and the boot goes on.
         yield* revalidateStoredWorkflowsOrLog;
-        // After the catalog, because a provider instance is created only for
-        // a provider this build registered.
-        yield* ensureProviderInstances;
+        // After the plugins start, because a shipped source is validated
+        // against their actions and event kinds, and after the stored
+        // workflows were validated again, so a source that cannot be
+        // installed is reported on its own. Before ingest starts, which
+        // happens with the server. A failure is logged and the boot goes on.
+        yield* installCardWorkflowsOrLog(SHIPPED_WORKFLOWS);
       }
 
       const url = yield* ensureSetupUrl(paths, bootstrap);
@@ -478,24 +557,33 @@ export const bootWith = <A, E>(
               logLevel: bootstrap.logLevel,
             });
 
+      yield* Ref.set(startedLocalRunner, localRunner);
       return { paths, identityId: record.id, setupUrl: url, localRunner } satisfies BootOutcome;
     });
 
-    return yield* Effect.scoped(
-      Effect.flatMap(steps, (outcome) =>
-        // Provided here, next to the local runner the boot started, so a
-        // service built in `use` reads the id from the running child.
-        Effect.provideService(use(outcome), LocalRunnerId, {
-          read: () => outcome.localRunner?.runnerId(),
-        }),
-      ),
-    ).pipe(
+    return yield* Effect.scoped(Effect.flatMap(steps, use)).pipe(
       Effect.provide(
         withPlugins.pipe(
           Layer.provideMerge(
             // The migrations run while the database opens, on the writer alone:
             // see `openDatabase`.
-            openDatabase(paths, migrate({ backupsDir: paths.backupsDir, databaseExisted })),
+            openDatabase(
+              paths,
+              // An existing Master Key is opened first, because a migration
+              // encrypts secrets again under it (spec 04, boot order). A key
+              // that cannot be opened stops the boot before the database
+              // changes. A machine with no key yet gets one after the
+              // migrations, in `masterKeyLayer`.
+              Effect.gen(function* () {
+                const masterKey = yield* openExistingMasterKey(options.masterKeyBackend);
+                yield* Ref.set(openedMasterKey, masterKey);
+                return yield* migrate({
+                  backupsDir: paths.backupsDir,
+                  databaseExisted,
+                  ...(masterKey === undefined ? {} : { masterKey }),
+                });
+              }),
+            ),
           ),
         ),
       ),
@@ -512,7 +600,8 @@ export const bootWith = <A, E>(
   // `<home>/logs/controller.log` too. A failure after that point is logged
   // there as well as printed, because a service unit keeps only the log; a
   // failure before it, such as a `config.toml` that does not parse, reaches
-  // only stderr.
+  // only stderr. The telemetry layer is installed at the same point, for the
+  // same reason: the migrations and the boot are traced too.
   const sequenceWithProcessLog = Effect.gen(function* () {
     const paths = yield* HerculeHome;
     const bootstrap = yield* BootstrapConfig;
@@ -520,7 +609,10 @@ export const bootWith = <A, E>(
       sequence.pipe(
         Effect.tapCause((cause) => Effect.logError("The controller stopped on a failure", cause)),
       ),
-      makeProcessLogLayer({ home: paths.home, role: "controller", level: bootstrap.logLevel }),
+      Layer.mergeAll(
+        makeProcessLogLayer({ home: paths.home, role: "controller", level: bootstrap.logLevel }),
+        makeTelemetryLayer(bootstrap.otlpEndpoint),
+      ),
     );
   });
 

@@ -419,7 +419,7 @@ const SIGNAL_WAITING_RUN: Run = {
 const IMPLEMENT_SESSION = buildSession({
   id: IMPLEMENT_SESSION_ID,
   permissionProfileId: "0199c0ff-aaaa-7000-8000-000000000001",
-  instanceId: "0199c0ff-bbbb-7000-8000-000000000001",
+  providerAccountId: "0199c0ff-bbbb-7000-8000-000000000001",
   runnerId: "0199c0ff-cccc-7000-8000-000000000001",
   title: `${WORKFLOW_NAME} · implement`,
   status: "idle",
@@ -1240,7 +1240,7 @@ describe("A run's page > its runner and workspace", () => {
 });
 
 describe("A run's page > a text generation step", () => {
-  const REASON = "No provider instance can generate text";
+  const REASON = "No provider account can generate text";
   /**
    * The running run with a text generation step `screen` in place of
    * `start`, running while its call waits for a runner.

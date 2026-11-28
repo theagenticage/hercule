@@ -8,6 +8,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Runner, Session } from "@hercule/contract";
 import { buildHeadline } from "@hercule/client-core";
+import { ANTHROPIC_IDENTITY, buildProviderAccount } from "@hercule/client-core/testing";
 import { readPageText, renderApp, stubApi, type Handler } from "../../../app/testing";
 
 /**
@@ -23,36 +24,10 @@ const getScreenCreateThreadLink = (): HTMLElement =>
 const ZONE = "Europe/Amsterdam";
 const NOW = new Date("2026-09-08T12:00:00.000Z");
 
-const DECLARED = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-} as const;
-
 const CLAUDE_ID = "01a06d02-1000-7000-8000-000000000001";
 
-const buildClaudeCodeInstance = () => ({
-  id: CLAUDE_ID,
-  providerId: "claude-code",
-  name: "Claude Code",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  secretFields: [],
-  declared: DECLARED,
-  snapshots: [],
-  createdAt: "2026-09-05T09:00:00.000Z",
-  updatedAt: "2026-09-05T09:00:00.000Z",
-});
+const buildClaudeCodeProviderAccount = () =>
+  buildProviderAccount({ ...ANTHROPIC_IDENTITY, id: CLAUDE_ID }, []);
 
 /** The runner every session here runs on. It is online, so a queued session waits for a free slot. */
 const MOSS: Runner = {
@@ -64,7 +39,8 @@ const MOSS: Runner = {
   version: "0.4.2",
   labels: [],
   facts: null,
-  watermark: null,
+  metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 ** 3,
   lastSeenAt: "2026-09-08T11:59:00.000Z",
@@ -84,7 +60,8 @@ const BASE_SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: CLAUDE_ID,
+  providerAccountId: CLAUDE_ID,
+  harnessId: "claude-code/claude-code",
   runnerId: MOSS.id,
   workspaceId: null,
   projectId: null,
@@ -100,6 +77,7 @@ const BASE_SESSION: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-08T09:05:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 const buildSession = (overrides: Partial<Session> & { id: string }): Session => ({
@@ -243,7 +221,7 @@ const buildController = (
     },
   },
   "GET /api/v1/sessions": { body: { items: sessions } },
-  "GET /api/v1/providers": { body: [buildClaudeCodeInstance()] },
+  "GET /api/v1/provider-accounts": { body: [buildClaudeCodeProviderAccount()] },
   "GET /api/v1/runners": { body: { items: [MOSS] } },
   // The sidebar's Assistants group reads this; no test here has an assistant.
   "GET /api/v1/assistants": { body: { items: [] } },
@@ -347,7 +325,7 @@ describe("All sessions", () => {
     expect(readPageText(findLane("Idle"))).not.toContain(idleWaiting.title);
   });
 
-  it("shows one row per session, with its title and provider display name", async () => {
+  it("shows one row per session, with its title and account name", async () => {
     await openApp(THREE_STATUSES);
 
     // The sidebar's threads face, also shown on /sessions, lists every
@@ -358,8 +336,8 @@ describe("All sessions", () => {
         expect(onScreen.length).toBeGreaterThanOrEqual(1);
       });
     }
-    // "Claude Code" is the provider display name for every session's instanceId.
-    expect(screen.getAllByText("Claude Code").length).toBeGreaterThanOrEqual(THREE_STATUSES.length);
+    // "Anthropic" is the account name for every session's providerAccountId.
+    expect(screen.getAllByText("Anthropic").length).toBeGreaterThanOrEqual(THREE_STATUSES.length);
   });
 
   it("shows the sessions that answer a conversation in the Assistants lane and in no other", async () => {

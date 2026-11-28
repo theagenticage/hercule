@@ -14,7 +14,7 @@ import {
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   FIXTURE_SUBAGENT,
   renderApp,
   setVisibility,
@@ -103,7 +103,7 @@ afterEach(() => {
 /** Starts the app signed in at `path`, with the delegating thread's reads and its interrupt. */
 const openApp = async (path: string) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
     ...buildThreadHandlers(THREAD),
     ...buildThreadHandlers(THREAD_FIXTURES.failed),
     [`POST ${INTERRUPT_PATH}`]: { body: THREAD.session },
@@ -149,11 +149,10 @@ const fakeClockTimers = (): void => {
 
 /**
  * Returns the side pane, once its lazy chunk has loaded and it is drawn. The
- * first time has taken longer than the default second while the whole suite
- * runs (1.8 s was seen), so the wait is 3 s, under the test's own 5 s limit.
+ * first time takes seconds when every core is busy.
  */
 const findPane = (): Promise<HTMLElement> =>
-  screen.findByRole("complementary", { name: "Side pane" }, { timeout: 3000 });
+  screen.findByRole("complementary", { name: "Side pane" });
 
 /** Returns the row of the subagent named `name`. */
 const findRow = async (name: string): Promise<HTMLElement> =>

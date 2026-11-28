@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Schema } from "effect";
+import { Effect, Schema, Struct } from "effect";
 import {
   AdapterFailed,
   ControllerToRunner,
@@ -7,12 +7,16 @@ import {
   LocalAnnouncement,
   LocalEnrolment,
   MAX_CHECKOUTS,
+  MAX_DISK_USAGE_ERROR_LENGTH,
   MAX_FRAME_BYTES,
+  MAX_MEASURED_WORKSPACES,
   MAX_LOGIN_CODE_SECONDS,
+  MAX_PROBE_MODELS,
   MAX_REPOSITORY_SKILLS,
   MAX_SKILL_DESCRIPTION_LENGTH,
   MAX_SKIPPED_REASON_LENGTH,
   PROTOCOL_VERSION,
+  RunnerFacts,
   RunnerToController,
   Sequenced,
   type ControllerToRunner as ControllerMessage,
@@ -47,7 +51,11 @@ const listTags = (union: typeof RunnerToController | typeof ControllerToRunner):
       ? (member.members as ReadonlyArray<{ fields: { _tag: { literal: string } } }>).map(
           (nested) => nested.fields._tag.literal,
         )
-      : [member.fields._tag.literal],
+      : // A frame with a key renamed on the wire is a transformation, and its
+        // struct is the decoded side.
+        "fields" in member
+        ? [member.fields._tag.literal]
+        : [member.to.fields._tag.literal],
   );
 
 const facts = {
@@ -59,15 +67,15 @@ const facts = {
     { name: "git", version: "2.50.1", path: "/usr/bin/git" },
     { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
   ],
-  providers: [
+  harnesses: [
     { name: "claude", present: true, path: "/usr/local/bin/claude" },
     { name: "codex", present: false },
   ],
-  adapters: ["claude-code"],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 } as const;
 
-const watermark = {
+const metrics = {
   diskFreeBytes: 42949672960,
   availableMemoryBytes: 8589934592,
 } as const;
@@ -91,7 +99,23 @@ const controllerHello = {
   signature: "c2lnbmF0dXJl",
 } as const;
 
-/** What one runner found out about one instance, with every optional key set. */
+/** What one runner found out about one Provider Account, with every optional key set. */
+const usageWindow = {
+  kind: "window",
+  window: "five-hour",
+  usedPercent: 42.5,
+  resetsAt: "2026-10-31T15:00:00.000Z",
+  hit: false,
+  takenAt: "2026-10-31T10:00:00.000Z",
+} as const;
+
+const usageCredit = {
+  kind: "credit",
+  remaining: 12.5,
+  limit: null,
+  takenAt: "2026-10-31T10:00:00.000Z",
+} as const;
+
 const probeResult = {
   harnessVersion: "2.1.263",
   auth: {
@@ -117,14 +141,32 @@ const probeResult = {
       ],
     },
   ],
+  usage: null,
 } as const;
 
 const REQUEST_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c72";
-const INSTANCE_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73";
+const PROVIDER_ACCOUNT_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c73";
+
+/** A per-machine account's `HarnessAccount`: it has no credential. */
+const perMachineAccount = {
+  providerAccountId: PROVIDER_ACCOUNT_ID,
+  harnessHome: `providers/${PROVIDER_ACCOUNT_ID}`,
+  modelArgument: "{model}",
+  credentialVariables: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
+} as const;
+
+/** A key account's `HarnessAccount`, with the optional credential set. */
+const harnessAccount = {
+  providerAccountId: PROVIDER_ACCOUNT_ID,
+  harnessHome: `providers/homes/${PROVIDER_ACCOUNT_ID}/pi/pi`,
+  modelArgument: "zai/{model}",
+  credentialVariables: ["ZAI_API_KEY"],
+  credential: { variable: "ZAI_API_KEY", value: "sk-test" },
+} as const;
 const SESSION_ID = "0199c3f4-1f2a-7c31-9f0e-6d2b8a4e5c74";
 
 const spec = {
-  instanceId: INSTANCE_ID,
+  providerAccountId: PROVIDER_ACCOUNT_ID,
   workspaceId: null,
   modelSelection: { model: "sonnet", options: {} },
   accessMode: "approval-required",
@@ -147,8 +189,40 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   runnerHello,
   { _tag: "pong" },
   { _tag: "factsReport", facts },
-  { _tag: "watermarkReport", watermark },
-  { _tag: "probeReport", requestId: REQUEST_ID, instanceId: INSTANCE_ID, result: probeResult },
+  { _tag: "watermarkReport", metrics },
+  {
+    _tag: "diskUsageReport",
+    diskUsage: {
+      workspaces: [
+        {
+          workspaceId: WORKSPACE_ID,
+          diskUsage: {
+            sizeBytes: 2_400_000_000,
+            freesBytes: 900_000_000,
+            measuredAt: "2026-11-03T10:00:00.000Z",
+          },
+          error: null,
+        },
+        {
+          workspaceId: CHECKOUT_ID,
+          diskUsage: null,
+          error: "Measuring took longer than 10 minutes",
+        },
+      ],
+      truncated: false,
+      runner: {
+        repositoryCacheBytes: 3_100_000_000,
+        harnessHomeBytes: 420_000_000,
+        measuredAt: "2026-11-03T10:00:00.000Z",
+      },
+    },
+  },
+  {
+    _tag: "probeReport",
+    requestId: REQUEST_ID,
+    providerAccountId: PROVIDER_ACCOUNT_ID,
+    result: probeResult,
+  },
   { _tag: "installResult", requestId: REQUEST_ID, ok: false, message: "curl: (22) not found" },
   {
     _tag: "loginUrl",
@@ -173,6 +247,11 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
     sessionId: SESSION_ID,
     editedFiles: [{ resourceId: "repo-1", path: "src/main.ts" }],
   },
+  {
+    _tag: "accountUsageReported",
+    sessionId: SESSION_ID,
+    readings: [usageWindow, usageCredit],
+  },
   { _tag: "githubTokenRequest", requestId: REQUEST_ID, sessionToken: "a-session-token" },
   { _tag: "sessionInputResult", requestId: REQUEST_ID, ok: true, delivery: "steered" },
   {
@@ -194,7 +273,13 @@ const runnerMessages: ReadonlyArray<RunnerMessage> = [
   },
   {
     _tag: "sessionsReport",
-    sessions: [{ sessionId: SESSION_ID, nativeSessionId: "native-1", instanceId: INSTANCE_ID }],
+    sessions: [
+      {
+        sessionId: SESSION_ID,
+        nativeSessionId: "native-1",
+        providerAccountId: PROVIDER_ACCOUNT_ID,
+      },
+    ],
   },
   {
     _tag: "workspaceReport",
@@ -273,22 +358,32 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   {
     _tag: "probeRequest",
     requestId: REQUEST_ID,
-    instanceId: INSTANCE_ID,
-    providerId: "claude-code",
-    config: {},
-    secrets: {},
+    harnessId: "pi/pi",
+    harnessAccount,
+    readUsage: false,
   },
-  { _tag: "installRequest", requestId: REQUEST_ID, providerId: "claude-code" },
-  { _tag: "loginStart", requestId: REQUEST_ID, instanceId: INSTANCE_ID, providerId: "claude-code" },
-  { _tag: "loginCode", requestId: REQUEST_ID, instanceId: INSTANCE_ID, code: "the-pasted-code" },
+  { _tag: "installRequest", requestId: REQUEST_ID, harnessId: "claude-code/claude-code" },
+  {
+    _tag: "loginStart",
+    requestId: REQUEST_ID,
+    harnessId: "claude-code/claude-code",
+    // A per-machine account has no credential.
+    harnessAccount: perMachineAccount,
+    method: "sign-in",
+  },
+  {
+    _tag: "loginCode",
+    requestId: REQUEST_ID,
+    providerAccountId: PROVIDER_ACCOUNT_ID,
+    code: "the-pasted-code",
+  },
   {
     _tag: "sessionStart",
     requestId: "0199e0e7-0000-7000-8000-00000000000d",
     sessionId: SESSION_ID,
     input: { text: "fix the login bug" },
-    providerId: "claude-code",
-    config: {},
-    secrets: {},
+    harnessId: "pi/pi",
+    harnessAccount,
     spec,
     token: "a-session-token",
   },
@@ -336,6 +431,13 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
     workspaceId: WORKSPACE_ID,
     requestId: REQUEST_ID,
     discardChanges: true,
+    archivedSessions: [
+      {
+        harnessId: "claude-code",
+        harnessHome: "providers/homes/0199e0e7/anthropic/claude",
+        nativeSessionId: "0199e0e7-1111-7222-8333-944455556666",
+      },
+    ],
   },
   { _tag: "workspaceDetach", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
   { _tag: "workspaceInspect", workspaceId: WORKSPACE_ID, requestId: REQUEST_ID },
@@ -388,10 +490,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
   {
     _tag: "textGenerationRequest",
     requestId: REQUEST_ID,
-    instanceId: INSTANCE_ID,
-    providerId: "claude-code",
-    config: {},
-    secrets: {},
+    harnessId: "pi/pi",
+    harnessAccount,
     spec: {
       model: "haiku",
       instructions: "Write a short title for this message.",
@@ -407,8 +507,8 @@ const controllerMessages: ReadonlyArray<ControllerMessage> = [
 ];
 
 describe("the protocol version", () => {
-  it("is 13, the version that added the wait and image generation item kinds", () => {
-    expect(PROTOCOL_VERSION).toBe(13);
+  it("is 19, the version that added the catalog models of a session start", () => {
+    expect(PROTOCOL_VERSION).toBe(19);
   });
 });
 
@@ -484,7 +584,7 @@ describe("the runner-to-controller catalogue", () => {
     const report = {
       _tag: "probeReport",
       requestId: REQUEST_ID,
-      instanceId: INSTANCE_ID,
+      providerAccountId: PROVIDER_ACCOUNT_ID,
       result: { ...probeResult, models: [omitKey(model, "imageInput")] },
     };
     expect(Schema.decodeUnknownSync(RunnerToController)(report)).toMatchObject({
@@ -497,7 +597,7 @@ describe("the runner-to-controller catalogue", () => {
     const reportWith = (imageInput: unknown) => ({
       _tag: "probeReport",
       requestId: REQUEST_ID,
-      instanceId: INSTANCE_ID,
+      providerAccountId: PROVIDER_ACCOUNT_ID,
       result: { ...probeResult, models: [{ ...model, imageInput }] },
     });
     expect(
@@ -509,6 +609,55 @@ describe("the runner-to-controller catalogue", () => {
       result: { models: [{ imageInput: null }] },
     });
     expect(decodeFromRunner(reportWith({ maxBytes: 0 }))._tag).toBe("Failure");
+  });
+
+  it("carries up to MAX_PROBE_MODELS models on a probe result, and refuses more", () => {
+    const [model] = probeResult.models;
+    const reportWith = (count: number) => ({
+      _tag: "probeReport",
+      requestId: REQUEST_ID,
+      providerAccountId: PROVIDER_ACCOUNT_ID,
+      result: { ...probeResult, models: Array.from({ length: count }, () => model) },
+    });
+    // 68 is how many models pi lists for OpenCode Zen, more than the 64 of every other list.
+    expect(decodeFromRunner(reportWith(68))._tag).toBe("Success");
+    expect(decodeFromRunner(reportWith(MAX_PROBE_MODELS))._tag).toBe("Success");
+    expect(decodeFromRunner(reportWith(MAX_PROBE_MODELS + 1))._tag).toBe("Failure");
+  });
+
+  it("carries usage readings on a probe result and on a session's usage report", () => {
+    const readings = [usageWindow, usageCredit];
+    const probed = {
+      _tag: "probeReport",
+      requestId: REQUEST_ID,
+      providerAccountId: PROVIDER_ACCOUNT_ID,
+      result: { ...probeResult, usage: readings },
+    };
+    expect(Schema.decodeUnknownSync(RunnerToController)(probed)).toEqual(probed);
+    expect(decodeFromRunner({ ...probed, result: omitKey(probed.result, "usage") })._tag).toBe(
+      "Failure",
+    );
+  });
+
+  it.each([
+    ["a percentage above 100", { ...usageWindow, usedPercent: 100.1 }],
+    ["a negative percentage", { ...usageWindow, usedPercent: -1 }],
+    ["a percentage that is not finite", { ...usageWindow, usedPercent: Number.NaN }],
+    ["a window with another name", { ...usageWindow, window: "daily" }],
+    ["a reset time that is not a timestamp", { ...usageWindow, resetsAt: "tomorrow" }],
+    ["a negative credit", { ...usageCredit, remaining: -1 }],
+    ["a credit limit of zero", { ...usageCredit, limit: 0 }],
+  ])("refuses a usage report with %s", (_name, reading) => {
+    expect(
+      decodeFromRunner({ _tag: "accountUsageReported", sessionId: SESSION_ID, readings: [reading] })
+        ._tag,
+    ).toBe("Failure");
+  });
+
+  it("refuses a usage report with no readings", () => {
+    expect(
+      decodeFromRunner({ _tag: "accountUsageReported", sessionId: SESSION_ID, readings: [] })._tag,
+    ).toBe("Failure");
   });
 
   it("round-trips a repository skills inspection that failed", () => {
@@ -532,6 +681,59 @@ describe("the runner-to-controller catalogue", () => {
     expect(
       decodeFromRunner({ ...listed, outcome: { status: "listed", skills: [], skipped: [] } })._tag,
     ).toBe("Failure");
+  });
+
+  describe("disk usage report", () => {
+    const entryWith = (error: string, index = 0) => ({
+      workspaceId: `${"w".repeat(63)}${String(index % 10)}`,
+      diskUsage: {
+        sizeBytes: Number.MAX_SAFE_INTEGER,
+        freesBytes: Number.MAX_SAFE_INTEGER,
+        measuredAt: "2026-11-03T10:00:00.000Z",
+      },
+      error,
+    });
+    const reportWith = (entries: ReadonlyArray<ReturnType<typeof entryWith>>) => ({
+      _tag: "diskUsageReport",
+      diskUsage: { workspaces: entries, truncated: true, runner: null },
+    });
+
+    // JSON writes a three-byte character as it is, a quote or backslash as two
+    // bytes, and a four-byte character as it is (two UTF-16 units). The widest
+    // text per UTF-16 unit is therefore the three-byte one.
+    it.each([
+      ["three-byte characters", "\u6F22".repeat(MAX_DISK_USAGE_ERROR_LENGTH)],
+      ["four-byte characters", "\u{1F600}".repeat(MAX_DISK_USAGE_ERROR_LENGTH / 2)],
+      ["characters JSON escapes", '"\\'.repeat(MAX_DISK_USAGE_ERROR_LENGTH / 2)],
+      ["line separators", "\u2028".repeat(MAX_DISK_USAGE_ERROR_LENGTH)],
+    ])("fits the largest report in a frame with %s", (_name, error) => {
+      const report = reportWith(
+        Array.from({ length: MAX_MEASURED_WORKSPACES }, (_, index) => entryWith(error, index)),
+      );
+      const encoded = JSON.stringify(Schema.encodeUnknownSync(RunnerToController)(report));
+      expect(Buffer.byteLength(encoded, "utf8")).toBeLessThan(MAX_FRAME_BYTES);
+    });
+
+    it.each([
+      ["longer than the cap", "x".repeat(MAX_DISK_USAGE_ERROR_LENGTH + 1)],
+      ["a lone high surrogate", "\ud800"],
+      ["a lone low surrogate", "a\udc00b"],
+      ["a lone surrogate before a pair", "\ud800\u{1F600}"],
+      ["a newline", "line one\nline two"],
+      ["a C0 control", "\u0001"],
+      ["DEL", "\u007f"],
+      ["a C1 control", "\u009b"],
+      ["a right-to-left override", "\u202e"],
+      ["a bidirectional isolate", "\u2066"],
+    ])("refuses a disk usage error with %s", (_name, error) => {
+      expect(decodeFromRunner(reportWith([entryWith(error)]))._tag).toBe("Failure");
+    });
+
+    it("accepts a disk usage error of well-formed text, emoji included", () => {
+      expect(decodeFromRunner(reportWith([entryWith("Cannot read \u6F22 \u{1F600}")]))._tag).toBe(
+        "Success",
+      );
+    });
   });
 
   it("fits the largest repository skills inspection in a frame", () => {
@@ -647,6 +849,34 @@ describe("the controller-to-runner catalogue", () => {
   });
 });
 
+describe("the login frames", () => {
+  const loginStart = {
+    _tag: "loginStart",
+    requestId: REQUEST_ID,
+    harnessId: "claude-code/claude-code",
+    harnessAccount: perMachineAccount,
+    method: "create-token",
+  };
+
+  it("needs the method, and refuses a method that is not a login method", () => {
+    expect(decodeFromController(loginStart)._tag).toBe("Success");
+    expect(decodeFromController(omitKey(loginStart, "method"))._tag).toBe("Failure");
+    expect(decodeFromController({ ...loginStart, method: "oauth" })._tag).toBe("Failure");
+  });
+
+  it("carries a token on a login result, and refuses an empty one", () => {
+    const result = {
+      _tag: "loginResult",
+      requestId: REQUEST_ID,
+      ok: true,
+      token: "sk-ant-oat01-x",
+    };
+    expect(decodeFromRunner(result)._tag).toBe("Success");
+    expect(decodeFromRunner({ ...result, token: "" })._tag).toBe("Failure");
+    expect(decodeFromRunner(omitKey(result, "token"))._tag).toBe("Success");
+  });
+});
+
 describe("the runner hello", () => {
   it.each(["protocolVersion", "capabilities", "binaryVersion", "nonce", "facts"])(
     "rejects a hello without %s",
@@ -669,10 +899,10 @@ describe("the runner hello", () => {
   });
 });
 
-describe("the watermark a runner reports", () => {
+describe("the Runner Metrics a runner reports", () => {
   it.each(["diskFreeBytes", "availableMemoryBytes"])("rejects a report without %s", (key) => {
     expect(
-      decodeFromRunner({ _tag: "watermarkReport", watermark: omitKey(watermark, key) })._tag,
+      decodeFromRunner({ _tag: "watermarkReport", watermark: omitKey(metrics, key) })._tag,
     ).toBe("Failure");
   });
 
@@ -680,12 +910,83 @@ describe("the watermark a runner reports", () => {
     const decoded = Effect.runSync(
       Schema.decodeUnknownEffect(RunnerToController)({
         _tag: "watermarkReport",
-        watermark: { ...watermark, acceptingPlacements: false },
+        watermark: { ...metrics, acceptingPlacements: false },
       }),
-    ) as { readonly watermark: Record<string, unknown> };
+    ) as { readonly metrics: Record<string, unknown> };
 
-    expect(decoded.watermark).not.toHaveProperty("acceptingPlacements");
-    expect(decoded.watermark).toEqual(watermark);
+    expect(decoded.metrics).not.toHaveProperty("acceptingPlacements");
+    expect(decoded.metrics).toEqual(metrics);
+  });
+
+  // Runners and controllers of the age before the rename must still read each
+  // other, so the frame keeps its old tag and key on the wire.
+  it("encodes under the old tag and the old key", () => {
+    expect(Schema.encodeSync(RunnerToController)({ _tag: "watermarkReport", metrics })).toEqual({
+      _tag: "watermarkReport",
+      watermark: metrics,
+    });
+  });
+
+  it("decodes a report in the old wire shape to `metrics`", () => {
+    expect(
+      Effect.runSync(
+        Schema.decodeUnknownEffect(RunnerToController)({
+          _tag: "watermarkReport",
+          watermark: metrics,
+        }),
+      ),
+    ).toEqual({ _tag: "watermarkReport", metrics });
+  });
+
+  it("rejects a report under the new key, which no runner sends yet", () => {
+    expect(decodeFromRunner({ _tag: "watermarkReport", metrics })._tag).toBe("Failure");
+  });
+});
+
+describe("the CPU in the Runner Metrics", () => {
+  const cpu = { averagePercent: 12.5, peakPercent: 80 };
+
+  // What a runner built before CPU was reported sends and reads.
+  const OldMetricsReport = Schema.Struct({
+    _tag: Schema.Literal("watermarkReport"),
+    watermark: Schema.Struct({ diskFreeBytes: Schema.Int, availableMemoryBytes: Schema.Int }),
+  });
+
+  it("decodes a report from a runner that does not report CPU, with no `cpu` key", () => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(RunnerToController)({
+        _tag: "watermarkReport",
+        watermark: metrics,
+      }),
+    ) as { readonly metrics: Record<string, unknown> };
+    expect(decoded.metrics).not.toHaveProperty("cpu");
+  });
+
+  it.each([cpu, null])("round-trips a report with cpu %j", (value) => {
+    const message = { _tag: "watermarkReport", metrics: { ...metrics, cpu: value } } as const;
+    const wire = Schema.encodeSync(RunnerToController)(message);
+    expect(wire).toEqual({ _tag: "watermarkReport", watermark: { ...metrics, cpu: value } });
+    expect(Effect.runSync(Schema.decodeUnknownEffect(RunnerToController)(wire))).toEqual(message);
+  });
+
+  it("is read by a runner or controller of the age before it, which drops the extra key", () => {
+    const wire = Schema.encodeSync(RunnerToController)({
+      _tag: "watermarkReport",
+      metrics: { ...metrics, cpu },
+    });
+    const decoded = Effect.runSync(Schema.decodeUnknownEffect(OldMetricsReport)(wire));
+    expect(decoded).toEqual({ _tag: "watermarkReport", watermark: metrics });
+  });
+
+  it.each([
+    ["an average above 100", { averagePercent: 101, peakPercent: 80 }],
+    ["a peak below 0", { averagePercent: 12.5, peakPercent: -1 }],
+    ["an average that is not a number", { averagePercent: Number.NaN, peakPercent: 80 }],
+    ["no peak", { averagePercent: 12.5 }],
+  ])("rejects %s", (_name, badCpu) => {
+    expect(
+      decodeFromRunner({ _tag: "watermarkReport", watermark: { ...metrics, cpu: badCpu } })._tag,
+    ).toBe("Failure");
   });
 });
 
@@ -743,6 +1044,55 @@ describe("the runner facts", () => {
   });
 });
 
+describe("the size of the disk in the runner facts", () => {
+  const diskTotalBytes = 994662584320;
+  const decodeFacts = (value: Record<string, unknown>) =>
+    decodeFromRunner({ _tag: "factsReport", facts: value });
+
+  // What a runner built before the disk size was reported sends and reads.
+  const OldRunnerFacts = Schema.Struct(Struct.omit(RunnerFacts.fields, ["diskTotalBytes"]));
+
+  it("decodes facts with and without it", () => {
+    expect(decodeFacts({ ...facts, diskTotalBytes })._tag).toBe("Success");
+    expect(decodeFacts(facts)._tag).toBe("Success");
+  });
+
+  it("is read by a runner or controller of the age before it, which drops the extra key", () => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(OldRunnerFacts)({ ...facts, diskTotalBytes }),
+    );
+    expect(decoded).toEqual(facts);
+  });
+
+  it.each([-1, 1.5])("rejects %s", (invalid) => {
+    expect(decodeFacts({ ...facts, diskTotalBytes: invalid })._tag).toBe("Failure");
+  });
+});
+
+describe("the probed toolchains in the runner facts", () => {
+  const decodeFacts = (value: Record<string, unknown>) =>
+    decodeFromRunner({ _tag: "factsReport", facts: value });
+
+  // What a controller built before the list was reported reads.
+  const OldRunnerFacts = Schema.Struct(Struct.omit(RunnerFacts.fields, ["probedToolchains"]));
+
+  it("decodes facts with and without it", () => {
+    expect(decodeFacts({ ...facts, probedToolchains: ["git", "gh", "node"] })._tag).toBe("Success");
+    expect(decodeFacts(facts)._tag).toBe("Success");
+  });
+
+  it("is read by a controller of the age before it, which drops the extra key", () => {
+    const decoded = Effect.runSync(
+      Schema.decodeUnknownEffect(OldRunnerFacts)({ ...facts, probedToolchains: ["git"] }),
+    );
+    expect(decoded).toEqual(facts);
+  });
+
+  it("rejects an empty name", () => {
+    expect(decodeFacts({ ...facts, probedToolchains: [""] })._tag).toBe("Failure");
+  });
+});
+
 describe("sequence numbers", () => {
   it("is carried by the one frame that extends the envelope, and is required there", () => {
     const event = runnerMessages.find((message) => message._tag === "sessionEvent");
@@ -788,6 +1138,17 @@ describe("the ids a machine uses as directory names", () => {
     expect(
       decodeFromController({ _tag: "workspaceDispose", workspaceId: "../elsewhere" })._tag,
     ).toBe("Failure");
+  });
+
+  it("rejects an archived session whose harness home could leave the storage directory", () => {
+    const dispose = (harnessHome: string) =>
+      decodeFromController({
+        _tag: "workspaceDispose",
+        workspaceId: WORKSPACE_ID,
+        archivedSessions: [{ harnessId: "claude-code", harnessHome, nativeSessionId: "native-1" }],
+      })._tag;
+    expect(dispose("providers/0199e0e7")).toBe("Success");
+    expect(dispose("providers/../../etc")).toBe("Failure");
   });
 
   it("rejects a checkout whose resource or subdirectory could escape the workspace", () => {

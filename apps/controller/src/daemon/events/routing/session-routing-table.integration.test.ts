@@ -89,6 +89,38 @@ describe("the session routing table's sweep", () => {
     });
   });
 
+  it("ends the subscription of an archived holder that is still running, and does not reopen it", async () => {
+    await withPipeline(async (arranged) => {
+      const agent = await spawnSubscriber(arranged, "archived-holder");
+      const subscriptionId = await subscribeThread(arranged, agent, REF);
+      await endPromptTurn(arranged, agent);
+      // Written by hand, not through `session.archive`: the real archive deletes
+      // the session's subscriptions itself, and this test is about the sweep that
+      // ends one that survives (for example, one created after the archive).
+      await runEffect(
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`UPDATE sessions
+                               SET done_at = ${at}, done_by = 'user',
+                                   archived_at = ${at}, archived_by = 'user'
+                               WHERE id = unhex(replace(${agent.session.id}, '-', ''))`,
+        ),
+      );
+
+      await emitManualEvent(arranged, [REF], "after the archive");
+
+      const ended = await waitUntil("ended the subscription", async () => {
+        const row = await readSubscriptionRow(arranged.harness, subscriptionId);
+        return row?.ended_at === null ? undefined : row;
+      });
+      expect(ended.ended_reason).toContain(agent.session.id);
+      expect(await readMatchedInputRows(arranged.harness, subscriptionId)).toEqual([]);
+      const session = await readSession(arranged, agent.session.id);
+      expect(session.done?.by).toBe("user");
+      expect(session.reopenedAt).toBeUndefined();
+    });
+  });
+
   it("cancels an input still waiting for a holder that has ended, with the same reason", async () => {
     await withPipeline(async (arranged) => {
       const agent = await spawnSubscriber(arranged, "resumable-holder");

@@ -75,7 +75,9 @@ const decidePath = (request: PermissionRequest): string =>
  */
 const renderDock = (thread: ThreadRecords, profiles: Handler = { body: { items: [PROFILE] } }) =>
   renderThreadPart(
-    ({ sessionId }) => <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} />,
+    ({ sessionId }) => (
+      <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} composerBelow />
+    ),
     {
       thread,
       handlers: {
@@ -346,7 +348,9 @@ describe("the dock for a Permission Request", () => {
 
   it("is not shown on a subagent's page, since a Permission Request is the session's own", async () => {
     await renderThreadPart(
-      ({ sessionId }) => <AgentRequestDock sessionId={sessionId} pageSubagentId="sub-1" />,
+      ({ sessionId }) => (
+        <AgentRequestDock sessionId={sessionId} pageSubagentId="sub-1" composerBelow={false} />
+      ),
       { thread: withPermissionRequests(IDLE, [DELETE_TASK]) },
     );
 

@@ -33,6 +33,22 @@ The script installs:
 - the `hercule` binary at `~/.local/bin/hercule`. When `~/.local/bin` is not on your `PATH`, it prints the line to add to your shell profile.
 - on macOS, the desktop app at `/Applications/Hercule.app`.
 
+On Linux the script installs no app, because the app is a package and installing it takes root. On x86_64 the script ends by printing the two commands that do it, for the package manager it finds. On Debian or Ubuntu:
+
+```sh
+curl -fL -o /tmp/Hercule-linux-amd64.deb https://github.com/theagenticage/hercule/releases/download/edge/Hercule-linux-amd64.deb
+sudo apt install /tmp/Hercule-linux-amd64.deb
+```
+
+On Arch Linux:
+
+```sh
+curl -fL -o /tmp/Hercule-linux-x86_64.pkg.tar.zst https://github.com/theagenticage/hercule/releases/download/edge/Hercule-linux-x86_64.pkg.tar.zst
+sudo pacman -U /tmp/Hercule-linux-x86_64.pkg.tar.zst
+```
+
+Run them again to update the app. There is no package for aarch64 or for other distributions yet.
+
 A first install starts nothing, because only you know what this machine is for. To run the controller on it:
 
 ```sh
@@ -114,3 +130,7 @@ Start with [the overview](docs/spec/01-overview-and-scope.md): what ships, what 
 TypeScript throughout, one repository. The controller and runner are written on [Effect 4](https://effect.website) with Effect Schema as the contract language ([ADR 0031](docs/adr/0031-the-backend-is-written-on-effect.md)); state lives in one SQLite database ([ADR 0004](docs/adr/0004-controller-state-lives-in-one-sqlite-database.md)); everything ships as one self-contained Bun binary ([ADR 0018](docs/adr/0018-hercule-ships-as-one-self-contained-binary.md)). The web app is a static SPA and a pure client of the public API ([ADR 0017](docs/adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
 
 Research findings land on `research/*` branches under `research/`; prototype code on `prototype/*` branches.
+
+## Third-party code
+
+Hercule copies third-party code, icons and fonts; [ATTRIBUTION.md](ATTRIBUTION.md) lists what, from where, and under which licence.

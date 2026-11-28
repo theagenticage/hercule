@@ -14,6 +14,7 @@ interface RowField {
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
+  readonly oneOf?: unknown;
 }
 
 interface Row {
@@ -80,14 +81,18 @@ describe("the spelling of a command", () => {
     expect(spelled).toEqual(written);
   });
 
-  it("never makes a query parameter positional", () => {
-    // Building the tree throws for such a row, so this always holds. The test
-    // checks that the rule is applied at all.
+  it("lists a positional query parameter among the positionals and not among the flags", () => {
     for (const command of COMMANDS) {
       for (const field of command.query) {
         expect(field.positional, `${readSpelling(command)}: --${field.spelling}`).toBe(false);
       }
     }
+    const search = COMMANDS.find((command) => command.id === "externalEntity.search")!;
+    expect(search.positionals.map((field) => [field.name, field.carriedIn])).toEqual([
+      ["source", "query"],
+      ["text", "query"],
+    ]);
+    expect(search.query.map((field) => field.name)).toEqual(["scopeRef"]);
   });
 
   it("spells every word in kebab-case", () => {
@@ -127,10 +132,14 @@ describe("the spelling of a command", () => {
         readSpelling(command),
       ).toEqual(listPathParams(command.path));
       // A payload positional comes after them. The only other positional is
-      // a skill folder, sent as the query field that names each skill.
+      // a skill folder, sent as the query field that names each skill, or the
+      // words of a search, which a GET carries in its query string.
       const rest = command.positionals.slice(inPath.length);
       expect(
-        rest.every((field) => field.carriedIn === "payload" || field.readsSkillFolder),
+        rest.every(
+          (field) =>
+            field.carriedIn === "payload" || field.readsSkillFolder || field.carriedIn === "query",
+        ),
         `${readSpelling(command)}: ${rest.map((field) => field.name).join(", ")}`,
       ).toBe(true);
     }
@@ -143,20 +152,23 @@ describe("the spelling of a command", () => {
 describe("a command's fields against the schema", () => {
   it("has exactly the fields of the schema, minus the ones the row hides", () => {
     for (const command of COMMANDS) {
+      // A flag that fills one key of an object field stands for that field.
       const reflected = [...command.positionals, ...command.payload, ...command.query].map(
-        (field) => field.name,
+        (field) => field.within ?? field.name,
       );
       const shown = Object.entries(readRow(command.id).fields ?? {})
         .filter(([, field]) => field.hidden !== true)
         .map(([name]) => name);
-      expect(reflected.sort(), readSpelling(command)).toEqual(shown.sort());
+      expect([...new Set(reflected)].sort(), readSpelling(command)).toEqual(shown.sort());
     }
   });
 
   it("gives every paged command a non-empty sort field list, except a list with one fixed order", () => {
     // `signal list` reads each view in the one order the view is defined by,
-    // so it pages with --limit and --cursor but takes no --sort.
-    const FIXED_ORDER = ["signal list"];
+    // `runner metrics` reads points by runner and then oldest first, and
+    // `initiative list` reads in creation order, so they page with --limit
+    // and --cursor but take no --sort.
+    const FIXED_ORDER = ["signal list", "runner metrics", "initiative list"];
     const paged = COMMANDS.filter((command) => command.paged);
     expect(paged.length).toBeGreaterThan(0);
     for (const command of paged) {
@@ -253,12 +265,13 @@ describe("a command's fields against the schema", () => {
     expect(send!.payload.find((field) => field.name === "text")?.stdin).toBe(true);
   });
 
-  it("takes at most one field from stdin, except the two passwords", () => {
+  it("takes at most one field from stdin, except the two passwords and the two lists of a Model Profile", () => {
     for (const command of COMMANDS) {
       const stdin = [...command.positionals, ...command.payload, ...command.query].filter(
         (field) => field.stdin,
       );
-      const expected = command.id === "user.setPassword" ? 2 : 1;
+      const expected =
+        command.id === "user.setPassword" || command.id === "modelProfile.update" ? 2 : 1;
       expect(
         stdin.length,
         `${readSpelling(command)} reads ${stdin.length} fields from stdin`,
@@ -266,6 +279,10 @@ describe("a command's fields against the schema", () => {
     }
     expect(
       findCommandByWords(["user", "set-password"])!.payload.filter((field) => field.stdin).length,
+    ).toBe(2);
+    expect(
+      findCommandByWords(["model-profile", "update"])!.payload.filter((field) => field.stdin)
+        .length,
     ).toBe(2);
   });
 
@@ -278,19 +295,45 @@ describe("a command's fields against the schema", () => {
     });
     const grants = create.payload.find((field) => field.name === "grants")!;
     expect(grants.repeated).toBe(true);
-    expect(grants.choices).toContain("permission.write");
+    expect(grants.choices?.has("permission.write")).toBe(true);
 
     expect(
       findCommandByWords(["profile", "update"])!.payload.every((field) => field.optional),
     ).toBe(true);
 
-    expect(findCommandByWords(["secret", "set"])!.positionals[0]?.choices).toEqual([
+    expect([...findCommandByWords(["secret", "set"])!.positionals[0]!.choices!.keys()]).toEqual([
       "connection",
       "plugin",
       "runner",
       "core",
-      "provider-instance",
+      "provider-account",
+      "mcp-server",
     ]);
+  });
+
+  // `queryInbox` is a union of four modes. The command line gets the fields of
+  // all of them, and sends the mode it is given.
+  it("takes the fields of a payload that is a union of modes, once each", () => {
+    const list = findCommandByWords(["entity", "list"])!;
+    expect(list.payload.map((field) => field.spelling)).toEqual([
+      "mode",
+      "list",
+      "clause",
+      "text",
+      "after",
+    ]);
+    expect(list.payload.find((field) => field.name === "mode")).toMatchObject({
+      optional: true,
+      defaultText: "first",
+    });
+    expect([...list.payload.find((field) => field.name === "mode")!.choices!.keys()]).toEqual([
+      "first",
+      "next",
+      "refresh",
+      "rows",
+    ]);
+    // Only the modes that read it have `after`, so it is optional.
+    expect(list.payload.find((field) => field.name === "after")!.optional).toBe(true);
   });
 
   // Only a row that opts in makes a record field take named values: a record
@@ -309,12 +352,50 @@ describe("a command's fields against the schema", () => {
   });
 });
 
+// A row's `oneOf` form turns one field that is a union of objects into one flag per key of the members.
+describe("a field of several shapes filled from flags", () => {
+  const command = findCommandByWords(["mcp-server", "create"])!;
+  const fields = command.payload;
+
+  it("becomes one field per key, a key two members share counting once", () => {
+    expect(fields.map((field) => [field.spelling, field.name, field.within])).toEqual([
+      ["plugin", "contributionId", "source"],
+      ["connection", "connectionId", "source"],
+      ["name", "name", "source"],
+      ["url", "url", "source"],
+      ["token", "token", "source"],
+    ]);
+    expect(fields.map((field) => field.optional)).toEqual([false, false, true, false, true]);
+    expect(fields.find((field) => field.name === "connectionId")!.resolves).toBe(
+      "connection.query",
+    );
+    expect(fields.filter((field) => field.stdin).map((field) => field.name)).toEqual(["token"]);
+  });
+
+  it("names each entry's selector, fixed values and flags", () => {
+    const [plugin, url] = command.choices[0]!.entries;
+    expect([plugin!.selector.spelling, plugin!.fixed]).toEqual(["plugin", { kind: "plugin" }]);
+    expect([url!.selector.spelling, url!.fixed]).toEqual(["url", { kind: "url" }]);
+    expect(url!.flags.map(({ field }) => field.spelling)).toEqual(["url", "name", "token"]);
+  });
+});
+
 describe("the placeholders a usage line shows", () => {
   const buildUsageShape = (spelled: string): string =>
     findCommandByWords(spelled.split(" "))!.positionals.map(formatPositionalShape).join(" ");
 
   /** Every command whose positionals are not a single plain `<id>`, with `...` after a repeated one. */
   const NAMED: Record<string, string> = {
+    "entity search": "<source> <text>",
+    "entity add-to-work": "<ref>",
+    "entity group": "<ref>",
+    "entity link": "<ref>",
+    "entity unlink": "<ref>",
+    "entity undo-hand-off": "<run-id>",
+    "entity take-on-together": "<id>...",
+    "entity dismiss": "<id>...",
+    "entity restore": "<id>...",
+    "entity match-project": "<id>...",
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
     "permission request": "<grant>",
@@ -327,6 +408,16 @@ describe("the placeholders a usage line shows", () => {
     "transcript read": "<session-id>",
     "session subagent list": "<session-id>",
     "session skill list": "<session-id>",
+    "provider-account read": "<account-id>",
+    "provider-account update": "<account-id>",
+    "provider-account delete": "<account-id>",
+    "provider-account sign-in": "<account-id>",
+    "provider-account submit-sign-in-code": "<account-id>",
+    "provider-account read-catalog": "<account-id>",
+    "provider-account refresh": "<account-id>",
+    "model-profile read": "<profile-id>",
+    "model-profile update": "<profile-id>",
+    "model-profile delete": "<profile-id>",
     "assistant read": "<assistant-id>",
     "assistant update": "<assistant-id>",
     "assistant delete": "<assistant-id>",
@@ -343,19 +434,22 @@ describe("the placeholders a usage line shows", () => {
     "trigger pause": "<workflow-id> <trigger-id>",
     "trigger resume": "<workflow-id> <trigger-id>",
     "signal done": "<signal-id>...",
-    "signal snooze": "<signal-id>...",
-    "signal unsnooze": "<signal-id>...",
-    "signal lower-priority": "<signal-id>...",
     "session done": "<session-id>...",
     "session reopen": "<session-id>...",
+    "session archive": "<session-id>...",
+    "workspace dispose-many": "<workspace-id>...",
     "ignore-rule create": "<kind>",
     "discussion read": "<discussion-id>",
     "discussion post": "<discussion-id>",
     "skill read": "<name>",
     "skill delete": "<name>",
     "skill import": "<folder>",
+    "skill propose": "<folder>",
+    "skill reject": "<name> <revision-hash>",
+    "runner metrics": "[<runner-id>]",
     "skill diff": "<name> <revision-hash>",
     "skill apply": "<name> <revision-hash>",
+    "task unblock": "<task-id> <blocker-id>",
   };
 
   it("names whose id a positional holds when the field name alone would not", () => {

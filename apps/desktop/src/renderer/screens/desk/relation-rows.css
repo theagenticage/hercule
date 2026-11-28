@@ -1,0 +1,221 @@
+/* The rows that draw the outside graph: a place above a thing, or a thing
+   linked to it. They are the drawing's `.o-link` rows (`css/open.css` of the
+   Inbox) and its 4px progress bar (`.b-progress` of `css/inbox.css`). */
+.relation-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.relation-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  border-radius: var(--r-xs);
+  font: var(--type-summary);
+}
+.relation-go {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+  min-height: 24px;
+  padding: 0 4px;
+  border-radius: var(--r-xs);
+  text-align: left;
+  color: inherit;
+}
+button.relation-go:hover,
+a.relation-go:hover {
+  background: var(--hover);
+}
+a.relation-go {
+  text-decoration: none;
+  cursor: default;
+}
+.relation-mark {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--mark-ink);
+}
+.relation-title {
+  min-width: 0;
+  flex: 1;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* What the place says about itself, then its progress, at the end of the row. */
+.relation-end {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  transition: opacity var(--m-quick);
+}
+.relation-facts {
+  white-space: nowrap;
+}
+
+/* A place no Connection can read: a lock and the words, all faint. */
+.relation-row.is-locked {
+  color: var(--faint);
+}
+.relation-row.is-locked .relation-title {
+  color: var(--faint);
+}
+
+/* The source's own report of how far along something is. */
+.relation-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  color: var(--faint);
+  font: var(--type-meta);
+  font-variant-numeric: tabular-nums;
+}
+.relation-progress.is-wide {
+  gap: 10px;
+  font: var(--type-summary);
+}
+.relation-bar {
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+}
+.is-wide .relation-bar {
+  width: 72px;
+}
+.relation-bar i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--ink) 55%, transparent);
+}
+
+/* The end of a row and the words of who says its thing is linked, which stand over the end while
+   the row is reached for. The drawing does this with `:has()`, which the app does not use in rows
+   that are drawn by the hundred, so the row carries the class instead. */
+.relation-tail {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+}
+.relation-end.is-status {
+  gap: 4px;
+}
+.relation-row.has-claim .relation-claim {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 0 6px;
+  border-radius: var(--r-xs);
+  background: var(--stock);
+  color: var(--faint);
+  font: var(--type-meta);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--m-quick);
+}
+.relation-row.has-claim:hover .relation-claim,
+.relation-row.has-claim:focus-within .relation-claim {
+  opacity: 1;
+}
+.relation-row.has-claim:hover .relation-end,
+.relation-row.has-claim:focus-within .relation-end {
+  opacity: 0;
+}
+/* The external icon of a row that opens in the browser, and the button that removes a link. Both
+   take no room at rest, so the row's end sits against the right edge in the same column as the
+   rows around it. While the row is reached for, they take their room at once, the end moves left,
+   and they fade in. Only the fade is a transition: the motion rule keeps layout out of
+   transitions. The negative margins take back the gap each would leave at rest. */
+.relation-external,
+.relation-unlink {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--m-quick);
+}
+.relation-external {
+  width: 0;
+  margin-left: -7px;
+  color: var(--muted);
+}
+.relation-unlink {
+  width: 0;
+  height: 22px;
+  margin-left: -8px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+}
+.relation-row:hover .relation-external,
+.relation-row:focus-within .relation-external {
+  width: 13px;
+  margin-left: 0;
+  opacity: 1;
+}
+.relation-row:hover .relation-unlink,
+.relation-row:focus-within .relation-unlink {
+  width: 22px;
+  margin-left: 0;
+  opacity: 1;
+}
+.relation-unlink:hover {
+  color: var(--ink);
+  background: var(--hover);
+}
+/* A reference found in text: the thing in muted words, where it was found in
+   faint ones, and the button that links the two. */
+.relation-row.is-hint .relation-title {
+  color: var(--muted);
+}
+.relation-why {
+  flex: none;
+  color: var(--faint);
+  font: var(--type-meta);
+}
+.relation-row.is-hint .relation-go {
+  min-width: 0;
+}
+
+/* What changed at the source, under the title, in finished words. */
+.relation-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  padding: 2px 0;
+}
+.relation-text .relation-title {
+  flex: none;
+}
+.relation-change {
+  color: var(--faint);
+  font-size: var(--t-11);
+  line-height: var(--line-16);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.relation-change[data-tone="bad"] {
+  color: var(--fail-ink);
+}
+.relation-change[data-tone="good"] {
+  color: var(--ok);
+}

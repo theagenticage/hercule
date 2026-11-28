@@ -1,7 +1,7 @@
 /**
- * Marking threads done, and reopening them (spec 17 §Sidebar, the Done
- * shelf, the thread header). The sidebar and the thread screen share one
- * move queue and one toast, offered by `DoneMovesProvider`.
+ * Marking threads done, reopening them, and archiving them (spec 17 §Sidebar,
+ * the Done shelf, the thread header). The sidebar and the thread screen share
+ * one move queue and one toast, offered by `DoneMovesProvider`.
  */
 import {
   createContext,
@@ -16,8 +16,10 @@ import {
 } from "react";
 import { matchQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
+  archiveRows,
   invalidateWithoutCancelling,
   readErrorMessage,
+  type ArchivePlan,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
@@ -183,14 +185,15 @@ const DONE_MOVES_KEY = ["done-moves"];
 const isLastDoneMove = (queryClient: QueryClient): boolean =>
   queryClient.isMutating({ mutationKey: DONE_MOVES_KEY }) === 1;
 
-/** The three Done moves, as `useRunDoneMoves` describes them. */
+/** The four moves, as `useRunDoneMoves` describes them. */
 interface DoneMoves {
   readonly markDone: (sessionIds: readonly string[]) => void;
   readonly reopen: (sessionIds: readonly string[]) => void;
+  readonly archive: (plan: ArchivePlan) => void;
   readonly undo: (undo: DoneUndo) => void;
 }
 
-/** What `useDoneMoves` returns: the three moves, and the store of the toast they show. */
+/** What `useDoneMoves` returns: the moves, and the store of the toast they show. */
 export interface DoneMovesValue extends DoneMoves {
   readonly toasts: DoneToastStore;
 }
@@ -207,6 +210,14 @@ export interface DoneMovesValue extends DoneMoves {
  *   calls it.
  * - `undo(undo)` makes the move of a toast's Undo on exactly the threads of
  *   that toast. It shows no toast of its own.
+ * - `archive(plan)` archives whole rows. It is sent in the same queue, so it
+ *   is ordered with the Done moves. It first reads the Threads of the rows'
+ *   workspaces (`archiveRows`). The controller can refuse it, for instance
+ *   when a session of a row started working, so nothing is written before
+ *   it answers. Once it has, the Threads leave the cached list, their own
+ *   cached records follow the answer, and a toast with no Undo says
+ *   "Archived", because nothing reverses an archive.
+ *   A refusal shows the controller's message as an alert.
  * - A move that fails reads the thread list again, so the rows go back to
  *   where the controller has them, and shows the error in the toast as an
  *   alert. While the toast shows the Undo of a newer move, the error waits
@@ -224,7 +235,7 @@ export interface DoneMovesValue extends DoneMoves {
  * cancels the reads running then, which may hold a state from before its
  * answer, and reads the list, and the Threads moved since the last read, again.
  *
- * The three functions keep their identity across renders, so the memoized
+ * The functions keep their identity across renders, so the memoized
  * rows that take them do not draw again.
  */
 const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMoves => {
@@ -238,6 +249,23 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
     () => keepPendingMovesApplied(queryClient, client, pending.current),
     [queryClient, client],
   );
+
+  // Runs when a move has settled. The last move to finish reads the list, and
+  // the Threads moved since the last read, again.
+  const readAfterLastMove = async (): Promise<void> => {
+    if (!isLastDoneMove(queryClient)) return;
+    // The moves no longer cover the cached Threads, so a read that started
+    // while one was pending, and answers now, would put back a state from
+    // before the controller's last answer. Cancelling those reads and
+    // reading again is simpler than keeping the moves applied until a read
+    // that started after this point has answered.
+    await cancelReadsHoldingData(queryClient, client, movedSinceRead.current);
+    // A move made while the reads were stopping reads again when it
+    // finishes, and keeps the Threads moved so far in `movedSinceRead`.
+    if (pending.current.size > 0) return;
+    readThreadsAgain(queryClient, client, movedSinceRead.current);
+    movedSinceRead.current.clear();
+  };
 
   const { mutate } = useMutation({
     mutationKey: DONE_MOVES_KEY,
@@ -286,19 +314,34 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
     // one that failed alike.
     onSettled: async (_answered, _error, _request, context) => {
       if (context !== undefined) pending.current.delete(context.pendingMove);
-      if (!isLastDoneMove(queryClient)) return;
-      // The moves no longer cover the cached Threads, so a read that started
-      // while one was pending, and answers now, would put back a state from
-      // before the controller's last answer. Cancelling those reads and
-      // reading again is simpler than keeping the moves applied until a read
-      // that started after this point has answered.
-      await cancelReadsHoldingData(queryClient, client, movedSinceRead.current);
-      // A move made while the reads were stopping reads again when it
-      // finishes, and keeps the Threads moved so far in `movedSinceRead`.
-      if (pending.current.size > 0) return;
-      readThreadsAgain(queryClient, client, movedSinceRead.current);
-      movedSinceRead.current.clear();
+      await readAfterLastMove();
     },
+  });
+
+  // Same key and scope as the Done moves, so an archive waits for the move
+  // before it and is counted with them. Nothing is applied before the
+  // controller answers, because it can refuse.
+  const { mutate: mutateArchive } = useMutation({
+    mutationKey: DONE_MOVES_KEY,
+    scope: { id: "done-moves" },
+    mutationFn: (plan: ArchivePlan) => archiveRows(client, plan),
+    onSuccess: ({ sessions, notice }) => {
+      const archived = new Set(sessions.map((session) => session.id));
+      for (const id of archived) movedSinceRead.current.add(id);
+      queryClient.setQueryData(threadAndAgentSessionsQuery(client).queryKey, (cached) =>
+        cached?.filter((session) => !archived.has(session.id)),
+      );
+      for (const session of sessions) {
+        queryClient.setQueryData(sessionQuery(client, session.id).queryKey, (cached) =>
+          cached === undefined ? undefined : session,
+        );
+      }
+      toasts.showNotice(notice);
+    },
+    onError: (error) => {
+      toasts.showFailure(`Couldn't archive: ${readErrorMessage(error)}`, null);
+    },
+    onSettled: readAfterLastMove,
   });
 
   const markDone = useCallback(
@@ -313,13 +356,19 @@ const useRunDoneMoves = (client: HerculeClient, toasts: DoneToastStore): DoneMov
     },
     [mutate],
   );
+  const archive = useCallback(
+    (plan: ArchivePlan) => {
+      mutateArchive(plan);
+    },
+    [mutateArchive],
+  );
   const undo = useCallback(
     ({ move, sessionIds }: DoneUndo) => {
       mutate({ sessionIds, move, announce: false });
     },
     [mutate],
   );
-  return { markDone, reopen, undo };
+  return { markDone, reopen, archive, undo };
 };
 
 const DoneMovesContext = createContext<DoneMovesValue | null>(null);
@@ -343,10 +392,10 @@ export function DoneMovesProvider({
   readonly children: ReactNode;
 }): JSX.Element {
   const [toasts] = useState(createDoneToastStore);
-  const { markDone, reopen, undo } = useRunDoneMoves(client, toasts);
+  const { markDone, reopen, archive, undo } = useRunDoneMoves(client, toasts);
   const value = useMemo(
-    () => ({ markDone, reopen, undo, toasts }),
-    [markDone, reopen, undo, toasts],
+    () => ({ markDone, reopen, archive, undo, toasts }),
+    [markDone, reopen, archive, undo, toasts],
   );
   return <DoneMovesContext value={value}>{children}</DoneMovesContext>;
 }

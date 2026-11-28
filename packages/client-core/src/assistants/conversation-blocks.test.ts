@@ -26,13 +26,14 @@ import {
   collectRunningTurnRows,
   decideOpenReply,
   describeOpenReply,
+  hasMessageAfter,
   trimToRunningTurn,
   type ConversationBlock,
   type OpenReplyBlock,
 } from "./conversation-blocks";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemKind = Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
+type HarnessEvent = TranscriptRow["event"];
+type ItemKind = Extract<HarnessEvent, { _tag: "item.started" }>["kind"];
 
 const NOW = new Date("2026-10-07T12:00:00.000Z");
 const TODAY = "2026-10-07T09:00:00.000Z";
@@ -43,7 +44,7 @@ const IDLE = buildSession({ id: "s1", status: "idle", conversationId: "c1" });
 let position = 0;
 
 /** Wraps an event in a transcript row at the next position. */
-const buildRow = (event: ProviderEvent): TranscriptRow => ({
+const buildRow = (event: HarnessEvent): TranscriptRow => ({
   position: ++position,
   at: event.at,
   event,
@@ -930,5 +931,28 @@ describe("describeOpenReply", () => {
 
   it("names the pose while the assistant does not work", () => {
     expect(describeOpenReply({ ...OPEN, pose: "waiting" })).toBe("waiting on you");
+  });
+});
+
+describe("hasMessageAfter", () => {
+  const blocks = [
+    { kind: "stamp" },
+    { kind: "notice" },
+    { kind: "stamp" },
+    { kind: "reply" },
+    { kind: "notice" },
+    { kind: "stamp" },
+  ];
+
+  it("finds a message after a notice that a later message follows, past a day stamp", () => {
+    expect(hasMessageAfter(blocks, 1)).toBe(true);
+  });
+
+  it("finds none after the newest notice, when only a day stamp follows it", () => {
+    expect(hasMessageAfter(blocks, 4)).toBe(false);
+  });
+
+  it("counts the open reply as a message", () => {
+    expect(hasMessageAfter([{ kind: "notice" }, { kind: "open-reply" }], 0)).toBe(true);
   });
 });

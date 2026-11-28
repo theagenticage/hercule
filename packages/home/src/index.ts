@@ -36,6 +36,7 @@ export {
   type HomePaths,
 } from "./paths";
 export {
+  BOOTSTRAP_ENV_VARIABLES,
   BOOTSTRAP_KEYS,
   BootstrapConfig,
   ConfigFileError,

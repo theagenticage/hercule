@@ -7,7 +7,7 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { prepareForQuoting, type Grant } from "@hercule/contract";
+import { prepareForQuoting, WIKI_WRITING_RULES, type Grant } from "@hercule/contract";
 import { wikiPageRepository, type WikiOverview } from "./repository";
 
 /** How many recently changed page titles a repository's line names. */
@@ -22,10 +22,6 @@ const READ_TEXT =
   "For larger work, checking the wiki is part of your research; a quick change does not need it. " +
   "List a repository's pages with `hercule wiki-page list --resource <id>`.";
 
-const WRITE_TEXT =
-  "When you learn something a future agent on this repository would need, write it down. " +
-  "When a human allows an exception to a rule of the repository, record what was allowed, by whom and when.";
-
 /** What the Wiki tells one session. */
 export interface WikiDescription {
   /** The Wiki's part of the paragraph. */
@@ -37,6 +33,7 @@ export interface WikiDescription {
 /**
  * Describes one repository's Wiki for its line: `Wiki: no pages yet.`, or the
  * number of pages and the quoted titles of the most recently changed ones.
+ * Archived pages are not in the overview, so they are neither counted nor named.
  * The titles were written by other agents, so each is prepared with
  * `prepareForQuoting` before it is quoted.
  */
@@ -52,7 +49,8 @@ const describeOverview = ({ pageCount, recentTitles }: WikiOverview): string => 
  * Builds what the Wiki tells a session holding `grants`, from the overviews of
  * the repositories that get a line of their own. Returns `undefined` for a
  * session without `wiki.read`, which is told nothing about the Wiki. A
- * session that may also write pages is asked to record what it learns.
+ * session that may also write pages is told what belongs in the Wiki and
+ * what does not.
  */
 export const buildWikiDescription = (
   grants: ReadonlySet<Grant>,
@@ -60,7 +58,7 @@ export const buildWikiDescription = (
 ): WikiDescription | undefined => {
   if (!grants.has("wiki.read")) return undefined;
   return {
-    text: grants.has("wiki.write") ? `${READ_TEXT} ${WRITE_TEXT}` : READ_TEXT,
+    text: grants.has("wiki.write") ? `${READ_TEXT} ${WIKI_WRITING_RULES}` : READ_TEXT,
     repositoryNotes: new Map(
       [...overviews].map(([resourceId, overview]) => [resourceId, describeOverview(overview)]),
     ),

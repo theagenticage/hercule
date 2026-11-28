@@ -42,7 +42,7 @@ steps:
       # Text in {{ }} is evaluated when the step runs. Here it gives the id
       # of the task that the file_task step created.
       taskId: "{{ steps.file_task.output.id }}"
-      status: in-progress
+      stage: building
 
 # An edge runs the "to" step after the "from" step ends.
 edges:

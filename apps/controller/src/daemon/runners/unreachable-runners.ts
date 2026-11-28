@@ -22,7 +22,7 @@ import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/sql/SqlError";
 import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /** How long a runner stays unreachable before the user is told about it. */
 const UNREACHABLE_GRACE: Duration.Duration = Duration.minutes(2);

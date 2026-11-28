@@ -1,5 +1,5 @@
 /**
- * Reads the answer to a login code the user pasted back, in a provider login
+ * Reads the answer to a sign-in code the user pasted back, in a sign-in
  * where the vendor's page shows the code and the user pastes it into Hercule.
  */
 import { readValidationIssues } from "./errors";

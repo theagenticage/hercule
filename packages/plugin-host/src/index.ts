@@ -16,12 +16,21 @@ export {
 } from "./manifest";
 
 export {
+  CssColor,
+  ExactColor,
+  Hue,
+  MAX_ICON_BYTES,
+  MAX_ICON_PATHS,
+  StatusIcon,
+  SVG_PATH_DATA_PATTERN,
+  findIconPathsProblem,
+  withPluginColor,
+} from "./drawing";
+
+export {
   deriveConfigJsonSchema,
   decodeAgainst,
-  secret,
-  listSecretFields,
   listChoiceFields,
-  excludeSecretFields,
   UnsupportedConfigSchema,
 } from "./config-schema";
 
@@ -44,6 +53,54 @@ export {
 } from "./connections";
 
 export {
+  ENTITY_CONCERNS,
+  ENTITY_REASON_TONES,
+  ENTITY_STATUS_SHAPES,
+  ENTITY_STATUS_STAGES,
+  ENTITY_STATUS_TONES,
+  CARD_FACE_SLOTS,
+  CARD_FACE_SLOT_FIELD_TYPES,
+  FACET_FIELD_TYPES,
+  type EntityFieldType,
+  CardFaceDeclaration,
+  EntityFactDeclaration,
+  EntityFieldDeclaration,
+  EntityKindDeclaration,
+  EntityObservation,
+  EntityObservationRelations,
+  EntityProgress,
+  EntityReasonDeclaration,
+  EntityRepository,
+  EntityStatusDeclaration,
+  EntityTemplate,
+  MAX_ENTITY_FACTS,
+  MAX_ENTITY_FIELDS,
+  MAX_ENTITY_FIELD_NAME_LENGTH,
+  MAX_ENTITY_FIELD_TEXT_LENGTH,
+  MAX_ENTITY_OBSERVATIONS,
+  MAX_ENTITY_EVIDENCE_KEY_LENGTH,
+  MAX_ENTITY_RELATIONS,
+  MAX_ENTITY_TEXT_LENGTH,
+  MAX_ENTITY_TEXTS,
+  HttpUrl,
+  isHttpUrl,
+  LinkedUrls,
+  ObservationTexts,
+  MAX_ENTITY_KIND_FIELDS,
+  QualifiedEntityFieldDeclaration,
+  QualifiedEntityKindDeclaration,
+  type EntityInventory,
+  type EntityBlockDraft,
+  type EntityLookup,
+  type EntityLookupContext,
+  type EntityRecognition,
+  type EntityMissing,
+  type EntityResolution,
+  type IngestEntities,
+  type TrackedBranch,
+} from "./entities";
+
+export {
   ActionError,
   AuthError,
   BINDING_PLACES,
@@ -54,7 +111,12 @@ export {
   FeedDeclaration,
   MAX_CONTRIBUTION_NAME_LENGTH,
   MAX_EMITTED_FIELD_BYTES,
-  ProviderDefinition,
+  HarnessDefinition,
+  HarnessWord,
+  MAX_HARNESS_HOME_SEGMENT_LENGTH,
+  HarnessProviderSupport,
+  HarnessReleaseSource,
+  QualifiedContributionId,
   SignalDraft,
   SignalDraftAction,
   WorkflowActionNames,
@@ -79,6 +141,61 @@ export {
   type WorkflowActionContribution,
   type WorkflowStepAction,
 } from "./contributions";
+
+export {
+  MAX_MCP_SERVER_DESCRIPTION_LENGTH,
+  MAX_MCP_SERVER_NAME_LENGTH,
+  McpServerDeclaration,
+  McpServerName,
+  McpServerOrigin,
+  type McpServerConnection,
+  type McpServerContribution,
+} from "./mcp-servers";
+
+export {
+  CORE_INBOX_FIELD_KEYS,
+  CORE_INBOX_FIELDS,
+  InboxClause,
+  MAX_INBOX_CLAUSE_KEY_LENGTH,
+  MAX_SAVED_QUERIES_PER_PLUGIN,
+  MAX_SAVED_QUERY_CLAUSES,
+  SavedQuery,
+  type CoreInboxFieldKey,
+} from "./saved-queries";
+
+export {
+  CLAUSE_OPERATORS_BY_TYPE,
+  DURATION_UNIT_SECONDS,
+  findClauseListProblem,
+  interpretClauseValue,
+  listClauseValues,
+  MAX_CLAUSE_VALUES,
+  splitClauseWord,
+  splitSearchValue,
+  type ClauseInterpretation,
+  type ClauseOperand,
+  type ClauseValue,
+  type InboxClauseOperator,
+  type RawClause,
+} from "./clause-grammar";
+
+export {
+  AccountKind,
+  AccountSetupStep,
+  AccountUsageDeclaration,
+  CatalogSource,
+  DefaultSelection,
+  HarnessLoginStep,
+  KeyCheck,
+  ProviderDefinition,
+  type ParseCatalogBody,
+  type ParseUsageBody,
+} from "./providers";
+
+// What a usage or catalog parser takes and returns, so a plugin names them without linking the protocol.
+// `CatalogModel` is also exported as a schema, so a catalog parser can check what it builds.
+export { CatalogModel } from "@hercule/protocol";
+export type { Timestamp, UsageReading } from "@hercule/protocol";
 
 export { checkEmittedEvent } from "./check-event";
 
@@ -110,6 +227,8 @@ export {
   PluginError,
   registerConnectionType,
   registerEventSource,
+  registerHarness,
+  registerMcpServer,
   registerProvider,
   registerWorkflowAction,
   type ActivationContext,
@@ -118,7 +237,10 @@ export {
   type KeyValueStore,
   type Plugin,
   type PluginSecrets,
+  type HarnessRegistration,
+  type McpServerRegistration,
   type ProviderRegistration,
+  type ProviderRegistrationOptions,
   type RegistrationHost,
   type WorkflowActionRegistration,
 } from "./plugin";

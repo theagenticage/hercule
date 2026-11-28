@@ -60,6 +60,7 @@ import {
   CONNECTION_PARAM,
   separateConnectionParam,
   type BuiltInControllerActionId,
+  type RegisteredHarness,
   type RegisteredWorkflowAction,
   type WorkspaceActionId,
 } from "../plugins";
@@ -75,8 +76,8 @@ export interface ResolvedReferences {
   readonly actions: ReadonlyMap<string, RegisteredWorkflowAction>;
   /** The event kinds a trigger can listen for, by kind. */
   readonly eventKinds: ReadonlyMap<string, DeclaredEventKindWithConnectionType>;
-  /** The kind of each Agent that the definition refers to and that exists, by Agent id. */
-  readonly agentKindById: ReadonlyMap<string, AgentKind>;
+  /** Each Agent that the definition refers to and that exists, by Agent id. */
+  readonly agentById: ReadonlyMap<string, ReferencedAgent>;
   /** The qualified type of each Connection that the definition refers to and that exists, by Connection id. */
   readonly connectionTypeById: ReadonlyMap<string, string>;
   /** The qualified name of every Connection type of an active plugin. */
@@ -87,6 +88,18 @@ export interface ResolvedReferences {
    * exist is not in the map.
    */
   readonly startedWorkflowInputsById: ReadonlyMap<string, ReadonlyArray<Input>>;
+}
+
+/** What validating an agent step needs to know of the Agent it names. */
+export interface ReferencedAgent {
+  readonly kind: AgentKind;
+  readonly name: string;
+  /**
+   * The harness the Agent runs in: its own, else its Provider Account's
+   * default. `undefined` when the account is gone or this build has no such
+   * harness, which gives no issue.
+   */
+  readonly harness: Pick<RegisteredHarness, "displayName" | "declared"> | undefined;
 }
 
 /** One input a workflow declares. */
@@ -213,6 +226,27 @@ const checkExpressionMap = (
       listCheckIssues([...path, name], validateExpression(source, scope)),
     ),
     (issues) => issues.flat(),
+  );
+
+/**
+ * Returns an issue for each `entity` input after the first. A handoff from a
+ * card fills the workflow's entity input with the card's ref, and with two
+ * such inputs it could not tell which one the card fills. The schema already
+ * requires qualified entity kinds, and like signal kinds they are not checked
+ * against the active plugins, so a workflow can be saved before its plugin is
+ * enabled.
+ */
+const listExtraEntityInputIssues = (inputs: ReadonlyArray<Input>): ReadonlyArray<Issue> =>
+  inputs.flatMap((input, index) =>
+    input.entity !== undefined && inputs.findIndex((other) => other.entity !== undefined) < index
+      ? [
+          {
+            path: ["inputs", String(index), "entity"],
+            message:
+              "A workflow can take only one entity input for now. Keep one entity input and remove this one.",
+          },
+        ]
+      : [],
   );
 
 /**
@@ -1024,7 +1058,7 @@ const listAgentReferenceIssues = (
   path: ReadonlyArray<string>,
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
-  switch (references.agentKindById.get(agentId)) {
+  switch (references.agentById.get(agentId)?.kind) {
     case "agent":
       return [];
     case "assistant":
@@ -1103,8 +1137,8 @@ const listWorkspaceIssues = (
 
 /**
  * Lints a step's output schema. The schema must stay within the JSON Schema
- * subset that every provider accepts. Returns one issue per broken rule, at
- * `path`.
+ * subset that every harness giving structured results accepts. Returns one
+ * issue per broken rule, at `path`.
  */
 const listOutputSchemaIssues = (
   outputSchema: OutputSchema,
@@ -1112,14 +1146,16 @@ const listOutputSchemaIssues = (
 ): ReadonlyArray<Issue> =>
   lintOutputSchema(outputSchema).map((finding) => ({
     path,
-    message: `The output schema is outside the JSON Schema subset that every provider accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
+    message: `The output schema is outside the JSON Schema subset that every harness giving structured results accepts. ${shortenLibraryMessage(finding)} Fix that part of the schema.`,
   }));
 
 /**
  * Validates an agent step's Agent and output schema. The Agent must exist and
- * must not be an assistant. The output schema is optional, and is linted by
- * `listOutputSchemaIssues` when present. A session runs the same lint when it
- * spawns, so a step that passes here does not fail at its first turn.
+ * must not be an assistant. The output schema is optional. When present, it is
+ * linted by `listOutputSchemaIssues`, and it is refused when the Agent's
+ * harness cannot give a structured result. The check is against the Agent as
+ * it is now: an Agent can change afterwards, so a session is checked again
+ * when it is placed.
  */
 const listAgentIssues = (
   step: AgentStep,
@@ -1127,11 +1163,24 @@ const listAgentIssues = (
   references: ResolvedReferences,
 ): ReadonlyArray<Issue> => {
   const path = ["steps", String(index)];
+  const agentIssues = listAgentReferenceIssues(step.agent, [...path, "agent"], references);
+  if (step.outputSchema === undefined) return agentIssues;
+  const outputSchemaPath = [...path, "outputSchema"];
+  const agent = references.agentById.get(step.agent);
+  const harness = agent?.harness;
+  const harnessIssues =
+    agent !== undefined && harness?.declared.structuredOutput === "unsupported"
+      ? [
+          {
+            path: outputSchemaPath,
+            message: `The Agent ${quoteAuthorText(agent.name)} runs in ${harness.displayName}, which cannot give a structured result. Remove the output schema, or use an Agent that runs in another harness.`,
+          },
+        ]
+      : [];
   return [
-    ...listAgentReferenceIssues(step.agent, [...path, "agent"], references),
-    ...(step.outputSchema === undefined
-      ? []
-      : listOutputSchemaIssues(step.outputSchema, [...path, "outputSchema"])),
+    ...agentIssues,
+    ...listOutputSchemaIssues(step.outputSchema, outputSchemaPath),
+    ...harnessIssues,
   ];
 };
 
@@ -1263,6 +1312,7 @@ export const validateDefinition = (
       ...(definition.inputs ?? []).flatMap((input, index) =>
         listInputIssues(input, index, references),
       ),
+      ...listExtraEntityInputIssues(definition.inputs ?? []),
       ...(yield* Effect.forEach(triggers, (trigger, index) =>
         checkTrigger(trigger, index, definition, references),
       )).flat(),

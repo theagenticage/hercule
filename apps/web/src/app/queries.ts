@@ -12,7 +12,7 @@
  * changed records, and only key builders that both sides share can turn those
  * records into the keys the cache uses.
  */
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import {
   isNotFound,
   queryKeys,
@@ -99,6 +99,20 @@ export const projectsQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.projects(),
     queryFn: () => client.project.query({ query: { limit: MAX_PAGE_LIMIT } }),
+  });
+
+/**
+ * Reads one project by its id, for a draft thread. The draft needs the
+ * project's Model Profile before it may pick a model, and the project list
+ * stops at its first page, so a project beyond that page would be missing
+ * from it. An error is not retried, because a project that returns 404 once
+ * will keep returning 404.
+ */
+export const projectQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.project(id),
+    queryFn: () => client.project.read({ params: { id } }),
+    retry: false,
   });
 
 /**
@@ -294,6 +308,37 @@ export const pluginsQuery = (client: HerculeClient) =>
   });
 
 /**
+ * Reads every MCP Server. A user has few, so the contract does not page them.
+ * The record carries no joined data: the screens join it with the Connections
+ * and the plugins where they draw it.
+ *
+ * The read is never stale by age: a screen that needs the servers holds the
+ * live topic `mcpServer`, whose first push and later pushes read them again.
+ * So a second component that mounts, or a window that gains focus, does not
+ * start another read.
+ */
+export const mcpServersQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.mcpServers(),
+    queryFn: () => client.mcpServer.query(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+
+/**
+ * Reads one MCP Server, for its page. An error is not retried, because a
+ * server that returns 404 once, such as one deleted from another window,
+ * will keep returning 404.
+ */
+export const mcpServerQuery = (client: HerculeClient, id: string) =>
+  queryOptions({
+    queryKey: queryKeys.mcpServer(id),
+    queryFn: () => client.mcpServer.read({ params: { id } }),
+    retry: false,
+  });
+
+/**
  * Reads every secret reference in a single page. A read returns references,
  * never secret values. There is about one per connection and plugin, so there
  * are few.
@@ -336,11 +381,57 @@ export const connectionChoicesQuery = (
     refetchOnWindowFocus: false,
   });
 
+/** Reads every Provider Account with what each runner last learned about it. */
+export const providerAccountsQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.providerAccounts(),
+    queryFn: () => client.providerAccount.query(),
+  });
+
+/** Reads the providers the controller's plugins register, whose names name the accounts. */
 export const providersQuery = (client: HerculeClient) =>
   queryOptions({
     queryKey: queryKeys.providers(),
     queryFn: () => client.provider.query(),
   });
+
+/** Reads the harnesses the controller's plugins register, with what each declares it can do. */
+export const harnessesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.harnesses(),
+    queryFn: () => client.harness.query(),
+  });
+
+/**
+ * Reads the Model Profiles with every entry resolved. The composer's model
+ * menu, Settings > Threads and the new-thread screen all draw from it, so it
+ * is a read of the shell: the shell's loader loads it, and it is kept for the
+ * life of the page (`gcTime: Infinity`) because Query would otherwise remove
+ * it five minutes after the last component left, and the next composer to
+ * mount would suspend. Only the `provider` live topic changes it, so it is
+ * never stale on its own.
+ */
+export const modelProfilesQuery = (client: HerculeClient) =>
+  queryOptions({
+    queryKey: queryKeys.modelProfiles(),
+    queryFn: () => client.modelProfile.query(),
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+
+/**
+ * Loads the reads that describe the accounts: the accounts, their providers,
+ * the harnesses and the plugins whose marks draw the providers. A screen that
+ * names or lists accounts calls it in its loader, so nothing below the route
+ * suspends.
+ */
+export const ensureProviderAccountReads = (queryClient: QueryClient, client: HerculeClient) =>
+  Promise.all([
+    queryClient.ensureQueryData(providerAccountsQuery(client)),
+    queryClient.ensureQueryData(providersQuery(client)),
+    queryClient.ensureQueryData(harnessesQuery(client)),
+    queryClient.ensureQueryData(pluginsQuery(client)),
+  ]);
 
 /**
  * Reads every session in a single page. The sidebar and All sessions both read

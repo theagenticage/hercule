@@ -27,9 +27,11 @@ import {
 import { makeAttachmentCache } from "../attachments";
 import { makeSessionSkillsFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
-import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "../harnesses/testing";
 
 afterAll(cleanTemporaries);
+
+const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
 
 const refuseSessionPlacement = async (
   workspaces: Workspaces,
@@ -37,7 +39,7 @@ const refuseSessionPlacement = async (
   workspaceId: string,
 ): Promise<void> => {
   const machine: Machine = {
-    providersDir: join(storageDir, "providers"),
+    storageDir,
     scratchDir: join(storageDir, "scratch"),
     attachmentsDir: join(storageDir, "attachments"),
     editMarksDir: join(storageDir, "edit-marks"),
@@ -70,12 +72,16 @@ const refuseSessionPlacement = async (
     requestId: createId(),
     sessionId: createId(),
     input: { text: "hello" },
-    providerId: "claude-code",
-    config: {},
-    secrets: {},
+    harnessId: "claude-code/claude-code",
+    harnessAccount: {
+      providerAccountId: ACCOUNT_ID,
+      harnessHome: `providers/${ACCOUNT_ID}`,
+      modelArgument: "{model}",
+      credentialVariables: [],
+    },
     token: "fixture-token",
     spec: {
-      instanceId: createId(),
+      providerAccountId: ACCOUNT_ID,
       workspaceId,
       modelSelection: { model: "fixture", options: {} },
       accessMode: "approval-required",
@@ -86,7 +92,7 @@ const refuseSessionPlacement = async (
     frame.spec,
     {
       ...frame.spec,
-      continue: { nativeSessionId: "saved-provider-transcript", mode: "resume" as const },
+      continue: { nativeSessionId: "saved-harness-transcript", mode: "resume" as const },
     },
   ]) {
     const outcome = await Effect.runPromise(

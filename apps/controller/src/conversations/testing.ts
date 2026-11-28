@@ -8,7 +8,7 @@
  * that message started, and report a turn from the runner.
  */
 import { expect } from "vitest";
-import type { ProviderEvent, TurnState } from "@hercule/protocol";
+import type { HarnessEvent, TurnState } from "@hercule/protocol";
 import type { Assistant, Conversation, ConversationMessage, Session } from "@hercule/contract";
 import { get, post } from "../http/testing";
 import {
@@ -154,7 +154,7 @@ export const startConversationSession = async (
     sessionId: session!.id,
     at,
     _tag: "session.started",
-    providerRefs: { nativeSessionId },
+    harnessRefs: { nativeSessionId },
   });
   return await waitForSession(arranged, session!.id, (one) => one.status === "busy");
 };
@@ -183,7 +183,7 @@ export const runTurn = async (
   const base = () => ({ eventId: crypto.randomUUID(), sessionId, at });
   reportEvent(arranged.wire, seq, { ...base(), _tag: "turn.started", turnId });
   await waitForSession(arranged, sessionId, (one) => one.status === "busy");
-  const events: Array<ProviderEvent> = [];
+  const events: Array<HarnessEvent> = [];
   texts.forEach((text, index) => {
     const itemId = `${turnId}-item-${String(index + 1)}`;
     // Every adapter reports an item's start before its text.

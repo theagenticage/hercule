@@ -27,12 +27,14 @@ const TASK: Task = {
   title: "Fix the lid",
   description: "It does not close.",
   status: "open",
+  stage: "planned",
   priority: "normal",
   labels: ["hardware"],
   provenance: [{ ref: "github:issue:o/r#42", at: AT, actor: "user" }],
   createdAt: AT,
   updatedAt: AT,
   statusChangedAt: AT,
+  stageChangedAt: AT,
 };
 
 /** The event of a run that ended on its own, so no request caused it. */
@@ -63,6 +65,24 @@ const TASK_UPDATED: PlatformEvent = {
   actor: "user",
   at: AT,
   payload: { taskId: TASK_ID, changes: { status: { old: "open", new: "done" } } },
+};
+
+/** The event of a fact about a linked pull request that just merged. */
+const TASK_ENTITY_CHANGED: PlatformEvent = {
+  kind: "task.entityChanged",
+  actor: "system",
+  at: AT,
+  payload: {
+    taskId: TASK_ID,
+    ref: "github:pull-request:o/r#7",
+    entityKind: "github/pull-request",
+    lifecycle: "completed",
+    previousLifecycle: "open",
+    factId: 12,
+    openLinks: 0,
+    completedLinks: 1,
+    observedAt: AT,
+  },
 };
 
 /** The services every test here runs with: both writers of the event log, and the database. */
@@ -123,6 +143,19 @@ describe("PlatformEvents", () => {
     expect(rows[0]!.actor).toBe("system");
     expect(rows[0]!.receivedAt).toBe(AT);
     expect(rows[0]!.payload).toEqual(RUN_COMPLETED.payload);
+  });
+
+  it("writes a fact about a linked entity with the fact's id in its payload", async () => {
+    const { value: rows } = await runRecordingAnnouncements(
+      Effect.gen(function* () {
+        const platformEvents = yield* PlatformEvents;
+        yield* inTransaction(platformEvents.emit(TASK_ENTITY_CHANGED));
+        return yield* readEventsOfKind("task.entityChanged");
+      }),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.actor).toBe("system");
+    expect(rows[0]!.payload).toEqual(TASK_ENTITY_CHANGED.payload);
   });
 
   it("writes a row the event router reads, where it skips an audit entry", async () => {

@@ -31,13 +31,14 @@ import {
   keepWindowOnTop,
   createUserDataDirForTest,
   launchForTest,
+  readOpenThreadTitle,
   signInAndReadToken,
   startIdentityServerForTest,
 } from "./harness";
 
 /**
  * Runs the production workspace manager and session placement in a Bun child.
- * Only provider events are synthetic: this fixture never launches a harness.
+ * Only harness events are synthetic: this fixture never launches a harness.
  * Both runner modes use this same transport, with separate scratch storage.
  */
 const RUNNER_SOURCE = String.raw`
@@ -55,7 +56,7 @@ const scope = Effect.runSync(Scope.make());
 const workspaces = Effect.runSync(makeWorkspaces({ storageDir: options.home, gitEnv: options.gitEnv }).pipe(Scope.provide(scope)));
 process.once("SIGTERM", async () => { await Effect.runPromise(Scope.close(scope, Exit.void)); process.exit(0); });
 const machine = {
-  providersDir: join(options.home, "providers"), scratchDir: join(options.home, "scratch"),
+  storageDir: options.home, scratchDir: join(options.home, "scratch"),
   attachmentsDir: join(options.home, "attachments"),
   editMarksDir: join(options.home, "edit-marks"), fileClock: openFileClock(join(options.home, "edit-marks", "clock")),
   attachments: makeAttachmentCache({ controllerUrl: options.url, credential: options.credential }),
@@ -87,8 +88,8 @@ const input = (session, frame) => {
 const handle = async (frame) => {
   switch (frame._tag) {
     case "ping": return send({ _tag: "pong" });
-    case "probeRequest": return send({ _tag: "probeReport", requestId: frame.requestId, instanceId: frame.instanceId,
-      result: { harnessVersion: "fixture", auth: { status: "ok" }, models: [{ slug: "fixture", name: "Fixture", imageInput: { maxBytes: null }, isDefault: true, options: [] }] } });
+    case "probeRequest": return send({ _tag: "probeReport", requestId: frame.requestId, providerAccountId: frame.harnessAccount.providerAccountId,
+      result: { harnessVersion: "fixture", auth: { status: "ok" }, models: [{ slug: "fixture", name: "Fixture", imageInput: { maxBytes: null }, isDefault: true, options: [] }], usage: null } });
     case "workspaceProvision": {
       const report = await Effect.runPromise(workspaces.provision(frame));
       log({ kind: "workspace", id: frame.workspaceId, cwd: Effect.runSync(workspaces.resolve(frame.workspaceId))?.cwd });
@@ -99,12 +100,12 @@ const handle = async (frame) => {
     case "workspaceDetach": return send(await Effect.runPromise(workspaces.detach(frame)));
     case "sessionStart": {
       const resolved = await Effect.runPromise(resolveSessionContext(frame, machine, "fixture"));
-      const session = { id: frame.sessionId, instanceId: frame.spec.instanceId, workspaceId: frame.spec.workspaceId, seq: 0, turn: null };
+      const session = { id: frame.sessionId, providerAccountId: frame.spec.providerAccountId, workspaceId: frame.spec.workspaceId, seq: 0, turn: null };
       sessions.set(session.id, session);
-      reportEvent(session, { _tag: "session.started", providerRefs: { nativeSessionId: session.id } });
+      reportEvent(session, { _tag: "session.started", harnessRefs: { nativeSessionId: session.id } });
       await observe(session);
       input(session, frame);
-      log({ kind: "session", id: session.id, cwd: resolved.ctx.cwd, resumed: frame.providerRefs !== undefined });
+      log({ kind: "session", id: session.id, cwd: resolved.ctx.cwd, resumed: frame.harnessRefs !== undefined });
       return;
     }
     case "sessionInput": return input(sessions.get(frame.sessionId), frame);
@@ -129,12 +130,12 @@ const dial = () => new Promise((done, fail) => {
   next.onopen = () => {
     socket = next;
     send({ _tag: "runnerHello", protocolVersion: PROTOCOL_VERSION, capabilities: [WORKSPACE_LIFECYCLE_CAPABILITY], binaryVersion: "fixture", nonce: randomBytes(16).toString("base64"),
-    facts: { os: options.os, arch: "arm64", totalMemoryBytes: 64 * 1024 ** 3, docker: false, toolchains: [], providers: [{ name: "claude", present: true, path: "/fixture/never-executed" }], adapters: ["claude-code"], identityPort: options.identityPort } });
+    facts: { os: options.os, arch: "arm64", totalMemoryBytes: 64 * 1024 ** 3, docker: false, toolchains: [], harnesses: [{ name: "claude", present: true, path: "/fixture/never-executed" }], adapters: ["claude-code/claude-code"], identityPort: options.identityPort } });
   };
   next.onmessage = ({ data }) => {
     const frame = JSON.parse(String(data));
     if (frame._tag === "controllerHello") {
-      send({ _tag: "sessionsReport", sessions: [...sessions.values()].map((session) => ({ sessionId: session.id, nativeSessionId: session.id, instanceId: session.instanceId })) });
+      send({ _tag: "sessionsReport", sessions: [...sessions.values()].map((session) => ({ sessionId: session.id, nativeSessionId: session.id, providerAccountId: session.providerAccountId })) });
       done();
     } else handle(frame).catch((error) => log({ kind: "fatal", message: String(error) }));
   };
@@ -369,8 +370,8 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     await fleet.call("PATCH", `/runners/${runnerId}`, { name });
     await expect
       .poll(async () =>
-        (await client.provider.query())
-          .find((instance) => instance.providerId === "claude-code")
+        (await client.providerAccount.query())
+          .find((account) => account.defaultHarnessId === "claude-code/claude-code")
           ?.snapshots.some(
             (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",
           ),
@@ -414,7 +415,9 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
         BrowserWindow.getAllWindows()[0]!.setContentSize(1920, 1200);
       });
     },
-    evidence === undefined ? undefined : { dir: evidence, size: { width: 1920, height: 1200 } },
+    evidence === undefined
+      ? {}
+      : { recordVideo: { dir: evidence, size: { width: 1920, height: 1200 } } },
   );
   onTestFinished(async () => {
     await close();
@@ -521,8 +524,8 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
   expect(readFileSync(join(remoteSource, ".git/config"))).toEqual(remoteConfig);
   expect(runGit(remoteSource, "rev-parse", "HEAD")).toBe(remoteCommit);
   expect(hashUserFiles(source)).toBe(sourceHash);
-  const instanceId = (await client.provider.query()).find(
-    (instance) => instance.providerId === "claude-code",
+  const providerAccountId = (await client.providerAccount.query()).find(
+    (account) => account.defaultHarnessId === "claude-code/claude-code",
   )!.id;
   const spawnThread = (startingRevision: StartingRevision, runnerId = local.runnerId) =>
     client.session.spawn({
@@ -530,7 +533,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
         prompt: "Inspect the fixture without editing files",
         projectId: project.id,
         runnerId,
-        instanceId,
+        providerAccountId,
         workspace: {
           kind: "ephemeral",
           checkouts: [{ resourceId: resource.id, startingRevision }],
@@ -682,7 +685,7 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
       prompt: "Share existing working files",
       projectId: project.id,
       runnerId: local.runnerId,
-      instanceId,
+      providerAccountId,
       workspace: { kind: "existing", workspaceId: attached.id },
     },
   });
@@ -705,8 +708,21 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     .locator(`a.side-row[href="/threads/${shared.id}"]`)
     .first()
     .click();
+  // The sidebar marks the thread as soon as the click lands, but the route's
+  // loader is still reading it, and the previous thread's page stays on screen
+  // until the loader ends. A press on that page's details button opens a dialog
+  // that goes away with the page. The header of the main pane (not the
+  // sidebar) names the new thread only once the page is the new thread's, or
+  // its "Opening the thread" placeholder, which has no details button.
+  await page.locator("header.top").getByText("Share existing working files").first().waitFor();
   await page.getByRole("button", { name: /workspace.*details|details.*workspace/i }).click();
   const adoptedDetails = page.getByRole("dialog", { name: "Workspace details", exact: true });
+  await adoptedDetails.waitFor().catch(async (error: unknown) => {
+    throw new Error(
+      `the Workspace details dialog never showed; the page has ${String(await page.getByRole("dialog").count())} dialog(s) and shows the thread titled ${JSON.stringify(await readOpenThreadTitle(page))}`,
+      { cause: error },
+    );
+  });
   await expect
     .poll(() =>
       adoptedDetails
@@ -715,7 +731,21 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     )
     .toBe(true);
   await capture("adopted-details");
-  await page.getByRole("button", { name: /^Detach existing checkout$/ }).click();
+  // A failure of this click says what the dialog shows, such as the reason it
+  // gives for not offering the button, because the step has failed on CI with
+  // only "waiting for the button" to go on.
+  await page
+    .getByRole("button", { name: /^Detach existing checkout$/ })
+    .click()
+    .catch(async (error: unknown) => {
+      const shown = await adoptedDetails
+        .textContent({ timeout: 1_000 })
+        .catch(() => "the dialog is no longer on the page");
+      throw new Error(
+        `the Detach button could not be pressed; the details dialog shows: ${JSON.stringify(shown)}`,
+        { cause: error },
+      );
+    });
   const detach = page.getByRole("dialog", { name: /detach/i });
   await expect.poll(() => detach.textContent()).toMatch(/files.*(stay|remain|kept)|keep.*files/i);
   await expect

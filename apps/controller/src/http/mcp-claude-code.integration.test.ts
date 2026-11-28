@@ -1,0 +1,695 @@
+/**
+ * Runs the real Claude Code against the real MCP Gateway, to check what the
+ * spec could only assume (spec 21 section 3.11): that the CLI works on both
+ * wire eras, that it sees `notifications/tools/list_changed` on each, and that
+ * it opens a new MCP session when the gateway answers 404 for the one it
+ * holds, as after a controller restart.
+ *
+ * Nothing here is billed and no login is used. The CLI starts the way the
+ * Claude Code adapter starts it: the adapter's own `mcpServers` entry
+ * (`buildMcpServerEntries`), the session token in `HERCULE_TOKEN`,
+ * `--strict-mcp-config`, a throwaway config directory and
+ * `MCP_DISCOVERY_CACHE=0`, and an environment built from nothing. Two things
+ * differ from production, each with its reason where it is set: an allow rule
+ * for the gateway's tools and `ENABLE_TOOL_SEARCH=false`. Its input carries no
+ * prompt until a test sends one, so it connects to its MCP servers and calls no
+ * model; `mcp_status` asks it what it lists. The one test that needs the CLI to
+ * send a `tools/call` sends a prompt to a local stand-in for the Messages API,
+ * which answers with that tool call.
+ *
+ * A second group runs the CLI against servers added by address, one with no
+ * sign-in and one with a token, and checks that the token is in neither the
+ * messages the CLI wrote to its stdout nor any file under its config folders.
+ *
+ * A recording proxy sits between the CLI and the controller and keeps what the
+ * gateway receives: methods, revisions, MCP session ids, and the messages the
+ * gateway sends on each stream. Skipped when no `claude` binary is found, which
+ * includes CI: no CI job installs one, so this file runs on a developer's
+ * machine only.
+ */
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { buildMcpServerEntries } from "../../../runner/src/harnesses/claude-code";
+import {
+  eventually,
+  readServer,
+  startFakeUpstream,
+  type FakeUpstream,
+} from "../mcp-servers/testing";
+import {
+  countListChanged,
+  describeRequest,
+  requestsOf,
+  waitUntilQuiet,
+} from "./mcp-recording-proxy.testing";
+import { withGatewayRig, withThreadOnGateway, type GatewayRig } from "./mcp-gateway-rig.testing";
+import { post, waitWithin } from "./testing";
+import { withFleet } from "../workspaces/testing";
+
+const claude = Bun.which("claude") ?? undefined;
+
+/** The most one step of these tests waits for the CLI, which is a separate process that starts slowly. */
+const STEP_MS = 20_000;
+
+// -- A stand-in for the Messages API -------------------------------------------
+
+/**
+ * Starts a local stand-in for the Anthropic Messages API and returns its
+ * address. The CLI is pointed at it, so no real model is reached. It answers
+ * a request with a call of the first of `tools` that has no result in the
+ * conversation yet, provided the request offers that tool, so each tool is
+ * called once and in order. Every other request gets the text "done".
+ */
+const startStandInModel = (
+  tools: ReadonlyArray<string>,
+): { readonly url: string; readonly stop: () => void } => {
+  let toolUses = 0;
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      if (!new URL(request.url).pathname.endsWith("/v1/messages")) {
+        return Response.json({});
+      }
+      const body = (await request.json()) as {
+        readonly model: string;
+        readonly tools?: ReadonlyArray<{ readonly name: string }>;
+        readonly messages: unknown;
+      };
+      const resultsSoFar = JSON.stringify(body.messages).split('"type":"tool_result"').length - 1;
+      const tool = tools[resultsSoFar];
+      const callsTool = tool !== undefined && (body.tools ?? []).some((one) => one.name === tool);
+      const block = callsTool
+        ? [
+            {
+              type: "content_block_start",
+              index: 0,
+              content_block: {
+                type: "tool_use",
+                id: `toolu_${String(++toolUses)}`,
+                name: tool,
+                input: {},
+              },
+            },
+            {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "input_json_delta", partial_json: JSON.stringify({ text: "hello" }) },
+            },
+          ]
+        : [
+            { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+            { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "done" } },
+          ];
+      const events: ReadonlyArray<readonly [string, unknown]> = [
+        [
+          "message_start",
+          {
+            type: "message_start",
+            message: {
+              id: "msg_1",
+              type: "message",
+              role: "assistant",
+              model: body.model,
+              content: [],
+              stop_reason: null,
+              usage: { input_tokens: 1, output_tokens: 1 },
+            },
+          },
+        ],
+        ...block.map((event) => [event.type, event] as const),
+        ["content_block_stop", { type: "content_block_stop", index: 0 }],
+        [
+          "message_delta",
+          {
+            type: "message_delta",
+            delta: { stop_reason: callsTool ? "tool_use" : "end_turn" },
+            usage: { output_tokens: 5 },
+          },
+        ],
+        ["message_stop", { type: "message_stop" }],
+      ];
+      return new Response(
+        events.map(([name, data]) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`).join(""),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  return {
+    url: `http://127.0.0.1:${String(server.port)}`,
+    stop: () => void server.stop(true),
+  };
+};
+
+// -- The real Claude Code --------------------------------------------------------
+
+/** What `mcp_status` reports for the gateway's entry. */
+interface ReportedServer {
+  readonly status: string;
+  readonly tools: ReadonlyArray<string>;
+}
+
+/** A running Claude Code, and the questions a test can put to it. */
+interface RunningClaude {
+  /** Asks the CLI what it lists for the `tools` entry now. */
+  readonly readStatus: () => Promise<ReportedServer>;
+  /** Sends a prompt, which the stand-in model answers with a call of the tool, and returns that call's result text. */
+  readonly runToolCall: () => Promise<ToolCallResult>;
+  /** Sends a prompt, which the stand-in model answers with `count` calls, and returns their results in order. */
+  readonly runToolCalls: (count: number) => Promise<ReadonlyArray<ToolCallResult>>;
+  /**
+   * Returns everything the CLI has put out so far as text: the messages it
+   * wrote to its output, and the content of every file under its folders.
+   */
+  readonly readTraces: () => { readonly output: string; readonly files: string };
+}
+
+interface ToolCallResult {
+  readonly isError: boolean;
+  readonly text: string;
+}
+
+interface ToolResultBlock {
+  readonly type: string;
+  readonly is_error?: boolean;
+  readonly content?: string | ReadonlyArray<{ readonly text?: string }>;
+}
+
+/**
+ * Starts the real CLI with the gateway at `gatewayUrl` as its `tools` server,
+ * the way the Claude Code adapter does, and its Messages API at `modelUrl`.
+ * Calls `body`, then stops the CLI by its process id and removes its folders.
+ */
+const withClaude = async (
+  options: {
+    readonly gatewayUrl: string;
+    readonly sessionToken: string;
+    readonly modelUrl: string;
+  },
+  body: (running: RunningClaude) => Promise<void>,
+): Promise<void> => {
+  const root = mkdtempSync(join(tmpdir(), "hercule-claude-gateway-"));
+  const configDir = join(root, "config");
+  const cwd = join(root, "cwd");
+  mkdirSync(configDir);
+  mkdirSync(cwd);
+  // The adapter's own entry: its header names `${HERCULE_TOKEN}`, and the runner puts the token there.
+  const mcpConfig = {
+    mcpServers: buildMcpServerEntries([{ name: "tools", url: `${options.gatewayUrl}/mcp` }]),
+  };
+  const child = Bun.spawn(
+    [
+      claude!,
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--strict-mcp-config",
+      "--mcp-config",
+      JSON.stringify(mcpConfig),
+      // Production differs here on purpose. The adapter asks the user through
+      // `canUseTool`; nobody is here to answer, and without this rule the CLI
+      // refuses the call ("requested permissions ... but you haven't granted it").
+      "--allowedTools",
+      "mcp__tools",
+    ],
+    {
+      // Built from nothing, so no login or setting of the developer's reaches the CLI.
+      env: {
+        PATH: process.env["PATH"] ?? "",
+        HOME: root,
+        CLAUDE_CONFIG_DIR: configDir,
+        ANTHROPIC_API_KEY: "sk-ant-placeholder",
+        ANTHROPIC_BASE_URL: options.modelUrl,
+        DISABLE_AUTOUPDATER: "1",
+        MCP_DISCOVERY_CACHE: "0",
+        HERCULE_TOKEN: options.sessionToken,
+        // Production differs here on purpose. With tool search on, the CLI
+        // sends the gateway's tools only as deferred names, and the stand-in
+        // model, which cannot search, never sees one to call.
+        ENABLE_TOOL_SEARCH: "false",
+      },
+      cwd,
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "ignore",
+    },
+  );
+
+  // Every message the CLI writes, so a test can wait for the answer it needs.
+  const messages: Array<{ readonly type?: string; readonly [key: string]: unknown }> = [];
+  void (async () => {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for await (const chunk of child.stdout) {
+      buffer += decoder.decode(chunk, { stream: true });
+      for (let end = buffer.indexOf("\n"); end !== -1; end = buffer.indexOf("\n")) {
+        const line = buffer.slice(0, end);
+        buffer = buffer.slice(end + 1);
+        if (line.trim() !== "") messages.push(JSON.parse(line) as (typeof messages)[number]);
+      }
+    }
+  })();
+  const write = async (message: unknown): Promise<void> => {
+    await child.stdin.write(`${JSON.stringify(message)}\n`);
+    await child.stdin.flush();
+  };
+
+  let nextRequest = 1;
+  const readStatus = async (): Promise<ReportedServer> => {
+    const requestId = `status-${String(nextRequest++)}`;
+    await write({
+      type: "control_request",
+      request_id: requestId,
+      request: { subtype: "mcp_status" },
+    });
+    const answered = (): unknown =>
+      messages.find(
+        (message) =>
+          message.type === "control_response" &&
+          (message["response"] as { request_id?: string }).request_id === requestId,
+      );
+    expect(await waitWithin(STEP_MS, () => answered() !== undefined), "mcp_status answered").toBe(
+      true,
+    );
+    const { response } = answered() as {
+      response: {
+        response: {
+          mcpServers: ReadonlyArray<{
+            name: string;
+            status: string;
+            tools?: ReadonlyArray<{ name: string }>;
+          }>;
+        };
+      };
+    };
+    const server = response.response.mcpServers.find((one) => one.name === "tools");
+    return {
+      status: server?.status ?? "absent",
+      tools: (server?.tools ?? []).map((tool) => tool.name),
+    };
+  };
+
+  const readToolResults = (): ReadonlyArray<ToolResultBlock> =>
+    messages
+      .filter((message) => message.type === "user")
+      .flatMap((message) => {
+        const content = (message["message"] as { content?: unknown }).content;
+        return Array.isArray(content) ? (content as ReadonlyArray<ToolResultBlock>) : [];
+      })
+      .filter((block) => block.type === "tool_result");
+  const runToolCalls = async (count: number): Promise<ReadonlyArray<ToolCallResult>> => {
+    const before = readToolResults().length;
+    await write({
+      type: "user",
+      message: { role: "user", content: [{ type: "text", text: "Call the tool." }] },
+      parent_tool_use_id: null,
+    });
+    expect(
+      await waitWithin(STEP_MS, () => readToolResults().length >= before + count),
+      `${String(count)} tool result(s)`,
+    ).toBe(true);
+    return readToolResults()
+      .slice(before, before + count)
+      .map((result) => ({
+        isError: result.is_error === true,
+        text:
+          typeof result.content === "string"
+            ? result.content
+            : (result.content ?? []).map((part) => part.text ?? "").join(""),
+      }));
+  };
+  const runToolCall = async (): Promise<ToolCallResult> => (await runToolCalls(1))[0]!;
+
+  const readTraces = (): { output: string; files: string } => {
+    const files: Array<string> = [];
+    for (const relative of readdirSync(root, { recursive: true, encoding: "utf8" })) {
+      const path = join(root, relative);
+      try {
+        if (statSync(path).isFile()) files.push(readFileSync(path, "utf8"));
+      } catch {
+        // The CLI removes its temporary files while it runs: one that is gone holds nothing to find.
+      }
+    }
+    return { output: JSON.stringify(messages), files: files.join("\n") };
+  };
+
+  try {
+    await body({ readStatus, runToolCall, runToolCalls, readTraces });
+  } finally {
+    child.kill();
+    await child.exited;
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+/**
+ * Starts the stand-in model that calls `tools` in order, runs `body` with its
+ * address, and stops it afterwards.
+ */
+const withStandInModel = async (
+  tools: ReadonlyArray<string>,
+  body: (modelUrl: string) => Promise<void>,
+): Promise<void> => {
+  const model = startStandInModel(tools);
+  try {
+    await body(model.url);
+  } finally {
+    model.stop();
+  }
+};
+
+/**
+ * Runs `body` against a controller with a live Thread whose list holds server
+ * `alpha`, a second server `bravo` ready to be added, the recording proxy in
+ * front of the controller, and a stand-in model.
+ */
+const withGateway = (
+  options: {
+    readonly upstream: FakeUpstream;
+    readonly answerDiscoverLikeOlderServer: boolean;
+    /** The tools the stand-in model calls, in order. By default `alpha`'s `echo`, once. */
+    readonly calls?: ReadonlyArray<string>;
+  },
+  body: (rig: GatewayRig & { readonly modelUrl: string }) => Promise<void>,
+): Promise<void> =>
+  withStandInModel(options.calls ?? ["mcp__tools__alpha__echo"], (modelUrl) =>
+    withGatewayRig(
+      {
+        upstream: options.upstream,
+        profileName: "claude-gateway",
+        serverNames: ["alpha", "bravo"],
+        listed: ["alpha"],
+        answerDiscoverLikeOlderServer: options.answerDiscoverLikeOlderServer,
+      },
+      (rig) => body({ ...rig, modelUrl }),
+    ),
+  );
+
+const ALPHA_TOOLS = ["alpha__echo", "alpha__get_issue_details_437857"];
+const ALL_TOOLS = [...ALPHA_TOOLS, "bravo__echo", "bravo__get_issue_details_437857"];
+
+/** Waits until the CLI lists exactly `tools` for the gateway's entry. */
+const waitForTools = (
+  running: RunningClaude,
+  tools: ReadonlyArray<string>,
+): Promise<ReportedServer> =>
+  eventually(
+    () => running.readStatus(),
+    (reported) => reported.status === "connected" && reported.tools.join() === tools.join(),
+  );
+
+describe.skipIf(claude === undefined)("the real Claude Code on the MCP Gateway", () => {
+  let upstream: FakeUpstream;
+
+  beforeAll(async () => {
+    upstream = await startFakeUpstream({
+      tools: [
+        { name: "echo", description: "Echoes its text" },
+        { name: "get-issue.details", description: "Reads an issue" },
+      ],
+    });
+  });
+
+  afterAll(async () => {
+    await upstream.stop();
+  });
+
+  it("works on the 2026-07-28 path and lists again when the gateway sends list_changed on subscriptions/listen", async () => {
+    await withGateway({ upstream, answerDiscoverLikeOlderServer: false }, async (rig) => {
+      await withClaude(rig, async (running) => {
+        await waitForTools(running, ALPHA_TOOLS);
+
+        // The CLI tries the new era first, and the gateway answers it, so no MCP session is ever opened.
+        const afterStart = rig.proxy.seen.map(describeRequest);
+        expect(afterStart[0]).toBe("POST server/discover 2026-07-28 no-session 200");
+        expect(afterStart).toContain("POST subscriptions/listen 2026-07-28 no-session 200");
+        expect(afterStart).toContain("POST tools/list 2026-07-28 no-session 200");
+        expect(requestsOf(rig.proxy.seen, "initialize")).toEqual([]);
+        expect(rig.proxy.seen.every((one) => one.sessionId === null)).toBe(true);
+        const [listen] = requestsOf(rig.proxy.seen, "subscriptions/listen");
+        expect(listen?.streamed[0]).toBe("notifications/subscriptions/acknowledged");
+        const listsBefore = requestsOf(rig.proxy.seen, "tools/list").length;
+        const changesBefore = countListChanged([listen!]);
+
+        await rig.setList(["alpha", "bravo"]);
+
+        // The notification goes out on the listen stream, and the CLI lists again.
+        expect(
+          await waitWithin(STEP_MS, () => countListChanged([listen!]) > changesBefore),
+          "list_changed on subscriptions/listen",
+        ).toBe(true);
+        await waitForTools(running, ALL_TOOLS);
+        expect(requestsOf(rig.proxy.seen, "tools/list").length).toBeGreaterThan(listsBefore);
+
+        // The call goes through the new era too.
+        const called = await running.runToolCall();
+        expect(called.isError).toBe(false);
+        expect(called.text).toContain("hello");
+        expect(requestsOf(rig.proxy.seen, "tools/call").map(describeRequest)).toEqual([
+          "POST tools/call 2026-07-28 no-session 200",
+        ]);
+      });
+    });
+  }, 120_000);
+
+  it("lists and calls a tool whose name has a hyphen and one whose name has a dot, each reaching its own upstream tool beside a tool that reads alike", async () => {
+    const tools = [
+      { name: "search_pages", description: "Searches the pages" },
+      { name: "search-pages", description: "Searches the pages by hyphen" },
+      { name: "search.pages", description: "Searches the pages by dot" },
+    ];
+    const owners: ReadonlyArray<readonly [string, string]> = [
+      ["alpha__search_pages_f33805", "search-pages"],
+      ["alpha__search_pages_52ac82", "search.pages"],
+      ["alpha__search_pages", "search_pages"],
+    ];
+    const searching = await startFakeUpstream({ tools });
+    try {
+      await withGateway(
+        {
+          upstream: searching,
+          answerDiscoverLikeOlderServer: false,
+          calls: owners.map(([name]) => `mcp__tools__${name}`),
+        },
+        async (rig) => {
+          await withClaude(rig, async (running) => {
+            // The gateway lists in order of the original names: `-`, `.`, `_`. The hyphen and the dot are changed to `_` and a hash.
+            await waitForTools(
+              running,
+              owners.map(([name]) => name),
+            );
+            const results = await running.runToolCalls(owners.length);
+            expect(results.map((result) => result.isError)).toEqual([false, false, false]);
+            expect(requestsOf(rig.proxy.seen, "tools/call").map((one) => one.tool)).toEqual(
+              owners.map(([name]) => name),
+            );
+            expect(
+              searching.requests
+                .filter((one) => one.method === "tools/call")
+                .map((one) => one.tool),
+            ).toEqual(owners.map(([, tool]) => tool));
+          });
+        },
+      );
+    } finally {
+      await searching.stop();
+    }
+  }, 120_000);
+
+  it("works on the older path when server/discover is refused, lists again on list_changed from the GET stream, and opens a new MCP session after a 404", async () => {
+    // The model calls `echo` twice: once for the call the 404 interrupts, and once after the refusal.
+    const calls = ["mcp__tools__alpha__echo", "mcp__tools__alpha__echo"];
+    await withGateway({ upstream, answerDiscoverLikeOlderServer: true, calls }, async (rig) => {
+      await withClaude(rig, async (running) => {
+        await waitForTools(running, ALPHA_TOOLS);
+
+        // initialize, then the initialized notification and the GET stream, each carrying the MCP session id.
+        const [discover, initialize] = rig.proxy.seen;
+        expect(describeRequest(discover!)).toBe("POST server/discover 2026-07-28 no-session 400");
+        expect(describeRequest(initialize!)).toBe("POST initialize no-revision no-session 200");
+        const firstSession = initialize!.answeredSessionId!;
+        expect(firstSession).not.toBeNull();
+        const [get] = requestsOf(rig.proxy.seen, "GET");
+        expect(describeRequest(get!)).toBe("GET - 2025-11-25 session 200");
+        expect(get!.sessionId).toBe(firstSession);
+        for (const method of ["notifications/initialized", "tools/list"]) {
+          const [one] = requestsOf(rig.proxy.seen, method);
+          expect(describeRequest(one!), method).toContain("2025-11-25 session");
+          expect(one!.sessionId, method).toBe(firstSession);
+        }
+
+        const changesBefore = countListChanged([get!]);
+        await rig.setList(["alpha", "bravo"]);
+        expect(
+          await waitWithin(STEP_MS, () => countListChanged([get!]) > changesBefore),
+          "list_changed on the GET stream",
+        ).toBe(true);
+        await waitForTools(running, ALL_TOOLS);
+
+        // The controller forgets the MCP session, as a restart does. The CLI is not told.
+        expect(await rig.forgetMcpSession()).toBe(firstSession);
+
+        // Its own next request is a tool call, which names the forgotten session.
+        const afterRestart = rig.proxy.seen.length;
+        const result = await running.runToolCall();
+        const [refused] = requestsOf(rig.proxy.seen.slice(afterRestart), "tools/call");
+        expect(describeRequest(refused!)).toBe("POST tools/call 2025-11-25 session 404");
+        expect(refused!.sessionId).toBe(firstSession);
+
+        // The CLI handshakes again and sends the call once more on a session of its own making.
+        const newSessions = requestsOf(rig.proxy.seen.slice(afterRestart), "initialize").map(
+          (one) => one.answeredSessionId,
+        );
+        expect(newSessions.length).toBeGreaterThan(0);
+        expect(newSessions).not.toContain(firstSession);
+        const retried = requestsOf(rig.proxy.seen.slice(afterRestart), "tools/call").at(-1)!;
+        expect(retried.status).toBe(200);
+        expect(newSessions).toContain(retried.sessionId);
+
+        // It sends the call before it lists, and the gateway has offered no name to the new MCP
+        // session, so the model sees one refusal that asks it to list again. This is the accepted
+        // cost of keeping the names offered per MCP session (spec 21 section 3.4).
+        expect(result.isError).toBe(true);
+        expect(result.text).toContain("List the tools again");
+
+        // The refusal sent list_changed, the CLI lists again on its new session, and then the call runs.
+        expect(
+          await waitWithin(STEP_MS, () =>
+            requestsOf(rig.proxy.seen.slice(afterRestart), "tools/list").some((one) =>
+              newSessions.includes(one.sessionId),
+            ),
+          ),
+          "tools/list on a new MCP session",
+        ).toBe(true);
+        const again = await running.runToolCall();
+        expect(again.isError).toBe(false);
+        expect(again.text).toContain("hello");
+
+        // The new MCP sessions have streams of their own, and a change reaches the CLI on them.
+        // The CLI may still be handshaking, so wait until it has been quiet for a moment.
+        await waitUntilQuiet(rig.proxy);
+        const newStreams = requestsOf(rig.proxy.seen.slice(afterRestart), "GET").filter(
+          (one) => one.status === 200,
+        );
+        expect(newStreams.length).toBeGreaterThan(0);
+        expect(newStreams.map((one) => one.sessionId)).not.toContain(firstSession);
+        const changesOnNew = countListChanged(newStreams);
+        await rig.setList(["alpha"]);
+        expect(
+          await waitWithin(STEP_MS, () => countListChanged(newStreams) > changesOnNew),
+          "list_changed on the new MCP sessions' streams",
+        ).toBe(true);
+        await waitForTools(running, ALPHA_TOOLS);
+      });
+    });
+  }, 120_000);
+});
+
+describe.skipIf(claude === undefined)("the real Claude Code on servers added by address", () => {
+  const TOKEN = "tok-claude-code-0123456789";
+  let open: FakeUpstream;
+  let tokened: FakeUpstream;
+
+  beforeAll(async () => {
+    open = await startFakeUpstream();
+    tokened = await startFakeUpstream();
+    // The fake that holds the token refuses every request that does not carry it.
+    tokened.authorize = (authorization) => authorization === `Bearer ${TOKEN}`;
+  });
+
+  afterAll(async () => {
+    await open.stop();
+    await tokened.stop();
+  });
+
+  it("calls a tool of a server with no sign-in and of one with a token, and the token is in neither the CLI's stdout messages nor its config folder", async () => {
+    await withFleet(async (arranged) => {
+      const controller = {
+        harness: arranged.harness,
+        base: arranged.harness.base,
+        token: arranged.token,
+      };
+      const ids: Array<string> = [];
+      for (const [name, fake, token] of [
+        ["open", open, undefined],
+        ["tokened", tokened, TOKEN],
+      ] as const) {
+        const created = await post(
+          controller.base,
+          "/api/v1/mcp-servers",
+          {
+            source: { kind: "url", url: fake.url, name, ...(token === undefined ? {} : { token }) },
+          },
+          controller.token,
+        );
+        expect(created.status, await created.clone().text()).toBe(200);
+        const { id } = (await created.json()) as { readonly id: string };
+        await eventually(
+          () => readServer(controller, id),
+          (record) => record.status === "ready",
+        );
+        ids.push(id);
+      }
+
+      await withStandInModel(["mcp__tools__open__echo", "mcp__tools__tokened__echo"], (modelUrl) =>
+        withThreadOnGateway(
+          arranged,
+          {
+            profileName: "claude-gateway",
+            serverIds: ids,
+            answerDiscoverLikeOlderServer: false,
+          },
+          async (rig) => {
+            await withClaude({ ...rig, modelUrl }, async (running) => {
+              await eventually(
+                () => running.readStatus(),
+                (reported) =>
+                  reported.status === "connected" &&
+                  reported.tools.join() === "open__echo,tokened__echo",
+              );
+
+              const results = await running.runToolCalls(2);
+
+              expect(results.map((result) => result.isError)).toEqual([false, false]);
+              expect(results.map((result) => result.text)).toEqual([
+                expect.stringContaining("hello"),
+                expect.stringContaining("hello"),
+              ]);
+              for (const fake of [open, tokened]) {
+                expect(fake.requests.filter((request) => request.method === "tools/call")).toEqual([
+                  expect.objectContaining({ tool: "echo", status: 200 }),
+                ]);
+              }
+              // The fake that holds the token let in only requests with the bearer. The other saw none.
+              expect(new Set(tokened.requests.map((request) => request.authorization))).toEqual(
+                new Set([`Bearer ${TOKEN}`]),
+              );
+              expect(new Set(open.requests.map((request) => request.authorization))).toEqual(
+                new Set([null]),
+              );
+
+              // The CLI records which tools it used in its config folder, a moment after the call.
+              // Waiting for that record means the search below has something to find in the files.
+              expect(
+                await waitWithin(STEP_MS, () =>
+                  running.readTraces().files.includes("mcp__tools__tokened__echo"),
+                ),
+                "the CLI's record of its tool use",
+              ).toBe(true);
+              // Only these two surfaces are searched for the token: the messages
+              // the CLI wrote to its stdout, and the files under its config folders.
+              const traces = running.readTraces();
+              expect(traces.output).not.toContain(TOKEN);
+              expect(traces.files).not.toContain(TOKEN);
+            });
+          },
+        ),
+      );
+    });
+  }, 120_000);
+});

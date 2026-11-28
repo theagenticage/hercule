@@ -10,8 +10,8 @@
  * shape whichever runner it is looking at.
  */
 import { Schema } from "effect";
-import { Capabilities, Fact, RunnerFacts, RunnerWatermark } from "@hercule/protocol";
-import { CapabilitySnapshot } from "./provider";
+import { Capabilities, Fact, RunnerDiskUsage, RunnerFacts, RunnerMetrics } from "@hercule/protocol";
+import { CapabilitySnapshot } from "./provider-account";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import * as HttpApiSchema from "effect/http-api/HttpApiSchema";
@@ -37,9 +37,11 @@ import { atMost, bounded } from "../strings";
  */
 export {
   Capabilities as RunnerCapabilities,
-  ProviderBinary as RunnerProvider,
+  HarnessBinary,
+  PROBED_TOOLCHAINS,
   RunnerFacts,
-  RunnerWatermark,
+  RunnerDiskUsage,
+  RunnerMetrics,
   Toolchain as RunnerToolchain,
 } from "@hercule/protocol";
 
@@ -93,7 +95,12 @@ export const Runner = Schema.Struct({
   version: Schema.NullOr(Fact),
   labels: atMost(RunnerLabel, MAX_RUNNER_LABELS),
   facts: Schema.NullOr(RunnerFacts),
-  watermark: Schema.NullOr(RunnerWatermark),
+  metrics: Schema.NullOr(RunnerMetrics),
+  /**
+   * What the runner last measured outside its workspaces. Null until its first
+   * report, and on a runner built before it measured disk usage.
+   */
+  diskUsage: Schema.NullOr(RunnerDiskUsage),
   /** The effective cap: the owner's override, or the one derived from the facts. */
   maxConcurrentSessions: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   /** The effective watermark: the owner's override, or the shipped ten gibibytes. */
@@ -159,8 +166,13 @@ export const RunnerRetireInput = closedStruct(RUNNER_RETIRE_FIELDS);
 
 export type RunnerRetireInput = Schema.Schema.Type<typeof RunnerRetireInput>;
 
-/** Shown here and nowhere else: the controller keeps only its hash. */
+/**
+ * Shown here and nowhere else: the controller keeps only its hash. The `id` is
+ * the one `JoinTokenRef` lists, so a client can tell this token among the open
+ * ones.
+ */
 export const MintedJoinToken = Schema.Struct({
+  id: Id,
   token: Schema.NonEmptyString,
   expiresAt: Timestamp,
 });
@@ -224,13 +236,16 @@ export const runner = HttpApiGroup.make("runner")
     }),
     HttpApiEndpoint.post("probe", "/runners/:id/probe", {
       params: { id: Id },
-      payload: Schema.Struct({ instanceId: Id }),
+      payload: Schema.Struct({
+        providerAccountId: Id,
+        harnessId: Schema.optionalKey(Schema.String),
+      }),
       success: CapabilitySnapshot,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("installHarness", "/runners/:id/install-harness", {
       params: { id: Id },
-      payload: Schema.Struct({ providerId: Schema.String }),
+      payload: Schema.Struct({ harnessId: Schema.String }),
       success: RunnerDetail,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),

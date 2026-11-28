@@ -14,7 +14,12 @@ import { readSenders, settingsQuery, wikiPageQuery } from "../../../../app/queri
 import { readFullSearch } from "../../../../screens/list-pane/list-with-open-pane";
 import { NotFound } from "../../../../screens/not-found";
 import { Markdown } from "../../../../screens/session/markdown";
-import { OldRevisionBand, WikiHistoryList, WikiPageLead } from "../../../../screens/wiki/wiki-page";
+import {
+  ArchivedBand,
+  OldRevisionBand,
+  WikiHistoryList,
+  WikiPageLead,
+} from "../../../../screens/wiki/wiki-page";
 
 /**
  * The search params of an open wiki page (spec 19 section 8.2):
@@ -53,7 +58,7 @@ const validateWikiPageSearch = (search: Record<string, unknown>): WikiPageSearch
  *
  * Its loader reads the page, as of `revision` when the URL names one, with
  * its newest revisions, then the sessions of the agents that wrote those
- * revisions, so their names are drawn at the first paint. When no page has
+ * revisions or archived the page, so their names are drawn at the first paint. When no page has
  * the id, the route shows `WikiPageNotFound`. When the page exists but has no
  * such revision, it shows `WikiPageNotFound` too, which then names the
  * missing revision and links to the current page.
@@ -74,12 +79,14 @@ export const Route = createFileRoute("/_connected/_shell/wiki/$pageId")({
   }) => {
     const { client } = controller;
     try {
-      const { revisions } = await queryClient.ensureQueryData(
+      const { page, revisions } = await queryClient.ensureQueryData(
         wikiPageQuery(client, pageId, revision),
       );
-      const senderSessionIds = new Set(
-        revisions.flatMap((entry) => readActorSessionId(entry.actor) ?? []),
-      );
+      const actors = [
+        ...revisions.map((entry) => entry.actor),
+        ...(page.archived === undefined ? [] : [page.archived.by]),
+      ];
+      const senderSessionIds = new Set(actors.flatMap((actor) => readActorSessionId(actor) ?? []));
       await readSenders(queryClient, client, [...senderSessionIds]);
     } catch (error) {
       if (!isNotFound(error)) throw error;
@@ -161,8 +168,8 @@ function OpenWikiPageRoute(): JSX.Element {
 
 /**
  * Reads the page `pageId`, as of `revision` or the current page when there is
- * none, and draws it: the band when it is an older revision, the lead, the
- * body, and the History beside it. The page is a section named by its title.
+ * none, and draws it: the band when it is archived, the band when it is an
+ * older revision, the lead, the body, and the History beside it. The page is a section named by its title.
  */
 function OpenWikiPage({
   pageId,
@@ -186,6 +193,9 @@ function OpenWikiPage({
   return (
     <section className="open-pane" aria-labelledby={headingId}>
       <div className="pill-room" />
+      {page.archived === undefined ? null : (
+        <ArchivedBand archived={page.archived} timezone={timezone} />
+      )}
       {page.revision === history.currentRevision ? null : (
         <OldRevisionBand
           pageId={pageId}

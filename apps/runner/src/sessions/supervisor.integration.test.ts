@@ -21,12 +21,23 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { Deferred, Duration, Effect, Exit, Fiber, PubSub, Scope, Stream } from "effect";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Logger,
+  PubSub,
+  Queue,
+  Scope,
+  Stream,
+} from "effect";
 import { TestClock } from "effect/testing";
 import type {
   ExitReason,
   ItemStatus,
-  ProviderEvent,
+  HarnessEvent,
   RequestResolution,
   RunnerToController,
   SendResult,
@@ -36,6 +47,7 @@ import type {
   SessionSpec,
   SessionStart,
   TurnInput,
+  UsageReading,
   WorkspaceKind,
   WorkspaceStepKey,
   WorkspaceStepResult,
@@ -55,7 +67,7 @@ import {
   type GithubTokenAnswer,
 } from "@hercule/protocol";
 import { FIXTURE_SCHEMA } from "@hercule/protocol/testing";
-import type { ProviderAdapter, ProviderRunnerContext } from "../providers";
+import type { HarnessAdapter, SessionStartContext, SessionUsageReport } from "../harnesses";
 import type { Machine } from "./context";
 
 import { makeWorkspaceSteps } from "../workspace-steps";
@@ -73,7 +85,7 @@ import { openFileClock } from "../edit-marks";
 import { writeStartMark } from "../edit-marks/testing";
 import { makeSupervising, type SessionSupervisor, type Supervising } from "./supervisor";
 import { makeAttachmentCache, type AttachmentCache } from "../attachments";
-import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "../harnesses/testing";
 import { makeSessionSkillsFolders } from "../skills";
 import {
   buildTestSkillRevision,
@@ -93,7 +105,8 @@ afterAll(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
+const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
+const HARNESS_HOME = `providers/${ACCOUNT_ID}`;
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
 const RUNNER_ID = "0199e0e7-0000-7000-8000-0000000000aa";
 const NATIVE = "0199e0e7-0000-7000-8000-0000000000fe";
@@ -117,7 +130,7 @@ const INACTIVITY_MS = 30 * 60 * 1000;
 const ABSOLUTE_MS = 8 * 60 * 60 * 1000;
 
 const SPEC: SessionSpec = {
-  instanceId: INSTANCE,
+  providerAccountId: ACCOUNT_ID,
   workspaceId: null,
   modelSelection: { model: "claude-haiku-4-5", options: {} },
   accessMode: "approval-required",
@@ -129,9 +142,13 @@ const START: SessionStart = {
   requestId: START_REQUEST,
   sessionId: SESSION,
   input: START_INPUT,
-  providerId: "fake",
-  config: {},
-  secrets: {},
+  harnessId: "fake",
+  harnessAccount: {
+    providerAccountId: ACCOUNT_ID,
+    harnessHome: HARNESS_HOME,
+    modelArgument: "{model}",
+    credentialVariables: [],
+  },
   spec: SPEC,
   token: "a-session-token",
 };
@@ -142,7 +159,7 @@ const at = "2026-09-07T10:00:00.000Z";
  * An event no real adapter sends. The tests publish it until the watch receives
  * it, and the fake adapter filters it out before the watch under test sees it.
  */
-const MARKER: ProviderEvent = {
+const MARKER: HarnessEvent = {
   _tag: "runtime.warning",
   eventId: "e-marker",
   sessionId: SESSION,
@@ -152,9 +169,9 @@ const MARKER: ProviderEvent = {
 
 /** A fake adapter that records what it was given and emits the events the test asks for. */
 interface Fake {
-  readonly adapter: ProviderAdapter;
+  readonly adapter: HarnessAdapter;
   /** The context the supervisor resolved for the one session it started. */
-  readonly contexts: Array<ProviderRunnerContext>;
+  readonly contexts: Array<SessionStartContext>;
   /** How many markers have reached the watch. A count above zero proves the watch is listening. */
   readonly heard: () => number;
   readonly inputs: Array<TurnInput>;
@@ -171,7 +188,11 @@ interface Fake {
   readonly answered: Array<readonly [string, string, RequestResolution]>;
   /** Every `stopSession` call, with the reason its caller gave. */
   readonly stops: Array<{ readonly sessionId: string; readonly reason: ExitReason }>;
-  readonly emit: (event: ProviderEvent) => void;
+  readonly emit: (event: HarnessEvent) => void;
+  /** Makes the adapter report the usage of a session's account. Kept until the watch reads it. */
+  readonly reportUsage: (report: SessionUsageReport) => void;
+  /** How many reports the watch has begun to read. When it reads one, it has finished the one before. */
+  readonly usageReportsRead: () => number;
   /** The error every later start and input fails with, when set. */
   fails: AdapterError | undefined;
   /** The message every `respondToQuestion` call fails with, when set. */
@@ -186,10 +207,14 @@ interface Fake {
 }
 
 const createFake = (): Fake => {
-  const events = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+  const events = Effect.runSync(PubSub.unbounded<HarnessEvent>());
+  // A queue, not a PubSub: the report of a test must not be lost to a watch
+  // that has not subscribed yet.
+  const usageReports = Effect.runSync(Queue.unbounded<SessionUsageReport>());
   let heard = 0;
+  let usageReportsRead = 0;
   let inputsBegun = 0;
-  const contexts: Array<ProviderRunnerContext> = [];
+  const contexts: Array<SessionStartContext> = [];
   const inputs: Array<TurnInput> = [];
   const interrupted: Array<{ readonly sessionId: string; readonly subagentId?: string }> = [];
   const answered: Array<readonly [string, string, RequestResolution]> = [];
@@ -211,8 +236,13 @@ const createFake = (): Fake => {
     emit: (event) => {
       PubSub.publishUnsafe(events, event);
     },
+    reportUsage: (report) => {
+      Queue.offerUnsafe(usageReports, report);
+    },
+    usageReportsRead: () => usageReportsRead,
     adapter: {
-      providerId: "fake",
+      harnessId: "fake",
+      harnessName: "Fake Harness",
       binaryName: "fake-harness",
       /**
        * A PubSub drops events that no subscriber receives, so an event
@@ -226,6 +256,10 @@ const createFake = (): Fake => {
         heard += 1;
         return false;
       }),
+      usageReports: Stream.tap(Stream.fromQueue(usageReports), () =>
+        Effect.sync(() => void (usageReportsRead += 1)),
+      ),
+      deleteSessionFiles: () => Effect.die("no session files here"),
       probe: () => Effect.die("not probed here"),
       listSessions: Effect.sync(() => [...held.values()]),
       generateText: () => Effect.die("no text generation here"),
@@ -237,7 +271,7 @@ const createFake = (): Fake => {
           const binding: SessionBinding = {
             sessionId,
             nativeSessionId: NATIVE,
-            instanceId: INSTANCE,
+            providerAccountId: ACCOUNT_ID,
           };
           held.set(sessionId, binding);
           fake.emit({ _tag: "session.started", eventId: "e-started", sessionId, at });
@@ -344,7 +378,7 @@ const buildConnection = (
   roots.push(under);
   const sent: Array<RunnerToController> = [];
   const machine: Machine = {
-    providersDir: join(under, "providers"),
+    storageDir: join(under, "storage"),
     scratchDir: join(under, "scratch"),
     attachmentsDir: join(under, "attachments"),
     editMarksDir: join(under, "edit-marks"),
@@ -594,10 +628,10 @@ describe("one session, start to exit", () => {
     // The controller inserts each event once, keyed by this number, so the
     // number must never repeat or go backwards.
     expect(events.map((frame) => frame.seq)).toEqual([1, 2, 3]);
-    // The harness is handed the scratch cwd and the instance's home, not paths
+    // The harness is handed the scratch cwd and the Harness Home, not paths
     // the controller invented.
     expect(fake.contexts[0]?.cwd).toBe(join(machine.scratchDir, SESSION));
-    expect(fake.contexts[0]?.home).toBe(join(machine.providersDir, INSTANCE));
+    expect(fake.contexts[0]?.home).toBe(join(machine.storageDir, HARNESS_HOME));
     expect(fake.contexts[0]?.binary).toBe("/usr/local/bin/fake-harness");
     expect(fake.contexts[0]?.env["HERCULE_SESSION"]).toBe("1");
     // The credential the session calls Hercule with, carried from the frame the
@@ -630,7 +664,7 @@ describe("one session, start to exit", () => {
     const reports = sent.filter((frame) => frame._tag === "sessionsReport");
     // A plain snapshot: each binding links the Hercule session to the harness's own session.
     expect(reports[0]?.sessions).toEqual([
-      { sessionId: SESSION, nativeSessionId: NATIVE, instanceId: INSTANCE },
+      { sessionId: SESSION, nativeSessionId: NATIVE, providerAccountId: ACCOUNT_ID },
     ]);
     expect(reports[1]?.sessions).toEqual([]);
     // The scratch directory dies with the session it was made for.
@@ -961,7 +995,7 @@ describe("a start interrupted while its harness is starting", () => {
     });
     const original = fake.adapter.startSession;
     Object.assign(fake.adapter, {
-      startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) => {
+      startSession: (sessionId: string, spec: SessionSpec, ctx: SessionStartContext) => {
         gateEntered = true;
         return Effect.andThen(
           Effect.promise(() => gate),
@@ -1148,7 +1182,7 @@ describe("a stale exit's release racing a fresh start under the same id", () => 
           originalListSessions,
         );
       }),
-      startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) => {
+      startSession: (sessionId: string, spec: SessionSpec, ctx: SessionStartContext) => {
         startCalls += 1;
         if (startCalls === 2) {
           staleExitSentBeforeFreshStart = listSessionEvents(sent).length === 2;
@@ -1515,7 +1549,7 @@ describe("a session that cannot run here", () => {
     expect(events[0]).toMatchObject({
       class: "HarnessNotInstalled",
       message: expect.stringContaining(
-        `hercule runner install-harness ${RUNNER_ID} --provider fake`,
+        `hercule runner install-harness ${RUNNER_ID} --harness fake`,
       ) as string,
     });
     // Not `stopped`: nobody asked for this, and there is nothing to resume.
@@ -1526,7 +1560,7 @@ describe("a session that cannot run here", () => {
     expect(fake.inputs).toEqual([]);
     expectStartInputRefused(
       sent,
-      `hercule runner install-harness ${RUNNER_ID} --provider fake`,
+      `hercule runner install-harness ${RUNNER_ID} --harness fake`,
       "HarnessNotInstalled",
     );
     // The answer comes before the exit, so the controller has it before the
@@ -1584,18 +1618,18 @@ describe("a session that cannot run here", () => {
     expectStartInputRefused(sent, "minProperties");
   });
 
-  it("ends a start for a provider this build has no adapter for", async () => {
+  it("ends a start for a harness this build has no adapter for", async () => {
     const fake = createFake();
     const { supervisor, sent } = buildConnection(fake);
 
-    await runConnected(fake, supervisor, supervisor.start({ ...START, providerId: "codex" }));
+    await runConnected(fake, supervisor, supervisor.start({ ...START, harnessId: "codex/codex" }));
 
     const events = listSessionEvents(sent).map((frame) => frame.event);
     expect(events[0]).toMatchObject({
-      message: expect.stringContaining("does not support the provider") as unknown,
+      message: expect.stringContaining("does not support the harness") as unknown,
     });
     expect(events[1]).toMatchObject({ _tag: "session.exited", reason: "crash" });
-    expectStartInputRefused(sent, "does not support the provider");
+    expectStartInputRefused(sent, "does not support the harness");
   });
 
   it("reports a defect on the session instead of letting it end the connection", async () => {
@@ -3099,7 +3133,7 @@ describe("a stop that arrives while a session is still starting", () => {
     });
     const original = fake.adapter.startSession;
     Object.assign(fake.adapter, {
-      startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) => {
+      startSession: (sessionId: string, spec: SessionSpec, ctx: SessionStartContext) => {
         gateEntered = true;
         return Effect.andThen(
           Effect.promise(() => gate),
@@ -3263,7 +3297,7 @@ describe("a start that follows a stop of the same id", () => {
     const { runner, machine, githubTokenCopies, steps, scope } = buildConnection(fake);
     // The watch holds this event until the test lets it go, so the old exit,
     // published after it, is handled only then.
-    const HOLD: ProviderEvent = { ...MARKER, eventId: "e-hold" };
+    const HOLD: HarnessEvent = { ...MARKER, eventId: "e-hold" };
     let releaseHold: () => void = () => {};
     const hold = new Promise<void>((resolve) => {
       releaseHold = resolve;
@@ -3308,7 +3342,7 @@ describe("a start that follows a stop of the same id", () => {
           dropped ? bindings.filter((binding) => binding.sessionId !== SESSION) : bindings,
         );
       }),
-      startSession: (sessionId: string, spec: SessionSpec, ctx: ProviderRunnerContext) =>
+      startSession: (sessionId: string, spec: SessionSpec, ctx: SessionStartContext) =>
         !dropped
           ? originalStart(sessionId, spec, ctx)
           : Effect.andThen(
@@ -3418,15 +3452,15 @@ describe("a shutdown that happens before a start has added its entry", () => {
 });
 
 /**
- * Tests the instance's secret config values. They arrive in the start frame and
- * reach the adapter through the context and nowhere else. Written to the
- * runner's disk, they would outlive the session they belong to, and the machine
- * holds no Hercule state to restore them from.
+ * Tests the account's credential. It arrives in the start frame and reaches the
+ * adapter through the context and nowhere else. Written to the runner's disk,
+ * it would outlive the session it belongs to, and the machine holds no Hercule
+ * state to restore it from.
  */
-describe("the secrets a start frame carries", () => {
+describe("the account a start frame carries", () => {
   const KEY = "a-paid-credential-nobody-else-holds";
 
-  it("passes the frame's secrets to the adapter, by name", async () => {
+  it("passes the account's credential and model argument to the adapter", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
@@ -3434,18 +3468,26 @@ describe("the secrets a start frame carries", () => {
       fake,
       supervisor,
       Effect.gen(function* () {
-        yield* supervisor.start({ ...START, secrets: { zaiApiKey: KEY } });
+        yield* supervisor.start({
+          ...START,
+          harnessAccount: {
+            ...START.harnessAccount,
+            modelArgument: "zai/{model}",
+            credential: { variable: "ZAI_API_KEY", value: KEY },
+          },
+        });
         yield* waitUntil("started the session", () => fake.contexts.length === 1);
       }),
     );
 
-    expect(fake.contexts[0]?.secrets).toEqual({ zaiApiKey: KEY });
-    // The runner never adds them to the environment: only the adapter knows
-    // which variable a key belongs in.
+    expect(fake.contexts[0]?.credential).toEqual({ variable: "ZAI_API_KEY", value: KEY });
+    expect(fake.contexts[0]?.modelArgument).toBe("zai/{model}");
+    // The runner never adds it to the environment: the adapter puts it in the
+    // environment of the harness process.
     expect(JSON.stringify(fake.contexts[0]?.env)).not.toContain(KEY);
   });
 
-  it("passes an empty set of secrets when the frame has none", async () => {
+  it("passes no credential when the frame has none", async () => {
     const fake = createFake();
     const { supervisor } = buildConnection(fake);
 
@@ -3458,7 +3500,7 @@ describe("the secrets a start frame carries", () => {
       }),
     );
 
-    expect(fake.contexts[0]?.secrets).toEqual({});
+    expect(fake.contexts[0]).not.toHaveProperty("credential");
   });
 });
 
@@ -3499,14 +3541,14 @@ const listStepResults = (
 /** Returns the position in `sent` of the first session event with the given tag, or -1. */
 const findEventIndex = (
   sent: ReadonlyArray<RunnerToController>,
-  tag: ProviderEvent["_tag"],
+  tag: HarnessEvent["_tag"],
 ): number => sent.findIndex((frame) => frame._tag === "sessionEvent" && frame.event._tag === tag);
 
 /** Emits the end of turn `TURN`, with the fields that say how it ended. */
 const emitStepTurnEnd = (
   fake: Fake,
   fields: Pick<
-    Extract<ProviderEvent, { _tag: "turn.completed" }>,
+    Extract<HarnessEvent, { _tag: "turn.completed" }>,
     "state" | "error" | "structuredResult"
   >,
 ): void =>
@@ -4111,6 +4153,100 @@ describe("an agent step's turn", () => {
   });
 });
 
+describe("the workspace sessions the supervisor reports to the disk measurements", () => {
+  /**
+   * Builds a connection with a primary workspace, and an observer that notes
+   * the branch the workspace is on each time a session starts in it. The
+   * branch shows whether the workspace was marked as used before the start
+   * switched it.
+   */
+  const buildObservedWorkspace = async (fake: Fake) => {
+    const connection = buildConnection(fake);
+    const remote = makeRemote();
+    addBranch(remote, "release");
+    const frame = buildProvisionFrame({
+      kind: "primary",
+      checkouts: [buildCheckout({ resourceId: createId(), remote: remote.url })],
+    });
+    expect((await Effect.runPromise(connection.machine.workspaces.provision(frame))).status).toBe(
+      "ready",
+    );
+    const cwd = Effect.runSync(connection.machine.workspaces.resolve(frame.workspaceId))!.cwd;
+    const initialBranch = runGitOrThrow(cwd, "rev-parse", "--abbrev-ref", "HEAD");
+    const calls: Array<string> = [];
+    connection.runner.observeWorkspaceSessions({
+      beginChange: () =>
+        Effect.sync(
+          () =>
+            void calls.push(
+              `started on ${runGitOrThrow(cwd, "rev-parse", "--abbrev-ref", "HEAD")}`,
+            ),
+        ),
+      endChange: () => Effect.sync(() => void calls.push("ended")),
+    });
+    return { ...connection, calls, cwd, initialBranch, workspaceId: frame.workspaceId };
+  };
+
+  it("hears of a start before the start switches the branch, and of the exit after it", async () => {
+    const fake = createFake();
+    const { supervisor, calls, cwd, initialBranch, workspaceId } =
+      await buildObservedWorkspace(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({
+          ...START,
+          spec: { ...SPEC, workspaceId },
+          checkoutBranch: "release",
+        });
+        yield* waitUntil("started the session", () => fake.contexts.length > 0);
+        expect(runGitOrThrow(cwd, "rev-parse", "--abbrev-ref", "HEAD")).toBe("release");
+        expect(calls).toEqual([`started on ${initialBranch}`]);
+        yield* supervisor.stop({ _tag: "sessionStop", sessionId: SESSION });
+        yield* waitUntil("reported the exit", () => calls.length === 2);
+      }),
+    );
+
+    expect(calls).toEqual([`started on ${initialBranch}`, "ended"]);
+  });
+
+  it("hears of the end of a start whose branch cannot be selected", async () => {
+    const fake = createFake();
+    const { supervisor, sent, calls, initialBranch, workspaceId } =
+      await buildObservedWorkspace(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({
+        ...START,
+        spec: { ...SPEC, workspaceId },
+        checkoutBranch: "no-such-branch",
+      }),
+    );
+
+    expect(listSessionEvents(sent).map((frame) => frame.event._tag)).toContain("session.exited");
+    expect(fake.contexts).toEqual([]);
+    expect(calls).toEqual([`started on ${initialBranch}`, "ended"]);
+  });
+
+  it("hears of the end of a start whose harness cannot be started", async () => {
+    const fake = createFake();
+    fake.fails = new AdapterFailed({ message: "could not write the settings file" });
+    const { supervisor, calls, initialBranch, workspaceId } = await buildObservedWorkspace(fake);
+
+    await runConnected(
+      fake,
+      supervisor,
+      supervisor.start({ ...START, spec: { ...SPEC, workspaceId } }),
+    );
+
+    expect(calls).toEqual([`started on ${initialBranch}`, "ended"]);
+  });
+});
+
 it("reports current checkout facts after start and resume before any turn ends, without repeating setup", async () => {
   const fake = createFake();
   const { supervisor, sent, machine, under } = buildConnection(fake);
@@ -4183,6 +4319,119 @@ it("reports current checkout facts after start and resume before any turn ends, 
   expect(fake.contexts.map((context) => context.cwd)).toEqual([cwd, cwd]);
 });
 
+describe("the usage a harness reports for a session's account", () => {
+  const WINDOW: UsageReading = {
+    kind: "window",
+    window: "five-hour",
+    usedPercent: 40,
+    resetsAt: null,
+    hit: false,
+    takenAt: at,
+  };
+  const listUsageFrames = (sent: ReadonlyArray<RunnerToController>) =>
+    sent.flatMap((frame) => (frame._tag === "accountUsageReported" ? [frame] : []));
+
+  it("is sent as an accountUsageReported frame while a connection is attached", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("started", () => listSessionEvents(sent).length > 0);
+        fake.reportUsage({ sessionId: SESSION, readings: [WINDOW] });
+        yield* waitUntil("sent the frame", () => listUsageFrames(sent).length === 1);
+        expect(listUsageFrames(sent)[0]).toEqual({
+          _tag: "accountUsageReported",
+          sessionId: SESSION,
+          readings: [WINDOW],
+        });
+      }),
+    );
+  });
+
+  it("is dropped while no connection is attached, and the next report goes out", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("started", () => listSessionEvents(sent).length > 0);
+      }),
+    );
+
+    // The second report is for a session nobody hosts, so it is dropped
+    // whatever is attached. Once the watch reads it, it has finished the first.
+    fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 10 }] });
+    fake.reportUsage({ sessionId: OTHER_SESSION, readings: [WINDOW] });
+    await Effect.runPromise(waitUntil("read both", () => fake.usageReportsRead() === 2));
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 20 }] });
+        yield* waitUntil("sent a frame", () => listUsageFrames(sent).length > 0);
+      }),
+    );
+
+    expect(listUsageFrames(sent).map((frame) => frame.readings)).toEqual([
+      [{ ...WINDOW, usedPercent: 20 }],
+    ]);
+  });
+
+  it("is not sent again while it repeats the last report, until that report is five minutes old", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    const later = "2026-10-19T13:00:00.000Z";
+    await runConnectedOnTestClock(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* awaitForwarded(sent, 1);
+        fake.reportUsage({ sessionId: SESSION, readings: [WINDOW] });
+        yield* waitOnWallClock("sent the first", () => listUsageFrames(sent).length === 1);
+
+        // Only `takenAt` differs, so this is skipped. The report after it
+        // differs, and once that is sent the skipped one has been handled.
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, takenAt: later }] });
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 50 }] });
+        yield* waitOnWallClock("sent the changed one", () => listUsageFrames(sent).length === 2);
+
+        yield* TestClock.adjust(Duration.minutes(5));
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 50 }] });
+        yield* waitOnWallClock("sent the refresh", () => listUsageFrames(sent).length === 3);
+      }),
+    );
+
+    expect(listUsageFrames(sent).map((frame) => frame.readings)).toEqual([
+      [WINDOW],
+      [{ ...WINDOW, usedPercent: 50 }],
+      [{ ...WINDOW, usedPercent: 50 }],
+    ]);
+  });
+
+  it("is dropped for a session this runner does not host", async () => {
+    const fake = createFake();
+    const { supervisor, sent } = buildConnection(fake);
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start(START);
+        yield* waitUntil("started", () => listSessionEvents(sent).length > 0);
+        fake.reportUsage({ sessionId: OTHER_SESSION, readings: [WINDOW] });
+        fake.reportUsage({ sessionId: SESSION, readings: [{ ...WINDOW, usedPercent: 50 }] });
+        yield* waitUntil("sent a frame", () => listUsageFrames(sent).length > 0);
+        expect(listUsageFrames(sent).map((frame) => frame.sessionId)).toEqual([SESSION]);
+      }),
+    );
+  });
+});
+
 describe("an agent step's turn that ends while no connection is attached", () => {
   it("saves the step's outcome, and a later connection is answered from it", async () => {
     const fake = createFake();
@@ -4237,7 +4486,7 @@ describe("the files an edit changed", () => {
     };
   };
 
-  const completedEdit = (itemId: string, status: ItemStatus, extra: Partial<ProviderEvent> = {}) =>
+  const completedEdit = (itemId: string, status: ItemStatus, extra: Partial<HarnessEvent> = {}) =>
     ({
       _tag: "item.completed",
       eventId: `e-done-${itemId}`,
@@ -4248,15 +4497,15 @@ describe("the files an edit changed", () => {
       kind: "file_change",
       status,
       ...extra,
-    }) as ProviderEvent;
+    }) as HarnessEvent;
 
   /**
    * Starts a session in a fresh repository, emits `events`, and returns the
    * events that reached the wire once the last one has.
    */
   const runEdits = async (
-    buildEvents: (repository: { readonly cwd: string }) => ReadonlyArray<ProviderEvent>,
-  ): Promise<ReadonlyArray<ProviderEvent>> => {
+    buildEvents: (repository: { readonly cwd: string }) => ReadonlyArray<HarnessEvent>,
+  ): Promise<ReadonlyArray<HarnessEvent>> => {
     const fake = createFake();
     const { supervisor, sent, machine } = buildConnection(fake);
     const repository = await provisionRepository(machine);
@@ -4280,7 +4529,7 @@ describe("the files an edit changed", () => {
     return listSessionEvents(sent).map((frame) => frame.event);
   };
 
-  const buildLastEvent = (): ProviderEvent => ({
+  const buildLastEvent = (): HarnessEvent => ({
     _tag: "runtime.warning",
     eventId: "e-last",
     sessionId: SESSION,
@@ -4288,7 +4537,7 @@ describe("the files an edit changed", () => {
     message: "last",
   });
 
-  const findCompleted = (events: ReadonlyArray<ProviderEvent>, itemId: string) =>
+  const findCompleted = (events: ReadonlyArray<HarnessEvent>, itemId: string) =>
     events.find((event) => event._tag === "item.completed" && event.itemId === itemId);
 
   it("reports the paths of a completed event itself, relative to the working directory", async () => {
@@ -4374,7 +4623,7 @@ describe("the files an edit changed", () => {
         turnId: "t-1",
         itemId,
         kind: "command_execution",
-      }) as ProviderEvent;
+      }) as HarnessEvent;
 
     /**
      * Waits until the file clock has moved on, so that writes before this call
@@ -4832,6 +5081,24 @@ describe("the skills a start names", () => {
     expect(fake.contexts[0]?.sessionSkillsFolder).toBeUndefined();
   });
 
+  it("hands the harness the catalog models of the start frame, and none when the frame has none", async () => {
+    const fake = createFake();
+    const { supervisor } = buildConnection(fake);
+    const catalogModels = [{ slug: "vendor/model", name: "Model", imageInput: null }];
+
+    await runConnected(
+      fake,
+      supervisor,
+      Effect.gen(function* () {
+        yield* supervisor.start({ ...START, catalogModels });
+        yield* supervisor.start({ ...START, sessionId: OTHER_SESSION });
+      }),
+    );
+
+    expect(fake.contexts[0]?.catalogModels).toEqual(catalogModels);
+    expect(fake.contexts[1]?.catalogModels).toBeUndefined();
+  });
+
   it("gives two sessions that name one revision each their own copy, and keeps one when the other exits", async () => {
     const fake = createFake();
     const stub = serve(IMPLEMENT, REVIEW);
@@ -5204,5 +5471,74 @@ describe("the Git boundary at a workspace root", () => {
     expect(readRefusalMessage(listInputResults(sent)[0])).not.toContain(root);
     expect(fake.contexts).toEqual([]);
     expect(existsSync(join(root, ".git"))).toBe(false);
+  });
+});
+
+describe("a frame that fails its protocol schema", () => {
+  it("is dropped with a warning that names its tags and holds none of its content", async () => {
+    const fake = createFake();
+    const { runner, machine, githubTokenCopies, steps, scope } = buildConnection(fake);
+    const SECRET = "text only the user may see";
+    const sent: Array<RunnerToController> = [];
+    const supervisor = runner.forConnection({
+      scope,
+      runnerId: RUNNER_ID,
+      machine,
+      githubTokenCopies,
+      workspaceSteps: steps,
+      // The real connection throws from its schema encoder, which is a defect, not a failed write.
+      send: (frame) =>
+        Effect.suspend(() => {
+          if (frame._tag === "sessionEvent" && frame.event._tag === "runtime.warning") {
+            throw new TypeError(`Expected a safe integer, got ${SECRET}`);
+          }
+          return Effect.sync(() => void sent.push(frame));
+        }),
+    });
+    const warnings: Array<string> = [];
+    const logger = Logger.make<unknown, void>((options) => {
+      if (options.logLevel === "Warn") warnings.push(String(options.message));
+    });
+
+    // Not `runConnected`: the logger must be in place when the watch is forked.
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startWatching(fake);
+          yield* awaitMarker(fake);
+          yield* supervisor.attach({ controllerReadsFilesEdited: true });
+          yield* supervisor.start(START);
+          yield* Effect.sync(() =>
+            fake.emit({
+              _tag: "runtime.warning",
+              eventId: "e-bad",
+              sessionId: SESSION,
+              at,
+              message: SECRET,
+            }),
+          );
+          yield* Effect.sync(() =>
+            fake.emit({
+              _tag: "content.delta",
+              eventId: "e-after",
+              sessionId: SESSION,
+              at,
+              turnId: "t-1",
+              itemId: "i-1",
+              streamKind: "assistant_text",
+              delta: "hello",
+            }),
+          );
+          // The event after the dropped one still arrives: the watch survived.
+          yield* waitUntil("sent the event after the dropped one", () =>
+            listSessionEvents(sent).some((frame) => frame.event._tag === "content.delta"),
+          );
+        }),
+      ).pipe(Effect.provide(Logger.layer([logger]))),
+    );
+
+    expect(warnings).toEqual([
+      "Dropped a sessionEvent frame (runtime.warning) that failed its protocol schema: TypeError",
+    ]);
   });
 });

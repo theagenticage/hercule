@@ -9,7 +9,11 @@
  * - `openSignals`, the signals still open on the Connection, read through
  *   the Open Signals port;
  * - `resources`, the Resources linked to the Connection, only when the
- *   plugin's manifest requested the `resources` capability.
+ *   plugin's manifest requested the `resources` capability;
+ * - `entities`, which reports what the poll read of External Entities through
+ *   the Entity Observations port, only when the manifest requested the
+ *   `entities` capability. It hands the port a recognizer over the plugins
+ *   that are active at that moment (see `buildIngestEntities`).
  */
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -30,6 +34,7 @@ import {
   type IngestConnection,
   type EmittedEvent,
   type IngestContext,
+  type IngestEntities,
   type LinkedResource,
 } from "@hercule/plugin-host";
 import { nowIso, withTransaction } from "../db";
@@ -41,6 +46,8 @@ import {
 import { appendIngestedEvent, decodeAgainstKind } from "../events";
 import { resourceRepository, type StoredResource } from "../resources";
 import { describeFieldIssues } from "./errors";
+import { EntityObservations, type EntityReporter } from "./entity-observations";
+import { recognizeInSources, type ListActiveSources } from "./entity-recognition";
 import type { RegisteredEventSource } from "./event-sources";
 import { OpenSignals } from "./open-signals";
 
@@ -115,12 +122,43 @@ const toLinkedResource = (resource: StoredResource): LinkedResource => ({
   remote: resource.canonicalRemote,
 });
 
+/**
+ * Binds the Entity Observations port to one reporter, which gives a plugin its
+ * `entities` handle. `reconcile` and `refresh` pass the port a recognizer over
+ * the plugins that are active at the moment of the call, because the External
+ * Entities domain cannot reach the plugins' lookups. One call reads the active
+ * plugins once, so all its texts see the same plugins.
+ */
+const buildIngestEntities = (
+  port: typeof EntityObservations.Service,
+  reporter: EntityReporter,
+  listActiveSources: ListActiveSources,
+): IngestEntities => {
+  const readRecognizer = Effect.map(
+    listActiveSources(),
+    (sources) => (text: string) => recognizeInSources(sources, text),
+  );
+  return {
+    reconcile: (inventory) =>
+      Effect.flatMap(readRecognizer, (recognize) => port.reconcile(reporter, inventory, recognize)),
+    refresh: (observations) =>
+      Effect.flatMap(readRecognizer, (recognize) =>
+        port.refresh(reporter, observations, recognize),
+      ),
+    listWanted: (kind, limit) => port.listWanted(reporter, kind, limit),
+    listTrackedBranches: (remotePrefix, limit) =>
+      port.listTrackedBranches(reporter, remotePrefix, limit),
+    reportMissing: (ref, reason) => port.reportMissing(reporter, ref, reason),
+  };
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const connectionTypes = yield* ConnectionTypes;
   const connectionState = yield* connectionStateRepository;
   const resources = yield* resourceRepository;
   const openSignals = yield* OpenSignals;
+  const entityObservations = yield* EntityObservations;
 
   /**
    * Checks one emitted event and appends it to the log in its own short
@@ -206,15 +244,31 @@ const make = Effect.gen(function* () {
      * Builds the context `open` receives for one Connection of the source's
      * type. Every service in it is scoped to that Connection, so nothing the
      * plugin passes reaches another Connection's events, state or Resources.
+     * `listActiveSources` is read at each report of entities, not once: a
+     * handle lives long, and plugins are enabled and disabled meanwhile.
      */
     buildIngestContext: (
       source: RegisteredEventSource,
       connection: IngestConnection,
+      listActiveSources: ListActiveSources,
     ): IngestContext => ({
       emit: (event) => emit(source, connection.id, event),
       state: connectionState.buildStore(connection.id),
       credentials: () => connectionTypes.runtimeFor(source.pluginId).credentials(connection.id),
       openSignals: () => openSignals.listForConnection(connection.id),
+      ...(source.entities
+        ? {
+            entities: buildIngestEntities(
+              entityObservations,
+              {
+                connectionId: connection.id,
+                pluginId: source.pluginId,
+                kinds: source.entityKinds,
+              },
+              listActiveSources,
+            ),
+          }
+        : {}),
       ...(source.resources
         ? {
             resources: {

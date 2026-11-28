@@ -1,0 +1,1621 @@
+/**
+ * Tests how the pi adapter launches a session and handles inputs, stops and
+ * output schemas, using a fake pi, so no vendor code runs. The flags are
+ * pi 0.85.1's, and the commands and responses follow the shapes
+ * `dist/modes/rpc/rpc-types.d.ts` declares.
+ */
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { afterAll, describe, expect, it } from "vitest";
+import { Effect, Fiber } from "effect";
+import { TestClock } from "effect/testing";
+import { AnswerNotDelivered, MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
+import type { OutputSchema, SessionSpec } from "@hercule/protocol";
+import type { UserMaterial } from "../index";
+import { NO_USER_MATERIAL, PNG_BYTES, writeTestImage } from "../testing";
+import { makePiAdapter, REPROMPT } from "./adapter";
+import { RPC_DEADLINE } from "./rpc";
+import {
+  AGENT_FILE_VARIABLE,
+  MCP_GATEWAY_URL_VARIABLE,
+  NO_AUTO_COMPACTION_VARIABLE,
+  OUTPUT_SCHEMA_VARIABLE,
+  SUBMIT_RESULT_TOOL,
+} from "./extension";
+import {
+  agentFolderOf,
+  buildFakePiSeam,
+  startBusySession,
+  cleanupHomes,
+  buildContext,
+  createDriving,
+  createPiHome,
+  listAgentSpawns,
+  TEST_ZAI_KEY,
+  PRIOR,
+  buildRefusal,
+  SESSION,
+  listSentCommands,
+  settle,
+  SPEC,
+  startTestSession,
+  filterByTag,
+  waitUntil,
+  type Spawn,
+} from "./testing";
+
+afterAll(cleanupHomes);
+
+/** Returns the flags every pi this adapter starts is given, in order. */
+const buildFlags = (home: string, agentFolder: string): ReadonlyArray<string> => [
+  "--mode",
+  "rpc",
+  "--no-context-files",
+  "--no-extensions",
+  "--no-skills",
+  "--no-prompt-templates",
+  "--no-themes",
+  "--no-approve",
+  "--offline",
+  "-e",
+  join(agentFolder, `extension-${SESSION}.ts`),
+  "--session-dir",
+  join(home, "sessions"),
+  "--session-id",
+  SESSION,
+  "--model",
+  "zai/glm-5.3",
+  "--thinking",
+  "high",
+];
+
+/** Writes the transcript file pi would have written for a native session with this id. Returns its path. */
+const writePriorSessionFile = (home: string, id: string): string => {
+  const dir = join(home, "sessions");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `2026-09-19T10-00-00-000Z_${id}.jsonl`);
+  writeFileSync(path, `${JSON.stringify({ type: "session", id, timestamp: 0 })}\n`);
+  return path;
+};
+
+const readFlagValue = (argv: ReadonlyArray<string>, flag: string): string | undefined =>
+  argv[argv.indexOf(flag) + 1];
+
+/** The MCP Gateway as the runner resolves it for a session start. */
+const GATEWAY = { name: MCP_GATEWAY_ENTRY_NAME, url: "http://127.0.0.1:7421/mcp" };
+
+describe("launching pi with the MCP Gateway", () => {
+  it("loads pi's MCP client and tool search beside the extension, and gives the extension the gateway's address", async () => {
+    const run = await startTestSession({}, SPEC, {}, { mcpServers: [GATEWAY] });
+
+    // `--no-extensions` stays: only what Hercule names loads. The two flags
+    // come right after the extension's own.
+    const flags = buildFlags(run.ctx.home, agentFolderOf(run.child));
+    const after = flags.indexOf("--session-dir");
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...flags.slice(0, after),
+      "-e",
+      "builtin:mcp",
+      "-e",
+      "builtin:tool-search",
+      ...flags.slice(after),
+    ]);
+    expect(run.child.env[MCP_GATEWAY_URL_VARIABLE]).toBe(GATEWAY.url);
+  });
+
+  it("loads nothing for a session without the gateway, and removes an address the runner inherited", async () => {
+    // A runner started from inside a pi session inherits that session's value.
+    const run = await startTestSession({}, SPEC, { [MCP_GATEWAY_URL_VARIABLE]: GATEWAY.url });
+
+    expect(run.child.command).not.toContain("builtin:mcp");
+    expect(run.child.command).not.toContain("builtin:tool-search");
+    expect(run.child.env).not.toHaveProperty(MCP_GATEWAY_URL_VARIABLE);
+  });
+});
+
+describe("launching pi for a session", () => {
+  it("turns off context files, the user's own extensions and pi's own approvals for a workspace-less session", async () => {
+    const run = await startTestSession();
+
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+    ]);
+  });
+
+  it("reads the workspace's own context files when the session has a workspace", async () => {
+    const run = await startTestSession(
+      {},
+      {
+        ...SPEC,
+        workspaceId: "0199e0e7-0000-7000-8000-00000000000b",
+      },
+    );
+
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)).filter(
+        (flag) => flag !== "--no-context-files",
+      ),
+    ]);
+  });
+
+  it("starts pi in the session's working directory", async () => {
+    const run = await startTestSession();
+
+    // pi resolves every relative path against the directory it runs in, so a
+    // child that inherited the runner's directory would write the user's work
+    // into whatever directory the runner was started from.
+    expect(run.child.cwd).toBe(run.ctx.cwd);
+  });
+
+  it("sets a private agent folder outside the Harness Home and the Z.ai key, and turns off the update check", async () => {
+    const run = await startTestSession();
+
+    const folder = agentFolderOf(run.child);
+    expect(folder).not.toBe(run.ctx.home);
+    expect(folder.startsWith(run.ctx.home)).toBe(false);
+    // Only this user may read it: it holds the account's model files.
+    expect(statSync(folder).mode & 0o777).toBe(0o700);
+    expect(run.child.env["PI_SKIP_VERSION_CHECK"]).toBe("1");
+    expect(run.child.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
+  });
+
+  it("writes each file of the agent folder readable by this user only", async () => {
+    const run = createDriving();
+    writeFileSync(join(run.ctx.home, "models.json"), '{"providers":{}}');
+    writeFileSync(join(run.ctx.home, "models-store.json"), "{}");
+
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, { ...SPEC, systemPrompt: "Be brief." }, run.ctx),
+    );
+    await waitUntil("spawned a pi", () => listAgentSpawns(run.spawns).length === 1);
+
+    // The home's `models.json` may hold a literal `apiKey`, and the copy is the account's key on disk.
+    const folder = agentFolderOf(listAgentSpawns(run.spawns)[0]!);
+    const names = readdirSync(folder);
+    expect(names.toSorted()).toEqual([
+      "extension-" + SESSION + ".ts",
+      "models-store.json",
+      "models.json",
+      "system-prompt.txt",
+    ]);
+    for (const name of names) {
+      expect(lstatSync(join(folder, name)).mode & 0o777, name).toBe(0o600);
+    }
+  });
+
+  it("uses the account's key over a key from the runner's environment", async () => {
+    const run = createDriving();
+    const ctx = {
+      ...run.ctx,
+      env: { ...run.ctx.env, ZAI_API_KEY: "the runner daemon's own key" },
+    };
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, ctx));
+    await Effect.runPromise(run.adapter.probe(ctx, { readUsage: false }));
+
+    // Otherwise a session would run on the machine's key, and a probe would
+    // report the account as logged in on it.
+    expect(run.spawns[0]!.env["ZAI_API_KEY"]).toBe(TEST_ZAI_KEY);
+    expect(run.runs.find((ran) => ran.command.includes("check"))?.env["ZAI_API_KEY"]).toBe(
+      TEST_ZAI_KEY,
+    );
+  });
+
+  it("keeps the runner's own key from an account that has none stored", async () => {
+    const run = createDriving();
+    // The account has no key stored, so its frame carries no credential.
+    const ctx = {
+      ...buildContext(run.ctx.home, run.ctx.cwd, null),
+      env: { ...run.ctx.env, ZAI_API_KEY: "the runner daemon's own key" },
+    };
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, ctx));
+    const probed = await Effect.runPromise(run.adapter.probe(ctx, { readUsage: false }));
+
+    // Otherwise the account would run on the machine's key, and report itself
+    // as logged in.
+    expect(run.spawns[0]!.env["ZAI_API_KEY"]).toBeUndefined();
+    expect(
+      run.runs.find((ran) => ran.command.includes("check"))?.env["ZAI_API_KEY"],
+    ).toBeUndefined();
+    expect(probed.auth.status).toBe("unauthenticated");
+  });
+
+  it("writes the extension pi loads, with the approval dialog tied to the abort signal", async () => {
+    const run = await startTestSession();
+
+    const path = join(agentFolderOf(run.child), `extension-${SESSION}.ts`);
+    expect(run.child.env[AGENT_FILE_VARIABLE]).toBe(path);
+    const source = readFileSync(path, "utf8");
+    expect(source).not.toBe("");
+    // Without the signal, an abort leaves the dialog waiting forever, and the
+    // session stuck with it.
+    expect(source).toContain("signal: ctx.signal");
+  });
+
+  it("kills what the session's bash calls left running once its pi exits, then deletes its extension", async () => {
+    const run = await startTestSession();
+    const path = join(agentFolderOf(run.child), `extension-${SESSION}.ts`);
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+
+    await waitUntil("deleted the session's extension", () => !existsSync(path));
+    expect(run.cleanedFiles).toEqual([path]);
+  });
+
+  it("still removes the session's folder when killing what holds its extension fails", async () => {
+    const { seam, spawns } = buildFakePiSeam();
+    const adapter = makePiAdapter({
+      ...seam,
+      killProcessesHolding: () => Effect.die(new Error("the process list could not be read")),
+    });
+    await Effect.runPromise(adapter.startSession(SESSION, SPEC, buildContext(createPiHome())));
+    await waitUntil("spawned a pi", () => listAgentSpawns(spawns).length === 1);
+    const folder = agentFolderOf(listAgentSpawns(spawns)[0]!);
+    expect(existsSync(folder)).toBe(true);
+
+    listAgentSpawns(spawns)[0]!.crash();
+
+    await waitUntil("removed the session's folder", () => !existsSync(folder));
+  });
+
+  it("resumes a native session by its transcript file, never by its id", async () => {
+    const run = createDriving();
+    const path = writePriorSessionFile(run.ctx.home, PRIOR);
+    const spec: SessionSpec = { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } };
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
+
+    // With an id, pi would search for the session and ask on stdin, which is
+    // Hercule's JSON channel, whether to fork it into this directory.
+    expect(readFlagValue(run.spawns[0]!.command, "--session")).toBe(path);
+    expect(run.spawns[0]!.command).not.toContain("--fork");
+  });
+
+  it("forks a native session by its transcript file", async () => {
+    const run = createDriving();
+    const path = writePriorSessionFile(run.ctx.home, PRIOR);
+    const spec: SessionSpec = { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } };
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, spec, run.ctx));
+
+    expect(readFlagValue(run.spawns[0]!.command, "--fork")).toBe(path);
+  });
+
+  it("fails to resume a session whose transcript is gone, instead of launching a pi that hangs", async () => {
+    const run = createDriving();
+    const spec: SessionSpec = { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } };
+
+    const refused = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, spec, run.ctx)),
+    );
+
+    expect(refused).toMatchObject({
+      _tag: "ResumeTranscriptMissing",
+      message: expect.stringContaining("new thread") as unknown,
+    });
+    expect(run.spawns).toEqual([]);
+    // The start failed, and the supervisor reports a failed start. Emitting
+    // an exit here too would report the same end twice.
+    await settle();
+    expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("fails with HarnessNotInstalled when the runner has no pi binary", async () => {
+    const run = createDriving();
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, { ...run.ctx, binary: undefined })),
+    );
+
+    expect(failed).toMatchObject({
+      _tag: "HarnessNotInstalled",
+      message: expect.stringContaining("not installed") as unknown,
+    });
+    expect(run.spawns).toEqual([]);
+  });
+
+  it("fails with HarnessNotInstalled when the system cannot find the pi binary to run", async () => {
+    const { seam } = buildFakePiSeam();
+    const missing = makePiAdapter({
+      ...seam,
+      spawn: () => {
+        throw Object.assign(new Error("ENOENT: no such file or directory, posix_spawn 'pi'"), {
+          code: "ENOENT",
+        });
+      },
+    });
+    const home = createPiHome();
+    const ctx = { ...buildContext(home), binary: join(home, "no-such-pi") };
+
+    const failed = await Effect.runPromise(Effect.flip(missing.startSession(SESSION, SPEC, ctx)));
+
+    expect(failed._tag).toBe("HarnessNotInstalled");
+  });
+
+  it("says pi is installed but cannot run when ENOENT comes for a binary that exists", async () => {
+    // A launcher script whose interpreter (node) is missing fails like this.
+    const { seam } = buildFakePiSeam();
+    const unrunnable = makePiAdapter({
+      ...seam,
+      spawn: () => {
+        throw Object.assign(new Error("ENOENT: no such file or directory, posix_spawn 'pi'"), {
+          code: "ENOENT",
+        });
+      },
+    });
+    const ctx = { ...buildContext(createPiHome()), binary: process.execPath };
+
+    const failed = await Effect.runPromise(
+      Effect.flip(unrunnable.startSession(SESSION, SPEC, ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain("installed");
+    expect(failed.message).toContain("PATH");
+  });
+
+  it("fails with AdapterFailed, not HarnessNotInstalled, when pi's folder cannot be prepared", async () => {
+    const run = createDriving();
+    // A file where the sessions directory should be makes `mkdir` fail with
+    // a file system error, while the pi binary is fine.
+    writeFileSync(join(run.ctx.home, "sessions"), "not a directory");
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed).toMatchObject({
+      _tag: "AdapterFailed",
+      message: expect.stringContaining("prepare") as unknown,
+    });
+    expect(run.spawns).toEqual([]);
+  });
+});
+
+describe("starting pi on exactly the model that was asked for", () => {
+  const wrongModel = {
+    answers: {
+      get_state: () => ({
+        success: true,
+        data: { model: { provider: "openrouter", id: "vendor/fake-model-pro" } },
+      }),
+    },
+  };
+  const OPENROUTER = { modelArgument: "openrouter/{model}" };
+  const SPEC_ON_FAKE: SessionSpec = {
+    ...SPEC,
+    modelSelection: { model: "vendor/fake-model", options: { thinking: "high" } },
+  };
+
+  it("asks pi which model it started on before it reports the session started", async () => {
+    const run = await startTestSession();
+
+    expect(listSentCommands(run.sent, "get_state")).toHaveLength(1);
+    await waitUntil(
+      "reported the session started",
+      () => filterByTag(run.seen, "session.started").length === 1,
+    );
+  });
+
+  it("fails the start, and stops pi, when pi picked a similar model instead", async () => {
+    const run = createDriving(wrongModel);
+    const ctx = { ...run.ctx, ...OPENROUTER };
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC_ON_FAKE, ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain("openrouter/vendor/fake-model-pro");
+    expect(failed.message).toContain("instead of openrouter/vendor/fake-model");
+    expect(run.spawns[0]!.kills()).toBe(1);
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+    await settle();
+    // The start failed, so the supervisor reports it. No exit or start event
+    // of the adapter may follow.
+    expect(filterByTag(run.seen, "session.started")).toEqual([]);
+    expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("fails the start when pi reports no model at all", async () => {
+    const run = createDriving({ answers: { get_state: () => ({ success: true, data: {} }) } });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed.message).toContain("started on no model");
+  });
+
+  it("fails the start when pi refuses to say which model it started on", async () => {
+    const run = createDriving({ answers: { get_state: () => buildRefusal("not now") } });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed.message).toContain("did not report which model it started on");
+    expect(failed.message).toContain("not now");
+  });
+
+  it("fails the start, with pi's own words, when pi exits while it starts", async () => {
+    const run = createDriving({ dies: true });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+
+    expect(failed._tag).toBe("AdapterFailed");
+    expect(failed.message).toContain("stopped while it was starting");
+    expect(failed.message).toContain("pi: could not start");
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+    await settle();
+    // The failed start is the one report: the exit is not reported as well.
+    expect(filterByTag(run.seen, "session.started")).toEqual([]);
+    expect(filterByTag(run.seen, "session.exited")).toEqual([]);
+  });
+
+  it("reports the exit after the start when pi answers and then exits before the check is over", async () => {
+    const run = createDriving({
+      answers: {
+        get_state: () => {
+          // pi answers, then crashes before the adapter looks at the answer.
+          queueMicrotask(() => run.spawns[0]!.crash("pi: crashed right after loading"));
+          return { success: true, data: { model: { provider: "zai", id: "glm-5.3" } } };
+        },
+      },
+    });
+
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    await waitUntil(
+      "said the session ended",
+      () => filterByTag(run.seen, "session.exited").length === 1,
+    );
+    const tags = run.seen.map((event) => event._tag).filter((tag) => tag.startsWith("session."));
+    expect(tags).toEqual(["session.started", "session.exited"]);
+    expect(filterByTag(run.seen, "session.exited")[0]?.message).toContain("crashed right after");
+  });
+});
+
+/** The User Material the runner finds on a machine that has all of the user's material. */
+const USER_MATERIAL: UserMaterial = {
+  promptTemplateDirs: ["/Users/someone/.pi/agent/prompts"],
+  instructions: undefined,
+  instructionsFile: "/Users/someone/.pi/agent/AGENTS.md",
+  warnings: [],
+};
+
+/** The flags that load `USER_MATERIAL` into pi, in the order the adapter adds them. */
+const USER_MATERIAL_FLAGS = [
+  "--prompt-template",
+  "/Users/someone/.pi/agent/prompts",
+  "--append-system-prompt",
+  "/Users/someone/.pi/agent/AGENTS.md",
+];
+
+/** Starts a session on a fake pi with the given user material. Returns the setup and the pi spawned. */
+const startSessionWithMaterial = async (
+  userMaterial: UserMaterial | undefined,
+  spec: SessionSpec = SPEC,
+): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
+  const run = createDriving();
+  const ctx = { ...run.ctx, ...(userMaterial === undefined ? {} : { userMaterial }) };
+  await Effect.runPromise(run.adapter.startSession(SESSION, spec, ctx));
+  return { ...run, ctx, child: run.spawns[0]! };
+};
+
+describe("launching pi for a session with a session skills folder", () => {
+  it("loads the skills in the folder by path, and keeps pi's own discovery off", async () => {
+    const librarySkillsFolder = "/runner/session-skills/0199e0e7";
+    const run = await startTestSession({}, SPEC, {}, { librarySkillsFolder });
+
+    // pi loads a directory named with `--skill` even under `--no-skills`.
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+      "--skill",
+      join(librarySkillsFolder, "skills"),
+    ]);
+  });
+});
+
+describe("launching pi for a session with repository skills folders", () => {
+  it("loads each repository's skills after the library's, in checkout order", async () => {
+    const librarySkillsFolder = "/runner/session-skills/0199e0e7";
+    const repositorySkillsFolders = [
+      "/runner/session-skills/repo-api",
+      "/runner/session-skills/repo-web",
+    ];
+    const run = await startTestSession(
+      {},
+      SPEC,
+      {},
+      { librarySkillsFolder, repositorySkillsFolders },
+    );
+
+    // pi keeps the first skill of a name, so this order is the precedence.
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+      "--skill",
+      join(librarySkillsFolder, "skills"),
+      "--skill",
+      join(repositorySkillsFolders[0]!, "skills"),
+      "--skill",
+      join(repositorySkillsFolders[1]!, "skills"),
+    ]);
+  });
+
+  it("loads the repository skills of a session that has no library skills", async () => {
+    const repositorySkillsFolders = ["/runner/session-skills/repo-api"];
+    const run = await startTestSession({}, SPEC, {}, { repositorySkillsFolders });
+
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+      "--skill",
+      join(repositorySkillsFolders[0]!, "skills"),
+    ]);
+  });
+});
+
+describe("launching pi for a Thread that sees the user's own material", () => {
+  it("loads the user's prompt templates and instructions by name, and keeps pi's own discovery off", async () => {
+    const run = await startSessionWithMaterial(USER_MATERIAL);
+
+    // The `--no-*` flags stay: they stop pi's own discovery, while a directory
+    // named on the command line still loads. Extensions stay off even here.
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+      ...USER_MATERIAL_FLAGS,
+    ]);
+  });
+
+  it("puts the user's instructions after the Agent's own system prompt", async () => {
+    const run = await startSessionWithMaterial(USER_MATERIAL, {
+      ...SPEC,
+      systemPrompt: "You review pull requests.",
+    });
+
+    // pi appends each `--append-system-prompt` in the order given.
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+      "--append-system-prompt",
+      join(agentFolderOf(run.child), "system-prompt.txt"),
+      ...USER_MATERIAL_FLAGS,
+    ]);
+  });
+
+  it("reports what the user's material lost as a warning of the session, after session.started", async () => {
+    const warning = "Cut /Users/someone/.pi/agent/AGENTS.md in the Thread's instructions";
+    const run = await startSessionWithMaterial({ ...USER_MATERIAL, warnings: [warning] });
+    await settle();
+
+    const tags = run.seen.map((event) => event._tag);
+    expect(filterByTag(run.seen, "runtime.warning")).toMatchObject([{ message: warning }]);
+    expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+  });
+
+  it("adds nothing for a Thread whose user has no material on this machine", async () => {
+    const run = await startSessionWithMaterial(NO_USER_MATERIAL);
+
+    expect(run.child.command).toEqual([
+      run.ctx.binary,
+      ...buildFlags(run.ctx.home, agentFolderOf(run.child)),
+    ]);
+  });
+
+  it("adds none of the user's material to an isolated session", async () => {
+    const run = await startSessionWithMaterial(undefined);
+
+    expect(run.child.command).not.toContain("--skill");
+    expect(run.child.command).not.toContain("--prompt-template");
+    expect(run.child.command).not.toContain("--append-system-prompt");
+  });
+
+  it("writes nothing of the user's material into the Harness Home", async () => {
+    const thread = await startSessionWithMaterial(USER_MATERIAL);
+    const isolated = await startSessionWithMaterial(undefined);
+
+    // Every session of the account reads that directory, so anything written
+    // there for a Thread would reach the account's other sessions too.
+    expect(readdirSync(thread.ctx.home).sort()).toEqual(readdirSync(isolated.ctx.home).sort());
+  });
+});
+
+describe("sending an input to a pi session", () => {
+  it.each(["set_model", "prompt"])(
+    "keeps Stop effective while %s is waiting and acknowledges only accepted input",
+    async (command) => {
+      const run = await startTestSession({ answers: { [command]: () => undefined } });
+      const input = run.adapter.sendInput(SESSION, {
+        text: "do not resurrect this input",
+        ...(command === "set_model"
+          ? { modelSelection: { model: "glm-5.3-flash", options: {} } }
+          : {}),
+      });
+      const sending =
+        command === "prompt" ? Effect.runPromise(input) : Effect.runPromise(Effect.flip(input));
+      await waitUntil(
+        "received the delayed command",
+        () => listSentCommands(run.sent, command).length === 1,
+      );
+      await Effect.runPromise(run.adapter.interrupt(SESSION));
+      const pending = listSentCommands(run.sent, command)[0]!;
+      run.child.push({ type: "response", command, id: pending["id"], success: true });
+      if (command === "prompt") expect(await sending).toMatchObject({ delivery: "opened" });
+      else expect(await sending).toMatchObject({ _tag: "InputNotDelivered" });
+      expect(listSentCommands(run.sent, "prompt")).toHaveLength(command === "prompt" ? 1 : 0);
+      expect(
+        filterByTag(run.seen, "item.started").filter((event) => event.kind === "user_message"),
+      ).toHaveLength(command === "prompt" ? 1 : 0);
+      expect(listSentCommands(run.sent, "set_thinking_level")).toEqual([]);
+      expect(listSentCommands(run.sent, "abort")).toHaveLength(command === "prompt" ? 2 : 0);
+      if (command === "prompt") {
+        pushAgentEnd(run.child, { stopReason: "aborted" });
+        await waitUntil(
+          "ended the accepted stopped turn",
+          () => filterByTag(run.seen, "turn.completed").length === 1,
+        );
+        expect(filterByTag(run.seen, "turn.completed")[0]!.state).toBe("interrupted");
+      }
+      const next = Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "new explicit input" }),
+      );
+      if (command === "prompt") {
+        await waitUntil(
+          "received the later input",
+          () => listSentCommands(run.sent, "prompt").length === 2,
+        );
+        const pendingNext = listSentCommands(run.sent, "prompt")[1]!;
+        run.child.push({
+          type: "response",
+          command: "prompt",
+          id: pendingNext["id"],
+          success: true,
+        });
+      }
+      expect(await next).toMatchObject({ delivery: "opened" });
+    },
+  );
+
+  it("sends a prompt when no turn is running, and reports that it opened a turn", async () => {
+    const run = await startTestSession();
+
+    const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+
+    expect(sent.delivery).toBe("opened");
+    expect(sent.turnId).not.toBe("");
+    expect(listSentCommands(run.sent, "prompt")).toEqual([
+      expect.objectContaining({ message: "hello" }),
+    ]);
+    expect(listSentCommands(run.sent, "steer")).toEqual([]);
+  });
+
+  it("ends the turn of a prompt that pi handled itself, so the next input opens a turn", async () => {
+    const run = await startTestSession({
+      answers: { prompt: () => ({ success: true, data: { disposition: "handled" } }) },
+    });
+
+    const handled = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "/mcp" }));
+    const next = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+
+    expect(handled.delivery).toBe("opened");
+    expect(next.delivery).toBe("opened");
+    expect(next.turnId).not.toBe(handled.turnId);
+    expect(
+      run.seen
+        .filter((event) => "turnId" in event && event.turnId === handled.turnId)
+        .map((event) => (event._tag === "item.completed" ? event.kind : event._tag)),
+    ).toEqual(["turn.started", "item.started", "user_message", "turn.completed"]);
+    expect(filterByTag(run.seen, "turn.completed")[0]).toMatchObject({
+      turnId: handled.turnId,
+      state: "completed",
+    });
+  });
+
+  it("leaves the turn to pi when pi handled a prompt after it started a run", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+    const sending = Effect.runPromise(run.adapter.sendInput(SESSION, { text: "/start-something" }));
+    await waitUntil("received the prompt", () => listSentCommands(run.sent, "prompt").length === 1);
+    // The run starts before pi answers the prompt.
+    run.child.push({ type: "agent_start" });
+    await waitUntil("announced the turn", () => filterByTag(run.seen, "turn.started").length === 1);
+
+    run.child.push({
+      type: "response",
+      command: "prompt",
+      id: listSentCommands(run.sent, "prompt")[0]!["id"],
+      success: true,
+      data: { disposition: "handled" },
+    });
+    await sending;
+
+    expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
+  });
+
+  it("steers the running turn instead of opening a second one", async () => {
+    const run = await startBusySession();
+
+    const sent = await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and the tests" }));
+
+    expect(sent.delivery).toBe("steered");
+    expect(listSentCommands(run.sent, "steer")).toEqual([
+      expect.objectContaining({ message: "and the tests" }),
+    ]);
+    // The one prompt came from the first input; the steer sent no second prompt.
+    expect(listSentCommands(run.sent, "prompt")).toHaveLength(1);
+  });
+
+  // pi takes the bytes inline, on a prompt and on a steer alike. The text
+  // names each image's file too, so the agent can use the file itself.
+  for (const [command, start] of [
+    ["prompt", startTestSession],
+    ["steer", startBusySession],
+  ] as const) {
+    it(`sends attached images as base64 on ${command}, after the text that names their files`, async () => {
+      const run = await start();
+      const image = writeTestImage();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "what is this?", attachments: [image] }),
+      );
+
+      expect(listSentCommands(run.sent, command).at(-1)).toMatchObject({
+        message: `what is this?\n\n[Attached image "screenshot.png" is saved at: ${image.path}]`,
+        images: [{ type: "image", data: PNG_BYTES.toString("base64"), mimeType: "image/png" }],
+      });
+    });
+  }
+
+  it("tells the agent which session sent a message, and reports the sender beside the original text", async () => {
+    const run = await startTestSession();
+    const sender = "0199e0e7-0000-7000-8000-0000000000e1";
+
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, { text: "rebase on main", senderSessionId: sender }),
+    );
+
+    expect(listSentCommands(run.sent, "prompt")).toEqual([
+      expect.objectContaining({
+        message: `[Message from session ${sender}, another agent. To reply: hercule session input ${sender}]\n\nrebase on main`,
+      }),
+    ]);
+    await waitUntil(
+      "reported the user's message",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+    const reported = filterByTag(run.seen, "item.completed")[0];
+    expect(reported?.kind).toBe("user_message");
+    expect(reported?.detail).toEqual({ text: "rebase on main", senderSessionId: sender });
+  });
+
+  it("reports the user's message as an item of the turn it opened", async () => {
+    const run = await startTestSession();
+
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "hello" }));
+
+    await waitUntil(
+      "reported the user's message",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+    const item = filterByTag(run.seen, "item.started")[0];
+    expect(item?.kind).toBe("user_message");
+    expect(JSON.stringify(item?.detail)).toContain("hello");
+  });
+
+  it("changes the model and its thinking level before prompting on it", async () => {
+    const run = await startTestSession();
+
+    await Effect.runPromise(
+      run.adapter.sendInput(SESSION, {
+        text: "hello",
+        modelSelection: { model: "glm-5.3-flash", options: { thinking: "low" } },
+      }),
+    );
+
+    // The first command is the check of the model pi started on.
+    expect(run.sent.map((one) => one.type)).toEqual([
+      "get_state",
+      "set_model",
+      "set_thinking_level",
+      "prompt",
+    ]);
+    expect(listSentCommands(run.sent, "set_model")[0]).toMatchObject({
+      provider: "zai",
+      modelId: "glm-5.3-flash",
+    });
+    expect(listSentCommands(run.sent, "set_thinking_level")[0]).toMatchObject({ level: "low" });
+  });
+
+  it("fails the input with pi's error when the model cannot be changed", async () => {
+    const run = await startTestSession({
+      answers: { set_model: () => buildRefusal("Model not found: zai/glm-9") },
+    });
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "hello",
+          modelSelection: { model: "glm-9", options: {} },
+        }),
+      ),
+    );
+
+    expect(refused).toMatchObject({
+      _tag: "ModelChangeRefused",
+      message: expect.stringContaining("Model not found") as unknown,
+    });
+    // No prompt was sent after pi rejected the model change.
+    expect(listSentCommands(run.sent, "prompt")).toEqual([]);
+  });
+
+  it("says pi did not acknowledge the model change in time, not that contact was lost", async () => {
+    const run = await startTestSession({ answers: { set_model: () => undefined } });
+
+    const failed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sending = yield* Effect.forkChild(
+            Effect.flip(
+              run.adapter.sendInput(SESSION, {
+                text: "hello",
+                modelSelection: { model: "glm-9", options: {} },
+              }),
+            ),
+          );
+          yield* Effect.promise(() =>
+            waitUntil("sent set_model", () => listSentCommands(run.sent, "set_model").length === 1),
+          );
+          yield* TestClock.adjust(RPC_DEADLINE);
+          return yield* Fiber.join(sending);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(failed._tag).toBe("HarnessProtocolError");
+    expect(failed.message).toContain("did not acknowledge the model change");
+    expect(failed.message).not.toContain("lost contact");
+  });
+
+  it("fails with SessionNotRunning for a session this adapter does not host", async () => {
+    const run = createDriving();
+
+    const refused = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
+    );
+
+    expect(refused._tag).toBe("SessionNotRunning");
+  });
+
+  it("fails with InputNotDelivered when pi refuses the prompt, because pi did not take it", async () => {
+    const run = await startTestSession({ answers: { prompt: () => buildRefusal("busy") } });
+
+    const refused = await Effect.runPromise(
+      Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })),
+    );
+
+    expect(refused).toMatchObject({
+      _tag: "InputNotDelivered",
+      message: expect.stringContaining("busy") as unknown,
+    });
+  });
+
+  it("fails with HarnessProtocolError when pi exits before it answers the prompt", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+    const sending = Effect.runPromise(Effect.flip(run.adapter.sendInput(SESSION, { text: "hi" })));
+    await waitUntil("received the prompt", () => listSentCommands(run.sent, "prompt").length === 1);
+
+    run.child.crash("pi: out of memory");
+
+    // The prompt may have reached pi before it died, so it is not "not delivered".
+    expect(await sending).toMatchObject({ _tag: "HarnessProtocolError" });
+  });
+
+  it("sends a prompt, not a steer, after pi rejected the previous prompt", async () => {
+    const run = await startTestSession({ answers: { prompt: () => buildRefusal("busy") } });
+
+    await Effect.runPromise(Effect.flip(run.adapter.sendInput(SESSION, { text: "hello" })));
+    await Effect.runPromise(Effect.flip(run.adapter.sendInput(SESSION, { text: "hello again" })));
+
+    // A rejected prompt opened no turn, and pi also rejects a steer when no
+    // turn is running: the session would accept no input from then on.
+    expect(listSentCommands(run.sent, "prompt")).toHaveLength(2);
+    expect(listSentCommands(run.sent, "steer")).toEqual([]);
+  });
+});
+
+describe("a prompt whose preflight compaction pi announces before it answers", () => {
+  const COMPACTION_END = {
+    type: "compaction_end",
+    reason: "threshold",
+    result: {
+      summary: "s",
+      firstKeptEntryId: "e1",
+      tokensBefore: 90_000,
+      estimatedTokensAfter: 20_000,
+    },
+    aborted: false,
+    willRetry: false,
+  };
+
+  /** Sends an input pi does not answer, and lets pi announce a compaction first. Returns the pending send. */
+  const sendDuringCompaction = async (run: Awaited<ReturnType<typeof startTestSession>>) => {
+    const sending = Effect.runPromise(Effect.flip(run.adapter.sendInput(SESSION, { text: "hi" })));
+    await waitUntil("received the prompt", () => listSentCommands(run.sent, "prompt").length === 1);
+    run.child.push({ type: "compaction_start", reason: "threshold" });
+    await waitUntil("announced the turn", () => filterByTag(run.seen, "turn.started").length === 1);
+    return { sending };
+  };
+
+  it("keeps the announced turn when the 5 second deadline passes, so the run that follows finds it", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+
+    const failed = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sending = yield* Effect.forkChild(
+            Effect.flip(run.adapter.sendInput(SESSION, { text: "hi" })),
+          );
+          yield* Effect.promise(() =>
+            waitUntil(
+              "received the prompt",
+              () => listSentCommands(run.sent, "prompt").length === 1,
+            ),
+          );
+          run.child.push({ type: "compaction_start", reason: "threshold" });
+          yield* Effect.promise(() =>
+            waitUntil(
+              "announced the turn",
+              () => filterByTag(run.seen, "turn.started").length === 1,
+            ),
+          );
+          yield* TestClock.adjust(RPC_DEADLINE);
+          return yield* Fiber.join(sending);
+        }),
+        TestClock.layer(),
+      ),
+    );
+    run.child.push(COMPACTION_END);
+    run.child.push({ type: "agent_start" });
+    run.child.push({ type: "agent_end", messages: [{ role: "assistant", stopReason: "stop" }] });
+    run.child.push({ type: "agent_settled" });
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+
+    expect(failed._tag).toBe("HarnessProtocolError");
+    const started = filterByTag(run.seen, "turn.started");
+    const completed = filterByTag(run.seen, "turn.completed");
+    expect(started).toHaveLength(1);
+    expect(completed.map((event) => [event.turnId, event.state])).toEqual([
+      [started[0]!.turnId, "completed"],
+    ]);
+    for (const event of run.seen) {
+      if ("turnId" in event) expect(event.turnId).toBe(started[0]!.turnId);
+    }
+  });
+
+  it("ends the announced turn as failed when pi then refuses the prompt", async () => {
+    const run = await startTestSession({ answers: { prompt: () => undefined } });
+    const { sending } = await sendDuringCompaction(run);
+
+    run.child.push({
+      type: "response",
+      id: listSentCommands(run.sent, "prompt")[0]!["id"],
+      success: false,
+      error: "No model selected",
+    });
+
+    expect(await sending).toMatchObject({ _tag: "InputNotDelivered" });
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    expect(filterByTag(run.seen, "turn.completed")[0]).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("No model selected") as unknown,
+    });
+  });
+});
+
+describe("an input while pi compacts between turns", () => {
+  it("is refused before anything is sent to pi, and runs once the compaction ends", async () => {
+    const run = await startTestSession();
+    run.child.push({ type: "compaction_start", reason: "manual" });
+    await waitUntil(
+      "opened the synthetic turn",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+
+    const refused = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.sendInput(SESSION, {
+          text: "and now this",
+          modelSelection: { model: "glm-5.3-flash", options: {} },
+        }),
+      ),
+    );
+
+    // The input is not lost: SteerRefused keeps it queued with this note.
+    expect(refused._tag).toBe("SteerRefused");
+    expect(refused.message).toContain("compacting");
+    expect(run.sent.map((one) => one.type)).not.toContain("prompt");
+    expect(run.sent.map((one) => one.type)).not.toContain("steer");
+    expect(run.sent.map((one) => one.type)).not.toContain("set_model");
+    expect(filterByTag(run.seen, "item.started").map((event) => event.kind)).toEqual([
+      "context_compaction",
+    ]);
+
+    run.child.push({
+      type: "compaction_end",
+      reason: "manual",
+      result: { summary: "s", tokensBefore: 10, estimatedTokensAfter: 5 },
+      aborted: false,
+      willRetry: false,
+    });
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "and now this" }));
+    expect(listSentCommands(run.sent, "prompt")).toHaveLength(1);
+  });
+});
+
+describe("the automatic compactions Hercule's extension cancels", () => {
+  it("shows nothing for them in a session with auto-compaction off, and still shows a manual one", async () => {
+    const run = await startBusySession({}, { ...SPEC, autoCompaction: false });
+    const aborted = (reason: string) => ({
+      type: "compaction_end",
+      reason,
+      result: undefined,
+      aborted: true,
+      willRetry: false,
+    });
+
+    run.child.push({ type: "compaction_start", reason: "threshold" });
+    run.child.push(aborted("threshold"));
+    run.child.push({ type: "compaction_start", reason: "manual" });
+    run.child.push(aborted("manual"));
+    await waitUntil("showed the manual compaction", () =>
+      filterByTag(run.seen, "item.completed").some((event) => event.kind === "context_compaction"),
+    );
+
+    expect(
+      filterByTag(run.seen, "item.started")
+        .map((event) => event.kind)
+        .filter((kind) => kind !== "user_message"),
+    ).toEqual(["context_compaction"]);
+  });
+
+  it("shows an automatic compaction when auto-compaction is on", async () => {
+    const run = await startBusySession();
+
+    run.child.push({ type: "compaction_start", reason: "threshold" });
+    await waitUntil("showed the compaction", () =>
+      filterByTag(run.seen, "item.started").some((event) => event.kind === "context_compaction"),
+    );
+  });
+});
+
+/** Pushes pi's `agent_end` with the given last message, then `agent_settled`. */
+const pushAgentEnd = (child: Spawn, message: Record<string, unknown>): void => {
+  child.push({ type: "agent_end", messages: [{ role: "assistant", ...message }] });
+  child.push({ type: "agent_settled" });
+};
+
+describe("answering a question to pi", () => {
+  it("fails to deliver the answer, because pi asks no questions", async () => {
+    const run = await startTestSession();
+
+    const failure = await Effect.runPromise(
+      Effect.flip(
+        run.adapter.respondToQuestion(
+          SESSION,
+          "r-1",
+          { Storage: "localStorage" },
+          { model: "glm-5.3-flash", options: {} },
+        ),
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(AnswerNotDelivered);
+  });
+});
+
+describe("how a turn ends after the user stops it", () => {
+  it("ends as interrupted, whatever pi reports about the message in flight", async () => {
+    const run = await startBusySession();
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    // This is what pi reports when the abort arrives while a tool is running:
+    // the tool is cancelled, and its message reports the cancellation as an
+    // error.
+    pushAgentEnd(run.child, { stopReason: "error", errorMessage: "The operation was aborted." });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    expect(filterByTag(run.seen, "turn.completed")[0]!.state).toBe("interrupted");
+    // No error is reported, because the user asked for this.
+    expect(filterByTag(run.seen, "runtime.error")).toEqual([]);
+  });
+
+  it("is not stopped by an interrupt that names a subagent that is not running", async () => {
+    const run = await startBusySession();
+
+    // The user asked to stop one subagent, not the session's own turn, and
+    // stopping a subagent that already ended does nothing.
+    await Effect.runPromise(run.adapter.interrupt(SESSION, "child-1"));
+    expect(listSentCommands(run.sent, "abort")).toEqual([]);
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    expect(listSentCommands(run.sent, "abort")).toHaveLength(1);
+  });
+
+  it("still fails a turn that ended on a real error", async () => {
+    const run = await startBusySession();
+
+    pushAgentEnd(run.child, {
+      stopReason: "error",
+      errorMessage: "the model provider refused the request",
+    });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    const completed = filterByTag(run.seen, "turn.completed")[0]!;
+    expect(completed.state).toBe("failed");
+    expect(JSON.stringify(completed.error)).toContain("refused the request");
+    expect(filterByTag(run.seen, "runtime.error")).toHaveLength(1);
+  });
+});
+
+describe("a pi that exits while its turn is running", () => {
+  it("fails the turn with pi's stderr output, and puts the same text on the exit", async () => {
+    const run = await startBusySession();
+    const complaint = "pi: the model provider refused the request";
+
+    run.child.crash(complaint);
+
+    await waitUntil(
+      "said the session ended",
+      () => filterByTag(run.seen, "session.exited").length === 1,
+    );
+    const completed = filterByTag(run.seen, "turn.completed")[0];
+    // Not interrupted: that state means the user stopped the turn, and it
+    // would hide that the session crashed.
+    expect(completed?.state).toBe("failed");
+    expect(JSON.stringify(completed?.error)).toContain(complaint);
+    const exited = filterByTag(run.seen, "session.exited")[0];
+    expect(exited?.reason).toBe("process_exit");
+    expect(JSON.stringify(exited?.message)).toContain(complaint);
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+  });
+});
+
+describe("stopping a session", () => {
+  it("kills a pi that keeps running after its stdin is closed", async () => {
+    const run = await startTestSession({ lingers: true });
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+
+    // A pi parked on an approval waits for the answer on the stdin that was
+    // just closed, so nothing will ever make it exit by itself.
+    expect(run.child.stdinClosed()).toBe(true);
+    expect(run.child.kills()).toBe(1);
+    expect(filterByTag(run.seen, "session.exited")[0]?.reason).toBe("stopped");
+    // The session entry is removed only once its pi has exited: a second pi
+    // started on this transcript while the first was still writing would
+    // corrupt it. The kill worked, so no warning is needed.
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+    expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
+  }, 10_000);
+
+  it("keeps the session until its pi has exited, so no new session starts under its id meanwhile", async () => {
+    const run = await startTestSession({ lingers: true });
+    run.child.push({ type: "agent_start" });
+    await waitUntil(
+      "reported the turn open",
+      () => filterByTag(run.seen, "turn.started").length === 1,
+    );
+
+    const stopping = Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+    const refused = await Effect.runPromise(
+      Effect.flip(run.adapter.startSession(SESSION, SPEC, run.ctx)),
+    );
+    await stopping;
+
+    expect(refused._tag).toBe("SessionAlreadyRunning");
+    // The turn ends with the session: a turn left open would make the thread
+    // look busy forever.
+    expect(filterByTag(run.seen, "turn.completed")[0]?.state).toBe("interrupted");
+    expect(run.spawns).toHaveLength(1);
+  }, 10_000);
+
+  it("closes pi's stdin, lets it exit, and reports the stop reason", async () => {
+    const run = await startTestSession();
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "idle_unload"));
+
+    await waitUntil(
+      "said the session ended",
+      () => filterByTag(run.seen, "session.exited").length === 1,
+    );
+    // Closing stdin tells pi to exit. Killing it would skip the transcript
+    // flush that makes the session resumable.
+    expect(run.child.stdinClosed()).toBe(true);
+    expect(run.child.kills()).toBe(0);
+    expect(filterByTag(run.seen, "session.exited")[0]?.reason).toBe("idle_unload");
+    await settle();
+    expect(filterByTag(run.seen, "session.exited")).toHaveLength(1);
+    expect(await Effect.runPromise(run.adapter.listSessions)).toEqual([]);
+  });
+});
+
+/**
+ * What an Agent adds to a pi session (spec 06 section 7):
+ *
+ * - its own instructions;
+ * - tool families the session may not use;
+ * - an output schema every turn must answer with.
+ *
+ * pi gets the first two as flags and reads the schema from its environment,
+ * so the arguments stay exactly as this adapter built them.
+ */
+const OUTPUT_SCHEMA: OutputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["verdict", "confidence"],
+  properties: {
+    verdict: { type: "string", enum: ["accept", "dismiss"] },
+    confidence: { type: "number" },
+  },
+};
+
+const SYSTEM_PROMPT = "You assess tasks and answer with a verdict.";
+
+const STRUCTURED: SessionSpec = {
+  ...SPEC,
+  systemPrompt: SYSTEM_PROMPT,
+  disallowedTools: ["edit", "shell", "web-search"],
+  outputSchema: OUTPUT_SCHEMA,
+};
+
+/** The arguments `submit_result` is called with, which are the turn's answer. */
+const ANSWER = { verdict: "accept", confidence: 0.9 };
+
+/** pi's id for the `submit_result` call. */
+const SUBMIT_CALL = "call-submit-1";
+
+/** Starts a session and opens a turn on it, since only a turn produces a result. */
+const openTurn = async (
+  spec: SessionSpec = STRUCTURED,
+): Promise<ReturnType<typeof createDriving> & { readonly child: Spawn }> => {
+  const run = await startTestSession({}, spec);
+  await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "Assess this task." }));
+  run.child.push({ type: "agent_start" });
+  await waitUntil(
+    "reported the turn open",
+    () => filterByTag(run.seen, "turn.started").length === 1,
+  );
+  return run;
+};
+
+/** Pushes a successful `submit_result` call: its start event and its end event. */
+const submitAnswer = (child: Spawn, args: Record<string, unknown>): void => {
+  child.push({
+    type: "tool_execution_start",
+    toolCallId: SUBMIT_CALL,
+    toolName: SUBMIT_RESULT_TOOL,
+    args,
+  });
+  child.push({
+    type: "tool_execution_end",
+    toolCallId: SUBMIT_CALL,
+    toolName: SUBMIT_RESULT_TOOL,
+    args,
+    result: { content: [{ type: "text", text: "recorded" }] },
+  });
+};
+
+/** Pushes a `submit_result` call that pi's validator rejects. */
+const refuseAnswer = (child: Spawn, callId: string, args: Record<string, unknown>): void => {
+  child.push({
+    type: "tool_execution_start",
+    toolCallId: callId,
+    toolName: SUBMIT_RESULT_TOOL,
+    args,
+  });
+  child.push({
+    type: "tool_execution_end",
+    toolCallId: callId,
+    toolName: SUBMIT_RESULT_TOOL,
+    isError: true,
+    result: {
+      content: [{ type: "text", text: `Validation failed for tool "${SUBMIT_RESULT_TOOL}"` }],
+    },
+  });
+};
+
+describe("launching pi for a session with an Agent", () => {
+  it("appends the agent's instructions to pi's system prompt, through a file for the session", async () => {
+    const run = await startTestSession({}, STRUCTURED);
+
+    expect(run.child.command).toContain("--append-system-prompt");
+    // The path, never the text: instructions on the command line would be
+    // visible in the machine's process list.
+    const path = readFlagValue(run.child.command, "--append-system-prompt")!;
+    expect(path.startsWith(agentFolderOf(run.child))).toBe(true);
+    expect(readFileSync(path, "utf8")).toBe(SYSTEM_PROMPT);
+    expect(run.child.command).not.toContain(SYSTEM_PROMPT);
+  });
+
+  it("appends the coordination paragraph, then an assistant's memory as the last part of the file", async () => {
+    const coordination = "Other agent sessions may work on the same repositories as you.";
+    const memory = "## Memory (core)\nThe user is Rogier.\n\n## Memory topics\n- projects";
+    const run = await startTestSession({}, { ...STRUCTURED, coordination, memory });
+
+    const path = readFlagValue(run.child.command, "--append-system-prompt")!;
+    expect(readFileSync(path, "utf8")).toBe(`${SYSTEM_PROMPT}\n\n${coordination}\n\n${memory}`);
+  });
+
+  it("starts the instructions file with the orientation, before the agent's instructions and memory", async () => {
+    const orientation = "This session runs inside Hercule.";
+    const memory = "## Memory (core)\nThe user is Rogier.";
+    const driving = createDriving();
+    const ctx = { ...driving.ctx, herculeTool: { ...driving.ctx.herculeTool, orientation } };
+    await Effect.runPromise(driving.adapter.startSession(SESSION, { ...STRUCTURED, memory }, ctx));
+    await waitUntil("spawned a pi", () => driving.spawns.length === 1);
+
+    const path = readFlagValue(driving.spawns[0]!.command, "--append-system-prompt")!;
+    expect(readFileSync(path, "utf8")).toBe(`${orientation}\n\n${SYSTEM_PROMPT}\n\n${memory}`);
+  });
+
+  it("writes the instructions file for memory alone, when the session has no agent instructions", async () => {
+    const memory = "## Memory (core)\nThe user is Rogier.";
+    const run = await startTestSession({}, { ...SPEC, memory });
+
+    const path = readFlagValue(run.child.command, "--append-system-prompt")!;
+    expect(readFileSync(path, "utf8")).toBe(memory);
+  });
+
+  it("removes the session's private folder, and the instructions in it, when the session ends", async () => {
+    const run = await startTestSession({}, STRUCTURED);
+    const folder = agentFolderOf(run.child);
+    const path = readFlagValue(run.child.command, "--append-system-prompt")!;
+    expect(existsSync(path)).toBe(true);
+
+    await Effect.runPromise(run.adapter.stopSession(SESSION, "stopped"));
+
+    // Otherwise one folder per session ever started would pile up, each
+    // holding an Agent's instructions.
+    await waitUntil("removed the folder", () => !existsSync(folder));
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it("removes the private folder when pi fails to start", async () => {
+    const ctx = buildContext(createPiHome());
+    const { seam } = buildFakePiSeam();
+    let folder: string | undefined;
+    const refusing = makePiAdapter({
+      ...seam,
+      spawn: (_command, env) => {
+        folder = env["PI_CODING_AGENT_DIR"];
+        throw new Error("spawn: permission denied");
+      },
+    });
+
+    const failed = await Effect.runPromise(
+      Effect.flip(refusing.startSession(SESSION, STRUCTURED, ctx)),
+    );
+
+    expect(failed).toMatchObject({
+      _tag: "AdapterFailed",
+      message: expect.stringContaining("permission denied") as unknown,
+    });
+    // No session was opened, so no session end will ever remove the folder.
+    expect(folder).toBeDefined();
+    expect(existsSync(folder!)).toBe(false);
+  });
+
+  it("passes instructions that look like a filename as text, not as that file", async () => {
+    const run = await startTestSession({}, { ...STRUCTURED, systemPrompt: "AGENTS.md" });
+
+    // When the value names a file pi can open, pi reads that file. A prompt
+    // passed as text would be replaced by whatever file of that name the
+    // session's directory holds.
+    expect(readFileSync(readFlagValue(run.child.command, "--append-system-prompt")!, "utf8")).toBe(
+      "AGENTS.md",
+    );
+  });
+
+  it("excludes pi's tool for each tool family the spec disallows", async () => {
+    const run = await startTestSession({}, STRUCTURED);
+
+    // The web family adds nothing: pi 0.85.1 has no web tool, and pi fails to
+    // start when given a tool name it does not know.
+    expect(run.child.command).toContain("--exclude-tools");
+    expect(readFlagValue(run.child.command, "--exclude-tools")).toBe("edit,bash");
+  });
+
+  it("leaves the flag out when pi has no tool in any disallowed family", async () => {
+    const run = await startTestSession({}, { ...STRUCTURED, disallowedTools: ["web-fetch"] });
+
+    // pi would read the flag with an empty list as a flag with a missing
+    // value.
+    expect(run.child.command).not.toContain("--exclude-tools");
+  });
+
+  it("passes the schema to the extension in pi's environment, not on the command line", async () => {
+    const run = await startTestSession({}, STRUCTURED);
+
+    expect(run.child.env[OUTPUT_SCHEMA_VARIABLE]).toBe(JSON.stringify(OUTPUT_SCHEMA));
+  });
+
+  it("tells the extension to cancel automatic compaction when the spec turns it off", async () => {
+    const run = await startTestSession({}, { ...STRUCTURED, autoCompaction: false });
+
+    expect(run.child.env[NO_AUTO_COMPACTION_VARIABLE]).toBe("1");
+    // Never pi's own command: it saves the choice in the account's
+    // settings.json, which every later session of the account reads.
+    expect(listSentCommands(run.sent, "set_auto_compaction")).toEqual([]);
+  });
+
+  it("leaves pi's own compaction alone when the spec does not turn it off", async () => {
+    // A runner started from inside a pi session inherits that session's value.
+    const run = await startTestSession({}, STRUCTURED, { [NO_AUTO_COMPACTION_VARIABLE]: "1" });
+
+    expect(NO_AUTO_COMPACTION_VARIABLE in run.child.env).toBe(false);
+    expect(listSentCommands(run.sent, "set_auto_compaction")).toEqual([]);
+  });
+
+  it("adds none of the three for a Thread, which has none of these fields", async () => {
+    const run = await startTestSession();
+
+    expect(run.child.command).not.toContain("--append-system-prompt");
+    expect(run.child.command).not.toContain("--exclude-tools");
+    // Absent, not empty: an empty schema in the environment would register
+    // `submit_result` on a session that has no output schema.
+    expect(OUTPUT_SCHEMA_VARIABLE in run.child.env).toBe(false);
+  });
+});
+
+describe("the result of a pi turn with an output schema", () => {
+  it("reports the arguments of the submit_result call as the turn's result", async () => {
+    const run = await openTurn();
+
+    submitAnswer(run.child, ANSWER);
+    run.child.push({ type: "agent_settled" });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    expect(filterByTag(run.seen, "turn.completed")[0]!.structuredResult).toEqual({
+      outcome: "ok",
+      value: ANSWER,
+    });
+  });
+
+  it("reports a schema failure naming the field when the arguments do not match the schema", async () => {
+    const run = await openTurn();
+
+    submitAnswer(run.child, { verdict: "maybe", confidence: 0.9 });
+    run.child.push({ type: "agent_settled" });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    expect(filterByTag(run.seen, "turn.completed")[0]!.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringContaining("verdict") as string,
+    });
+  });
+
+  it("re-prompts inside the same turn when the agent finishes without calling the tool", async () => {
+    const run = await openTurn();
+
+    run.child.push({ type: "agent_settled" });
+
+    await waitUntil(
+      "asked again for the tool",
+      () => listSentCommands(run.sent, "prompt").length === 2,
+    );
+    expect(listSentCommands(run.sent, "prompt")[1]).toMatchObject({ message: REPROMPT });
+    // The re-prompt stays inside the same Hercule turn: a second
+    // `turn.started` would split one turn in two, and a `turn.completed` here
+    // would report a result while the session is still being asked for it.
+    await settle();
+    expect(filterByTag(run.seen, "turn.started")).toHaveLength(1);
+    expect(filterByTag(run.seen, "turn.completed")).toEqual([]);
+  });
+
+  it("gives up after the second re-prompt and reports that the tool was never called", async () => {
+    const run = await openTurn();
+
+    run.child.push({ type: "agent_settled" });
+    await waitUntil("asked again", () => listSentCommands(run.sent, "prompt").length === 2);
+    run.child.push({ type: "agent_settled" });
+    await waitUntil("asked a second time", () => listSentCommands(run.sent, "prompt").length === 3);
+    run.child.push({ type: "agent_settled" });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    // Two re-prompts and no more: more could make a session that never ends.
+    expect(listSentCommands(run.sent, "prompt")).toHaveLength(3);
+    expect(filterByTag(run.seen, "turn.completed")[0]!.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringMatching(/\S/) as string,
+    });
+    expect(filterByTag(run.seen, "turn.started")).toHaveLength(1);
+  });
+
+  it("ends the turn after pi rejects too many answers, and reports the last one", async () => {
+    const run = await openTurn();
+
+    // pi returns a validation error to the model as the call's result, and a
+    // model that cannot satisfy the schema keeps retrying for as long as it
+    // is allowed to.
+    for (const attempt of [1, 2, 3]) {
+      refuseAnswer(run.child, `call-refused-${String(attempt)}`, { verdict: "maybe" });
+    }
+    await waitUntil("ended pi's run", () => listSentCommands(run.sent, "abort").length === 1);
+    run.child.push({ type: "agent_settled" });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    const completed = filterByTag(run.seen, "turn.completed")[0]!;
+    // Completed, not interrupted: the turn ran to its end and answered, and
+    // the answer is what failed.
+    expect(completed.state).toBe("completed");
+    expect(completed.structuredResult).toEqual({
+      outcome: "schema-failure",
+      reason: expect.stringContaining("verdict") as string,
+    });
+    expect(filterByTag(run.seen, "runtime.warning")).toHaveLength(1);
+  });
+
+  it("reports no result and does not re-prompt when the user stopped the turn", async () => {
+    const run = await openTurn();
+
+    await Effect.runPromise(run.adapter.interrupt(SESSION));
+    pushAgentEnd(run.child, { stopReason: "aborted" });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    const completed = filterByTag(run.seen, "turn.completed")[0]!;
+    expect(completed.state).toBe("interrupted");
+    // Nobody expects a result from a turn the user stopped, and re-prompting
+    // a session that was just stopped would get no answer.
+    expect("structuredResult" in completed).toBe(false);
+    expect(listSentCommands(run.sent, "prompt")).toHaveLength(1);
+  });
+
+  it("reports no result when the turn failed on an error", async () => {
+    const run = await openTurn();
+
+    pushAgentEnd(run.child, {
+      stopReason: "error",
+      errorMessage: "the model provider refused the request",
+    });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    const completed = filterByTag(run.seen, "turn.completed")[0]!;
+    expect(completed.state).toBe("failed");
+    // The turn itself failed. A schema failure here would wrongly suggest
+    // that an answer was checked and rejected.
+    expect("structuredResult" in completed).toBe(false);
+  });
+
+  it("reports no result and does not re-prompt on a session with no schema", async () => {
+    const run = await openTurn(SPEC);
+
+    run.child.push({ type: "agent_settled" });
+
+    await waitUntil("closed the turn", () => filterByTag(run.seen, "turn.completed").length === 1);
+    // A Thread answers in prose. A result on every turn of every session
+    // would give "ok" a second meaning, and a re-prompt would ask for a value
+    // this session was never asked for.
+    expect("structuredResult" in filterByTag(run.seen, "turn.completed")[0]!).toBe(false);
+    await settle();
+    expect(listSentCommands(run.sent, "prompt")).toHaveLength(1);
+  });
+});

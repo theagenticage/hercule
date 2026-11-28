@@ -20,17 +20,16 @@
  *    `SETTINGS_SECTIONS` open in turn (see `openSettingsSection`), with
  *    40 threads and the sidebar's Hercule face showing (see
  *    `showOrchestrationFace`), and, after spawning 460 more, with 500 threads,
- *    then with a thread of 500 transcript rows open (see step 3), and last
- *    with Intake open on 200 signals (see step 5).
+ *    and last with a thread of 500 transcript rows open (see step 3).
  *    Spec 17 §What Settings costs asks for Settings' memory and idle to be
  *    read with a section open; each section in `SETTINGS_SECTIONS` adds one
- *    launch, Intake and Connections among them. Spec 17 §What the Hercule face costs and §What Intake costs ask
- *    the same of the face and of Intake.
+ *    launch, Signals, Connections and Providers among them. Spec 17 §What
+ *    the Hercule face costs asks the same of the face.
  *    Before each of them the fixture restarts the controller with every idle
- *    thread's creation and last activity, and every open signal's creation,
- *    set hours back. Then the script starts the app
- *    through Playwright, signed in, to warm it up (see `warmUpApp`), and
- *    then as a plain process, signed in, for the measured launch. From each
+ *    thread's creation and last activity set hours back. Then the script
+ *    starts the app through Playwright, signed in, to warm it up (see
+ *    `warmUpApp`), and then as a plain process, signed in, for the measured
+ *    launch. From each
  *    measured launch the script reads, in this order:
  *    - the memory of each of the app's processes, 13 s after the page opens;
  *    - the age labels on screen, 28 s after the page opens;
@@ -53,36 +52,13 @@
  *    open.
  * 4. One more plain launch, which reopens the same thread, measures a turn
  *    that streams into it at full speed (see `measureStreaming`).
- * 5. The fixture raises 200 signals, and one more that it snoozes for an
- *    hour, so Intake's snooze timer is set. The script opens Intake once, so
- *    the last measured launch opens on Intake (see `openIntakeOnce`), with
- *    the Hercule face showing. Its first screen is Intake's list, and its
- *    memory and idle are read with Intake open. One more plain launch, which
- *    opens Intake again, measures what a signal raised costs, alone and in
- *    a burst, what opening and closing the split costs, and what the
- *    list's motion and inbox zero cost on screen (see `perf-intake.ts`).
- *    Pass `--intake-only` to run only that launch, on 40 threads and the
- *    signals of this step:
- *
- *        pnpm --filter @hercule/desktop perf -- --intake-only
- *
- *    Pass `--tracking-only` to measure Tracking (spec 17 §What Intake
- *    costs), on 40 threads and the signals of this step: Intake's idle
- *    launch with 10 Tasks tracked and with nothing tracked, then one launch
- *    that runs every other Tracking scenario in a single app (see
- *    `perf-tracking.ts`). Your work is in it: 60 of the signals are about a
- *    thread (`--tracking-thread-signals=N` sets another number) and 10 open
- *    Tasks carry their refs. Pass `--tracking-fast` as well to sample idle once
- *    the page is quiet (a quick look, never evidence):
- *
- *        pnpm --filter @hercule/desktop perf -- --tracking-only
- * 6. The last plain launch opens another idle thread, into which the fixture
+ * 5. The last plain launch opens another idle thread, into which the fixture
  *    has played 20 subagents, 4 of them still running, and measures what
  *    spec 17 §What subagents cost asks for: memory with the side pane closed
  *    and open, idle with 4 running and with every subagent ended, how often
  *    the rows' durations change, the live topics held on each page, and
  *    the reads that subagent changes cause (see `perf-subagents.ts`).
- * 7. Last, the fixture creates 50 workflows, 10 of them with 5 live runs
+ * 6. Last, the fixture creates 50 workflows, 10 of them with 5 live runs
  *    each, and the script opens Workflows once, so one more plain launch
  *    opens on the workflow list. It measures memory and idle with the list
  *    open, what opening the list reads and how long that takes, and how many
@@ -94,11 +70,11 @@
  *    A last launch opens the page of one of the live runs and measures
  *    memory and idle with it open, the work of each tick of its "Running
  *    for" duration, and what a `run` push reads (see `perf-workflows.ts`).
- *    Pass `--workflows-only` to skip steps 2 to 6 and the Discussions step:
+ *    Pass `--workflows-only` to skip steps 2 to 5 and the Discussions step:
  *
  *        pnpm --filter @hercule/desktop perf -- --workflows-only
  *
- * After Everything (below) and before step 7, the fixture has the agent
+ * After step 5 and before step 6, the fixture has the agent
  * sessions of its busy threads write 60 Discussions, one of them with 190
  * Posts, and a wiki page with 60 revisions (see `seedDiscussions`). One more
  * plain launch opens that Discussion again and measures what spec 17 §What
@@ -109,14 +85,6 @@
  * threads:
  *
  *        pnpm --filter @hercule/desktop perf -- --discussions-only
- *
- * Between steps 6 and 7, the fixture writes 1,000 events of Intake, and one
- * more plain launch, which opens Intake again, measures Everything: opening
- * the view, scrolling its list to the end, and the memory after (see
- * `measureEverythingWork`). Pass `--everything-only` to run only that, on 40
- * threads and the signals of step 5:
- *
- *        pnpm --filter @hercule/desktop perf -- --everything-only
  *
  * Right after the launch of step 3 that reopens the long thread, one more
  * plain launch measures the sidebar beside it: hiding it, showing it, and
@@ -153,6 +121,41 @@
  *
  *        pnpm --filter @hercule/desktop perf -- --skills-only
  *
+ * Spec 17 §The Providers page's budgets asks for the section's paint time
+ * and its idle with Providers open. The full run measures the Providers
+ * launch with the other sections. Pass `--providers-only` to run only that,
+ * on 40 threads: Settings › Profile open, to compare with, then Settings ›
+ * Providers open on seven accounts in four Model Profiles, with usage
+ * readings on two and a refused key on one. The Providers launch also prints
+ * how long the cards took to draw after the click on the section's row. Last, ten usage updates of the
+ * Claude account are measured with Providers open (see `perf-providers.ts`):
+ *
+ *        pnpm --filter @hercule/desktop perf -- --providers-only
+ *
+ * Spec 17 §What Fleet costs asks for processes, memory, idle and per streamed
+ * token with the Fleet page and then a machine's page open, and for the reads
+ * that Runner Metrics nudges, disk usage reports, the Activity page and the
+ * cleanup cause. Pass `--fleet-only` for that: on six machines with 14 days of
+ * history, five launches, the new-thread screen to compare with, the Fleet
+ * page, studio's page, the Fleet page with about 500 sessions open, and
+ * nimbus's page for the cleanup (see `perf-fleet.ts`). The full run does not
+ * measure Fleet:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --fleet-only
+ *
+ * Spec 17 §What Work costs and §What the Inbox costs ask for processes,
+ * memory, idle and per streamed token with Work and with the Inbox open, for
+ * the reads that pushes cause, and for the frames of Work's motion. Pass
+ * `--work-only` for Work: 300 invented Tasks in 10 Projects with 20
+ * Initiatives, a thread open to compare with, Work by Project and by
+ * repository, then Work at 1,000 Tasks (see `perf-work.ts`). Pass
+ * `--inbox-only` for the Inbox: 300 cards with 300 open signals, a thread
+ * open to compare with, then the Inbox (see `perf-inbox.ts`). The full run
+ * measures neither:
+ *
+ *        pnpm --filter @hercule/desktop perf -- --work-only
+ *        pnpm --filter @hercule/desktop perf -- --inbox-only
+ *
  * The first thread screen's JavaScript is not measured here: `pnpm
  * build:desktop` checks it, and prints it as "the first screen", because the
  * thread's route is among the routes its check counts.
@@ -180,7 +183,9 @@
  * for each process:
  *
  * - The physical footprint, which the budget limits: the memory `footprint`
- *   reports and Activity Monitor shows for a process.
+ *   reports and Activity Monitor shows for a process. On Linux, which has no
+ *   footprint, it is the PSS instead, and no Mac budget is judged against it
+ *   (see `MEASURED_ON_MAC` in `perf-measures.ts`).
  * - The working set, the resident size `ps` reports, which is the number
  *   `app.getAppMetrics()` reports on macOS. It is printed for information
  *   only. It counts the Electron framework's pages, which all four processes
@@ -264,10 +269,18 @@ import { runWithThreadFixture, type LongThread, type ThreadFixture } from "./per
 import {
   BUDGET,
   HIDDEN_SETTLE_MS,
+  MEMORY_NAME,
   MEMORY_READ_AT_MS,
+  READS_PROCESS_START_TIMES,
   VISIBLE_SAMPLE_AT_MS,
+  WAKEUPS_NAME,
+  countAppProcesses,
+  describeAppProcesses,
+  describeMeasurements,
   evaluateInPage,
   findProcessUse,
+  formatWithin,
+  macLimit,
   findRendererMainTasks,
   openThreadOnce,
   readCpuMs,
@@ -276,34 +289,11 @@ import {
   sampleIdleUse,
   TIMELINE_CATEGORY,
   waitForPageSocketUrl,
-  waitForQuietPage,
   warmUpApp,
   type ProcessMemory,
   type ProcessUse,
+  type Within,
 } from "./perf-measures.ts";
-import {
-  INTAKE_SIGNALS,
-  measureEverythingWork,
-  measureIntakeWork,
-  openIntakeOnce,
-  raiseSignals,
-  raiseSnoozedSignal,
-  reportEverythingWork,
-  reportIntakeWork,
-  seedEvents,
-} from "./perf-intake.ts";
-import {
-  createTrackingWorkflows,
-  FAST_MODE,
-  logProgress,
-  measureTrackingInteractions,
-  releaseTracking,
-  reportTrackingInteractions,
-  seedTracking,
-  seedYourWork,
-  THREAD_SIGNALS,
-  TRACKED_COUNT,
-} from "./perf-tracking.ts";
 import {
   measureDiscussionWork,
   openDiscussionOnce,
@@ -333,6 +323,19 @@ import {
   reportWorkflowWork,
   seedWorkflows,
 } from "./perf-workflows.ts";
+import { measureAccountUsageUpdates, reportAccountUsageUpdates } from "./perf-providers.ts";
+import {
+  buildFleetDatabaseWrite,
+  measureFleetLaunch,
+  openFleetScreenOnce,
+  reportFleetLaunch,
+  reportFleetReadSizes,
+  reportFleetState,
+  seedFleet,
+  type FleetLaunchPlan,
+} from "./perf-fleet.ts";
+import { measureInbox } from "./perf-inbox.ts";
+import { measureWork } from "./perf-work.ts";
 import { pollUntil } from "./poll.ts";
 import { SHOWN_WITHOUT_FIRST_SCREEN_ERROR } from "../src/main/window-visibility.ts";
 
@@ -343,10 +346,11 @@ const LONG_THREAD_ROWS = 500;
  * The sections of Settings that get a measured launch each, with the section
  * open, by the name that the section's row in the Settings list and its
  * header title show. Only the Connections launch has Connections in the
- * controller: one of each health the table draws (see `prepareLaunch` in
- * `perf-fixture.ts`).
+ * controller: one of each health the table draws. Only the Providers launch
+ * has seven Provider Accounts in four Model Profiles, with identities and plans (see `prepareLaunch`
+ * in `perf-fixture.ts`).
  */
-const SETTINGS_SECTIONS = ["Profile", "Assistants", "Intake", "Connections"] as const;
+const SETTINGS_SECTIONS = ["Profile", "Assistants", "Signals", "Connections", "Providers"] as const;
 
 /**
  * A section of Settings a launch can open. Skills is not in
@@ -386,10 +390,10 @@ const NUDGE_SETTLE_MS = 2_000;
 interface LaunchTimes {
   /** Until main's Node environment was ready, before any of the app's own code ran. */
   readonly nodeReadyMs: number;
-  /** Until main started the GPU process. */
-  readonly gpuProcessMs: number;
-  /** Until main started the renderer process. */
-  readonly rendererProcessMs: number;
+  /** Until main started the GPU process, or null where the start time is not read (see `READS_PROCESS_START_TIMES`). */
+  readonly gpuProcessMs: number | null;
+  /** Until main started the renderer process, or null where the start time is not read. */
+  readonly rendererProcessMs: number | null;
   /** Until the renderer started loading the page. */
   readonly pageStartMs: number;
   /** Until the page first painted. */
@@ -412,25 +416,8 @@ interface NudgeCost {
   readonly threadListReads: number;
 }
 
-/**
- * How a plain launch samples the app at rest:
- *
- * - `full`: memory 13 s after the page opens, the idle samples from 30 s,
- *   then the age clock counted for 60 s visible and 60 s hidden and 20 live
- *   nudges. The reference.
- * - `lean`: the same times, without the age-clock count and the nudges. For a
- *   scenario whose rows add no timer and no thread-list read, so Intake's own
- *   `full` launch covers them.
- * - `quiescent`: `lean`, but every sample starts once the page has been quiet
- *   for 2 s instead of at a fixed time, so a launch takes about 30 s less.
- *   Memory read earlier is not comparable with the reference: it is the
- *   "early quiescent idle" of the fast mode, never evidence.
- */
-type IdleSampling = "full" | "lean" | "quiescent";
-
 /** What one plain launch of the app measured. */
 interface PlainLaunch {
-  readonly idle: IdleSampling;
   readonly launch: LaunchTimes;
   /** Each process's memory, 13 s after the page opened. */
   readonly memory: ProcessMemory[];
@@ -440,17 +427,22 @@ interface PlainLaunch {
   readonly visible: ProcessUse[];
   /** Each process's use over 10 s with the window hidden, from 3 s after it was hidden. */
   readonly hidden: ProcessUse[];
-  /** How often the age clock fired in the 60 s from 30 s after the page opened, or null when `idle` does not count. */
-  readonly firesVisible: number | null;
-  /** How often the age clock fired in the 60 s after the window was hidden, or null when `idle` does not count. */
-  readonly firesHidden: number | null;
-  /** What 20 live nudges cost, or null when `idle` makes none. */
-  readonly nudges: NudgeCost | null;
+  /** How often the age clock fired in the 60 s from 30 s after the page opened. */
+  readonly firesVisible: number;
+  /** How often the age clock fired in the 60 s after the window was hidden. */
+  readonly firesHidden: number;
+  /** What 20 live nudges cost. */
+  readonly nudges: NudgeCost;
+  /**
+   * How long Settings › Providers took to put its cards on screen, in
+   * milliseconds from the click on its row, or null when the launch did not
+   * open it.
+   */
+  readonly providersPaintMs: number | null;
 }
 
 /**
- * Starts the test package signed in, as a plain process, and measures it, as
- * `idle` says (see `IdleSampling`):
+ * Starts the test package signed in, as a plain process, and measures it:
  *
  * - the memory of each of its processes (see `readProcessMemory`);
  * - the age labels on screen;
@@ -462,9 +454,9 @@ interface PlainLaunch {
  *   `LaunchTimes`), the measures that need a connection to main and to the
  *   page.
  *
- * With `reopens` set, the app is expected to open the last screen again, so
- * the first screen is the last open thread's transcript, or Intake with its
- * signals. With `reopens` null it opens on the new-thread screen. With a `settingsSection`,
+ * With `reopensThread`, the app is expected to open the last open thread
+ * again, so the first screen is its transcript. Without it the app opens on
+ * the new-thread screen. With a `settingsSection`,
  * the script opens that section of Settings once the first screen is up (see
  * `openSettingsSection`). With `showsOrchestrationFace`, the script switches
  * the sidebar to its Hercule face once the first screen is up (see
@@ -477,17 +469,16 @@ interface PlainLaunch {
  * Fails when the app does not open its page within 10 s, when the section of
  * Settings, the skill's page or the Hercule face has not rendered by the time memory is read, when the window is
  * not visible while it is sampled, when main showed the window without its
- * first screen, when the first screen is not the shell, or not the screen
- * `reopens` names, or when the app does not quit cleanly afterwards.
+ * first screen, when the first screen is not the shell, or not the thread
+ * `reopensThread` expects, or when the app does not quit cleanly afterwards.
  */
 async function measurePlainLaunch(
   userDataDir: string,
   fixture: ThreadFixture,
-  reopens: ReopenedScreen | null,
+  reopensThread: boolean,
   settingsSection: SettingsSection | null,
   skillName: string | null,
   showsOrchestrationFace: boolean,
-  idle: IdleSampling,
 ): Promise<PlainLaunch> {
   const spawnedAt = Date.now();
   const app = await launchPlainApp(userDataDir);
@@ -499,8 +490,9 @@ async function measurePlainLaunch(
     const sleepUntil = (msAfterOpen: number) =>
       sleep(Math.max(0, pageOpenedAt + msAfterOpen - Date.now()));
 
+    let providersPaintMs: number | null = null;
     if (settingsSection !== null) {
-      await openSettingsSection(
+      providersPaintMs = await openSettingsSection(
         inspectorUrl,
         pageSocketUrl,
         settingsSection,
@@ -513,16 +505,15 @@ async function measurePlainLaunch(
     if (showsOrchestrationFace) {
       await showOrchestrationFace(inspectorUrl, pageSocketUrl, pageOpenedAt + MEMORY_READ_AT_MS);
     }
-    if (idle === "quiescent") await waitForQuietPage(pageSocketUrl);
-    else await sleepUntil(MEMORY_READ_AT_MS);
+    await sleepUntil(MEMORY_READ_AT_MS);
     const memory = await readProcessMemory(app.process.pid!);
     const rendererPid = memory.find((sample) => sample.label === "Tab")?.pid;
     if (rendererPid === undefined) throw new Error("the app has no renderer process");
 
-    if (idle !== "quiescent") await sleepUntil(AGES_READ_AT_MS);
+    await sleepUntil(AGES_READ_AT_MS);
     const agesOnScreen = (await evaluateInPage(pageSocketUrl, READ_AGES_ON_SCREEN)) as string[];
 
-    if (idle !== "quiescent") await sleepUntil(VISIBLE_SAMPLE_AT_MS);
+    await sleepUntil(VISIBLE_SAMPLE_AT_MS);
     const visibleCountFrom = Date.now();
     const visible = await sampleIdleUse(inspectorUrl);
     const shown = await evaluateInMain(
@@ -530,7 +521,7 @@ async function measurePlainLaunch(
       `require("electron").BrowserWindow.getAllWindows()[0]?.isVisible()`,
     );
     if (shown !== true) throw new Error("the window was not visible while sampled");
-    if (idle === "full") await sleepUntil(VISIBLE_SAMPLE_AT_MS + FIRE_COUNT_MS);
+    await sleepUntil(VISIBLE_SAMPLE_AT_MS + FIRE_COUNT_MS);
     await evaluateInMain(
       inspectorUrl,
       `require("electron").BrowserWindow.getAllWindows()[0]?.hide()`,
@@ -538,7 +529,7 @@ async function measurePlainLaunch(
     const hiddenCountFrom = Date.now();
     await sleep(HIDDEN_SETTLE_MS);
     const hidden = await sampleIdleUse(inspectorUrl);
-    if (idle === "full") await sleep(Math.max(0, hiddenCountFrom + FIRE_COUNT_MS - Date.now()));
+    await sleep(Math.max(0, hiddenCountFrom + FIRE_COUNT_MS - Date.now()));
 
     // `showInactive` leaves the focus where it is, so the run does not take
     // the keyboard from whoever is using the machine.
@@ -546,19 +537,14 @@ async function measurePlainLaunch(
       inspectorUrl,
       `require("electron").BrowserWindow.getAllWindows()[0]?.showInactive()`,
     );
-    let fires: { visible: number; hidden: number } | null = null;
-    let nudges: NudgeCost | null = null;
-    if (idle === "full") {
-      await sleep(SHOW_SETTLE_MS);
-      const fireTimes = (await evaluateInPage(
-        pageSocketUrl,
-        `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`,
-      )) as number[];
-      const countFires = (from: number) =>
-        fireTimes.filter((at) => at >= from && at < from + FIRE_COUNT_MS).length;
-      fires = { visible: countFires(visibleCountFrom), hidden: countFires(hiddenCountFrom) };
-      nudges = await measureNudges(pageSocketUrl, fixture, rendererPid);
-    }
+    await sleep(SHOW_SETTLE_MS);
+    const fireTimes = (await evaluateInPage(
+      pageSocketUrl,
+      `performance.getEntriesByName("age-clock-fire").map((entry) => performance.timeOrigin + entry.startTime)`,
+    )) as number[];
+    const countFires = (from: number) =>
+      fireTimes.filter((at) => at >= from && at < from + FIRE_COUNT_MS).length;
+    const nudges = await measureNudges(pageSocketUrl, fixture, rendererPid);
 
     const mainSteps = (await evaluateInMain(inspectorUrl, READ_MAIN_LAUNCH_STEPS)) as {
       nodeReady: number;
@@ -588,30 +574,27 @@ async function measurePlainLaunch(
     if (!firstScreen.showsShell) {
       throw new Error("the app did not open on the shell, so it was not signed in");
     }
-    if (reopens === "thread" && !firstScreen.showsTranscript) {
+    if (reopensThread && !firstScreen.showsTranscript) {
       throw new Error("the app did not open the last open thread");
-    }
-    if (reopens === "intake" && !firstScreen.showsIntake) {
-      throw new Error("the app did not open Intake with its signals");
     }
     measured = {
       launch: {
         nodeReadyMs: mainSteps.nodeReady - spawnedAt,
-        gpuProcessMs: mainSteps.gpuProcess - spawnedAt,
-        rendererProcessMs: mainSteps.rendererProcess - spawnedAt,
+        gpuProcessMs: READS_PROCESS_START_TIMES ? mainSteps.gpuProcess - spawnedAt : null,
+        rendererProcessMs: READS_PROCESS_START_TIMES ? mainSteps.rendererProcess - spawnedAt : null,
         pageStartMs: firstScreen.pageStart - spawnedAt,
         firstPaintMs: firstScreen.firstPaint - spawnedAt,
         firstScreenMs: firstScreen.firstScreen - spawnedAt,
         windowShownMs: mainSteps.windowShown - spawnedAt,
       },
-      idle,
       memory,
       agesOnScreen,
       visible,
       hidden,
-      firesVisible: fires?.visible ?? null,
-      firesHidden: fires?.hidden ?? null,
+      firesVisible: countFires(visibleCountFrom),
+      firesHidden: countFires(hiddenCountFrom),
       nudges,
+      providersPaintMs,
     };
   } finally {
     await stopPlainApp(app);
@@ -640,11 +623,11 @@ const buildPageWaiter =
 /**
  * Switches the sidebar of the app's page, which `pageSocketUrl` connects to,
  * to its Hercule face, and returns once the face has rendered: the sidebar's
- * list is the `nav` named "Hercule". Fails when that has not happened by
+ * list is the `nav` named "Work". Fails when that has not happened by
  * `deadline`, in milliseconds since the epoch.
  *
  * Once the page shows the shell, main sends the page the
- * `showOrchestrationFace` menu command, View › Hercule, through main's
+ * `showOrchestrationFace` menu command, View › Work, through main's
  * inspector at `inspectorUrl`, without showing the window, as
  * `openSettingsSection` does. The connection to the page is closed before
  * the function returns.
@@ -667,7 +650,7 @@ async function showOrchestrationFace(
       `require("electron").BrowserWindow.getAllWindows()[0].webContents.send("menu.command", "showOrchestrationFace")`,
     );
     await waitInPage(
-      `document.querySelector('nav[aria-label="Hercule"]') !== null`,
+      `document.querySelector('nav[aria-label="Work"]') !== null`,
       "the sidebar did not show the Hercule face before memory was read",
     );
   } finally {
@@ -690,13 +673,17 @@ async function showOrchestrationFace(
  *
  * One connection to the page serves every check, and it is closed before
  * the function returns, so nothing stays attached while memory is read.
+ *
+ * For Providers it also returns how long the section took to draw its first
+ * card, in milliseconds from the click on its row until the frame after the
+ * card was added. For any other section it returns null.
  */
 async function openSettingsSection(
   inspectorUrl: string,
   pageSocketUrl: string,
   section: SettingsSection,
   deadline: number,
-): Promise<void> {
+): Promise<number | null> {
   const page = await connectInspector(pageSocketUrl);
   try {
     const waitInPage = buildPageWaiter(page, deadline);
@@ -706,6 +693,20 @@ async function openSettingsSection(
       `performance.getEntriesByName("first-screen").length > 0 && document.querySelector("main") !== null`,
       "the app did not show the shell before memory was read",
     );
+    if (section === "Providers") {
+      // Watching starts before the click, so the first card cannot be missed.
+      await page.evaluate("Runtime.evaluate", {
+        expression: `globalThis.firstCardPainted = new Promise((resolve) => {
+          const observer = new MutationObserver(() => {
+            if (document.querySelector(".pa-card") === null) return;
+            observer.disconnect();
+            requestAnimationFrame(() => resolve(performance.now()));
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+        })`,
+        returnByValue: true,
+      });
+    }
     await evaluateInMain(
       inspectorUrl,
       `require("electron").BrowserWindow.getAllWindows()[0].webContents.send("menu.command", "openSettings")`,
@@ -715,8 +716,10 @@ async function openSettingsSection(
         const row = [...document.querySelectorAll("main a")].find(
           (link) => link.textContent.trim() === ${sectionName},
         );
-        row?.click();
-        return row !== undefined;
+        if (row === undefined) return false;
+        globalThis.rowClickedAt = performance.now();
+        row.click();
+        return true;
       })()`,
       `Settings did not open with a row for ${section} before memory was read`,
     );
@@ -724,6 +727,14 @@ async function openSettingsSection(
       `[...document.querySelectorAll("main h1")].some((heading) => heading.textContent.trim() === ${sectionName})`,
       `Settings › ${section} did not render before memory was read`,
     );
+    if (section !== "Providers") return null;
+    const painted = await page.evaluate("Runtime.evaluate", {
+      expression: `globalThis.firstCardPainted.then((at) => at - globalThis.rowClickedAt)`,
+      awaitPromise: true,
+      returnByValue: true,
+    });
+    if (typeof painted !== "number") throw new Error("Settings › Providers drew no card");
+    return painted;
   } finally {
     page.close();
   }
@@ -767,24 +778,20 @@ async function openSkillPage(
 
 /**
  * An expression that evaluates, in the page, to the text of every age label
- * inside the visible part of the sidebar's list, top to bottom, followed by
- * those inside the visible part of Intake's list when Intake is open. A
- * mounted row outside that part, in a list's overscan, is left out, because
- * the age clock does not keep its label current.
+ * inside the visible part of the sidebar's list, top to bottom. A mounted row
+ * outside that part, in the list's overscan, is left out, because the age
+ * clock does not keep its label current.
  */
 const READ_AGES_ON_SCREEN = `(() => {
-  const readVisibleAges = (scrollerSelector, labelSelector) => {
-    const scroller = document.querySelector(scrollerSelector);
-    if (scroller === null) return [];
-    const list = scroller.getBoundingClientRect();
-    return [...scroller.querySelectorAll(labelSelector)]
-      .filter((label) => {
-        const box = label.getBoundingClientRect();
-        return box.bottom > list.top && box.top < list.bottom;
-      })
-      .map((label) => label.textContent);
-  };
-  return [...readVisibleAges(".side-scroll", ".side-age"), ...readVisibleAges(".asks-scroll", ".ask-age")];
+  const scroller = document.querySelector(".side-scroll");
+  if (scroller === null) return [];
+  const list = scroller.getBoundingClientRect();
+  return [...scroller.querySelectorAll(".side-age")]
+    .filter((label) => {
+      const box = label.getBoundingClientRect();
+      return box.bottom > list.top && box.top < list.bottom;
+    })
+    .map((label) => label.textContent);
 })()`;
 
 /**
@@ -802,21 +809,7 @@ interface FirstScreen {
   readonly showsShell: boolean;
   /** Whether the page shows a thread's transcript. */
   readonly showsTranscript: boolean;
-  /** Whether the page shows Intake with at least one signal's row. */
-  readonly showsIntake: boolean;
 }
-
-/**
- * The screen a measured launch stores as the last screen beforehand, so the
- * app opens it again: the last open thread, or Intake.
- */
-type ReopenedScreen = "thread" | "intake";
-
-/** What the first screen shows when the app opens each `ReopenedScreen` again, for the report. */
-const FIRST_SCREEN_NAMES: Readonly<Record<ReopenedScreen, string>> = {
-  thread: "the last thread's transcript",
-  intake: "Intake's signals",
-};
 
 /**
  * An expression that evaluates, in the page, to its `FirstScreen`, or to
@@ -833,7 +826,6 @@ const READ_FIRST_SCREEN = `(() => {
     firstScreen: performance.timeOrigin + firstScreen.startTime,
     showsShell: document.querySelector("main") !== null,
     showsTranscript: document.querySelector('section[aria-label="Transcript"]') !== null,
-    showsIntake: document.querySelector('section[aria-label="Signals"] .ask-row') !== null,
   };
 })()`;
 
@@ -1071,13 +1063,13 @@ function reportStreaming(cost: StreamingCost, thread: LongThread): void {
           "Renderer main thread, longest task",
           `no task over ${String(BUDGET.streamingTaskMs)} ms`,
           `${cost.longestTaskMs.toFixed(1)} ms (${String(cost.longTasks)} over ${String(BUDGET.streamingTaskMs)} ms)`,
-          cost.longTasks === 0 ? "yes" : "over",
+          formatWithin(macLimit(cost.longTasks === 0)),
         ],
         [
           "Paragraph writes",
           "at most one a frame, over the whole turn",
           `${String(cost.paragraphWrites)} in ${String(cost.frames)} frames`,
-          cost.paragraphWrites <= cost.frames ? "yes" : "over",
+          formatWithin(cost.paragraphWrites <= cost.frames),
         ],
       ],
     ),
@@ -1098,8 +1090,8 @@ interface MeasuredLaunch extends PlainLaunch {
   readonly threadCount: number;
   /** Whether one row on screen showed minutes, so the age clock should fire once while visible. */
   readonly twoMinuteRow: boolean;
-  /** The screen the app opened again at launch, or `null` when it opened on the new-thread screen. */
-  readonly reopens: ReopenedScreen | null;
+  /** Whether the app opened the last open thread again at launch, rather than the new-thread screen. */
+  readonly reopensThread: boolean;
   /** The machine's load average over the minute before the app was spawned. */
   readonly loadAtSpawn: number;
 }
@@ -1115,14 +1107,14 @@ function reportLaunch(measured: MeasuredLaunch): void {
     sample.label,
     String(sample.pid),
     sample.workingSetMb.toFixed(1),
-    sample.footprintMb.toFixed(1),
+    sample.memoryMb.toFixed(1),
   ]);
   const summedMb = memory.reduce((sum, sample) => sum + sample.workingSetMb, 0);
-  const summedFootprintMb = memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
-  memoryRows.push(["Sum", "", summedMb.toFixed(1), summedFootprintMb.toFixed(1)]);
+  const summedMemoryMb = memory.reduce((sum, sample) => sum + sample.memoryMb, 0);
+  memoryRows.push(["Sum", "", summedMb.toFixed(1), summedMemoryMb.toFixed(1)]);
   const renderer = memory.find((sample) => sample.label === "Tab");
   const rendererMb = renderer?.workingSetMb ?? 0;
-  const rendererFootprintMb = renderer?.footprintMb ?? 0;
+  const rendererMemoryMb = renderer?.memoryMb ?? 0;
 
   // A process that started or exited between the two samples is in one of
   // them only, so the table lists every process either sample saw.
@@ -1139,48 +1131,56 @@ function reportLaunch(measured: MeasuredLaunch): void {
   const rendererWakeupsHidden = findProcessUse(hidden, "Tab")?.wakeupsPerSecond ?? 0;
   const rendererLimit = `no wakeups from the app (at most ${BUDGET.rendererWakeups}/s)`;
   const expectedFiresVisible = measured.twoMinuteRow ? 1 : 0;
-  const notCounted =
-    "not counted by this launch (see its idle sampling): Intake's own launch covers it";
   // Spec 17 sets the nudge limit for 500 threads; at 40 the cost is recorded
   // only.
   const checksNudgeLimit = measured.threadCount === 500;
 
   // Budget, limit, measured, and whether the measurement is within the limit,
   // or null for a measure that is recorded but has no budget.
-  const budgets: [string, string, string, boolean | null][] = [
+  const budgets: [string, string, string, Within][] = [
     [
       "Launch, spawn to window shown",
       `shown within ${BUDGET.launchMs} ms of spawn (warm, signed in)`,
       `${launch.windowShownMs.toFixed(0)} ms`,
-      launch.windowShownMs <= BUDGET.launchMs,
+      macLimit(launch.windowShownMs <= BUDGET.launchMs),
     ],
-    ...(measured.reopens === null
+    ...(measured.reopensThread
+      ? [
+          [
+            "Launch, spawn to the last thread's transcript",
+            `painted within ${BUDGET.transcriptPaintMs} ms of spawn (warm, signed in)`,
+            `${launch.firstScreenMs.toFixed(0)} ms`,
+            macLimit(launch.firstScreenMs <= BUDGET.transcriptPaintMs),
+          ] satisfies [string, string, string, Within],
+        ]
+      : []),
+    ...(measured.providersPaintMs === null
       ? []
       : [
           [
-            `Launch, spawn to ${FIRST_SCREEN_NAMES[measured.reopens]}`,
-            `painted within ${BUDGET.transcriptPaintMs} ms of spawn (warm, signed in)`,
-            `${launch.firstScreenMs.toFixed(0)} ms`,
-            launch.firstScreenMs <= BUDGET.transcriptPaintMs,
-          ] satisfies [string, string, string, boolean],
+            "Opening Settings › Providers",
+            `the cards on screen within ${BUDGET.providersPaintMs} ms of the click on the row (the reads are the shell's, so none is waited for)`,
+            `${measured.providersPaintMs.toFixed(0)} ms`,
+            macLimit(measured.providersPaintMs <= BUDGET.providersPaintMs),
+          ] satisfies [string, string, string, Within],
         ]),
     [
       "Processes",
       `${BUDGET.processes}: browser, GPU, network utility, renderer`,
-      `${memory.length}: ${memory.map((sample) => sample.label).join(", ")}`,
-      memory.length <= BUDGET.processes,
+      describeAppProcesses(memory),
+      countAppProcesses(memory) <= BUDGET.processes,
     ],
     [
-      "Footprint, summed",
+      `${MEMORY_NAME}, summed`,
       `at most ${BUDGET.summedFootprintMb} MB`,
-      `${summedFootprintMb.toFixed(0)} MB`,
-      summedFootprintMb <= BUDGET.summedFootprintMb,
+      `${summedMemoryMb.toFixed(0)} MB`,
+      macLimit(summedMemoryMb <= BUDGET.summedFootprintMb),
     ],
     [
-      "Footprint, renderer",
+      `${MEMORY_NAME}, renderer`,
       `at most ${BUDGET.rendererFootprintMb} MB`,
-      `${rendererFootprintMb.toFixed(0)} MB`,
-      rendererFootprintMb <= BUDGET.rendererFootprintMb,
+      `${rendererMemoryMb.toFixed(0)} MB`,
+      macLimit(rendererMemoryMb <= BUDGET.rendererFootprintMb),
     ],
     ["Working set, summed", "recorded; not budgeted", `${summedMb.toFixed(0)} MB`, null],
     ["Working set, renderer", "recorded; not budgeted", `${rendererMb.toFixed(0)} MB`, null],
@@ -1188,82 +1188,65 @@ function reportLaunch(measured: MeasuredLaunch): void {
       "Idle visible, GPU",
       `at most ${BUDGET.gpuWakeupsVisible} wakeups/s`,
       `${gpuWakeups.toFixed(1)}/s`,
-      gpuWakeups <= BUDGET.gpuWakeupsVisible,
+      macLimit(gpuWakeups <= BUDGET.gpuWakeupsVisible),
     ],
     [
       "Idle visible, renderer",
       rendererLimit,
       `${rendererWakeupsVisible.toFixed(1)}/s`,
-      rendererWakeupsVisible <= BUDGET.rendererWakeups,
+      macLimit(rendererWakeupsVisible <= BUDGET.rendererWakeups),
     ],
     [
       "Idle visible, age clock over 60 s",
       measured.twoMinuteRow
         ? "1 fire: one row on screen shows minutes"
         : "0 fires: every age on screen is over an hour",
-      measured.firesVisible === null
-        ? notCounted
-        : `${String(measured.firesVisible)} (${String(measured.agesOnScreen.length)} ages on screen, the youngest ${findYoungestAge(measured.agesOnScreen)})`,
-      measured.firesVisible === null ? null : measured.firesVisible === expectedFiresVisible,
+      `${String(measured.firesVisible)} (${String(measured.agesOnScreen.length)} ages on screen, the youngest ${findYoungestAge(measured.agesOnScreen)})`,
+      measured.firesVisible === expectedFiresVisible,
     ],
     [
       "Idle hidden, renderer",
       rendererLimit,
       `${rendererWakeupsHidden.toFixed(1)}/s`,
-      rendererWakeupsHidden <= BUDGET.rendererWakeups,
+      macLimit(rendererWakeupsHidden <= BUDGET.rendererWakeups),
     ],
     [
       "Idle hidden, age clock over 60 s",
       "0 fires: the clock is stopped while hidden",
-      measured.firesHidden === null ? notCounted : String(measured.firesHidden),
-      measured.firesHidden === null ? null : measured.firesHidden === 0,
+      String(measured.firesHidden),
+      measured.firesHidden === 0,
     ],
-    ...(nudges === null
-      ? []
-      : ([
-          [
-            "Nudges, renderer main thread",
-            checksNudgeLimit
-              ? `at most ${BUDGET.rendererMainThreadPerNudgeMs} ms a nudge, one frame at 60 Hz`
-              : "recorded; the limit is for 500 threads",
-            formatPerNudge(nudges.rendererMainThreadMs),
-            checksNudgeLimit
-              ? nudges.rendererMainThreadMs / NUDGE_COUNT <= BUDGET.rendererMainThreadPerNudgeMs
-              : null,
-          ],
-          [
-            "Nudges, renderer CPU",
-            "recorded; not budgeted",
-            formatPerNudge(nudges.rendererCpuMs),
-            null,
-          ],
-          [
-            "Nudges, controller CPU",
-            "recorded; not budgeted",
-            formatPerNudge(nudges.controllerCpuMs),
-            null,
-          ],
-          [
-            "Nudges, thread list reads",
-            "recorded; not budgeted",
-            `${String(nudges.threadListReads)} for ${String(NUDGE_COUNT)} nudges`,
-            null,
-          ],
-        ] satisfies [string, string, string, boolean | null][])),
+    [
+      "Nudges, renderer main thread",
+      checksNudgeLimit
+        ? `at most ${BUDGET.rendererMainThreadPerNudgeMs} ms a nudge, one frame at 60 Hz`
+        : "recorded; the limit is for 500 threads",
+      formatPerNudge(nudges.rendererMainThreadMs),
+      checksNudgeLimit
+        ? macLimit(nudges.rendererMainThreadMs / NUDGE_COUNT <= BUDGET.rendererMainThreadPerNudgeMs)
+        : null,
+    ],
+    ["Nudges, renderer CPU", "recorded; not budgeted", formatPerNudge(nudges.rendererCpuMs), null],
+    [
+      "Nudges, controller CPU",
+      "recorded; not budgeted",
+      formatPerNudge(nudges.controllerCpuMs),
+      null,
+    ],
+    [
+      "Nudges, thread list reads",
+      "recorded; not budgeted",
+      `${String(nudges.threadListReads)} for ${String(NUDGE_COUNT)} nudges`,
+      null,
+    ],
   ];
 
   console.log(`## ${measured.name}`);
   console.log();
   console.log(`Load average over the minute before the launch: ${measured.loadAtSpawn.toFixed(2)}`);
   console.log();
-  if (measured.idle === "quiescent") {
-    console.log(
-      "EARLY QUIESCENT IDLE (fast mode): every sample started once the page had been quiet for 2 s. Not comparable with the reference below, and not evidence.",
-    );
-    console.log();
-  }
   console.log(
-    `Launch steps, in ms from spawn (first screen: ${measured.reopens === null ? "the new-thread screen" : FIRST_SCREEN_NAMES[measured.reopens]}):`,
+    `Launch steps, in ms from spawn (first screen: ${measured.reopensThread ? "the last thread's transcript" : "the new-thread screen"}):`,
   );
   console.log(
     formatTable(
@@ -1285,24 +1268,18 @@ function reportLaunch(measured: MeasuredLaunch): void {
           launch.firstPaintMs,
           launch.firstScreenMs,
           launch.windowShownMs,
-        ].map((ms) => ms.toFixed(0)),
+        ].map((ms) => ms?.toFixed(0) ?? "not measured on Linux"),
       ],
     ),
   );
   console.log();
-  console.log(
-    measured.idle === "quiescent"
-      ? "Memory, once the page was quiet:"
-      : "Memory, 13 s after the page opened:",
-  );
-  console.log(formatTable(["Process", "PID", "Working set MB", "Footprint MB"], memoryRows));
+  console.log("Memory, 13 s after the page opened:");
+  console.log(formatTable(["Process", "PID", "Working set MB", `${MEMORY_NAME} MB`], memoryRows));
   console.log();
   console.log(
-    measured.idle === "quiescent"
-      ? "CPU and wakeups over 10 s: visible from when the page was quiet, hidden from 3 s after hiding:"
-      : "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
+    "CPU and wakeups over 10 s: visible from 30 s after the page opened, hidden from 3 s after hiding:",
   );
-  const useHeader = ["CPU %", "Wakeups/s"];
+  const useHeader = ["CPU %", `${WAKEUPS_NAME}/s`];
   console.log(
     formatTable(
       [
@@ -1322,7 +1299,7 @@ function reportLaunch(measured: MeasuredLaunch): void {
         budget,
         limit,
         measuredText,
-        within === null ? "-" : within ? "yes" : "over",
+        formatWithin(within),
       ]),
     ),
   );
@@ -1335,24 +1312,6 @@ function reportLaunch(measured: MeasuredLaunch): void {
  * on 40 threads, and skips every other launch, which take long.
  */
 const WORKFLOWS_ONLY = process.argv.includes("--workflows-only");
-
-/**
- * Whether the run measures only Everything (see `perf-intake.ts`), on 40
- * threads, and skips every other launch and the workflow list.
- */
-const EVERYTHING_ONLY = process.argv.includes("--everything-only");
-
-/**
- * Whether the run measures only Intake at work (see `measureIntakeWork`), on
- * 40 threads, and skips every other launch and the workflow list.
- */
-const INTAKE_ONLY = process.argv.includes("--intake-only");
-
-/**
- * Whether the run measures only Tracking (see `perf-tracking.ts`), on 40
- * threads, and skips every other launch and the workflow list.
- */
-const TRACKING_ONLY = process.argv.includes("--tracking-only");
 
 /**
  * Whether the run measures only Discussions and Wiki (see
@@ -1389,77 +1348,23 @@ const KEYSTROKES_ONLY = process.argv.includes("--keystrokes-only");
 const SKILLS_ONLY = process.argv.includes("--skills-only");
 
 /**
- * Writes the events of Intake, and measures Everything in a plain launch that
- * opens Intake again. The fixture gives the events their titles and arrival
- * times in `prepareLaunch`.
- *
- * The launch opens Intake on To do, waits for its list to draw a row, and
- * reads the memory of Intake on To do to compare Everything with. So it first
- * raises `INTAKE_SIGNALS` signals onto To do. Without them, the full run would
- * find To do empty: Intake at work, measured just before, ends at inbox zero.
- * The signals Intake at work marked done stay on Done, and the snoozed signal
- * stays on Later, so neither changes To do.
+ * Whether the run measures only Settings › Providers and Settings › Profile
+ * (see `measureProviders`), on 40 threads, and skips every other launch and
+ * the workflow list.
  */
-async function measureEverything(fixture: ThreadFixture, userDataDir: string): Promise<void> {
-  await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
-  await seedEvents(fixture);
-  await fixture.prepareLaunch({ twoMinuteRow: false });
-  await openIntakeOnce(userDataDir);
-  await warmUpApp(userDataDir);
-  reportEverythingWork(await measureEverythingWork(userDataDir));
-}
+const PROVIDERS_ONLY = process.argv.includes("--providers-only");
 
 /**
- * Measures Tracking (see `perf-tracking.ts`), on 40 threads and Intake's 200
- * signals: two idle launches, one with `TRACKED_COUNT` Tasks tracked and one
- * with nothing tracked, so the pair shows what the rows add, then one
- * interaction launch that runs every other scenario against the same
- * controller.
- *
- * The pair shares one preparation. The 10 Tasks are handed off first, 10 more
- * open Tasks are made for Your work (`seedYourWork`), then `prepareLaunch`
- * restarts the controller, makes `THREAD_SIGNALS` of the 200 signals signals
- * about a thread, and moves the runs three hours
- * back, so the rows show hours and no label changes while the launch is read;
- * `openIntakeOnce` stores Intake as the last screen and `warmUpApp` warms the
- * app up, once for both. The tracked launch follows, then
- * `releaseTracking` marks the Tasks done, and the nothing-tracked launch
- * follows it on the same controller, 3 s after the quit as `warmUpApp` waits: its Tasks are done, so Tracking reads no
- * row. Both launches sample with nothing attached, and the windows are the
- * canonical ones. `--tracking-fast` samples once the page is quiet (see
- * `IdleSampling`).
+ * Whether the run measures only the Fleet screens (see `measureFleet`), and
+ * skips every other launch and the workflow list.
  */
-async function measureTracking(fixture: ThreadFixture, userDataDir: string): Promise<void> {
-  await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
-  await raiseSnoozedSignal(fixture);
-  const workflows = await createTrackingWorkflows(fixture);
-  await seedTracking(fixture, workflows);
-  await seedYourWork(fixture);
-  await fixture.prepareLaunch({ twoMinuteRow: false, signalsAboutThreads: THREAD_SIGNALS });
-  await openIntakeOnce(userDataDir);
-  await warmUpApp(userDataDir);
-  logProgress("signals raised, 10 Tasks handed off, controller prepared, app warmed");
-  const intake = `40 threads, Intake open on ${String(INTAKE_SIGNALS)} signals`;
-  const options: LaunchOptions = {
-    opensIntake: true,
-    isPrepared: true,
-    idle: FAST_MODE ? "quiescent" : "lean",
-  };
-  await measureLaunch(
-    fixture,
-    userDataDir,
-    `${intake}, ${String(TRACKED_COUNT)} Tasks tracked`,
-    40,
-    false,
-    options,
-  );
-  logProgress("idle launch, tracked");
-  await releaseTracking(fixture);
-  await sleep(3_000);
-  await measureLaunch(fixture, userDataDir, `${intake}, nothing tracked`, 40, false, options);
-  logProgress("idle launch, nothing tracked");
-  reportTrackingInteractions(await measureTrackingInteractions(userDataDir, fixture, workflows));
-}
+const FLEET_ONLY = process.argv.includes("--fleet-only");
+
+/** Whether the run measures only Work (see `measureWork`), and skips every other launch. */
+const WORK_ONLY = process.argv.includes("--work-only");
+
+/** Whether the run measures only the Inbox (see `measureInbox`), and skips every other launch. */
+const INBOX_ONLY = process.argv.includes("--inbox-only");
 
 /**
  * Writes the Discussions and the wiki page of `perf-discussions.ts` through
@@ -1477,19 +1382,10 @@ async function measureDiscussions(fixture: ThreadFixture, userDataDir: string): 
 /** What a measured launch opens, beyond the screen the app opens on. */
 interface LaunchOptions {
   readonly openThread?: LongThread | null;
-  readonly opensIntake?: boolean;
   readonly settingsSection?: SettingsSection | null;
   /** The skill whose page opens from Settings › Skills; `settingsSection` must be "Skills". */
   readonly skillName?: string | null;
   readonly showsOrchestrationFace?: boolean;
-  /** How the launch samples the app at rest; `full` unless given. */
-  readonly idle?: IdleSampling;
-  /**
-   * Whether the caller has already prepared the controller, stored the screen
-   * to open and warmed the app up, so the launch only measures. Tracking's two
-   * idle launches share one preparation and the launches that stored the screen.
-   */
-  readonly isPrepared?: boolean;
 }
 
 /**
@@ -1506,36 +1402,32 @@ async function measureLaunch(
   twoMinuteRow: boolean,
   {
     openThread = null,
-    opensIntake = false,
     settingsSection = null,
     skillName = null,
     showsOrchestrationFace = false,
-    idle = "full",
-    isPrepared = false,
   }: LaunchOptions = {},
 ): Promise<void> {
-  if (!isPrepared) {
-    await fixture.prepareLaunch({ twoMinuteRow, connections: settingsSection === "Connections" });
-    if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
-    if (opensIntake) await openIntakeOnce(userDataDir);
-    await warmUpApp(userDataDir);
-  }
-  const reopens: ReopenedScreen | null =
-    openThread !== null ? "thread" : opensIntake ? "intake" : null;
+  await fixture.prepareLaunch({
+    twoMinuteRow,
+    connections: settingsSection === "Connections",
+    providerAccounts: settingsSection === "Providers",
+  });
+  if (openThread !== null) await openThreadOnce(userDataDir, openThread.id);
+  await warmUpApp(userDataDir);
+  const reopensThread = openThread !== null;
   reportLaunch({
     name,
     threadCount,
     twoMinuteRow,
-    reopens,
+    reopensThread,
     loadAtSpawn: loadavg()[0]!,
     ...(await measurePlainLaunch(
       userDataDir,
       fixture,
-      reopens,
+      reopensThread,
       settingsSection,
       skillName,
       showsOrchestrationFace,
-      idle,
     )),
   });
 }
@@ -1576,6 +1468,88 @@ async function measureSkills(fixture: ThreadFixture, userDataDir: string): Promi
 }
 
 /**
+ * Measures two launches on 40 threads: Settings › Profile open, to compare
+ * with, and Settings › Providers open on the fixture's seven accounts. Then
+ * measures what ten usage updates of the Claude account cost while Providers
+ * is open (see `measureAccountUsageUpdates`).
+ */
+async function measureProviders(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  for (const section of ["Profile", "Providers"] as const) {
+    await measureLaunch(fixture, userDataDir, `40 threads, Settings › ${section} open`, 40, false, {
+      settingsSection: section,
+    });
+  }
+  reportAccountUsageUpdates(
+    await measureAccountUsageUpdates(userDataDir, fixture, (inspectorUrl, pageSocketUrl) =>
+      openSettingsSection(inspectorUrl, pageSocketUrl, "Providers", Date.now() + 10_000),
+    ),
+  );
+}
+
+/**
+ * Measures the Fleet screens (see `perf-fleet.ts`): seeds the machines and
+ * their history on 48 threads, then measures the new-thread screen, the
+ * Fleet page and studio's page, then grows to 492 threads and measures the
+ * Fleet page again, and last nimbus's page with its cleanup. Each launch
+ * starts from a fresh `prepareLaunch`, because a streamed turn makes its
+ * thread's age recent.
+ */
+async function measureFleet(fixture: ThreadFixture, userDataDir: string): Promise<void> {
+  await fixture.growTo(48);
+  const seeded = await seedFleet(fixture);
+  const writeDatabase = buildFleetDatabaseWrite(seeded);
+  const [studio] = seeded.runners;
+  const plans: FleetLaunchPlan[] = [
+    {
+      name: "the new-thread screen, to compare with",
+      path: "/",
+      drawn: `document.querySelector("main") !== null && document.querySelector(".fleet-card, .machine-page-head") === null`,
+      reporters: seeded.runners,
+      reportsDiskUsage: true,
+      opensActivity: false,
+      cleansUp: false,
+    },
+    {
+      name: "the Fleet page",
+      path: "/fleet",
+      drawn: `document.querySelectorAll(".fleet-card").length >= 5`,
+      reporters: seeded.runners,
+      reportsDiskUsage: true,
+      opensActivity: false,
+      cleansUp: false,
+    },
+    {
+      name: "studio's page",
+      path: `/fleet/${studio!.runnerId}`,
+      drawn: `document.querySelector(".machine-page-head") !== null`,
+      reporters: [studio!],
+      reportsDiskUsage: false,
+      opensActivity: true,
+      cleansUp: false,
+    },
+  ];
+  const measure = async (plan: FleetLaunchPlan) => {
+    await fixture.prepareLaunch({ twoMinuteRow: false, writeDatabase });
+    await reportFleetState(seeded);
+    await openFleetScreenOnce(userDataDir, plan);
+    reportFleetLaunch(await measureFleetLaunch(userDataDir, fixture, seeded, plan));
+  };
+  for (const plan of plans) await measure(plan);
+  await reportFleetReadSizes(fixture, studio!.runnerId);
+  await fixture.growTo(492);
+  await measure({ ...plans[1]!, name: "the Fleet page, about 500 sessions" });
+  await measure({
+    name: "nimbus's page, cleaning up",
+    path: `/fleet/${seeded.nimbus.runnerId}`,
+    drawn: `document.querySelector(".machine-page-head") !== null && document.querySelector("#machine-storage") !== null`,
+    reporters: [seeded.nimbus],
+    reportsDiskUsage: false,
+    opensActivity: false,
+    cleansUp: true,
+  });
+}
+
+/**
  * Measures every launch but the workflow list's, and reports each launch as
  * it is measured. Returns the readings that are reported once the
  * controller has stopped.
@@ -1610,17 +1584,12 @@ async function measureLaunches(fixture: ThreadFixture, userDataDir: string) {
   reportSidebarWork(await measureSidebarWork(userDataDir));
   reportKeystrokeWork(await measureKeystrokeWork(userDataDir));
   const streaming = await measureStreaming(userDataDir, fixture, thread);
-  await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
-  await raiseSnoozedSignal(fixture);
-  await measure(`500 threads, Intake open on ${String(INTAKE_SIGNALS)} signals`, 500, false, {
-    opensIntake: true,
-  });
-  // The app opens Intake again, as the launch above left it.
-  reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
   const subagents = await measureSubagentLaunch(userDataDir, fixture, thread.id);
-  await measureEverything(fixture, userDataDir);
   return { streaming, longThread: thread, subagents };
 }
+
+const measurementNotes = describeMeasurements();
+if (measurementNotes.length > 0) console.log(`${measurementNotes.join("\n")}\n`);
 
 const launches = await runWithThreadFixture(async (fixture) => {
   const userDataDir = mkdtempSync(join(tmpdir(), "hercule-desktop-perf-"));
@@ -1630,25 +1599,28 @@ const launches = await runWithThreadFixture(async (fixture) => {
     if (grouped === null) await fixture.growTo(40);
     writeSettings(userDataDir, { controllerUrl: fixture.url });
     await signInOnce(userDataDir);
-    if (INTAKE_ONLY) {
-      await raiseSignals(fixture, INTAKE_SIGNALS, "Raised signal");
-      await raiseSnoozedSignal(fixture);
-      await fixture.prepareLaunch({ twoMinuteRow: false });
-      await openIntakeOnce(userDataDir);
-      await warmUpApp(userDataDir);
-      reportIntakeWork(await measureIntakeWork(userDataDir, fixture));
-      return null;
-    }
-    if (TRACKING_ONLY) {
-      await measureTracking(fixture, userDataDir);
-      return null;
-    }
     if (DISCUSSIONS_ONLY) {
       await measureDiscussions(fixture, userDataDir);
       return null;
     }
     if (SKILLS_ONLY) {
       await measureSkills(fixture, userDataDir);
+      return null;
+    }
+    if (PROVIDERS_ONLY) {
+      await measureProviders(fixture, userDataDir);
+      return null;
+    }
+    if (FLEET_ONLY) {
+      await measureFleet(fixture, userDataDir);
+      return null;
+    }
+    if (WORK_ONLY) {
+      await measureWork(fixture, userDataDir);
+      return null;
+    }
+    if (INBOX_ONLY) {
+      await measureInbox(fixture, userDataDir);
       return null;
     }
     if (SIDEBAR_ONLY) {
@@ -1672,12 +1644,6 @@ const launches = await runWithThreadFixture(async (fixture) => {
       await openThreadOnce(userDataDir, thread.id);
       await warmUpApp(userDataDir);
       reportKeystrokeWork(await measureKeystrokeWork(userDataDir));
-      return null;
-    }
-    if (EVERYTHING_ONLY) {
-      // The full run reaches Everything with this snoozed signal on Later.
-      await raiseSnoozedSignal(fixture);
-      await measureEverything(fixture, userDataDir);
       return null;
     }
     const measured = WORKFLOWS_ONLY ? null : await measureLaunches(fixture, userDataDir);

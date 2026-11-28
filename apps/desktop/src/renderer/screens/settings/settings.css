@@ -3,7 +3,7 @@
    maps 1:1 to the book's rule of the same name. The list's group headings
    are the sidebar's `.side-h`, in shell/sidebar.css, as in the book. The
    header itself, `.bar` and `.title`, is in styles/controls.css, because
-   Intake draws it too. */
+   other screens draw it too. */
 
 .crumb {
   flex: none;

@@ -10,6 +10,7 @@
 export { PromotionService, PromotionServiceLayer } from "./service";
 export { PromotionTokens, PromotionTokensLayer } from "./tokens";
 export {
+  DRAIN_TIMEOUT,
   PromotionState,
   PromotionStateLayer,
   buildForwardingPointer,

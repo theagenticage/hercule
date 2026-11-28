@@ -62,7 +62,7 @@ export const buildTurnFailedText = (name: string, error: string | undefined): st
  * interrupted turn for all of these:
  *
  * - the owner pressed Stop;
- * - a steer on a provider without native steering stopped the turn to send
+ * - a steer on a harness without native steering stopped the turn to send
  *   the new message as the next one;
  * - a stop of the whole session, where the adapter ends the running turn
  *   before it reports the exit (pi, and Codex when the turn's end arrives

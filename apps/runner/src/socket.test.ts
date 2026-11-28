@@ -19,6 +19,7 @@ import { locateRunnerFile } from "@hercule/home";
 import {
   AGENT_STEPS_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   PROTOCOL_VERSION,
@@ -33,7 +34,7 @@ import {
   type RunnerFacts,
   type ProbeReport,
   type ProbeRequest,
-  type ProviderEvent,
+  type HarnessEvent,
   type RunnerFactsReport,
   type RunnerFactsRequest,
   type RunnerHello,
@@ -57,8 +58,8 @@ import {
 import { acceptControllerMove } from "./repoint";
 import { writeRunnerFile } from "./runner-file";
 import { makeCredentialRelay, makeGithubTokenCopies } from "./credentials";
-import type { ProviderAdapter } from "./providers";
-import { makeLogins, type Logins } from "./providers/login";
+import type { HarnessAdapter } from "./harnesses";
+import { makeLogins, type Logins } from "./harnesses/login";
 import { makeSupervising, type Supervising } from "./sessions/supervisor";
 import { makeWorkspaceSteps, type WorkspaceSteps } from "./workspace-steps";
 import * as workspaceFixtures from "./workspaces/testing";
@@ -66,7 +67,7 @@ import { makeTestWorkspaces } from "./workspaces/testing";
 import { makeAttachmentCache } from "./attachments";
 import { makeSessionSkillsFolders } from "./skills";
 import { openFileClock } from "./edit-marks";
-import { NO_CONTROLLER_UPLOADER } from "./providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "./harnesses/testing";
 
 /** This machine's facts. These tests are not about the probe. */
 const FACTS: RunnerFacts = {
@@ -75,8 +76,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-  adapters: ["claude-code"],
+  harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 };
 
@@ -128,7 +129,7 @@ const waitUntil = async (ready: () => boolean): Promise<void> => {
 /**
  * Waits until the runner has accepted this stub as its controller.
  *
- * The watermark report shows this, because the runner only sends it to a
+ * The metrics report shows this, because the runner only sends it to a
  * peer that has proved its identity. The runner's own hello does not: the stub
  * records that frame before it has even signed its hello. A test that sends a
  * request as soon as it sees the runner's hello could send it before the
@@ -295,9 +296,8 @@ const DEADLINE = Duration.millis(500);
 const PATIENT = Duration.minutes(1);
 
 /** Only the session tests start a session, and they use directories of their own, so none of these is ever created. */
-const PROVIDERS_DIR = "/nonexistent/hercule-runner-providers";
-const SCRATCH_DIR = "/nonexistent/hercule-runner-scratch";
 const STORAGE_DIR = "/nonexistent/hercule-runner-storage";
+const SCRATCH_DIR = "/nonexistent/hercule-runner-scratch";
 const BIN_DIR = "/nonexistent/hercule-runner-bin";
 const HERCULE_TOOL = {
   orientation: "",
@@ -307,6 +307,11 @@ const HERCULE_TOOL = {
 
 const workspaces = makeTestWorkspaces({ storageDir: STORAGE_DIR });
 
+/** The disk measurements of a runner that never has anything to report. */
+const SILENT_DISK_MEASUREMENTS: ConnectOptions["diskMeasurements"] = {
+  reportTo: () => Effect.never,
+};
+
 /** The workspace steps of a runner that holds none. */
 const IDLE_STEPS = makeWorkspaceSteps({
   storageDir: STORAGE_DIR,
@@ -315,7 +320,7 @@ const IDLE_STEPS = makeWorkspaceSteps({
   baseEnv: {},
 });
 
-/** The provider logins of a runner that starts none. */
+/** The harness logins of a runner that starts none. */
 const IDLE_LOGINS = makeLogins(() => {
   throw new Error("no test in this file starts a login");
 });
@@ -344,8 +349,11 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         pin,
         facts: FACTS,
         probe: Effect.succeed(FACTS),
-        headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1 }),
-        providersDir: PROVIDERS_DIR,
+        readDiskAndMemory: Effect.succeed({
+          diskFreeBytes: 200 * 1024 ** 3,
+          availableMemoryBytes: 1,
+        }),
+        storageDir: STORAGE_DIR,
         scratchDir: SCRATCH_DIR,
         attachmentsDir: "/nonexistent/hercule-runner-attachments",
         editMarksDir: "/nonexistent/hercule-runner-edit-marks",
@@ -363,13 +371,14 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
           readControllerUrl: () => "https://controller.example:4938",
         }),
         workspaces,
+        diskMeasurements: SILENT_DISK_MEASUREMENTS,
         workspaceSteps: IDLE_STEPS,
         socketPath: `${STORAGE_DIR}/daemon.sock`,
         credentials: makeCredentialRelay(),
         githubTokenCopies: makeGithubTokenCopies({
           ask: () => Promise.reject(new Error("no test in this file asks for a token")),
         }),
-        providerLogins: IDLE_LOGINS,
+        harnessLogins: IDLE_LOGINS,
         sessions: makeSupervising([]),
         binDir: BIN_DIR,
         herculeTool: HERCULE_TOOL,
@@ -500,7 +509,7 @@ describe("which controller a runner accepts", () => {
     });
 
     await stub.connected();
-    // The watermark is only sent to a peer that has proved its identity, so it
+    // The metrics are only sent to a peer that has proved its identity, so it
     // shows the runner accepted the real hello.
     await waitUntilProven(stub);
     // A hello claiming another identity, after the real one was accepted. It
@@ -528,7 +537,42 @@ describe("which controller a runner accepts", () => {
     expect(readFailure(settled)).not.toBeInstanceOf(ControllerNotRecognised);
   });
 
-  it("sends the watermark as soon as the controller has proved its identity", async () => {
+  it.each([
+    { listed: true, sent: 1 },
+    { listed: false, sent: 0 },
+  ])(
+    "sends the disk usage once after hello only when the controller lists the capability (listed: $listed)",
+    async ({ listed, sent }) => {
+      const stub = await stubController((real) => ({
+        ...real,
+        capabilities: listed ? [DISK_USAGE_CAPABILITY] : [],
+      }));
+      const report = { workspaces: [], truncated: false, runner: null };
+      const pending = runConnection(buildPin(stub), {
+        diskMeasurements: {
+          reportTo: (send) =>
+            Effect.andThen(send({ _tag: "diskUsageReport", diskUsage: report }), Effect.never),
+        },
+      });
+
+      await stub.connected();
+      // The metrics go out at the same moment, so the disk usage report is
+      // there by the time they are.
+      await waitUntilProven(stub);
+      await delay(50);
+      expect(stub.received.filter((frame) => frame._tag === "diskUsageReport")).toHaveLength(sent);
+      if (listed)
+        expect(stub.received.find((frame) => frame._tag === "diskUsageReport")).toEqual({
+          _tag: "diskUsageReport",
+          diskUsage: report,
+        });
+
+      stub.hangUp();
+      await pending;
+    },
+  );
+
+  it("sends the metrics as soon as the controller has proved its identity", async () => {
     const stub = await stubController();
 
     let settled: Awaited<ReturnType<typeof runConnection>> | undefined;
@@ -543,9 +587,11 @@ describe("which controller a runner accepts", () => {
     await waitUntilProven(stub);
     expect(stub.received.find((frame) => frame._tag === "watermarkReport")).toEqual({
       _tag: "watermarkReport",
-      watermark: {
+      metrics: {
         diskFreeBytes: 200 * 1024 ** 3,
         availableMemoryBytes: 1,
+        // No minute of CPU has been read yet on the report right after hello.
+        cpu: null,
       },
     });
 
@@ -605,8 +651,20 @@ describe("which controller a runner accepts", () => {
         AGENT_STEPS_CAPABILITY,
         ATTACHMENTS_CAPABILITY,
         REPOSITORY_SKILLS_CAPABILITY,
+        DISK_USAGE_CAPABILITY,
       ]) as unknown,
     });
+    // One MCP Servers capability for each adapter that maps the gateway's
+    // entry, which today is Antigravity, Claude Code, Codex and pi, and the retired plain
+    // `mcpServers` for a controller of the first MCP Gateway build.
+    const hello = stub.received[0] as { readonly capabilities: ReadonlyArray<string> };
+    expect(hello.capabilities.filter((capability) => capability.startsWith("mcpServers"))).toEqual([
+      "mcpServers",
+      "mcpServers:claude-code/claude-code",
+      "mcpServers:codex/codex",
+      "mcpServers:pi/pi",
+      "mcpServers:antigravity/antigravity",
+    ]);
 
     stub.hangUp();
     await pending;
@@ -747,7 +805,7 @@ describe("a runner with workspace steps in flight", () => {
 });
 
 describe("reporting the end of a device login", () => {
-  /** Returns the idle provider logins, counting how often a connection attaches to them. */
+  /** Returns the idle harness logins, counting how often a connection attaches to them. */
   const countAttaches = (): { readonly logins: Logins; readonly attaches: () => number } => {
     let attaches = 0;
     return {
@@ -769,7 +827,7 @@ describe("reporting the end of a device login", () => {
     }));
     const counted = countAttaches();
 
-    const pending = runConnection(buildPin(stub), { providerLogins: counted.logins });
+    const pending = runConnection(buildPin(stub), { harnessLogins: counted.logins });
 
     await stub.connected();
     // The logins are attached while the hello is handled, before the proof
@@ -785,7 +843,7 @@ describe("reporting the end of a device login", () => {
     const stub = await stubController();
     const counted = countAttaches();
 
-    const pending = runConnection(buildPin(stub), { providerLogins: counted.logins });
+    const pending = runConnection(buildPin(stub), { harnessLogins: counted.logins });
 
     await stub.connected();
     await waitUntilProven(stub);
@@ -810,7 +868,7 @@ describe("reporting the end of a device login", () => {
       },
     };
 
-    const pending = runConnection(buildPin(stub), { providerLogins: logins });
+    const pending = runConnection(buildPin(stub), { harnessLogins: logins });
     await stub.connected();
     await waitUntilProven(stub);
     stub.hangUp();
@@ -947,14 +1005,18 @@ describe("a controller requesting the machine's facts", () => {
   });
 });
 
-describe("a controller asking a runner to probe a provider it has no adapter for", () => {
+describe("a controller asking a runner to probe a harness it has no adapter for", () => {
   const REQUEST: ProbeRequest = {
     _tag: "probeRequest",
     requestId: "01999999-0000-7000-8000-0000000000c1",
-    instanceId: "01999999-0000-7000-8000-0000000000c2",
-    providerId: "a-provider-nobody-wrote-an-adapter-for",
-    config: {},
-    secrets: {},
+    harnessId: "a-harness-nobody-wrote-an-adapter-for",
+    harnessAccount: {
+      providerAccountId: "01999999-0000-7000-8000-0000000000c2",
+      harnessHome: "providers/01999999-0000-7000-8000-0000000000c2",
+      modelArgument: "{model}",
+      credentialVariables: [],
+    },
+    readUsage: false,
   };
 
   const findProbeReport = (stub: Stub): ProbeReport | undefined =>
@@ -974,12 +1036,12 @@ describe("a controller asking a runner to probe a provider it has no adapter for
     await waitUntil(() => findProbeReport(stub) !== undefined);
     const report = findProbeReport(stub);
     // Matched by request id, because probes, logins and installs for several
-    // instances can run on one connection at once.
+    // accounts can run on one connection at once.
     expect(report?.requestId).toBe(REQUEST.requestId);
-    expect(report?.instanceId).toBe(REQUEST.instanceId);
+    expect(report?.providerAccountId).toBe(REQUEST.harnessAccount.providerAccountId);
     expect(report?.result.auth.status).toBe("error");
     expect(report?.result.auth.message).toContain(
-      'does not support the provider "a-provider-nobody-wrote-an-adapter-for"',
+      'does not support the harness "a-harness-nobody-wrote-an-adapter-for"',
     );
     expect(report?.result.harnessVersion).toBeNull();
     expect(report?.result.models).toEqual([]);
@@ -997,7 +1059,7 @@ describe("a controller asking a runner to probe a provider it has no adapter for
  * while a start is held at a chosen point.
  */
 describe("session frames on one connection", () => {
-  const PROVIDER = "fake";
+  const HARNESS_ID = "fake";
   const SESSION_A = "0199e0e7-0000-7000-8000-0000000000a1";
   const SESSION_B = "0199e0e7-0000-7000-8000-0000000000b1";
 
@@ -1028,7 +1090,7 @@ describe("session frames on one connection", () => {
 
   /** A fake adapter that records what it is given, with gates the test can hold its steps at. */
   interface Fake {
-    readonly adapter: ProviderAdapter;
+    readonly adapter: HarnessAdapter;
     /** The text of every input handed to a harness, with its session, in order. */
     readonly inputs: Array<readonly [string, string]>;
     /** Every stop the adapter was asked for, with its reason. */
@@ -1053,12 +1115,12 @@ describe("session frames on one connection", () => {
      */
     stopGate: Gate | undefined;
     /** Publishes an event as if the harness had reported it. */
-    readonly emit: (event: ProviderEvent) => void;
+    readonly emit: (event: HarnessEvent) => void;
   }
 
   const createFake = (): Fake => {
     const held = new Map<string, SessionBinding>();
-    const events = Effect.runSync(PubSub.unbounded<ProviderEvent>());
+    const events = Effect.runSync(PubSub.unbounded<HarnessEvent>());
     const fake: Fake = {
       inputs: [],
       turns: [],
@@ -1072,10 +1134,13 @@ describe("session frames on one connection", () => {
       stopGate: undefined,
       emit: (event) => PubSub.publishUnsafe(events, event),
       adapter: {
-        providerId: PROVIDER,
+        harnessId: HARNESS_ID,
+        harnessName: "Fake Harness",
         binaryName: "fake-harness",
         events: Stream.fromPubSub(events),
+        usageReports: Stream.empty,
         probe: () => Effect.die("not probed here"),
+        deleteSessionFiles: () => Effect.die("no session files here"),
         generateText: () => Effect.die("no text generation here"),
         listSessions: Effect.suspend(() => {
           const gate = fake.listGate;
@@ -1089,7 +1154,11 @@ describe("session frames on one connection", () => {
           Effect.andThen(
             fake.startGates.get(sessionId)?.pass ?? Effect.void,
             Effect.sync(() => {
-              const binding = { sessionId, nativeSessionId: sessionId, instanceId: INSTANCE };
+              const binding = {
+                sessionId,
+                nativeSessionId: sessionId,
+                providerAccountId: ACCOUNT_ID,
+              };
               held.set(sessionId, binding);
               return binding;
             }),
@@ -1140,7 +1209,7 @@ describe("session frames on one connection", () => {
     return fake;
   };
 
-  const INSTANCE = "0199e0e7-0000-7000-8000-00000000000a";
+  const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
 
   /** Builds a start. A second start of the same session needs a request id of its own. */
   const buildStart = (
@@ -1151,11 +1220,15 @@ describe("session frames on one connection", () => {
     requestId,
     sessionId,
     input: { text: `start ${sessionId}` },
-    providerId: PROVIDER,
-    config: {},
-    secrets: {},
+    harnessId: HARNESS_ID,
+    harnessAccount: {
+      providerAccountId: ACCOUNT_ID,
+      harnessHome: `providers/${ACCOUNT_ID}`,
+      modelArgument: "{model}",
+      credentialVariables: [],
+    },
     spec: {
-      instanceId: INSTANCE,
+      providerAccountId: ACCOUNT_ID,
       workspaceId: null,
       modelSelection: { model: "fast", options: {} },
       accessMode: "approval-required",
@@ -1263,7 +1336,7 @@ describe("session frames on one connection", () => {
     const stub = await stubController();
     const storageDir = joinPath(root, "storage");
     const pending = runConnection(buildPin(stub), {
-      providersDir: joinPath(root, "providers"),
+      storageDir,
       scratchDir: joinPath(root, "scratch"),
       attachmentsDir: joinPath(root, "attachments"),
       sessions,

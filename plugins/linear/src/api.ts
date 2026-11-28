@@ -114,6 +114,14 @@ const isAuthenticationError = (error: GraphQLError): boolean =>
   error.extensions?.code === "AUTHENTICATION_ERROR";
 
 /**
+ * Returns a Linear Connection's token: the `accessToken` of the redirect
+ * flow, else the pasted `apiKey`. Returns undefined when the credentials hold
+ * neither.
+ */
+export const readToken = (credentials: Readonly<Record<string, string>>): string | undefined =>
+  credentials["accessToken"] ?? credentials["apiKey"];
+
+/**
  * Returns the `Authorization` header for a Linear Connection's credentials:
  * `Bearer <token>` for the `accessToken` of the redirect flow, or the pasted
  * `apiKey` as it is, because Linear refuses a personal API key sent with
@@ -122,9 +130,8 @@ const isAuthenticationError = (error: GraphQLError): boolean =>
 export const buildAuthorization = (
   credentials: Readonly<Record<string, string>>,
 ): string | undefined => {
-  const accessToken = credentials["accessToken"];
-  if (accessToken !== undefined) return `Bearer ${accessToken}`;
-  return credentials["apiKey"];
+  const token = readToken(credentials);
+  return credentials["accessToken"] === undefined ? token : `Bearer ${token}`;
 };
 
 /**
@@ -268,6 +275,50 @@ interface PagedItems<A> {
 }
 
 /**
+ * Reads the pages of a list query one after another and returns what `keep`
+ * leaves of the items. `keep` runs after every page, so memory stays bounded
+ * by what it keeps plus one page. Each page asks for `pageSize` items. Stops after `maxPages` pages. `hasMore` is
+ * true when that cap stopped the read or `keep` dropped an item. Fails as
+ * `callLinear` does, and then returns nothing.
+ */
+const readPagesKeeping = <S extends Schema.Decoder<unknown>>(
+  authorization: string,
+  query: LinearQuery,
+  field: string,
+  item: S,
+  maxPages: number,
+  keep: (items: Array<S["Type"]>) => Array<S["Type"]>,
+  pageSize: number = MAX_PAGE_SIZE,
+): Effect.Effect<PagedItems<S["Type"]>, LinearFailure, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const page = Schema.Struct({
+      [field]: Schema.Struct({ nodes: Schema.Array(item), pageInfo: PageInfo }),
+    });
+    let items: Array<S["Type"]> = [];
+    let dropped = false;
+    let after: string | null = null;
+    for (let read = 0; read < maxPages; read += 1) {
+      const data = yield* callLinear(
+        authorization,
+        { ...query, variables: { ...query.variables, first: pageSize, after } },
+        page,
+      );
+      const list = data[field] as {
+        readonly nodes: ReadonlyArray<S["Type"]>;
+        readonly pageInfo: Schema.Schema.Type<typeof PageInfo>;
+      };
+      const combined = [...items, ...list.nodes];
+      items = keep(combined);
+      dropped ||= items.length < combined.length;
+      if (!list.pageInfo.hasNextPage || list.pageInfo.endCursor === null) {
+        return { items, hasMore: dropped };
+      }
+      after = list.pageInfo.endCursor;
+    }
+    return { items, hasMore: true };
+  });
+
+/**
  * Reads a list query page by page and returns its items. The query's list is
  * the root field `field`, and the query takes `$first` and `$after`. Each
  * page asks for `MAX_PAGE_SIZE` items. Stops after `maxPages` pages and says
@@ -281,27 +332,59 @@ export const readPages = <S extends Schema.Decoder<unknown>>(
   item: S,
   maxPages: number,
 ): Effect.Effect<PagedItems<S["Type"]>, LinearFailure, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const page = Schema.Struct({
-      [field]: Schema.Struct({ nodes: Schema.Array(item), pageInfo: PageInfo }),
-    });
-    const items: Array<S["Type"]> = [];
-    let after: string | null = null;
-    for (let read = 0; read < maxPages; read += 1) {
-      const data = yield* callLinear(
-        authorization,
-        { ...query, variables: { ...query.variables, first: MAX_PAGE_SIZE, after } },
-        page,
-      );
-      const list = data[field] as {
-        readonly nodes: ReadonlyArray<S["Type"]>;
-        readonly pageInfo: Schema.Schema.Type<typeof PageInfo>;
-      };
-      items.push(...list.nodes);
-      if (!list.pageInfo.hasNextPage || list.pageInfo.endCursor === null) {
-        return { items, hasMore: false };
-      }
-      after = list.pageInfo.endCursor;
-    }
-    return { items, hasMore: true };
-  });
+  readPagesKeeping(authorization, query, field, item, maxPages, (items) => items);
+
+/**
+ * Reads a list query to its last page and returns the `limit` items with the
+ * latest `updatedAt`, newest first. `hasMore` is true when the list was longer
+ * than `limit`. Whatever order Linear lists in, the result is the same, and
+ * memory holds at most `limit` plus one page of items. Fails as `callLinear`
+ * does, on any page, and then returns nothing.
+ */
+export const readNewestPages = <S extends Schema.Decoder<{ readonly updatedAt: string }>>(
+  authorization: string,
+  query: LinearQuery,
+  field: string,
+  item: S,
+  limit: number,
+): Effect.Effect<PagedItems<S["Type"]>, LinearFailure, HttpClient.HttpClient> =>
+  readPagesKeeping(authorization, query, field, item, Number.POSITIVE_INFINITY, (items) =>
+    // Linear's timestamps are all UTC ISO strings of one shape, so they order as text.
+    items
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0))
+      .slice(0, limit),
+  );
+
+/**
+ * Reads a list query to its last page and returns the `limit` items with the
+ * smallest `keyOf`, in that order. `hasMore` is true when the list was longer
+ * than `limit`. Whatever order Linear lists in, the result is the same, and
+ * memory holds at most `limit` plus one page of items. Each page asks for
+ * `pageSize` items, for queries whose items carry nested lists that make a
+ * page of `MAX_PAGE_SIZE` too costly. Fails as `callLinear` does, on any
+ * page, and then returns nothing.
+ */
+export const readSmallestPages = <S extends Schema.Decoder<unknown>>(
+  authorization: string,
+  query: LinearQuery,
+  field: string,
+  item: S,
+  limit: number,
+  keyOf: (item: S["Type"]) => string,
+  pageSize: number,
+): Effect.Effect<PagedItems<S["Type"]>, LinearFailure, HttpClient.HttpClient> =>
+  readPagesKeeping(
+    authorization,
+    query,
+    field,
+    item,
+    Number.POSITIVE_INFINITY,
+    (items) =>
+      items
+        .sort((a, b) => {
+          const [left, right] = [keyOf(a), keyOf(b)];
+          return left < right ? -1 : left > right ? 1 : 0;
+        })
+        .slice(0, limit),
+    pageSize,
+  );

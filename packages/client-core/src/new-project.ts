@@ -12,7 +12,7 @@ import {
 } from "@hercule/contract";
 import { readEveryPage } from "./read-every-page";
 import type { HerculeClient } from "./client";
-import { readErrorMessage } from "./errors";
+import { readErrorMessage, readValidationIssues } from "./errors";
 import { describeRemoteRefusal } from "./remote";
 
 /** The error for a project with no name. */
@@ -54,6 +54,12 @@ export interface NewProjectForm<Repository extends RepositorySubmission = Reposi
   readonly name: string;
   /** The project's id once a submission created it, or `null` while it does not exist. */
   readonly projectId: string | null;
+  /**
+   * The Model Profile a new thread in the project starts on. Left out, the
+   * project names none. Sent only when the project is created: a submission
+   * that already holds a `projectId` never changes the project's profile.
+   */
+  readonly modelProfileId?: string;
   readonly repositories: readonly Repository[];
 }
 
@@ -63,6 +69,12 @@ export interface NewProjectSubmission<
 > extends NewProjectForm<Repository> {
   /** Why the project itself was not created, or `null`. */
   readonly failure: string | null;
+  /**
+   * Why the controller refused `modelProfileId`, such as a profile that was
+   * deleted since the form listed it. Present only then; `failure` is then
+   * `null`, because the refusal belongs under the profile field.
+   */
+  readonly modelProfileFailure?: string;
 }
 
 /**
@@ -143,8 +155,22 @@ export const createProjectWithRepositories = async <Repository extends Repositor
   let projectId = form.projectId;
   if (projectId === null) {
     try {
-      projectId = (await client.project.create({ payload: { name } })).id;
+      const payload = {
+        name,
+        ...(form.modelProfileId === undefined ? {} : { modelProfileId: form.modelProfileId }),
+      };
+      projectId = (await client.project.create({ payload })).id;
     } catch (error) {
+      const refusal = readValidationIssues(error)?.find(
+        (issue) => issue.path[0] === "modelProfileId",
+      );
+      if (refusal !== undefined)
+        return {
+          ...form,
+          failure: null,
+          modelProfileFailure: refusal.message,
+          repositories: checked,
+        };
       return { ...form, failure: readErrorMessage(error), repositories: checked };
     }
   }

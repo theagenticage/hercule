@@ -35,6 +35,7 @@ const renderSection = (
       onSave={onSave}
       promptError={promptError}
       onSavePrompt={onSavePrompt}
+      platform="mac"
     />,
   );
   return { onSave, onSavePrompt };

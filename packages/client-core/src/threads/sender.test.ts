@@ -11,6 +11,7 @@ import {
   collectSenderSessionIds,
   describeSender,
   readInputSender,
+  readUserSender,
   readSenderSession,
 } from "./sender";
 import { buildSession } from "./workspaces.testing";
@@ -23,7 +24,8 @@ const ADA: Assistant = {
   id: "01a0ec64-6e80-7000-8000-a00000000010",
   name: "Ada",
   systemPrompt: "You are Ada.",
-  instanceId: "i-claude",
+  providerAccountId: "a-anthropic",
+  harnessId: "claude-code/claude-code",
   permissionProfileId: "p-unrestricted",
   accessMode: "auto-accept-edits",
   model: null,
@@ -205,5 +207,16 @@ describe("collectSenderSessionIds", () => {
     ];
 
     expect(collectSenderSessionIds(rows, [])).toEqual([]);
+  });
+});
+
+describe("readUserSender", () => {
+  it("returns the sending session's id, and undefined when the message has no sender", () => {
+    expect(readUserSender({ text: "Rebase on main", senderSessionId: "s-sender" })).toBe(
+      "s-sender",
+    );
+    expect(readUserSender({ text: "Fix the login bug" })).toBeUndefined();
+    expect(readUserSender({ text: "Fix the login bug", senderSessionId: "" })).toBeUndefined();
+    expect(readUserSender(undefined)).toBeUndefined();
   });
 });

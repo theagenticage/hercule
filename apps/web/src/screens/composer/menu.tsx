@@ -1,10 +1,10 @@
-import type { JSX, ReactNode } from "react";
+import type { ComponentProps, JSX, ReactNode } from "react";
 import { cn } from "@hercule/ui";
 
 /**
  * One row of a composer menu. From left to right it has:
  *
- * - a marker column: a dot on the current row, or a provider's logo;
+ * - a marker column: a dot on the current row, or a harness's logo;
  * - the name, with its small detail beside it;
  * - a note on the right.
  *
@@ -27,8 +27,10 @@ export function MenuRow({
   dimmed = null,
   clipNote = false,
   inert,
+  plain = false,
   trailing,
   className,
+  buttonProps,
   onPick,
 }: {
   /** The content of the marker column; defaults to the row's dot. */
@@ -49,12 +51,21 @@ export function MenuRow({
   /**
    * Whether the row cannot be picked, for a row that shows its reason
    * somewhere other than the right-hand note, such as on its sub-line. A row
-   * with a `dimmed` reason is already inert without this flag.
+   * with a `dimmed` reason is already inert without this flag. An inert row is
+   * drawn faded.
    */
   readonly inert?: boolean;
+  /**
+   * Whether the row is not a pick but is drawn at full strength, because it
+   * has controls of its own at the right (a New row's Add and Not now).
+   * Takes precedence over `inert`.
+   */
+  readonly plain?: boolean;
   readonly trailing?: ReactNode;
   /** Extra classes for the row, such as a rule above it. */
   readonly className?: string;
+  /** Extra attributes for the row's button, such as `aria-expanded` on a row that opens a submenu. Ignored on a row that is not a button. */
+  readonly buttonProps?: ComponentProps<"button">;
   readonly onPick?: () => void;
 }): JSX.Element {
   const body = (
@@ -115,6 +126,8 @@ export function MenuRow({
     className,
   );
 
+  if (plain) return <div className={layout}>{body}</div>;
+
   if (inert ?? dimmed !== null) {
     return <div className={cn(layout, "opacity-50")}>{body}</div>;
   }
@@ -129,22 +142,75 @@ export function MenuRow({
         "cursor-pointer hover:bg-line-soft hover:text-ink",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
       )}
+      {...buttonProps}
     >
       {body}
     </button>
   );
 }
 
-/** A lane's heading inside a menu. Every lane but the first has a rule above it. */
-export function Lane({ label }: { readonly label: string }): JSX.Element {
+/**
+ * A lane's heading inside a menu. Every lane but the first has a rule above it.
+ * An optional logo sits before the label, for a lane that stands for an account.
+ */
+export function Lane({
+  label,
+  logo,
+}: {
+  readonly label: string;
+  readonly logo?: ReactNode;
+}): JSX.Element {
   return (
-    <div className="mt-1.5 border-t border-line-soft px-2 pt-2 pb-[3px] first:mt-0 first:border-t-0 first:pt-1 [input+&]:mt-0 [input+&]:border-t-0 [input+&]:pt-1">
-      <span className="text-label font-emph tracking-[0.1em] text-faint uppercase">{label}</span>
+    <div className="mt-1.5 flex items-center gap-1.5 border-t border-line-soft px-2 pt-2 pb-[3px] first:mt-0 first:border-t-0 first:pt-1 [input+&]:mt-0 [input+&]:border-t-0 [input+&]:pt-1">
+      {logo === undefined || logo === null ? null : (
+        <span className="flex shrink-0 text-faint opacity-85">{logo}</span>
+      )}
+      <span className="min-w-0 truncate text-label font-emph tracking-[0.1em] text-faint uppercase">
+        {label}
+      </span>
     </div>
   );
 }
 
-/** Wraps a provider's logo for a row's marker column, in place of the dot. */
+/**
+ * The head of a Model Profile in the model menu: its name as a lane label
+ * with a chevron at the right, pointing down while the profile is unfolded.
+ * Clicking it unfolds the profile.
+ */
+export function ProfileHead({
+  label,
+  unfolded,
+  onOpen,
+}: {
+  readonly label: string;
+  readonly unfolded: boolean;
+  readonly onOpen: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      aria-expanded={unfolded}
+      onClick={onOpen}
+      className={cn(
+        "mt-1.5 flex w-full cursor-pointer items-center gap-1.5 rounded-[6px] border-t border-line-soft px-2 pt-2 pb-[3px] text-left first:mt-0 first:border-t-0 first:pt-1 [input+&]:mt-0 [input+&]:border-t-0 [input+&]:pt-1",
+        "text-faint hover:text-ink aria-expanded:text-ink",
+        "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
+      )}
+    >
+      <span className="min-w-0 truncate text-label font-emph tracking-[0.1em] uppercase">
+        {label}
+      </span>
+      <span
+        aria-hidden="true"
+        className={cn("ml-auto text-fine transition-transform", unfolded && "rotate-90")}
+      >
+        ›
+      </span>
+    </button>
+  );
+}
+
+/** Wraps a harness's logo for a row's marker column, in place of the dot. */
 export const renderMarker = (mark: ReactNode): ReactNode => (
   <span className="flex w-4 justify-center opacity-85">{mark}</span>
 );

@@ -9,23 +9,35 @@
  * This package sits on the runner's import path, so it depends on nothing but
  * `effect`.
  */
-import { Effect, Schema } from "effect";
+import { Schema } from "effect";
 
 import {
+  Bytes,
+  CredentialVariable,
   Fact,
-  InstanceId,
-  InstanceSecrets,
+  HarnessAccount,
+  HarnessCredential,
+  HarnessHome,
+  ModelArgument,
+  ProviderAccountId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
+  MAX_PROBE_MODELS,
+  MAX_SECRET_VALUE_LENGTH,
   Seq,
   Sequenced,
   StorageId,
   Subdirectory,
   Timestamp,
+  UsageCredit,
+  UsageReading,
+  UsageWindow,
   WorkspaceStepKey,
 } from "./primitives";
+import { ModelDescriptor } from "./models";
 import {
+  AccountUsageReported,
   FilesEdited,
   GithubTokenAnswer,
   GithubTokenRequest,
@@ -44,6 +56,7 @@ import { TextGenerationReport, TextGenerationRequest } from "./text-generation";
 import {
   CredentialAnswer,
   CredentialRequest,
+  DiskUsageReport,
   WorkspaceDispose,
   WorkspaceDetach,
   WorkspaceProvision,
@@ -65,6 +78,7 @@ export * from "./adapter-errors";
 export * from "./attachments";
 export * from "./image-signatures";
 export * from "./identity-port";
+export * from "./models";
 export * from "./output-schema";
 export * from "./remote";
 export * from "./sessions";
@@ -74,15 +88,26 @@ export * from "./text-generation";
 export * from "./workspace-steps";
 export * from "./workspaces";
 export {
+  Bytes,
+  CredentialVariable,
   Fact,
-  InstanceId,
+  HarnessAccount,
+  HarnessCredential,
+  HarnessHome,
+  ModelArgument,
+  ProviderAccountId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
+  MAX_PROBE_MODELS,
+  MAX_SECRET_VALUE_LENGTH,
   Sequenced,
   StorageId,
   Subdirectory,
   Timestamp,
+  UsageCredit,
+  UsageReading,
+  UsageWindow,
   WorkspaceStepKey,
 };
 
@@ -131,8 +156,43 @@ export {
  * - Version 13 added the `wait` and `image_generation` item kinds. A controller
  *   on 12 could not decode an item of either kind and would close the socket
  *   on it, again after every reconnect, so the two refuse each other at hello.
+ * - Version 14 renamed the frame fields that name a harness: `harnessId` on
+ *   the probe, install, login and session start requests and on the text
+ *   generation request, `harnessRefs` on events, and `harnesses` in the runner
+ *   facts. The harness ids are now qualified (`claude-code/claude-code`). An
+ *   older peer cannot decode the renamed fields, so the two refuse each other
+ *   at hello.
+ * - Version 15 made the frames name a Provider Account. The probe, login and
+ *   text generation requests and the session start carry a `HarnessAccount`
+ *   (the account, its Harness Home folder, the model argument and the
+ *   credential) in place of the earlier id, config and secrets fields; the
+ *   probe report, the login code, the session spec and the
+ *   session binding carry `providerAccountId`. An older peer cannot decode any
+ *   of them, so the two refuse each other at hello.
+ * - Version 16 reshaped the `HarnessAccount`: it lists every
+ *   `credentialVariables` the harness reads, and its `credential` has a value
+ *   or is absent. It also added the `method` of `loginStart` and the optional
+ *   `token` of a successful `loginResult`. An older runner would leave the
+ *   ambient key of its own environment in place and could not make a token, so
+ *   the two refuse each other at hello.
+ * - Version 17 added Account Usage: the required `readUsage` of the probe
+ *   request, the required `usage` of the probe result and the
+ *   `AccountUsageReported` frame. An older peer cannot decode them, so the two
+ *   refuse each other at hello. The new frame needs no capability, because the
+ *   bump already keeps it away from an older runner or controller.
+ * - Version 18 raised the most models a probe result may list from 64 to
+ *   `MAX_PROBE_MODELS` (256). A controller on 17 cannot decode a list of more
+ *   than 64 models and would close the socket on it, so the two refuse each
+ *   other at hello.
+ * - Version 19 added `SessionStart.catalogModels` and
+ *   `TextGenerationRequest.catalogModels`, the account's whole Model Catalog
+ *   for a harness that declares models. A runner on 18 would drop the key and
+ *   start a pi session that cannot run the model the user chose, with no
+ *   error, so the two refuse each other at hello. It also raised the most models a probe
+ *   result may list from 256 to 1024 (`MAX_PROBE_MODELS`), because pi ships 366
+ *   OpenRouter models. A controller on 18 cannot decode more than 256 models.
  */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 19;
 
 /**
  * The close code and reason the controller uses to end the connection of a
@@ -184,24 +244,46 @@ const Base64 = Schema.String.check(
   }),
 );
 
-const Bytes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+/**
+ * The tools a runner probes for, in the order it reports them. The list is
+ * fixed in code: there is no setting for it. The runner reads it to know what
+ * to probe, and a client reads it to show the tools in the same order.
+ */
+export const PROBED_TOOLCHAINS = [
+  "git",
+  "gh",
+  "node",
+  "pnpm",
+  "bun",
+  "go",
+  "rustc",
+  "python3",
+  "uv",
+  "docker",
+  "terraform",
+  "dotnet",
+] as const;
 
 export const Toolchain = Schema.Struct({
   name: Fact,
-  /** The output of `--version`, unparsed when the runner could not parse it. */
+  /**
+   * The version the tool printed when asked for it (`--version`, or `go
+   * version` for `go`): the semantic version in that text, or the whole text
+   * trimmed when it holds none.
+   */
   version: Fact,
   path: Fact,
 });
 
 export type Toolchain = Schema.Schema.Type<typeof Toolchain>;
 
-export const ProviderBinary = Schema.Struct({
+export const HarnessBinary = Schema.Struct({
   name: Fact,
   present: Schema.Boolean,
   path: Schema.optionalKey(Fact),
 });
 
-export type ProviderBinary = Schema.Schema.Type<typeof ProviderBinary>;
+export type HarnessBinary = Schema.Schema.Type<typeof HarnessBinary>;
 
 /**
  * What a runner knows about the machine it is on. This is state where the
@@ -216,31 +298,73 @@ export const RunnerFacts = Schema.Struct({
   totalMemoryBytes: Bytes,
   docker: Schema.Boolean,
   toolchains: Schema.Array(Toolchain).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
-  providers: Schema.Array(ProviderBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /**
-   * The provider ids this runner build has an adapter for. A fact about the
-   * binary rather than the machine, so the fleet view can show "no adapter in
-   * this runner build" instead of finding out by trying and failing.
+   * The names of the toolchains the runner looked for, whether it found them
+   * or not. Without it, a client cannot tell "not installed" from "this runner
+   * never looked". Absent means a runner built before the list grew, which
+   * looked for `git` and `gh` only.
+   */
+  probedToolchains: Schema.optionalKey(
+    Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  ),
+  harnesses: Schema.Array(HarnessBinary).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The qualified harness ids (such as `claude-code/claude-code`) this runner
+   * build has an adapter for. A fact about the binary rather than the machine,
+   * so the fleet view can say that this machine's Hercule cannot run a harness,
+   * instead of finding out by trying and failing.
    */
   adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  /**
+   * The size of the file system that holds the runner's storage directory: the
+   * same file system `RunnerMetrics.diskFreeBytes` is read from. Absent from a
+   * runner built before it was reported; the Fleet screen then shows free
+   * space without a percentage.
+   */
+  diskTotalBytes: Schema.optionalKey(Bytes),
   /** The port that serves `GET /identity`, which is used to resolve the "local" alias. */
   identityPort: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 })),
 });
 
 export type RunnerFacts = Schema.Schema.Type<typeof RunnerFacts>;
 
+const Percent = Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 }));
+
 /**
- * The fast-changing part of a runner's state. Never buffered: only the latest
- * value matters. The controller decides what a reading means for placement,
- * by comparing it with the watermark it holds, so the runner reports only what
- * the machine has left.
+ * How busy the machine's CPU was over the minute before a report. The runner
+ * reads the share of all cores that were busy once a second, as a number from
+ * 0 to 100.
  */
-export const RunnerWatermark = Schema.Struct({
-  diskFreeBytes: Bytes,
-  availableMemoryBytes: Bytes,
+export const RunnerCpu = Schema.Struct({
+  /** The mean of the minute's reads. */
+  averagePercent: Percent,
+  /** The highest read of the minute. */
+  peakPercent: Percent,
 });
 
-export type RunnerWatermark = Schema.Schema.Type<typeof RunnerWatermark>;
+export type RunnerCpu = Schema.Schema.Type<typeof RunnerCpu>;
+
+/**
+ * The Runner Metrics: the fast-changing part of a runner's state. Never
+ * buffered: only the latest value matters. The controller decides what a
+ * reading means for placement, by comparing the free disk with the disk
+ * watermark it holds, so the runner reports only what the machine has left.
+ */
+export const RunnerMetrics = Schema.Struct({
+  diskFreeBytes: Bytes,
+  availableMemoryBytes: Bytes,
+  /**
+   * The CPU use over the minute before the report, in one of three states:
+   * - an object: the minute's mean and highest once-a-second read;
+   * - `null`: the runner reads CPU but has no minute yet, as on the report
+   *   right after hello;
+   * - absent: the runner was built before it reported CPU. The Fleet screen
+   *   then says the runner is too old to report CPU.
+   */
+  cpu: Schema.optionalKey(Schema.NullOr(RunnerCpu)),
+});
+
+export type RunnerMetrics = Schema.Schema.Type<typeof RunnerMetrics>;
 
 /**
  * What a machine reports about itself when it presents a join token: only what
@@ -347,76 +471,23 @@ export const RunnerFactsReport = Schema.Struct({
 
 export type RunnerFactsReport = Schema.Schema.Type<typeof RunnerFactsReport>;
 
-export const WatermarkReport = Schema.Struct({
+/**
+ * A runner's latest Runner Metrics, sent right after every hello and on the
+ * runner's periodic check.
+ *
+ * The frame was named for the report before the report became the Runner
+ * Metrics. On the wire it keeps the old tag `watermarkReport` and the old key
+ * `watermark`, so a runner and a controller of either age read each other's
+ * report. `encodeKeys` renames the key between the wire and the decoded
+ * `metrics` field. The next raise of `PROTOCOL_VERSION` renames both on the
+ * wire.
+ */
+export const MetricsReport = Schema.Struct({
   _tag: Schema.Literal("watermarkReport"),
-  watermark: RunnerWatermark,
-});
+  metrics: RunnerMetrics,
+}).pipe(Schema.encodeKeys({ metrics: "watermark" }));
 
-export type WatermarkReport = Schema.Schema.Type<typeof WatermarkReport>;
-
-/**
- * One choice the composer offers for a model: a select over named values, or a
- * switch. Each harness decides what it accepts per model, so this is probed
- * from the harness rather than written by hand.
- */
-export const ModelOption = Schema.Struct({
-  id: Fact,
-  label: Fact,
-  kind: Schema.Literals(["select", "boolean"]),
-  choices: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ value: Fact, label: Fact })).check(
-      Schema.isMaxLength(MAX_FACT_ITEMS),
-    ),
-  ),
-  default: Schema.Union([Schema.String, Schema.Boolean]),
-});
-
-export type ModelOption = Schema.Schema.Type<typeof ModelOption>;
-
-/**
- * What a model takes as image input. `maxBytes` is the largest image the
- * model accepts, or `null` when it sets no limit of its own beyond the
- * controller's 10 MiB per upload.
- */
-export const ImageInputCapability = Schema.Struct({
-  maxBytes: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
-});
-
-export type ImageInputCapability = Schema.Schema.Type<typeof ImageInputCapability>;
-
-/** One model a harness offers, and the per-model choices that come with it. */
-export const ModelDescriptor = Schema.Struct({
-  slug: Fact,
-  name: Fact,
-  isDefault: Schema.optionalKey(Schema.Boolean),
-  /** A model the harness no longer lists but still forwards to the API. */
-  isLegacy: Schema.optionalKey(Schema.Boolean),
-  /**
-   * Whether the model takes images as input, and how large, or `null` when it
-   * takes none. The composer and the controller refuse images for a model
-   * whose value is `null`.
-   *
-   * The capability is one field per kind of input, not one flag for all
-   * attachments, for two reasons:
-   *
-   * - harnesses declare input support per modality (text, image, and so on);
-   * - the limits differ per kind, so each kind carries its own.
-   *
-   * A later kind, such as documents, gets a field of its own beside this one
-   * (`documentInput`).
-   *
-   * A missing answer must never count as yes, so the field is required on the
-   * decoded type and every adapter sets it. A descriptor without it decodes as
-   * `null`: a runner on an older build sends none, and neither do the
-   * snapshots the controller stored before the field existed.
-   */
-  imageInput: Schema.NullOr(ImageInputCapability).pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed(null)),
-  ),
-  options: Schema.Array(ModelOption).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
-});
-
-export type ModelDescriptor = Schema.Schema.Type<typeof ModelDescriptor>;
+export type MetricsReport = Schema.Schema.Type<typeof MetricsReport>;
 
 /** Whether the harness reports a usable login, and whose it is. */
 export const SnapshotAuth = Schema.Struct({
@@ -431,14 +502,21 @@ export const SnapshotAuth = Schema.Struct({
 export type SnapshotAuth = Schema.Schema.Type<typeof SnapshotAuth>;
 
 /**
- * What one runner found out about one provider instance. A probe has no side
+ * What one runner found out about one Provider Account in one harness. A probe has no side
  * effects: it reads the harness's own account and model list and makes no API
- * call.
+ * call. The one exception is a usage read (`ProbeRequest.readUsage`), which goes
+ * through the harness's own usage call (Codex's `account/rateLimits/read`, the
+ * Claude Agent SDK's usage read).
  */
 export const ProbeResult = Schema.Struct({
   harnessVersion: Schema.NullOr(Fact),
   auth: SnapshotAuth,
-  models: Schema.Array(ModelDescriptor).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  models: Schema.Array(ModelDescriptor).check(Schema.isMaxLength(MAX_PROBE_MODELS)),
+  /**
+   * The account's usage as the harness read it. `null` when the request did
+   * not ask for it, or when the harness has no usage to give.
+   */
+  usage: Schema.NullOr(Schema.Array(UsageReading).check(Schema.isMaxLength(MAX_FACT_ITEMS))),
 });
 
 export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
@@ -450,17 +528,21 @@ export type ProbeResult = Schema.Schema.Type<typeof ProbeResult>;
 const RequestId = Fact;
 
 /**
- * Asks the runner to probe one provider instance. The instance id and its
- * config live on the controller, so the runner cannot start this on its own.
+ * Asks the runner to probe one harness for one Provider Account. The account's
+ * Harness Home, model argument and credential live on the controller, so the
+ * request carries them and the runner cannot start this on its own.
  */
 export const ProbeRequest = Schema.Struct({
   _tag: Schema.Literal("probeRequest"),
   requestId: RequestId,
-  instanceId: InstanceId,
-  providerId: Fact,
-  config: Schema.Json,
-  /** The instance's credentials, which its config never holds; `{}` when none. */
-  secrets: InstanceSecrets,
+  harnessId: Fact,
+  harnessAccount: HarnessAccount,
+  /**
+   * Whether the harness should also read the account's usage. The controller
+   * sets it only when its 15-minute rule allows a read, because a usage read
+   * is a call to the provider.
+   */
+  readUsage: Schema.Boolean,
 });
 
 export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;
@@ -468,7 +550,7 @@ export type ProbeRequest = Schema.Schema.Type<typeof ProbeRequest>;
 export const ProbeReport = Schema.Struct({
   _tag: Schema.Literal("probeReport"),
   requestId: RequestId,
-  instanceId: InstanceId,
+  providerAccountId: ProviderAccountId,
   result: ProbeResult,
 });
 
@@ -477,7 +559,7 @@ export type ProbeReport = Schema.Schema.Type<typeof ProbeReport>;
 export const InstallRequest = Schema.Struct({
   _tag: Schema.Literal("installRequest"),
   requestId: RequestId,
-  providerId: Fact,
+  harnessId: Fact,
 });
 
 export type InstallRequest = Schema.Schema.Type<typeof InstallRequest>;
@@ -509,15 +591,29 @@ export const MAX_AUTHORIZE_URL_LENGTH = 2048;
 const AuthorizeUrl = Schema.String.check(Schema.isBetweenLength(1, MAX_AUTHORIZE_URL_LENGTH));
 
 /**
- * Asks the runner to start the vendor's own login for one instance. The
- * credential lands in that instance's config directory, which is why this is
- * routed on the instance rather than on the provider.
+ * What a login produces:
+ *
+ * - `sign-in`: the vendor's own login, which leaves its credential in the
+ *   account's Harness Home on the runner.
+ * - `create-token`: the vendor's command that mints a long-lived token. The
+ *   runner returns the token in the success `LoginResult`, and the controller
+ *   stores it as the account's credential. Nothing is left in the Harness Home.
+ */
+export const LoginMethod = Schema.Literals(["sign-in", "create-token"]);
+
+export type LoginMethod = Schema.Schema.Type<typeof LoginMethod>;
+
+/**
+ * Asks the runner to start the vendor's own login for one Provider Account in
+ * one harness. A `sign-in` credential lands in the account's Harness Home,
+ * which is why the request carries the account.
  */
 export const LoginStart = Schema.Struct({
   _tag: Schema.Literal("loginStart"),
   requestId: RequestId,
-  instanceId: InstanceId,
-  providerId: Fact,
+  harnessId: Fact,
+  harnessAccount: HarnessAccount,
+  method: LoginMethod,
 });
 
 export type LoginStart = Schema.Schema.Type<typeof LoginStart>;
@@ -525,7 +621,7 @@ export type LoginStart = Schema.Schema.Type<typeof LoginStart>;
 export const LoginCode = Schema.Struct({
   _tag: Schema.Literal("loginCode"),
   requestId: RequestId,
-  instanceId: InstanceId,
+  providerAccountId: ProviderAccountId,
   code: Schema.String.check(Schema.isBetweenLength(1, MAX_FACT_LENGTH)),
 });
 
@@ -570,12 +666,12 @@ export const LOGIN_ENDED_CAPABILITY = "loginEnded";
  * exited, or its code expired and the runner stopped it. A device login reads
  * nothing back, so this is the only way the controller learns that the user
  * finished it in the browser. The frame carries no outcome: the controller
- * probes the instance again, and the probe says whether the login worked.
+ * probes the account again, and the probe says whether the login worked.
  *
  * `requestId` is the request id of the `LoginStart` that started the login.
- * It names one login rather than an instance, so the controller can tell this
- * login's end from the end of an earlier login on the same instance. The
- * controller knows which instance the login belongs to, so the frame does not
+ * It names one login rather than an account, so the controller can tell this
+ * login's end from the end of an earlier login on the same account. The
+ * controller knows which account the login belongs to, so the frame does not
  * repeat it.
  */
 export const LoginEnded = Schema.Struct({
@@ -601,12 +697,19 @@ export type LoginFailed = Schema.Schema.Type<typeof LoginFailed>;
 /**
  * The result of a pasted code. `ok: false` means the vendor rejected the code,
  * and the login still accepts another one.
+ *
+ * `token` is the secret a `create-token` login produced. It is present only on
+ * a success of that method; the receiver refuses it on any other result. Like
+ * a `HarnessCredential` value it is never logged.
  */
 export const LoginResult = Schema.Struct({
   _tag: Schema.Literal("loginResult"),
   requestId: RequestId,
   ok: Schema.Boolean,
   message: Schema.optionalKey(Fact),
+  token: Schema.optionalKey(
+    Schema.String.check(Schema.isBetweenLength(1, MAX_SECRET_VALUE_LENGTH)),
+  ),
 });
 
 export type LoginResult = Schema.Schema.Type<typeof LoginResult>;
@@ -645,7 +748,8 @@ export const RunnerToController = Schema.Union([
   RunnerHello,
   Pong,
   RunnerFactsReport,
-  WatermarkReport,
+  MetricsReport,
+  DiskUsageReport,
   ProbeReport,
   InstallResult,
   LoginUrl,
@@ -654,6 +758,7 @@ export const RunnerToController = Schema.Union([
   LoginEnded,
   SessionEvent,
   FilesEdited,
+  AccountUsageReported,
   GithubTokenRequest,
   SessionInputResult,
   SessionRespondToQuestionResult,

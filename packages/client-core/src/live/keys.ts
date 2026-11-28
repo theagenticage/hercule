@@ -20,21 +20,11 @@ import type {
   SkillsPreviewFilter,
   TaskFilter,
 } from "@hercule/contract";
-import type { HerculeClient } from "../client";
+import type { RunnerMetricsScope } from "../fleet/metrics-history";
 import { listLoopbackEndpoints } from "../local-runner";
 
 /** A cache key. This package does not read it; the app's query client does. */
 export type LiveQueryKey = ReadonlyArray<unknown>;
-
-/**
- * The filter of an event listing that identifies it in the cache: the fields
- * of `event.query` that narrow the listing. Paging and `since` are left out,
- * so every page of one listing shares one key.
- */
-export type EventListFilter = Pick<
-  NonNullable<Parameters<HerculeClient["event"]["query"]>[0]["query"]>,
-  "intake" | "text" | "source" | "handling"
->;
 
 /**
  * The key builder for every read the app makes. The argument of a list or
@@ -50,32 +40,101 @@ export const queryKeys = {
     filter === undefined ? ["tasks"] : ["tasks", filter],
   task: (id?: string): LiveQueryKey => (id === undefined ? ["task"] : ["task", id]),
   /**
-   * Tracking as one read: the tracked Tasks and their runs. Live topics:
-   * `task` reads it again on every push, and `run` only when the push can
-   * change it (see `findTrackingTasksAffectedByRunPush`), so no key maps it for
-   * `run` here. The key is stable: the Tasks tracked change, the key does not.
+   * The Work board's one read. It sits under the Tasks' key, so every ordinary
+   * `task` push reads it again. A `derived` `task` push reads only this key
+   * (see `buildQueryKeys`).
    */
-  tracking: (): LiveQueryKey => ["tracking"],
+  workBoard: (): LiveQueryKey => [...queryKeys.tasks(), "board"],
   /**
-   * What the Tracking pane of one Task draws (`task.readTracking`). Live
-   * topics: `task` reads it again when its push names the Task, or names no
-   * ids; `run` follows the rule of `tracking` (see `findTrackingTasksAffectedByRunPush`),
-   * so no key maps it for `run` here. Without an id, the key is the prefix of
-   * every Task's detail, and it is apart from `tracking()`, which is a
-   * different read.
+   * Whether any live Task has a failed run (`task.readAttention`), which the
+   * sidebar draws as a dot on every screen. It sits under the Tasks' key, so
+   * every ordinary `task` push reads it again. A `derived` `task` push does not:
+   * the controller sends a plain push whenever a failure starts or ends.
    */
-  trackingDetail: (taskId?: string): LiveQueryKey =>
-    taskId === undefined ? ["trackingDetail"] : ["trackingDetail", taskId],
+  taskAttention: (): LiveQueryKey => [...queryKeys.tasks(), "attention"],
   /**
-   * Your work as one read (`signal.queryYourWork`): the open Tasks that
-   * belong to an open signal, snoozed or not. Live topics: `task` and
-   * `signal` read it again on every push, because a Task's provenance and the
-   * set of open signals both decide it. It is kept out of the `signals` prefix on purpose: that prefix
-   * is also read again by every `workflow`, `connection` and `plugin` push,
-   * which cannot change Your work.
+   * What the details pane of one Task draws (`task.readDetail`). It sits under
+   * `task(id)`, so an ordinary `task` push reads it again with the Task's
+   * record. A `derived` `task` push names it too (see `buildQueryKeys`),
+   * because a derived push is the one that a summary, a Thread or a run
+   * causes, and the pane shows all three.
    */
-  yourWork: (): LiveQueryKey => ["your-work"],
+  taskDetail: (id: string): LiveQueryKey => [...queryKeys.task(id), "detail"],
+  /**
+   * What `task.checkMerge` answers for one pair: whether the Task `sourceId`
+   * could be merged into the Task `intoTaskId`. Without ids, the prefix of
+   * every pair. Every `task` push, derived ones too, marks it out of date
+   * (see `buildQueryKeys`): a blocker removed or added anywhere changes the
+   * answer, and the push does not say which pair. The reads are made by
+   * pointing at a card and have no screen watching them, so marking them
+   * costs no request: the pair is asked again when it is next pointed at.
+   */
+  mergeCheck: (sourceId?: string, intoTaskId?: string): LiveQueryKey =>
+    sourceId === undefined || intoTaskId === undefined
+      ? ["mergeCheck"]
+      : ["mergeCheck", sourceId, intoTaskId],
+  /**
+   * The Inbox's page reads (`externalEntity.queryInbox`). With a query, the
+   * key of that query's pages; without one, the prefix of every page read,
+   * which is what a push invalidates. Live topics: `externalEntity` reads it
+   * again on every push, and `task`, `signal`, `connection` and `plugin` too,
+   * because each can move a thing in or out, or change what a row shows (see
+   * `buildQueryKeys`).
+   */
+  inbox: (query?: unknown): LiveQueryKey => (query === undefined ? ["inbox"] : ["inbox", query]),
+  /**
+   * The Inbox's counts alone (`externalEntity.countInbox`), which the sidebar
+   * reads on every screen. It is apart from `inbox()` because the shell
+   * holds this read while the Inbox is not open, and the two are read again
+   * for the same pushes.
+   */
+  inboxCount: (): LiveQueryKey => ["inbox-count"],
+  /**
+   * What the Inbox's rail draws (`externalEntity.readInboxOutline`). It is
+   * inside the `inbox()` prefix on purpose: every push that reads the pages
+   * again reads the outline again, and only the Inbox screen holds it.
+   */
+  inboxOutline: (): LiveQueryKey => ["inbox", "outline"],
+  /**
+   * One External Entity (`externalEntity.read`), as an open pane draws it;
+   * without the id, the prefix of every entity read. Live topics: every
+   * `externalEntity`, `connection` and `plugin` push reads the prefix, and a
+   * plain `task` push and a `signal` push too (a pane draws the entity's
+   * signals; see `buildQueryKeys`). The prefix and not one id, because a pane
+   * embeds its parents' records.
+   */
+  externalEntity: (id?: string): LiveQueryKey =>
+    id === undefined ? ["external-entity"] : ["external-entity", id],
+  /**
+   * The light cards of the things a message carried as context
+   * (`externalEntity.readCards`), one read per message, keyed by its ids in the
+   * order asked. Its own prefix, not under `externalEntity()`: a `task` or
+   * `signal` push reads that prefix and can change nothing a card shows, which
+   * is title, status, the face's values and whether the user can read the
+   * thing. Live topics: exactly the ones of `ENTITY_SOURCE_KEYS`
+   * (`externalEntity` for the values, `connection` for access, `plugin` for
+   * face declarations).
+   */
+  entityCards: (ids?: ReadonlyArray<string>): LiveQueryKey =>
+    ids === undefined ? ["entity-cards"] : ["entity-cards", ids],
+  /**
+   * Every suggestion list of the Add sheet (`externalEntity.listSuggestions`).
+   * Live topics: `externalEntity` and a plain `task` push, which can give an
+   * entity a live Task or take it away. A search of the source is not keyed
+   * here: a poll cannot change what the source answers.
+   */
+  entitySuggestions: (): LiveQueryKey => ["entity-suggestions"],
+  /**
+   * The open Initiatives, every page (`initiative.query`). Live topic:
+   * `initiative`. Work reads it beside the board; it is not shell data.
+   */
+  initiatives: (): LiveQueryKey => ["initiatives"],
   projects: (): LiveQueryKey => ["projects"],
+  /**
+   * One project read by its id. It sits under the `projects` prefix, so
+   * invalidating the list reads the project again too.
+   */
+  project: (id: string): LiveQueryKey => ["projects", id],
   /**
    * No live topic yet: a resource changed elsewhere, such as from the CLI,
    * shows up on the next read.
@@ -101,7 +160,7 @@ export const queryKeys = {
   connections: (): LiveQueryKey => ["connections"],
   /**
    * The Ignore Rules, with what each caught. Not a live topic: Settings >
-   * Intake reads the list each time it opens, and after a delete.
+   * Signals reads the list each time it opens, and after a delete.
    */
   ignoreRules: (): LiveQueryKey => ["ignore-rules"],
   /**
@@ -125,15 +184,25 @@ export const queryKeys = {
   runners: (): LiveQueryKey => ["runners"],
   runner: (id?: string): LiveQueryKey => (id === undefined ? ["runner"] : ["runner", id]),
   /**
+   * One history of Runner Metrics a Fleet screen holds, keyed by its scope.
+   *
+   * The `runnerMetrics` topic maps to no key here, on purpose. A push says a
+   * row was written, and the screens that draw metrics decide what to read on
+   * it: each history is read again from the start of its newest point, or at
+   * most once an hour. Its key is also outside the `runner` prefix: a push on
+   * `runner` must not read any history.
+   */
+  runnerMetrics: (scope: RunnerMetricsScope): LiveQueryKey => ["runnerMetrics", scope],
+  /**
    * A filtered listing is keyed on its filter, such as:
    *
    * - one runner's sessions, for its page;
    * - one run's sessions, the ones its agent steps started, for the run's page;
    * - `{ kind: "thread" }`, every Thread and no Agent's session, for the
    *   desktop app's sidebar;
-   * - `{ kind: ["agent", "run", "assistant"], status: LIVE_SESSION_STATUSES }`,
-   *   the live sessions an Agent spawned, which the desktop app's "From runs"
-   *   reads.
+   * - `{ kind: ["agent", "run", "assistant"], status: LIVE_SESSION_STATUSES,
+   *   archived: false }`, the live sessions an Agent spawned that are not
+   *   archived, which the desktop app's "From runs" and the Office read.
    *
    * Every variant keeps the `sessions` prefix, so a `session` push
    * invalidates them all.
@@ -251,7 +320,23 @@ export const queryKeys = {
   plugins: (): LiveQueryKey => ["plugins"],
   /** Not a live topic: secret references change only through this browser's own writes. */
   secrets: (): LiveQueryKey => ["secrets"],
+  /** The Provider Accounts with their snapshots. Pushed on the `provider` topic. */
+  providerAccounts: (): LiveQueryKey => ["provider-accounts"],
+  /**
+   * The Model Profiles with every entry resolved, which the composer's model
+   * menu reads. Pushed on the `provider` topic: a sign-in, a catalog change or
+   * a runner coming or going changes what an entry can do.
+   */
+  modelProfiles: (): LiveQueryKey => ["model-profiles"],
+  /** Not a live topic: the providers a build registers change only with the build. */
   providers: (): LiveQueryKey => ["providers"],
+  /**
+   * The harnesses a build registers, and for each runner whether it has the
+   * harness installed and its version. The registered set changes only with
+   * the build; the per-runner install state changes with a runner, so a push
+   * on the `runner` topic refetches this read.
+   */
+  harnesses: (): LiveQueryKey => ["harnesses"],
   controller: (): LiveQueryKey => ["controller"],
   workflows: (): LiveQueryKey => ["workflows"],
   workflow: (id?: string): LiveQueryKey => (id === undefined ? ["workflow"] : ["workflow", id]),
@@ -294,19 +379,6 @@ export const queryKeys = {
    */
   workflowActions: (): LiveQueryKey => ["workflow-actions"],
   eventKinds: (): LiveQueryKey => ["event-kinds"],
-  /**
-   * One event, as `event.read` returns it. Not a live topic: the event log is
-   * append-only, so a stored event is read once and kept.
-   */
-  event: (id: number): LiveQueryKey => ["event", id],
-  /**
-   * Pages of `event.query`, keyed on the filter without its cursor, so every
-   * page of one listing shares one key. Without the filter, the prefix of
-   * every event listing. Not a live topic: the event log is append-only, so a
-   * screen that shows a listing reads it again each time it opens.
-   */
-  events: (filter?: EventListFilter): LiveQueryKey =>
-    filter === undefined ? ["events"] : ["events", filter],
   /** Not a live topic yet. A change to an Agent made elsewhere shows up on the next fetch. */
   agents: (): LiveQueryKey => ["agents"],
   assistants: (): LiveQueryKey => ["assistants"],
@@ -338,8 +410,8 @@ export const queryKeys = {
     since ?? null,
   ],
   /**
-   * Intake's lists, keyed on the filter. The `to-do` view is read whole, so
-   * one entry holds every open signal and its count.
+   * The lists of signals, keyed on the filter. The `to-do` view is read
+   * whole, so one entry holds every open signal.
    */
   signals: (filter?: SignalFilter): LiveQueryKey =>
     filter === undefined ? ["signals"] : ["signals", filter],
@@ -350,6 +422,11 @@ export const queryKeys = {
   /** One Discussion, as `discussion.read` returns it; without the id, the prefix of every Discussion. */
   discussion: (id?: string): LiveQueryKey =>
     id === undefined ? ["discussion"] : ["discussion", id],
+  /** Every MCP Server, as `mcpServer.query` returns them. Live topic: `mcpServer`. */
+  mcpServers: (): LiveQueryKey => ["mcp-servers"],
+  /** One MCP Server, as `mcpServer.read` returns it; without the id, the prefix of every server's page. */
+  mcpServer: (id?: string): LiveQueryKey =>
+    id === undefined ? ["mcp-server"] : ["mcp-server", id],
   /** Every page of the Wiki Page listing, newest first. */
   wikiPages: (): LiveQueryKey => ["wiki-pages"],
   /**
@@ -364,13 +441,6 @@ export const queryKeys = {
       : revision === undefined
         ? ["wiki-page", id]
         : ["wiki-page", id, revision],
-  /**
-   * Every snoozed signal of the kind `kind`, every page of Later. Not a live
-   * topic, and kept out of the `signals` prefix on purpose: the offer's pane
-   * and the Ignore dialog read it once when they open, so a `signal` push
-   * does not read all of Later again.
-   */
-  laterSignalsOfKind: (kind: string): LiveQueryKey => ["later-signals-of-kind", kind],
   /**
    * Keyed on the loopback endpoints detection asks among `runners`, because
    * the result depends on them. The same runners read again, with the same
@@ -394,37 +464,140 @@ export const queryKeys = {
 const SIGNAL_DESCRIBE_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.signals(), queryKeys.signal()];
 
 /**
+ * The keys of the Inbox's two reads. A card's place on the Inbox depends on
+ * records of other topics: a Task's existence and links decide who has it, a
+ * Connection's status decides `stale`, and a plugin being enabled decides
+ * `kindAvailable`. Those topics map to these keys, so the entity domain
+ * never has to import them to announce a change.
+ */
+const INBOX_KEYS: ReadonlyArray<LiveQueryKey> = [queryKeys.inbox(), queryKeys.inboxCount()];
+
+/**
+ * The entity reads a plain `task` push makes stale, beyond the Inbox's: an
+ * open entity pane shows which Task has the entity and whether you follow it,
+ * and the Add sheet lists only the entities no live Task has. A Task
+ * created, finished, deleted or linked from anywhere, the CLI included,
+ * changes both and writes no entity row, so no `externalEntity` push comes.
+ * A `derived` push never changes a Task's links or liveness, so it does not
+ * read these, nor the Inbox's.
+ */
+const TASK_LINK_KEYS: ReadonlyArray<LiveQueryKey> = [
+  queryKeys.externalEntity(),
+  queryKeys.entitySuggestions(),
+];
+
+/**
+ * The entity reads an `externalEntity`, `connection` or `plugin` push makes stale: every entity
+ * pane (`kindAvailable`, `stale`, the context's completeness), the Work board
+ * (the same facts on its cards, and the claims a deleted Connection takes
+ * with it), every Task's details pane (it embeds the same entities, places
+ * and edges, and sits under the `task` prefix) and the Add sheet's
+ * suggestions (a deleted Connection takes the claims that made a thing concern
+ * the user, so it stops qualifying). A `connection` or `plugin` change writes
+ * no entity row, so it sends no `externalEntity` push of its own.
+ */
+const ENTITY_SOURCE_KEYS: ReadonlyArray<LiveQueryKey> = [
+  queryKeys.externalEntity(),
+  queryKeys.entityCards(),
+  queryKeys.workBoard(),
+  queryKeys.task(),
+  queryKeys.entitySuggestions(),
+];
+
+/**
+ * The entity reads a push that names a changed workflow makes stale: the
+ * Inbox, whose cards hold the workflows they can be handed to, and every
+ * entity pane, which holds the same offers. The Inbox's count does not depend
+ * on a workflow, so it is left out: the shell holds it active.
+ *
+ * A `derived` workflow push (a trigger's counts, next fire time or health)
+ * never changes an offer, so it reads none of these. A busy trigger or a
+ * minute-by-minute cron causes such a push about every second.
+ *
+ * A push that names no workflow (the controller's first push on every
+ * subscription) leaves them alone. Opening the Inbox reads it afresh already,
+ * and reading it again at once would double the cost of every visit. An edit
+ * missed while the connection was down shows when the next workflow push
+ * comes, and the controller checks the offer again when a card is handed off.
+ */
+const WORKFLOW_ENTITY_KEYS: ReadonlyArray<LiveQueryKey> = [
+  queryKeys.inbox(),
+  queryKeys.externalEntity(),
+];
+
+/**
  * Returns the query keys to invalidate for a push on a mutable topic. A push
  * with no ids means every record of the topic may have changed (the
  * controller sends one first on every subscription), so it returns the list
  * and record prefixes rather than one key per record. `conversationIds` is
  * the push's map from each session to its conversation, which only a
  * `session` push carries.
+ *
+ * `derived` is the push's flag of the same name, which a `task` or a
+ * `workflow` push can carry.
+ *
+ * On a `task` push it means a Task's card changed because of its sessions,
+ * runs or summary, and no field of the Task record changed. Only the Work
+ * board and the details pane of the named Tasks draw that, so the push reads
+ * the board and those details. The sidebar's failure dot is read again only
+ * on a plain push, which the controller sends when a failure starts or ends.
+ * The Inbox sorts a card by whether its Task is live and has it, which only a
+ * plain `task` push (a Task created, edited, finished or deleted) or an
+ * `externalEntity` push can change. The list and the Task's record read
+ * fields of the Task itself, so reading them again would fetch the same data.
+ * A busy agent causes this push every second, and the shell keeps the
+ * Inbox's count active on every screen, so reading it here would cost a
+ * request a second for nothing. Only the open pane has a detail mounted, so
+ * the details of the other Tasks are marked out of date and cost no read.
+ * Both kinds of `task` push mark every merge check out of date: a blocker
+ * edge is announced as a derived push, and it decides the check. Those reads
+ * have no screen watching them, so this costs no request.
+ *
+ * On a `workflow` push it means a trigger's counts, next fire time or health
+ * changed, and no field of the definition did. Only the workflow screens draw
+ * that, so the push reads the workflow lists, the named workflows and the
+ * triggers. It leaves out the signal reads (their describe lines show a
+ * workflow's name), the Inbox and the entity panes (their offers come from
+ * the definitions).
  */
 export const buildQueryKeys = (
   topic: MutableLiveTopic,
   ids: ReadonlyArray<string>,
   conversationIds?: Invalidate["conversationIds"],
+  derived?: Invalidate["derived"],
+  kind?: Invalidate["kind"],
 ): ReadonlyArray<LiveQueryKey> => {
   // A topic that no screen reads has no key to invalidate. Add a case here
   // when a screen starts reading a new topic.
   if (topic === "task") {
+    if (derived === true) {
+      return [
+        queryKeys.workBoard(),
+        ...ids.map((id) => queryKeys.taskDetail(id)),
+        queryKeys.mergeCheck(),
+      ];
+    }
     return ids.length === 0
       ? [
           queryKeys.tasks(),
           queryKeys.task(),
-          queryKeys.tracking(),
-          queryKeys.trackingDetail(),
-          queryKeys.yourWork(),
+          ...INBOX_KEYS,
+          ...TASK_LINK_KEYS,
+          queryKeys.mergeCheck(),
         ]
       : [
           queryKeys.tasks(),
           ...ids.map((id) => queryKeys.task(id)),
-          queryKeys.tracking(),
-          ...ids.map((id) => queryKeys.trackingDetail(id)),
-          queryKeys.yourWork(),
+          ...INBOX_KEYS,
+          ...TASK_LINK_KEYS,
+          queryKeys.mergeCheck(),
         ];
   }
+  // Work reads Initiatives as one small list, so the whole list is read
+  // again whichever Initiative changed. The board is not read again: it
+  // carries only each card's `initiativeId`, and a deletion that clears Tasks
+  // announces each Task on the `task` topic.
+  if (topic === "initiative") return [queryKeys.initiatives()];
   // Any runner change refetches the list. A runner's own page is refetched
   // only when the push lists its id, or when the push lists no ids.
   //
@@ -436,10 +609,18 @@ export const buildQueryKeys = (
   // facts, starts or stops accepting placements, or is changed by a user,
   // never on a timer. And only a screen that shows the controller's read
   // refetches it.
+  //
+  // The harness list is refetched too, because it holds each runner's install
+  // state and version of every harness, which the runner's facts change.
   if (topic === "runner") {
     return ids.length === 0
-      ? [queryKeys.runners(), queryKeys.runner(), queryKeys.controller()]
-      : [queryKeys.runners(), ...ids.map((id) => queryKeys.runner(id)), queryKeys.controller()];
+      ? [queryKeys.runners(), queryKeys.runner(), queryKeys.harnesses(), queryKeys.controller()]
+      : [
+          queryKeys.runners(),
+          ...ids.map((id) => queryKeys.runner(id)),
+          queryKeys.harnesses(),
+          queryKeys.controller(),
+        ];
   }
   if (topic === "workspace") {
     return ids.length === 0
@@ -471,14 +652,23 @@ export const buildQueryKeys = (
   }
   // Any connection change refetches the list. A connection's own page is
   // refetched only when the push lists its id, or when the push lists no ids.
-  // Every signal read is refetched too, see `SIGNAL_DESCRIBE_KEYS`.
+  // Every signal read is refetched too, see `SIGNAL_DESCRIBE_KEYS`, and so
+  // are the Inbox's reads, because a card is stale while its Connection is.
   if (topic === "connection") {
     return ids.length === 0
-      ? [queryKeys.connections(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS]
+      ? [
+          queryKeys.connections(),
+          queryKeys.connection(),
+          ...SIGNAL_DESCRIBE_KEYS,
+          ...INBOX_KEYS,
+          ...ENTITY_SOURCE_KEYS,
+        ]
       : [
           queryKeys.connections(),
           ...ids.map((id) => queryKeys.connection(id)),
           ...SIGNAL_DESCRIBE_KEYS,
+          ...INBOX_KEYS,
+          ...ENTITY_SOURCE_KEYS,
         ];
   }
   // Any workflow change refetches the listing and every trigger list. A
@@ -487,8 +677,18 @@ export const buildQueryKeys = (
   // triggers too, so the `triggers` prefix covers both it and the one
   // workflow's list. A workflow's own page is refetched only when the push
   // lists its id, or when the push lists no ids. Every signal read is
-  // refetched too, see `SIGNAL_DESCRIBE_KEYS`.
+  // refetched too, see `SIGNAL_DESCRIBE_KEYS`, and so are the Inbox and the
+  // entity panes when a push names a workflow, because the workflows a card
+  // can be handed to are read from the workflows (see `WORKFLOW_ENTITY_KEYS`).
+  // A `derived` push, which only a change of a trigger's counts, next fire
+  // time or health causes, reads the workflow screens alone.
   if (topic === "workflow") {
+    if (derived === true)
+      return [
+        queryKeys.workflows(),
+        ...ids.map((id) => queryKeys.workflow(id)),
+        queryKeys.triggers(),
+      ];
     return ids.length === 0
       ? [queryKeys.workflows(), queryKeys.workflow(), queryKeys.triggers(), ...SIGNAL_DESCRIBE_KEYS]
       : [
@@ -496,6 +696,7 @@ export const buildQueryKeys = (
           ...ids.map((id) => queryKeys.workflow(id)),
           queryKeys.triggers(),
           ...SIGNAL_DESCRIBE_KEYS,
+          ...WORKFLOW_ENTITY_KEYS,
         ];
   }
   // Any run change refetches the run list, whatever its filter. A run's own
@@ -539,11 +740,18 @@ export const buildQueryKeys = (
   // Any signal change refetches every list, whatever its filter, because a
   // raised or resolved signal moves in or out of them. A signal's own read is
   // refetched only when the push lists its id, or when the push lists no ids.
-  // Your work is read again too, because it follows the To do list.
+  //
+  // An open signal, or the end of one, also decides which cards the
+  // Inbox holds and how many lines a card shows, so the Inbox's reads and the
+  // open entity panes (which list the entity's signals) are read again. Not
+  // the Add sheet's suggestions or the Work board: a signal changes neither.
   if (topic === "signal") {
-    return ids.length === 0
-      ? [queryKeys.signals(), queryKeys.signal(), queryKeys.yourWork()]
-      : [queryKeys.signals(), ...ids.map((id) => queryKeys.signal(id)), queryKeys.yourWork()];
+    return [
+      queryKeys.signals(),
+      ...(ids.length === 0 ? [queryKeys.signal()] : ids.map((id) => queryKeys.signal(id))),
+      ...INBOX_KEYS,
+      queryKeys.externalEntity(),
+    ];
   }
   // Any Discussion change refetches every page of the listing. A
   // Discussion's own page is refetched only when the push lists its id, or
@@ -568,19 +776,67 @@ export const buildQueryKeys = (
       ? [queryKeys.skills(), queryKeys.skill()]
       : [queryKeys.skills(), ...ids.map((name) => queryKeys.skill(name))];
   }
+  // Any MCP Server change refetches the list. A server's own read is
+  // refetched only when the push lists its id, or when the push lists no ids.
+  // The projects and the settings are refetched only when a server is
+  // deleted: that takes it out of every project's list, and a box that still
+  // named it would send it and be refused. A status change, a creation or the
+  // push that opens a subscription leaves them alone.
+  if (topic === "mcpServer") {
+    const own =
+      ids.length === 0 ? [queryKeys.mcpServer()] : ids.map((id) => queryKeys.mcpServer(id));
+    return kind === "deleted"
+      ? [queryKeys.mcpServers(), ...own, queryKeys.projects(), queryKeys.settings()]
+      : [queryKeys.mcpServers(), ...own];
+  }
   // The plugin set is fixed at build time and read as one list, so the whole
   // list is refetched whichever plugin changed. Every signal read is
   // refetched too, see `SIGNAL_DESCRIBE_KEYS`. So is every Connection's own
   // page: a plugin-level write changes what every Connection of the plugin
-  // resolves to.
+  // resolves to. The Inbox's reads, the entity panes and the Work board are
+  // refetched too: a card's kind is available only while its plugin is
+  // enabled.
   if (topic === "plugin") {
-    return [queryKeys.plugins(), queryKeys.connection(), ...SIGNAL_DESCRIBE_KEYS];
+    return [
+      queryKeys.plugins(),
+      queryKeys.connection(),
+      ...SIGNAL_DESCRIBE_KEYS,
+      ...INBOX_KEYS,
+      ...ENTITY_SOURCE_KEYS,
+    ];
   }
-  // Provider instances are read as one list (there is one per shipped
-  // provider), so the whole list is refetched whichever instance changed.
-  // The controller's own read is refetched too: whether a text generation
-  // can run now depends on which runners are logged in to which instance.
-  if (topic === "provider") return [queryKeys.providers(), queryKeys.controller()];
+  // A poll, a claim, a place's title, status or progress, and the user's own
+  // moves (take, add, dismiss, restore) all announce this topic. A card is
+  // drawn by the Inbox, the sidebar's count, the Work board's marks and lanes,
+  // an open pane, every Task's details pane (it shows the linked entities'
+  // titles and statuses), and the Add sheet's suggestions, so every one of
+  // them reads again. Every open pane reads again, not only the named
+  // entities': a pane embeds its parents' records, so a change to a repository
+  // changes the panes of the entities under it, and the push names only the
+  // repository.
+  // The signal lists are not read again here: when a thing becomes a full
+  // record, which gives its open signals their `entity`, the controller
+  // announces a `signal` push naming those signals.
+  if (topic === "externalEntity") {
+    return [...INBOX_KEYS, ...ENTITY_SOURCE_KEYS];
+  }
+  // Provider Accounts are read as one list, so the whole list is refetched
+  // whichever account changed. The controller's own read is refetched too:
+  // whether a text generation can run now depends on which runners are signed
+  // in to which account. The harness list is refetched too: each runner's
+  // version verdict for a harness comes from the probes, and a probe that
+  // finishes announces this topic, so a harness upgraded after a "too old"
+  // verdict must be read again to clear it. The Model Profiles are refetched
+  // too: each entry carries whether it can run now, which every one of these
+  // changes can alter.
+  if (topic === "provider") {
+    return [
+      queryKeys.providerAccounts(),
+      queryKeys.modelProfiles(),
+      queryKeys.controller(),
+      queryKeys.harnesses(),
+    ];
+  }
   return [];
 };
 

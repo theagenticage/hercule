@@ -13,7 +13,8 @@ const MOSS: Runner = {
   version: "0.4.2",
   labels: [],
   facts: null,
-  watermark: null,
+  metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 2,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-09-05T09:14:00.000Z",
@@ -38,7 +39,8 @@ const buildSession = (status: SessionStatus): Session => {
     conversationId: null,
     runId: null,
     stepId: null,
-    instanceId: "01a06d02-1000-7000-8000-000000000001",
+    providerAccountId: "01a06d02-1000-7000-8000-000000000001",
+    harnessId: "claude-code/claude-code",
     runnerId: MOSS.id,
     workspaceId: null,
     projectId: null,
@@ -54,6 +56,7 @@ const buildSession = (status: SessionStatus): Session => {
     exitedAt: null,
     lastActivityAt: "2026-09-05T09:00:00.000Z",
     unenforced: [],
+    mcpServers: [],
   };
 };
 

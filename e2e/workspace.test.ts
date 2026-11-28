@@ -15,7 +15,7 @@
  * storage is selected explicitly here, so the user's own checkout stays
  * untouched. Existing-checkout attachment is tested separately.
  *
- * The worktree case is the only one that needs a session, and no fake provider
+ * The worktree case is the only one that needs a session, and no fake harness
  * ships, so it runs a real one and is opt-in under `HERCULE_LIVE_SESSION_TEST`
  * like `e2e/session.test.ts`. The rest run everywhere.
  *
@@ -56,7 +56,7 @@ const REMOTE = "https://hercule.test/acme/web";
 
 /**
  * Opt-in, like `e2e/session.test.ts`: the worktree case is the only one here
- * that needs a session, no fake provider ships, and a real one spends the
+ * that needs a session, no fake harness ships, and a real one spends the
  * developer's tokens.
  */
 const live = isLiveSessionTestEnabled();
@@ -132,14 +132,14 @@ const waitForSettledWorkspace = async (id: string): Promise<Workspace> => {
 };
 
 /**
- * Checks whether any machine has reported a logged-in provider instance. A
+ * Checks whether any machine has reported a logged-in Provider Account. A
  * thread cannot be spawned without one - `session.spawn` resolves an
- * instance, a machine and a model catalog before it writes anything - and this
- * build has no provider that works without a vendor login, so the worktree
+ * account, a machine and a model catalog before it writes anything - and this
+ * build has no harness that works without a vendor login, so the worktree
  * case is skipped with a message.
  */
-const isAnyInstanceLoggedIn = async (): Promise<boolean> => {
-  const response = await fetch(`${url}/api/v1/providers`, {
+const isAnyAccountLoggedIn = async (): Promise<boolean> => {
+  const response = await fetch(`${url}/api/v1/provider-accounts`, {
     headers: { authorization: `Bearer ${apiKey}` },
   });
   const body = await response.text();
@@ -291,11 +291,11 @@ describe("a repo, its main workspace and a thread's worktree, through the CLI", 
   it.skipIf(!live)(
     "gives a thread its own worktree, on a branch named after the session",
     async (ctx) => {
-      if (!(await isAnyInstanceLoggedIn())) {
+      if (!(await isAnyAccountLoggedIn())) {
         ctx.skip(
-          "no machine reports a logged-in provider instance. `session.spawn` resolves an " +
-            "instance, a machine and a model catalog before it writes anything, and this build " +
-            "carries no provider that answers without a vendor login, so an ephemeral workspace " +
+          "no machine reports a logged-in provider account. `session.spawn` resolves an " +
+            "account, a machine and a model catalog before it writes anything, and this build " +
+            "carries no harness that answers without a vendor login, so an ephemeral workspace " +
             "cannot be made here. Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN to run it.",
         );
         return;

@@ -1,5 +1,5 @@
 /**
- * Writes `apps/runner/src/providers/codex/generated`.
+ * Writes `apps/runner/src/harnesses/codex/generated`.
  *
  * Unlike the other generated trees this one is checked in: `pnpm typecheck`
  * would otherwise need a `codex` binary on the machine, and CI has none. The
@@ -13,7 +13,7 @@ import { $ } from "bun";
 import { CODEX_VERSION } from "../packages/home/src/version";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const out = `${root}apps/runner/src/providers/codex/generated`;
+const out = `${root}apps/runner/src/harnesses/codex/generated`;
 
 const reported = (await $`codex --version`.nothrow().quiet().text()).trim();
 // The types and the version constant must match: types from another release

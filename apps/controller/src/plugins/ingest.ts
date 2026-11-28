@@ -18,8 +18,9 @@
  * - sets an `error` Connection back to `connected` once every feed has polled
  *   successfully since the open. A successful open alone does not, because
  *   it proves nothing about the feeds;
- * - sets it to `needs-reauth` and stops at the first `AuthError`, because
- *   retrying with rejected credentials cannot help.
+ * - sets it to `needs-reauth`, which raises its Notification, and stops at
+ *   the first `AuthError`, because retrying with rejected credentials cannot
+ *   help.
  *
  * Closing a Connection interrupts its feed timers, waits for them to finish,
  * then calls the handle's `close` once, giving it 10 seconds. The controller
@@ -41,7 +42,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { MAX_FEED_INTERVAL_SECONDS, summarizeCause } from "@hercule/contract";
 import {
   AuthError,
-  decodeAgainst,
   type FeedDeclaration,
   type IngestHandle,
   PluginError,
@@ -55,10 +55,12 @@ import {
 } from "../connections";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
-import { toPluginError } from "./errors";
+import { decodeConnectionConfig } from "./connection-config";
 import type { RegisteredEventSource } from "./event-sources";
+import type { ListActiveSources } from "./entity-recognition";
 import { ingestContexts } from "./ingest-context";
 import { IngestExecutor } from "./ingest-executor";
+import type { EntityObservations } from "./entity-observations";
 import type { OpenSignals } from "./open-signals";
 
 /** After this many failures in a row, of one feed or of the open, the Connection is set to `error`. */
@@ -164,11 +166,11 @@ const make = Effect.gen(function* () {
   const superviseConnection = (
     source: RegisteredEventSource,
     connection: StoredConnection,
+    listActiveSources: ListActiveSources,
   ): Effect.Effect<void> =>
     Effect.gen(function* () {
       const type = Option.getOrUndefined(yield* connectionTypes.named(connection.type));
       const typeDisplayName = type?.contribution.displayName ?? connection.type;
-      const configSchema = type?.contribution.configSchema;
       const intervals = Object.entries(source.feeds).map(
         ([name, declaration]) =>
           [name, computeFeedInterval(declaration, connection.feedIntervals[name])] as const,
@@ -279,31 +281,34 @@ const make = Effect.gen(function* () {
       /**
        * Sets the Connection to `needs-reauth` after an `AuthError`, unless its
        * credentials changed since the attempt started, and returns whether
-       * it did. A reconnect while a poll runs replaces the rejected
+       * it did. The core raises the Connection's Notification with the status
+       * change. A reconnect while a poll runs replaces the rejected
        * credentials; marking the Connection then would flag credentials that
        * may well work.
+       *
+       * The check runs under the Connection's refresh permit. A refresh in
+       * flight may have made the provider reject the old token before its
+       * new token is stored, and the poll then fails with the refresh's
+       * doing: once the permit is held, the new token is stored and the
+       * check sees it.
        */
       const markNeedsReauth = (
         credentialsVersion: string,
         cause: Cause.Cause<AuthError | PluginError>,
       ): Effect.Effect<boolean> =>
-        writeStatus((at) =>
-          Effect.gen(function* () {
-            const current = yield* connectionTypes.readCredentialsVersion(connection.id);
-            if (current !== credentialsVersion) return false;
-            if (
-              yield* connections.changeStatusFrom(
+        connectionTypes.withRefreshPermit(
+          connection.id,
+          writeStatus(() =>
+            Effect.gen(function* () {
+              const current = yield* connectionTypes.readCredentialsVersion(connection.id);
+              if (current !== credentialsVersion) return false;
+              yield* connectionTypes.setNeedsReauthInTransaction(
                 connection.id,
-                ["connected", "error"],
-                "needs-reauth",
                 summarizeCause(cause),
-                at,
-              )
-            ) {
-              yield* announceConnection;
-            }
-            return true;
-          }),
+              );
+              return true;
+            }),
+          ),
         );
 
       /**
@@ -346,10 +351,7 @@ const make = Effect.gen(function* () {
           return computeRetryDelay(intervalSeconds, count);
         });
 
-      const decodeConfig: Effect.Effect<unknown, PluginError> =
-        configSchema === undefined
-          ? Effect.succeed(connection.config)
-          : Effect.mapError(decodeAgainst(configSchema, connection.config), toPluginError);
+      const decodeConfig = decodeConnectionConfig(connectionTypes, connection);
 
       const openRetrySeconds = Math.min(...intervals.map(([, seconds]) => seconds));
 
@@ -370,7 +372,7 @@ const make = Effect.gen(function* () {
               };
               return source.open(
                 ingestConnection,
-                contexts.buildIngestContext(source, ingestConnection),
+                contexts.buildIngestContext(source, ingestConnection, listActiveSources),
               );
             }),
           ),
@@ -535,8 +537,15 @@ const make = Effect.gen(function* () {
      * the loop is started, not once the handle is open. The first poll of
      * each feed runs right after the open. Does nothing when the Connection
      * is already open; close it first to open it with a new config.
+     * `listActiveSources` tells the handle which plugins are active whenever
+     * it reports entities, so it recognizes web addresses and texts over the
+     * plugins of that moment.
      */
-    open: (source: RegisteredEventSource, connection: StoredConnection): Effect.Effect<void> =>
+    open: (
+      source: RegisteredEventSource,
+      connection: StoredConnection,
+      listActiveSources: ListActiveSources,
+    ): Effect.Effect<void> =>
       Effect.gen(function* () {
         // The check and the new entry are one update, so two opens of one
         // Connection at the same time start one supervisor, not two.
@@ -553,7 +562,10 @@ const make = Effect.gen(function* () {
               ],
         );
         if (!added) return;
-        yield* executor.execute(connection.id, superviseConnection(source, connection));
+        yield* executor.execute(
+          connection.id,
+          superviseConnection(source, connection, listActiveSources),
+        );
       }),
 
     /**
@@ -591,5 +603,11 @@ export class IngestLoops extends Context.Service<IngestLoops, Effect.Success<typ
 export const IngestLoopsLayer: Layer.Layer<
   IngestLoops,
   never,
-  SqlClient.SqlClient | ConnectionTypes | Notifier | IngestExecutor | OpenSignals | PromotionState
+  | SqlClient.SqlClient
+  | ConnectionTypes
+  | Notifier
+  | IngestExecutor
+  | OpenSignals
+  | EntityObservations
+  | PromotionState
 > = Layer.effect(IngestLoops)(make);

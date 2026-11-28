@@ -9,7 +9,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { AttachmentService } from "../../attachments";
 import { PromotionState } from "../../promotion";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * How often the sweep runs. An unclaimed upload can no longer be claimed

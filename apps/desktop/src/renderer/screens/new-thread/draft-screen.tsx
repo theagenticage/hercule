@@ -9,7 +9,6 @@ import { useNavigate, useRouteContext } from "@tanstack/react-router";
 import {
   appendToMessage,
   applyThreadChoice,
-  buildComposerPlaceholder,
   buildRecentModel,
   buildSubmission,
   findDraftSubject,
@@ -22,14 +21,15 @@ import {
   markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
-  type LoginTarget,
+  type SignInTarget,
   type RecentModel,
   type ShelfItem,
   type ThreadChoice,
   type ThreadPicks,
 } from "@hercule/client-core";
 import type { SessionSpawnInput, Workspace } from "@hercule/contract";
-import { useDraftThread } from "../../app/draft-thread";
+import { requireSignedIn, type AccountScope } from "../../app/account-scope";
+import { readCachedMcpServerIds, useDraftThread } from "../../app/draft-thread";
 import { buildDraftKey } from "../../app/pending-submissions";
 import { threadAndAgentSessionsQuery } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
@@ -38,6 +38,7 @@ import { buildLook, Face } from "../../faces";
 import { useComposerImages } from "../attachments/use-composer-images";
 import { useSendOnMenuCommand } from "../session/send-key";
 import { useShowsClassicScrollbar } from "../session/classic-scrollbar";
+import { LazyAddProviderAccount } from "../settings/providers/lazy-add-provider-account";
 import { DraftComposer } from "./draft-composer";
 import { DraftHeader } from "./draft-header";
 import { useDraftSkills } from "./use-draft-skills";
@@ -45,7 +46,7 @@ import { StartCards } from "./start-cards";
 import "../session/composer.css";
 import "./new-thread.css";
 
-// The login dialog is loaded the first time Log in opens it, so its code is
+// The sign-in dialog is loaded the first time Sign in opens it, so its code is
 // not part of the first screen's scripts (spec 17 §Performance).
 const ProviderLoginDialog = lazy(() =>
   import("../provider-login").then((module) => ({ default: module.ProviderLoginDialog })),
@@ -76,16 +77,20 @@ interface SentDraft {
  *   has a row in the sidebar, the work's name and the lines of that row;
  * - a face and a question, "What should the agent do in webshop?", then the
  *   lead: where the thread will work and on which machine, or why it cannot
- *   start yet. When the reason is a provider instance that is not logged in,
- *   a Log in button follows it and opens the login in a dialog;
+ *   start yet. When the reason is an account that is not signed in on the
+ *   draft's machine, a Sign in button follows it and opens the sign-in in a
+ *   dialog. When the user has no account, an Add an account button follows it
+ *   and opens the add-account sheet;
  * - the composer, see `DraftComposer`;
- * - the start cards, or the starter threads while the project has no open
+ * - the start cards, or the starter threads while the project has no planned
  *   task, when the draft is in a project, see `StartCards`.
  *
  * ⏎ or Send starts the thread with what the composer shows, and opens it once
  * the controller has started it. A failed start keeps the draft and shows
  * why under the composer's row, also when the user left while it ran and
- * came back.
+ * came back. The line goes once the user changes a pick, or signs the
+ * draft's account in on the draft's machine, because the start it describes
+ * was made with what came before.
  *
  * What the draft holds, the text, the images and the picks, is kept in memory for as
  * long as the app runs, in the pending submissions under the draft's project
@@ -121,8 +126,14 @@ export function DraftScreen({
   const { projects, workspaces } = catalogs;
   const { groupRows } = useSessionPresentation();
   const inspection = useMutation({
-    mutationFn: (id: string) => client.workspace.inspect({ params: { id } }),
-    onSuccess: (current) => {
+    // The scope is read when the user opens the menu and travels with the request, so an answer
+    // that arrives after another account signed in does not write into that account's cache.
+    mutationFn: ({ id, scope }: { id: string; scope: AccountScope }) => {
+      requireSignedIn(scope);
+      return client.workspace.inspect({ params: { id } });
+    },
+    onSuccess: (current, { scope }) => {
+      if (!scope.isCurrent()) return;
       queryClient.setQueryData<readonly Workspace[]>(queryKeys.workspaces(), (records) =>
         records?.map((each) => (each.id === current.id ? current : each)),
       );
@@ -157,7 +168,11 @@ export function DraftScreen({
     // again, after the user left and came back, has a mutation of its own,
     // which never saw this start fail.
     onError: (error, sent) => {
-      pendingSubmissions.recordFailure(key, readErrorMessage(error));
+      // A failure is about the picks the start was sent with. When the user
+      // has picked something else since, it no longer applies.
+      if (pendingSubmissions.read(key).picks === sent.picks) {
+        pendingSubmissions.recordFailure(key, readErrorMessage(error));
+      }
       // An image the controller swept before the start is marked on its
       // tile, so the user sees which one to attach again.
       const expired = findExpiredShelfKeys(error, sent.attachments);
@@ -168,8 +183,9 @@ export function DraftScreen({
   // Whether the column is scrolled away from its top, so part of it is under
   // the header. Only then does it fade under the header (../session/floating-header.css).
   const [scrolled, setScrolled] = useState(false);
-  // The login the Log in button opened, while its dialog is open.
-  const [login, setLogin] = useState<LoginTarget | null>(null);
+  // The sign-in the Sign in button opened, while its dialog is open.
+  const [signIn, setSignIn] = useState<SignInTarget | null>(null);
+  const [addingAccount, setAddingAccount] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const showsScrollbar = useShowsClassicScrollbar(scrollRef);
   const images = useComposerImages({
@@ -189,10 +205,17 @@ export function DraftScreen({
   const recordThreadChoice = (choice: ThreadChoice): void => {
     const { picks } = pendingSubmissions.read(key);
     pendingSubmissions.writePicks(key, applyThreadChoice(picks, choice));
+    // A failed start was about the picks it was sent with, so it no longer
+    // applies once they change.
+    pendingSubmissions.clearFailure(key);
   };
   const submit = (): void => {
     if (!canSend || isMutationRunning(queryClient, startKey)) return;
-    const submission = buildSubmission(view.resolved, pending.message);
+    const submission = buildSubmission(
+      view.resolved,
+      pending.message,
+      readCachedMcpServerIds(queryClient, client),
+    );
     pendingSubmissions.clearFailure(key);
     images.clearRefusal();
     spawn.mutate(
@@ -249,15 +272,23 @@ export function DraftScreen({
             ) : (
               <p>
                 <b className="newbie-blocked">Can&apos;t start yet.</b> {fields.blocked.reason}.
-                {fields.blocked.login === null ? null : (
+                {fields.blocked.signIn === null ? null : (
                   <>
                     {" "}
                     <button
                       type="button"
                       className="link"
-                      onClick={() => setLogin(fields.blocked?.login ?? null)}
+                      onClick={() => setSignIn(fields.blocked?.signIn ?? null)}
                     >
-                      Log in
+                      Sign in
+                    </button>
+                  </>
+                )}
+                {!fields.blocked.addAccount ? null : (
+                  <>
+                    {" "}
+                    <button type="button" className="link" onClick={() => setAddingAccount(true)}>
+                      Add an account
                     </button>
                   </>
                 )}
@@ -267,13 +298,6 @@ export function DraftScreen({
           <DraftComposer
             view={view}
             text={pending.message.text}
-            placeholder={buildComposerPlaceholder({
-              readOnly: null,
-              busy: false,
-              active: false,
-              pick: workspace,
-              workspaces,
-            })}
             canSend={canSend}
             error={
               pending.failure ??
@@ -284,6 +308,7 @@ export function DraftScreen({
             skills={skills}
             readRecent={() => readRecentModels(controller.url)}
             fieldRef={fieldRef}
+            onSignIn={setSignIn}
             onTextChange={(text) => {
               pendingSubmissions.writeText(key, text);
             }}
@@ -291,7 +316,8 @@ export function DraftScreen({
             onSubmit={submit}
             onOpenWorkspaceMenu={() => {
               if (inspection.isPending) return;
-              for (const id of view.workspaceInspectionIds) inspection.mutate(id);
+              const scope = controller.accountScopes.read();
+              for (const id of view.workspaceInspectionIds) inspection.mutate({ id, scope });
             }}
           />
           {project === undefined ? null : (
@@ -299,23 +325,50 @@ export function DraftScreen({
               projectId={project.id}
               projectName={project.name}
               hasRepository={listProjectRepos(catalogs.resources, project.id).length > 0}
-              onStart={(message) => {
+              onStart={(message, taskId) => {
                 const { text } = pendingSubmissions.read(key).message;
                 pendingSubmissions.writeText(key, appendToMessage(text, message));
+                if (taskId !== undefined) pendingSubmissions.writeTask(key, taskId);
                 fieldRef.current?.focus();
               }}
             />
           )}
         </div>
       </div>
-      {login === null ? null : (
+      {signIn === null ? null : (
         // Without its own boundary, the dialog's load would suspend the draft
         // behind it.
         <Suspense fallback={null}>
           <ProviderLoginDialog
-            target={login}
+            client={client}
+            providerAccountId={signIn.providerAccountId}
+            runnerId={signIn.runnerId}
+            // A failed start on the account and machine just signed in may
+            // have failed for the missing sign-in, so the next start is the
+            // one to tell. A sign-in of another account, from the model
+            // menu, says nothing about it.
+            onSignedIn={() => {
+              if (
+                signIn.providerAccountId === view.resolved.config.providerAccountId &&
+                signIn.runnerId === fields.machine.runnerId
+              ) {
+                pendingSubmissions.clearFailure(key);
+              }
+            }}
             onClose={() => {
-              setLogin(null);
+              setSignIn(null);
+              fieldRef.current?.focus();
+            }}
+          />
+        </Suspense>
+      )}
+      {!addingAccount ? null : (
+        <Suspense fallback={null}>
+          <LazyAddProviderAccount
+            client={client}
+            signInMachines="all"
+            onClose={() => {
+              setAddingAccount(false);
               fieldRef.current?.focus();
             }}
           />

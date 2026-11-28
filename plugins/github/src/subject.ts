@@ -78,6 +78,26 @@ export const parseItemRef = (
   };
 };
 
+/**
+ * Splits `owner/repo` into its owner and its repository name. A string with
+ * no slash has an empty name.
+ */
+export const splitRepoName = (repo: string): { readonly owner: string; readonly name: string } => {
+  const [owner = "", name = ""] = repo.split("/");
+  return { owner, name };
+};
+
+/** The External Ref of a repository, with the `owner/repo` captured. */
+const REPO_REF_PATTERN = new RegExp(`^github:repo:(${REPO_NAME_PATTERN})$`);
+
+/**
+ * Parses the External Ref of a repository, such as `github:repo:owner/repo`,
+ * and returns `owner/repo` in lowercase. Returns undefined for any other
+ * string, and for a repository name GitHub would not allow.
+ */
+export const parseRepoRef = (ref: string): string | undefined =>
+  REPO_REF_PATTERN.exec(ref)?.[1]?.toLowerCase();
+
 /** Returns the `subject` block of an event about an issue or a pull request. */
 const buildItemSubject = (item: GithubItem): GithubSubject => ({
   repo: item.repo.toLowerCase(),

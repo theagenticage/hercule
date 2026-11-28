@@ -1,0 +1,13 @@
+{
+  "name": "@hercule/plugin-opencode",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@hercule/plugin-host": "workspace:*",
+    "effect": "4.0.7"
+  }
+}

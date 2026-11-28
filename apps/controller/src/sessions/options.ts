@@ -121,7 +121,7 @@ export const buildStepSessionTimeouts = (
 
 /**
  * Builds the spec sent to a runner for a session that continues a
- * provider-native session, either resumed in place or forked. Returns the
+ * harness-native session, either resumed in place or forked. Returns the
  * parent's spec with three changes: the model selection the parent ended on,
  * `continuation`, which names the native session to continue from and, for a
  * resume, the subagents the controller has records of, and the timeouts from

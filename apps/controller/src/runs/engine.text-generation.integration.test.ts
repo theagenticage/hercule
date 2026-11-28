@@ -20,16 +20,25 @@ import { EventKindsLayer, PlatformEventsLayer } from "../events";
 import { SessionTokensLayer } from "../permissions";
 import { EventKindCatalogLayer, PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { buildPluginStack, USER } from "../plugins/testing";
+import { ProviderAccountRunnersLayer } from "../provider-accounts";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
+import { AccountUsageLayer } from "../usage";
 import { TaskServiceLayer } from "../tasks";
 import { TextGeneration, TextGenerationError, type TextGenerationCall } from "../text-generation";
-import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
+import {
+  WorkflowRuns,
+  WorkflowService,
+  WorkflowServiceLayer,
+  WorkflowSignals,
+  WorkflowEntities,
+} from "../workflows";
 import { WorkspaceServiceLayer } from "../workspaces";
 import { runRepository } from "./repository";
 import { RunService, RunServiceLayer } from "./service";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { WorkspaceSteps, type WorkspaceStepToStart } from "./workspace-steps";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 const at = "2026-10-14T10:00:00.000Z";
 
@@ -72,9 +81,10 @@ const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFib
           Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) }),
         ),
         Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
+        Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
-    Layer.provideMerge(TaskServiceLayer),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(
       WorkspaceServiceLayer.pipe(
         Layer.provide(SessionTokensLayer),
@@ -87,6 +97,8 @@ const runTest = <A, E>(body: (fakes: Fakes) => Effect.Effect<A, E, Deps | RunFib
     Layer.provideMerge(workspaceSteps),
     Layer.provideMerge(Layer.succeed(AfterCommit)({ publish: () => Effect.void })),
     Layer.provideMerge(textGeneration),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(buildPluginStack()),
   );
   return Effect.runPromise(

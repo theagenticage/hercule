@@ -21,7 +21,7 @@ import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
-import { ProviderProbes } from "../../providers";
+import { ProviderAccountProbes } from "../../provider-accounts";
 import { SettingsOperations } from "../../settings";
 
 const make = Effect.gen(function* () {
@@ -56,9 +56,9 @@ export const TextGenerationTargetChangesLayer: Layer.Layer<TextGenerationTargetC
 export const forwardTargetChanges: Effect.Effect<
   void,
   never,
-  ProviderProbes | SettingsOperations | TextGenerationTargetChanges
+  ProviderAccountProbes | SettingsOperations | TextGenerationTargetChanges
 > = Effect.gen(function* () {
-  const probes = yield* ProviderProbes;
+  const probes = yield* ProviderAccountProbes;
   const settings = yield* SettingsOperations;
   const targetChanges = yield* TextGenerationTargetChanges;
   yield* Stream.runForEach(

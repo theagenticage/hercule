@@ -1,5 +1,6 @@
 import { globSync, readFileSync } from "node:fs";
 import { defineConfig } from "vitest/config";
+import { WeighedShardSequencer } from "./scripts/test-shards.ts";
 
 /**
  * Seven projects: the React code of the web app and the UI library, everything
@@ -27,10 +28,11 @@ import { defineConfig } from "vitest/config";
  * runs it, after `pnpm build:binary`. It is kept apart because a build rewrites
  * `apps/web/dist` and the generated file list underneath any controller a
  * parallel suite is running from source. Most of its suites test the packaging
- * itself and fail with a clear error when `./hercule` is missing; the five that test the
+ * itself and fail with a clear error when `./hercule` is missing; the six that test the
  * controller's own surface rather than the packaging - `e2e/workspace.test.ts`,
- * `e2e/workspace-steps.test.ts`, `e2e/github-push.test.ts`, `e2e/workflows.test.ts`
- * and the cases of `e2e/text-generation-step.test.ts` that call no model - are the
+ * `e2e/workspace-steps.test.ts`, `e2e/github-push.test.ts`, `e2e/workflows.test.ts`,
+ * `e2e/telemetry.test.ts` and the cases of `e2e/text-generation-step.test.ts` that
+ * call no model - are the
  * same program either way, so with no build they run the dispatcher's source
  * instead (`findReleaseBinary` in `e2e/harness.ts`).
  *
@@ -93,15 +95,19 @@ const binaryTests = [
   "e2e/github-push.test.ts",
   "e2e/workflows.test.ts",
   "e2e/hand-off.test.ts",
+  "e2e/entity-hand-off.test.ts",
+  "e2e/card-follows-pull-request.test.ts",
   "e2e/text-generation-step.test.ts",
   "e2e/binary-size.test.ts",
   "e2e/logs.test.ts",
+  "e2e/telemetry.test.ts",
   "e2e/home-in-session.test.ts",
   "e2e/promote.test.ts",
   "e2e/skills.test.ts",
   "e2e/skill-library-session.test.ts",
   "e2e/repository-skills-session.test.ts",
   "e2e/skill-references-session.test.ts",
+  "e2e/mcp-url-servers.test.ts",
   // upgrade.test.ts downloads the matching edge asset for this platform
   // (linux-x64, linux-arm64, or darwin-arm64) and runs it. Other platforms
   // fail in CI and skip locally.
@@ -163,6 +169,8 @@ const templateDatabaseSetup = "apps/controller/src/db/template.global-setup.ts";
 
 export default defineConfig({
   test: {
+    // `--shard` splits the files by their recorded run time, not by name.
+    sequence: { sequencer: WeighedShardSequencer },
     projects: [
       {
         test: {
@@ -233,6 +241,11 @@ export default defineConfig({
           name: "desktop",
           environment: "node",
           include: ["e2e/desktop/**/*.test.ts"],
+          // Starts the app once before any test, so that Mesa's shader cache
+          // (`~/.cache/mesa_shader_cache`) is warm: the first launch in a fresh
+          // container compiles shaders for seconds, and every worker would
+          // pay for it at the same time. See the file.
+          globalSetup: ["e2e/desktop/warm-up.global-setup.ts"],
           // Each test starts the packaged app, which takes seconds.
           testTimeout: HANG_LIMIT_MS,
           hookTimeout: HANG_LIMIT_MS,

@@ -1,0 +1,225 @@
+/* A machine's Storage section: the disk as one bar in parts, its legend, the
+   line on automatic cleanup and the largest idle workspaces. The measurements
+   are the fleet prototype's variant G (`fp-disk`, `fp-seg`, `fx-legend`,
+   `fx-auto-line`, `fx-idle`). Every class starts with `machine-storage-`.
+   Each departure from the prototype is explained in a comment. */
+
+/* ---------- The head ---------- */
+/* The section's head note is muted, as on the other sections; the prototype's
+   faint ink is lighter than the figures here deserve. The figures line up. */
+.machine-storage-head {
+  font-variant-numeric: tabular-nums;
+}
+/* The forecast is in the ink and weight of a card's need line that is coming
+   (`.fleet-attn.is-you`). */
+.machine-storage-forecast {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+
+/* ---------- The bar and its legend ---------- */
+/* The free space is the bar itself: its background is what no part covers. The
+   bar clips its parts to its rounded corners. */
+.machine-storage-bar {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--ink) 5%, transparent);
+  overflow: hidden;
+}
+.machine-storage-seg {
+  flex: none;
+  height: 100%;
+}
+.machine-storage-seg + .machine-storage-seg {
+  box-shadow: inset 1px 0 0 var(--surface);
+}
+.machine-storage-part--inUse {
+  background: color-mix(in oklab, var(--ink) 62%, transparent);
+}
+.machine-storage-part--idle {
+  background: var(--you);
+}
+.machine-storage-part--repositoryCaches {
+  background: color-mix(in oklab, var(--ink) 40%, transparent);
+}
+.machine-storage-part--sessionData {
+  background: color-mix(in oklab, var(--ink) 28%, transparent);
+}
+.machine-storage-part--other {
+  background: color-mix(in oklab, var(--ink) 17%, transparent);
+}
+/* Where the disk limit is: below it the machine takes no new sessions. */
+.machine-storage-limit {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 1.5px;
+  background: var(--fail);
+  opacity: 0.7;
+}
+.machine-storage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 26px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.machine-storage-legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.machine-storage-legend b {
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.machine-storage-swatch {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+}
+/* The Settings frame's `.set-sec > p` rule (lead text) is as specific as a class
+   and a tag, so this names the section too. */
+.machine-page-section > p.machine-storage-old {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* ---------- Automatic cleanup ---------- */
+/* The text, the last removal and the info button flow as one line of text, so
+   when the line wraps the button follows the last word and is never alone. */
+.machine-storage-auto {
+  margin: 14px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.machine-storage-auto-last {
+  margin-left: 4px;
+  color: var(--faint);
+}
+.machine-storage-nowrap {
+  white-space: nowrap;
+}
+/* The button is 22px in a 12px line; the negative margin keeps the line's
+   height at the text's. */
+.machine-storage-info {
+  display: inline-flex;
+  vertical-align: middle;
+  margin: -4px 0 -4px 4px;
+  color: var(--faint);
+}
+.pop.machine-storage-rules {
+  inset: auto;
+  /* Under the button, running rightwards from its left edge. Where that leaves
+     the window (the button is at the end of the line, wherever it wrapped),
+     the popover runs leftwards instead, and above the button when there is no
+     room below. */
+  position-area: block-end span-inline-end;
+  position-try-fallbacks: flip-inline, flip-block;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  margin: 6px 0;
+  padding: 12px 14px 13px;
+  font-size: var(--t-12);
+  line-height: 1.5;
+}
+.machine-storage-rules b {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--t-13);
+}
+.machine-storage-rules ul {
+  margin: 0 0 6px;
+  padding-left: 16px;
+  color: var(--muted);
+}
+.machine-storage-rules > span {
+  color: var(--muted);
+}
+
+/* ---------- The largest idle workspaces ---------- */
+.machine-storage-idle {
+  margin-top: 26px;
+}
+/* The head holds a 26px button, so its row is centred. The first row's rule
+   sits 4px under it, as in the prototype. */
+.machine-storage-idle-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 26px;
+  margin-bottom: 4px;
+}
+.machine-storage-idle-head h4 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: var(--w-medium);
+}
+.machine-storage-idle-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.machine-storage-idle-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+}
+.machine-storage-idle-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  border-top: 1px solid var(--divider);
+}
+.machine-storage-idle-name {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.machine-storage-idle-name b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--w-medium);
+}
+/* Why the numbers are old or missing. The prototype's second line is the
+   project and branch, in the faint ink; this one is a notice, so it is muted. */
+.machine-storage-idle-name span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.machine-storage-idle-age {
+  flex: none;
+  width: 90px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: right;
+}
+.machine-storage-idle-frees {
+  flex: none;
+  width: 76px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.machine-storage-idle-frees small {
+  display: block;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.machine-storage-idle-empty {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+}

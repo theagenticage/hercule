@@ -15,45 +15,78 @@ import {
   PluginError,
   registerConnectionType,
   registerEventSource,
+  registerMcpServer,
   registerWorkflowAction,
   type ActionContext,
   type ActivationContext,
   type AuthError,
+  type EntityKindDeclaration,
   type EventSourceContribution,
   type IngestConnection,
   type FeedDeclaration,
   type IngestContext,
+  type McpServerContribution,
   type PollResult,
   type Plugin,
   type PluginCapability,
+  type HarnessDefinition,
   type ProviderDefinition,
+  type ProviderRegistrationOptions,
   type RegistrationHost,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotificationServiceTestLayer } from "../notifications/testing";
 import { masterKeyLayer, SecretLayer, secretsLayer } from "../secrets";
 import { connectionRepository, ConnectionTypesLayer, type StoredConnection } from "../connections";
-import { IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
+import { EntityObservationsLayer, IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
 import { nowIso, withTransaction } from "../db";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { PluginConfigsLayer, PluginHostLayer, PluginsLayer } from "./index";
 import { PluginObserver } from "./observer";
 
-/** Builds a provider definition that supports everything natively. */
-export const buildProviderDefinition = (
+/**
+ * Returns the plugin with every harness it registers declaring
+ * `textGeneration: "unsupported"`, as the Antigravity harness does. Use it to
+ * make a plugin from a shared fixture set unable to make text generations
+ * without rebuilding that fixture.
+ */
+export const declareNoTextGeneration = (plugin: Plugin): Plugin => ({
+  ...plugin,
+  register: (host) => {
+    const harnesses = host.harnesses;
+    if (harnesses === undefined) return plugin.register(host);
+    return plugin.register({
+      ...host,
+      harnesses: {
+        ...harnesses,
+        register: (definition) =>
+          harnesses.register({
+            ...definition,
+            declared: { ...definition.declared, textGeneration: "unsupported" },
+          }),
+      },
+    });
+  },
+});
+
+/**
+ * Builds a harness definition that supports everything natively and, unless
+ * `runs` says otherwise, runs no provider. `declared` replaces the capabilities
+ * it names, for a harness that lacks one.
+ */
+export const buildHarnessDefinition = (
   id: string,
-  defaultConfig: Schema.Json = {},
-): ProviderDefinition => ({
+  runs: HarnessDefinition["runs"] = [],
+  declared: Partial<HarnessDefinition["declared"]> = {},
+): HarnessDefinition => ({
   id,
-  displayName: `Provider ${id}`,
+  displayName: `Harness ${id}`,
   binaryName: "harness",
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({ token: Schema.String }),
-  defaultConfig,
+  releaseSource: { kind: "npm", package: "harness" },
   declared: {
     steering: "native",
     fork: "native",
@@ -67,8 +100,89 @@ export const buildProviderDefinition = (
     mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    textGeneration: "supported",
+    ...declared,
   },
+  runs,
 });
+
+/**
+ * Builds a provider definition with one `api-key` account kind, entered as a
+ * single `apiKey` field and a key check, that runs in the harnesses named by
+ * `harnesses` (qualified ids). The first of them is the provider's default
+ * harness.
+ */
+export const buildProviderDefinition = (
+  id: string,
+  harnesses: ReadonlyArray<string> = ["alpha/alpha"],
+): ProviderDefinition => ({
+  id,
+  displayName: `Provider ${id}`,
+  kinds: [
+    {
+      id: "api-key",
+      title: "API key",
+      description: `A key for provider ${id}.`,
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      harnesses,
+      keyCheck: {
+        url: "https://api.example.com/v1/models",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+    },
+  ],
+  defaultHarnessId: harnesses[0] ?? "alpha/alpha",
+  catalogSource: { kind: "harness-probe", harnessId: harnesses[0] ?? "alpha/alpha" },
+  defaultSelection: "current-models",
+});
+
+/**
+ * Builds a plugin that registers the given harnesses and, for each one, a
+ * provider of its own with one account kind (`subscription`, signed in on each
+ * machine) that only that harness runs. A test controller can then give every
+ * harness one account that runs in it, as a real controller has an account for
+ * each harness a user can sign in to. A harness that already lists what it
+ * runs keeps its own `runs`.
+ */
+export const buildPluginWithProviderPerHarness = (
+  pluginId: string,
+  definitions: ReadonlyArray<HarnessDefinition>,
+): Plugin =>
+  createPluginFixture({
+    id: pluginId,
+    capabilities: ["harnesses", "providers"],
+    definitions: definitions.map((definition) => ({
+      ...definition,
+      runs:
+        definition.runs.length > 0
+          ? definition.runs
+          : [
+              {
+                providerId: `${pluginId}/${definition.id}`,
+                kinds: [{ kind: SUBSCRIPTION_KIND, modelArgument: "{model}" }],
+                models: "all",
+              },
+            ],
+    })),
+    providers: definitions.map((definition) => ({
+      id: definition.id,
+      displayName: `Provider ${definition.id}`,
+      kinds: [
+        {
+          id: SUBSCRIPTION_KIND,
+          title: "Subscription",
+          description: "A plan signed in on each machine.",
+          setup: [{ kind: "harness-login", method: "sign-in" }],
+          harnesses: [`${pluginId}/${definition.id}`],
+        },
+      ],
+      defaultHarnessId: `${pluginId}/${definition.id}`,
+      catalogSource: { kind: "harness-probe", harnessId: `${pluginId}/${definition.id}` },
+      defaultSelection: "current-models",
+    })),
+  }).plugin;
+
+const SUBSCRIPTION_KIND = "subscription";
 
 const homes: Array<string> = [];
 
@@ -96,6 +210,10 @@ export const buildPluginStack = () => {
         Layer.provide(IngestExecutorLayer),
         // Merged, so a test can build an ingest context of its own.
         Layer.provideMerge(OpenSignalsLayer),
+        // The ingest records Task facts, which are Platform Events. Only the
+        // ingest gets the writer: a service of its own in the stack's output
+        // changes how the layers above it are built.
+        Layer.provideMerge(EntityObservationsLayer.pipe(Layer.provide(PlatformEventsLayer))),
       ),
     ),
     Layer.provideMerge(ConnectionTypesLayer),
@@ -140,8 +258,12 @@ export const createPluginFixture = (options: {
   readonly hostApi?: number;
   readonly capabilities?: ReadonlyArray<PluginCapability>;
   readonly configSchema?: Schema.Top;
-  /** The providers to register, in order. By default, one provider named after the plugin. */
-  readonly definitions?: ReadonlyArray<ProviderDefinition>;
+  /** The harnesses to register, in order. By default, one harness named after the plugin. */
+  readonly definitions?: ReadonlyArray<HarnessDefinition>;
+  /** The providers to register, in order. By default, none. */
+  readonly providers?: ReadonlyArray<ProviderDefinition>;
+  /** What the plugin passes beside each provider it registers. By default, nothing. */
+  readonly providerOptions?: ProviderRegistrationOptions;
   /** A message to fail `register` with, after registering, where a plugin's own work would go. */
   readonly registerFails?: string;
   /** How many `activate` calls fail before the first one that succeeds. */
@@ -158,7 +280,7 @@ export const createPluginFixture = (options: {
   const calls: Array<string> = [];
   const contexts: Array<ActivationContext> = [];
   const hosts: Array<RegistrationHost> = [];
-  const definitions = options.definitions ?? [buildProviderDefinition(`${options.id}-provider`)];
+  const definitions = options.definitions ?? [buildHarnessDefinition(options.id)];
   let remainingFailures = options.activateFailures ?? 0;
   let up = false;
   const pause = options.slow === true ? Effect.yieldNow : Effect.void;
@@ -168,7 +290,7 @@ export const createPluginFixture = (options: {
       id: options.id,
       displayName: `Plugin ${options.id}`,
       hostApi: options.hostApi ?? HOST_API,
-      capabilities: options.capabilities ?? ["providers"],
+      capabilities: options.capabilities ?? ["harnesses"],
       configSchema: options.configSchema ?? Schema.Struct({}),
     },
     register:
@@ -177,7 +299,11 @@ export const createPluginFixture = (options: {
         Effect.gen(function* () {
           hosts.push(host);
           for (const definition of definitions) {
-            if (host.providers !== undefined) yield* host.providers.register(definition);
+            if (host.harnesses !== undefined) yield* host.harnesses.register(definition);
+          }
+          for (const definition of options.providers ?? []) {
+            if (host.providers !== undefined)
+              yield* host.providers.register(definition, options.providerOptions);
           }
           if (options.registerFails !== undefined) {
             return yield* Effect.fail(new PluginError({ message: options.registerFails }));
@@ -233,6 +359,103 @@ export const buildActionPlugin = (id: string, action: WorkflowActionContribution
     configSchema: Schema.Struct({}),
   },
   register: (host) => registerWorkflowAction(host, action),
+  activate: () => Effect.succeed(Effect.void),
+});
+
+/** Where a test plugin's MCP server is reached: the endpoint, and the origin the plugin declares for it. */
+export interface DeskUpstream {
+  readonly url: string;
+  readonly origin: string;
+}
+
+const UNREACHABLE_DESK_UPSTREAM: DeskUpstream = {
+  url: "https://mcp.desk.example/mcp",
+  origin: "https://mcp.desk.example",
+};
+
+/**
+ * The MCP server of `buildMcpServerPlugin`, with the Connection type
+ * `<plugin id>/desk`. Its requests carry the Connection's token, a pasted
+ * `token` or an OAuth `accessToken`, as a Bearer `Authorization` header.
+ */
+export const buildDeskMcpServer = (
+  pluginId: string,
+  upstream: DeskUpstream = UNREACHABLE_DESK_UPSTREAM,
+): McpServerContribution => ({
+  id: "desk",
+  displayName: "Desk",
+  description: "Read and update Desk tickets.",
+  connectionType: `${pluginId}/desk`,
+  origin: upstream.origin,
+  buildUpstreamRequest: ({ credentials }) => ({
+    url: upstream.url,
+    headers: {
+      Authorization: `Bearer ${credentials["token"] ?? credentials["accessToken"] ?? ""}`,
+    },
+  }),
+});
+
+/**
+ * Builds a plugin, named after its id (`acme` is "Acme"), that registers the
+ * Connection type `desk` and one MCP server, the server first when
+ * `serverFirst` is true. The server is `buildDeskMcpServer` unless `server`
+ * replaces it, and `registerType: false` leaves the Connection type out. The
+ * manifest requests `connections` and `mcp-servers` unless `capabilities`
+ * replaces them.
+ *
+ * The Connection holds a pasted `token`, or, when `deviceProviderUrl` is
+ * given, OAuth tokens that refresh at that provider.
+ */
+export const buildMcpServerPlugin = (
+  id: string,
+  options: {
+    readonly server?: McpServerContribution;
+    readonly serverFirst?: boolean;
+    readonly registerType?: boolean;
+    readonly capabilities?: ReadonlyArray<PluginCapability>;
+    readonly deviceProviderUrl?: string;
+  } = {},
+): Plugin => ({
+  manifest: {
+    id,
+    displayName: `${id.slice(0, 1).toUpperCase()}${id.slice(1)}`,
+    hostApi: HOST_API,
+    capabilities: options.capabilities ?? ["connections", "mcp-servers"],
+    configSchema: Schema.Struct({}),
+  },
+  register: (host) => {
+    const providerUrl = options.deviceProviderUrl;
+    const registerType =
+      options.registerType === false
+        ? Effect.void
+        : registerConnectionType(host, {
+            type: "desk",
+            displayName: "Desk",
+            ...(providerUrl === undefined
+              ? {
+                  setup: [
+                    {
+                      kind: "credentials",
+                      fields: [{ name: "token", label: "Token", secret: true }],
+                    },
+                  ],
+                }
+              : {
+                  setup: [{ kind: "device" }],
+                  device: {
+                    clientId: "desk-client",
+                    deviceCodeUrl: `${providerUrl}/device/code`,
+                    tokenUrl: `${providerUrl}/token`,
+                    scopes: [],
+                  },
+                }),
+            validate: () => Effect.succeed({ displayName: "Desk", accountId: "desk-1" }),
+          });
+    const server = registerMcpServer(host, options.server ?? buildDeskMcpServer(id));
+    return options.serverFirst === true
+      ? Effect.andThen(server, registerType)
+      : Effect.andThen(registerType, server);
+  },
   activate: () => Effect.succeed(Effect.void),
 });
 
@@ -300,7 +523,7 @@ export const buildForgePlugin = (
           type: "forge",
           displayName: "Forge",
           setup: [
-            { kind: "credentials", fields: [{ name: "token", label: "Token" }] },
+            { kind: "credentials", fields: [{ name: "token", label: "Token", secret: true }] },
             ...(tokenUrl === undefined ? [] : [{ kind: "oauth" as const }]),
           ],
           ...(tokenUrl === undefined
@@ -397,6 +620,10 @@ export const createEventSourceFixture = (
   options: {
     readonly feeds?: Record<string, FeedDeclaration>;
     readonly capabilities?: ReadonlyArray<PluginCapability>;
+    /** The External Entity kinds the source declares. The manifest needs the `entities` capability then. */
+    readonly entityKinds?: ReadonlyArray<EntityKindDeclaration>;
+    /** Gives the Connection type a device flow whose token endpoint is at this base address, so its tokens can be refreshed. */
+    readonly deviceProviderUrl?: string;
   } = {},
 ): EventSourceFixture => {
   let running = 0;
@@ -421,7 +648,17 @@ export const createEventSourceFixture = (
           registerConnectionType(host, {
             type: "acme",
             displayName: "Acme",
-            setup: [],
+            ...(options.deviceProviderUrl === undefined
+              ? { setup: [] }
+              : {
+                  setup: [{ kind: "device" as const }],
+                  device: {
+                    clientId: "acme-client",
+                    deviceCodeUrl: `${options.deviceProviderUrl}/device/code`,
+                    tokenUrl: `${options.deviceProviderUrl}/token`,
+                    scopes: [],
+                  },
+                }),
             configSchema: Schema.Struct({ project: Schema.optionalKey(Schema.String) }),
             validate: () => Effect.succeed({ displayName: "Acme", accountId: "acme-1" }),
           }),
@@ -429,6 +666,7 @@ export const createEventSourceFixture = (
             id: "acme",
             connectionType: EVENT_SOURCE_FIXTURE.connectionType,
             feeds: options.feeds ?? { notifications: { defaultIntervalSeconds: 60 } },
+            ...(options.entityKinds === undefined ? {} : { entityKinds: options.entityKinds }),
             kinds: {
               [EVENT_SOURCE_FIXTURE.kind]: {
                 description: "Something was done in Acme.",
@@ -523,6 +761,8 @@ const buildIntakeSignalKind = (word: string, label: string) => ({
   word,
   label,
   description: `${label}, as the fixture describes it.`,
+  noun: word,
+  asks: true,
   from: [INTAKE_FIXTURE.opened],
   rule: '"no"',
   guidance: "Never raised.",
@@ -559,7 +799,9 @@ export const createIntakeFixture = (): {
         registerConnectionType(host, {
           type: "intaked",
           displayName: "Intaked",
-          setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
+          setup: [
+            { kind: "credentials", fields: [{ name: "token", label: "Token", secret: true }] },
+          ],
           validate: (credentials: Record<string, string>) =>
             Effect.succeed({
               displayName: "Intaked",

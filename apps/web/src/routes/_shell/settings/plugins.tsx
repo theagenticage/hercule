@@ -33,7 +33,7 @@ function Plugins(): JSX.Element {
       <EmptyState
         className="mt-0"
         headline="No plugins are installed."
-        lead="Plugins bring channels, event sources, providers and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that."
+        lead="Plugins bring channels, event sources, harnesses and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that."
       />
     );
   }

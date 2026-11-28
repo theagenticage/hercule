@@ -1,0 +1,88 @@
+/* Narrow, the menu over what the list holds: the drawing's `.narrow-menu` (`docs/design/inbox-list/css/menus.css`
+   on the branch `prototype/inbox-list-hifi`) on the app's tokens. It is a popover; `inbox-narrow-menu.tsx`
+   sets its `left`, `top` and `max-height` when it opens. */
+.ib-narrow-menu {
+  inset: auto;
+  margin: 0;
+  width: 280px;
+  padding: 6px;
+  overflow-y: auto;
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--glass-fill-raised);
+  -webkit-backdrop-filter: var(--glass-filter);
+  backdrop-filter: var(--glass-filter);
+  color: var(--ink);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-rim),
+    inset 0 1px 0 var(--glass-edge),
+    var(--shadow-2);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ib-narrow-menu:popover-open {
+    animation: ib-narrow-arrive 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
+@keyframes ib-narrow-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+  }
+}
+.ib-narrow-heading {
+  margin: 4px 8px 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.ib-narrow-source {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 8px 2px;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+}
+.ib-narrow-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  font-size: var(--t-13);
+  text-align: left;
+}
+.ib-narrow-row:hover,
+.ib-narrow-row[data-active] {
+  background: var(--hover);
+}
+.ib-narrow-row > span {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ib-narrow-row small {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.ib-narrow-row .ic {
+  flex: none;
+  color: var(--faint);
+}
+.ib-narrow-row[data-back] {
+  color: var(--muted);
+}
+.ib-narrow-line {
+  display: block;
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--divider);
+}

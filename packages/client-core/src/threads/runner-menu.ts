@@ -1,9 +1,11 @@
 /**
- * Builds the composer's runner selector for the instance the model selector
+ * Builds the composer's runner selector for the account the model selector
  * has already picked. Each row shows whether that runner can host the
- * instance; the login state of other instances does not matter here.
+ * account in the thread's harness; the sign-in state of other accounts does
+ * not matter here.
  */
-import type { CapabilitySnapshot, ProviderInstance, Runner } from "@hercule/contract";
+import type { ProviderAccount, Runner } from "@hercule/contract";
+import { findProviderAccountReadiness, type AccountReadinessOnRunner } from "../provider-accounts";
 
 export interface RunnerMenuRow {
   readonly runnerId: string;
@@ -29,48 +31,66 @@ const readRunnerState = (runner: Runner): RunnerMenuRow["state"] =>
 const isRetired = (runner: Runner): boolean => runner.lifecycle === "retired";
 
 /**
- * Returns why `runner` cannot host a thread of the instance whose snapshot on
- * it is `snapshot` right now, or `null` when it can: "retired", its
- * connectivity when it is not online, "draining", or "not logged in".
+ * Returns why `runner` cannot host a thread of an account that is `readiness`
+ * on it right now, or `null` when it can: "retired", its connectivity when it
+ * is not online, "draining", "not signed in", "no key or token" when the
+ * controller holds no credential for the account, "key or token expired",
+ * "not installed" when the harness is not on the runner, "not supported"
+ * when the runner's build has no adapter for the harness, or "harness too old"
+ * when it is older than this build supports.
  */
 export const findDimmedReason = (
   runner: Runner,
-  snapshot: CapabilitySnapshot | undefined,
-): string | null =>
-  isRetired(runner)
-    ? "retired"
-    : runner.connectivity !== "online"
-      ? runner.connectivity
-      : runner.lifecycle === "draining"
-        ? "draining"
-        : snapshot?.auth.status !== "ok"
-          ? "not logged in"
-          : null;
+  readiness: AccountReadinessOnRunner,
+): string | null => {
+  if (isRetired(runner)) return "retired";
+  if (runner.connectivity !== "online") return runner.connectivity;
+  if (runner.lifecycle === "draining") return "draining";
+  switch (readiness) {
+    case "ready":
+      return null;
+    case "not-signed-in":
+      return "not signed in";
+    case "credential-missing":
+      return "no key or token";
+    case "token-expired":
+      return "key or token expired";
+    case "harness-too-old":
+      return "harness too old";
+    case "harness-missing":
+      return "not installed";
+    case "no-adapter":
+      return "not supported";
+  }
+};
 
 /**
  * Returns one row per runner that is not retired, and the default runner: the
  * runner on this Mac when it is usable, else the first usable runner, else `null`.
  * A row is dimmed, with the reason, when its runner is not online, is
- * draining, or is not logged in to the instance.
+ * draining, or the account cannot run in `harnessId` on it
+ * (`findProviderAccountReadiness`).
  */
 export const buildRunnerMenu = (
   runners: readonly Runner[],
   localId: string | null,
-  instance: ProviderInstance,
+  account: ProviderAccount,
+  harnessId: string,
 ): RunnerMenu => {
   const rows = runners
     .filter((runner) => !isRetired(runner))
     .map((runner) => {
-      const snapshot = instance.snapshots.find((each) => each.runnerId === runner.id);
-      const dimmed = findDimmedReason(runner, snapshot);
+      const readiness = findProviderAccountReadiness(account, harnessId, runner);
+      const dimmed = findDimmedReason(runner, readiness);
       return {
         runnerId: runner.id,
         name: runner.name,
         state: readRunnerState(runner),
         isLocal: runner.id === localId,
         reserved: runner.reserved,
-        identity: snapshot?.auth.identity ?? null,
-        planLabel: snapshot?.auth.planLabel ?? null,
+        // Who the account is signed in as is known only where it can run.
+        identity: readiness === "ready" ? account.identity : null,
+        planLabel: readiness === "ready" ? account.planLabel : null,
         dimmed,
       };
     });
@@ -86,8 +106,8 @@ export const buildRunnerMenu = (
 
 /**
  * Returns the runner the composer refers to when it needs one even though
- * none may be selectable, for example in a dimmed reason or to read the model
- * menu's catalog. Returns, in order of preference:
+ * none may be selectable, for example to name it in the reason a draft cannot
+ * start. Returns, in order of preference:
  *
  * - the selected runner, even a retired one, because a started thread keeps
  *   the runner it ran on;

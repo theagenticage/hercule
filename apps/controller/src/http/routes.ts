@@ -31,6 +31,13 @@ import { LiveTopicsLayer, WsTickets, WsTicketsLayer } from "../live";
 import { MemoryService, MemoryServiceLayer } from "../memory";
 import { WikiPageService, WikiPageServiceLayer } from "../wiki";
 import { SkillService, SkillServiceLayer } from "../skills";
+import { McpGatewayLayer } from "../mcp-gateway";
+import {
+  McpServerCallsLayer,
+  McpServerChecksLayer,
+  McpServerService,
+  McpServerServiceLayer,
+} from "../mcp-servers";
 import { ApiKeys, ApiKeysLayer } from "../credentials";
 import { EventKinds, EventKindsLayer, EventService, EventServiceLayer } from "../events";
 import { ConnectionService } from "../connections";
@@ -64,13 +71,21 @@ import {
   PipelineLayer,
   Placement,
   SignalBuildFailuresLayer,
+  SignalEntitiesLayer,
   PermissionRequests,
   PermissionRequestsLayer,
   PlacementLayer,
+  FactsRefresh,
+  FactsRefreshLayer,
+  HarnessInstall,
+  HarnessInstallLayer,
+  ProviderAccountRunnerOperations,
+  ProviderAccountRunnerOperationsLayer,
   SessionSkills,
   SessionSkillsLayer,
   ProfileRemoval,
   ProfileRemovalLayer,
+  McpServerListHoldersLayer,
   Provisioning,
   ProvisioningLayer,
   TextGenerationLayer,
@@ -79,10 +94,12 @@ import {
   RunExecutorLayer,
   RunServiceReferenceFill,
   RunTargetsLayer,
-  TaskTrackingRunsLayer,
+  TaskBoardFactsLayer,
+  TaskDetailFactsLayer,
+  TaskServiceWithPortsLayer,
+  TaskRunsLayer,
   TriggeredRunsLayer,
-  WorkflowRunsLayer,
-  WorkflowSignalsLayer,
+  WorkflowServiceWithPortsLayer,
   WorkspaceStepsLayer,
 } from "../daemon";
 import { NotificationService, NotificationServiceLayer } from "../notifications";
@@ -94,31 +111,39 @@ import {
   SignalRaisesLayer,
   SignalService,
   SignalServiceLayer,
-  YourWork,
-  YourWorkLayer,
 } from "../signals";
 import { Profiles, ProfilesLayer } from "../permissions";
-import { EventKindCatalogLayer, Plugins } from "../plugins";
+import { EntityLookupsLayer, EventKindCatalogLayer, Plugins } from "../plugins";
+import {
+  ExternalEntityHandoffs,
+  ExternalEntityHandoffsLayer,
+  ExternalEntityService,
+  ExternalEntityServiceLayer,
+} from "../external-entities";
 import { Secret, SecretLayer } from "../secrets";
 import { SessionService } from "../sessions";
 import { SubscriptionService, SubscriptionServiceLayer } from "../subscriptions";
 import { SettingsOperations, SettingsOperationsLayer } from "../settings";
 import { LastTextGenerationFailureLayer, TextGenerationModelsLayer } from "../text-generation";
+import { InitiativeService, InitiativeServiceLayer } from "../initiatives";
 import { ProjectService, ProjectServiceLayer } from "../projects";
 import { ResourceService, ResourceServiceLayer } from "../resources";
 import { WorkspaceService } from "../workspaces";
-import { ProviderService } from "../providers";
+import { HarnessService, HarnessServiceLayer } from "../harnesses";
+import { ModelProfileService, ModelProfileServiceLayer } from "../model-profiles";
+import { ProviderAccountService } from "../provider-accounts";
+import { ProviderService, ProviderServiceLayer } from "../providers";
 import { RunnerJoinLayer, RunnerService, RunnerServiceLayer } from "../runners";
+import { RunnerMetricsService, RunnerMetricsServiceLayer } from "../runner-metrics";
 import { RunService, RunServiceLayer } from "../runs";
 import { Setup, SetupLayer } from "../setup";
-import { TaskService, TaskServiceLayer, TaskTracking, TaskTrackingLayer } from "../tasks";
+import { TaskBoard, TaskBoardLayer, TaskDetails, TaskDetailsLayer, TaskService } from "../tasks";
 import { User, UserLayer } from "../users";
 import {
   CronTriggerSchedulerLayer,
   TriggerEffectsLayer,
   TriggerHealthLayer,
   WorkflowService,
-  WorkflowServiceLayer,
 } from "../workflows";
 import { buildAttachmentResponse } from "./attachment-response";
 
@@ -261,21 +286,101 @@ const connectionRoutes = HttpApiBuilder.group(api, "connection", (handlers) =>
   }),
 );
 
+const initiativeRoutes = HttpApiBuilder.group(api, "initiative", (handlers) =>
+  Effect.gen(function* () {
+    const initiatives = yield* InitiativeService;
+    return handlers
+      .handle("query", ({ query }) => withApiErrors(initiatives.query(query)))
+      .handle("read", ({ params }) => withApiErrors(initiatives.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(initiatives.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(initiatives.update(params.id, payload)),
+      )
+      .handle("close", ({ params }) => withApiErrors(initiatives.close(params.id)))
+      .handle("reopen", ({ params }) => withApiErrors(initiatives.reopen(params.id)))
+      .handle("delete", ({ params }) => withApiErrors(initiatives.delete(params.id)));
+  }),
+);
+
 const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
   Effect.gen(function* () {
     const tasks = yield* TaskService;
-    const tracking = yield* TaskTracking;
+    const board = yield* TaskBoard;
+    const details = yield* TaskDetails;
+    const runs = yield* RunService;
     return handlers
       .handle("query", ({ query }) => withApiErrors(tasks.query(query)))
-      .handle("queryTracking", () => withApiErrors(tracking.query()))
-      .handle("queryLegs", ({ query }) => withApiErrors(tracking.queryLegs(query.runIds)))
-      .handle("readTracking", ({ params }) => withApiErrors(tracking.read(params.id)))
+      .handle("queryBoard", () => withApiErrors(board.query()))
+      .handle("readAttention", () => withApiErrors(tasks.readAttention()))
+      .handle("readDetail", ({ params }) => withApiErrors(details.read(params.id)))
       .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(tasks.update({ id: params.id, ...payload })),
       )
+      .handle("move", ({ params, payload }) =>
+        withApiErrors(tasks.move({ id: params.id, ...payload })),
+      )
+      .handle("linkEntity", ({ params, payload }) =>
+        withApiErrors(tasks.linkEntity({ id: params.id, ...payload })),
+      )
+      .handle("unlinkEntity", ({ params, payload }) =>
+        withApiErrors(tasks.unlinkEntity({ id: params.id, ...payload })),
+      )
+      .handle("merge", ({ params, payload }) => withApiErrors(tasks.merge(params.id, payload)))
+      .handle("checkMerge", ({ params, query }) =>
+        withApiErrors(tasks.checkMerge(params.id, query.intoTaskId)),
+      )
+      .handle("addBlocker", ({ params, payload }) =>
+        withApiErrors(tasks.addBlocker(params.id, payload.blockedByTaskId)),
+      )
+      .handle("removeBlocker", ({ params }) =>
+        withApiErrors(tasks.removeBlocker(params.id, params.blockedByTaskId)),
+      )
+      .handle("undoTryAgain", ({ params, payload }) =>
+        withApiErrors(runs.undoTryAgain(params.id, payload)),
+      )
       .handle("delete", ({ params }) => withApiErrors(tasks.delete(params.id)));
+  }),
+);
+
+const externalEntityRoutes = HttpApiBuilder.group(api, "externalEntity", (handlers) =>
+  Effect.gen(function* () {
+    const entities = yield* ExternalEntityService;
+    const handoffs = yield* ExternalEntityHandoffs;
+    return handlers
+      .handle("queryInbox", ({ payload }) => withApiErrors(entities.queryInbox(payload)))
+      .handle("countInbox", () => withApiErrors(entities.countInbox()))
+      .handle("readInboxOutline", () => withApiErrors(entities.readInboxOutline()))
+      .handle("readInboxGroup", ({ payload }) =>
+        withApiErrors(entities.readInboxGroup(payload.ref)),
+      )
+      .handle("suggestInboxValues", ({ payload }) =>
+        withApiErrors(entities.suggestInboxValues(payload)),
+      )
+      .handle("matchProject", ({ payload }) => withApiErrors(entities.matchProject(payload)))
+      .handle("readCards", ({ payload }) => withApiErrors(entities.readCards(payload)))
+      .handle("search", ({ query }) => withApiErrors(entities.search(query)))
+      .handle("listSuggestions", ({ query }) => withApiErrors(entities.listSuggestions(query)))
+      .handle("read", ({ params }) => withApiErrors(entities.read(params.id)))
+      .handle("readBlocks", ({ params }) => withApiErrors(entities.readBlocks(params.id)))
+      .handle("takeOn", ({ params }) => withApiErrors(entities.takeOn(params.id)))
+      .handle("undoTakeOn", ({ params, payload }) =>
+        withApiErrors(entities.undoTakeOn(params.id, payload.taskId)),
+      )
+      .handle("takeOnTogether", ({ payload }) => withApiErrors(entities.takeOnTogether(payload)))
+      .handle("undoTakeOnTogether", ({ payload }) =>
+        withApiErrors(entities.undoTakeOnTogether(payload)),
+      )
+      .handle("handOff", ({ params, payload }) =>
+        withApiErrors(handoffs.handOff(params.id, payload)),
+      )
+      .handle("undoHandOff", ({ params }) => withApiErrors(handoffs.undoHandOff(params.runId)))
+      .handle("dismiss", ({ payload }) => withApiErrors(entities.dismiss(payload)))
+      .handle("restore", ({ payload }) => withApiErrors(entities.restore(payload)))
+      .handle("addToWork", ({ payload }) => withApiErrors(entities.addToWork(payload)))
+      .handle("link", ({ payload }) => withApiErrors(entities.link(payload)))
+      .handle("unlink", ({ payload }) => withApiErrors(entities.unlink(payload)));
   }),
 );
 
@@ -298,10 +403,8 @@ const notificationRoutes = HttpApiBuilder.group(api, "notification", (handlers) 
 const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
   Effect.gen(function* () {
     const signals = yield* SignalService;
-    const yourWork = yield* YourWork;
     return handlers
       .handle("query", ({ query }) => withApiErrors(signals.query(query)))
-      .handle("queryYourWork", () => withApiErrors(yourWork.query()))
       .handle("read", ({ params }) => withApiErrors(signals.read(params.id)))
       .handle("raise", ({ payload }) => withApiErrors(signals.raise(payload)))
       .handle("act", ({ params, payload }) =>
@@ -313,10 +416,7 @@ const signalRoutes = HttpApiBuilder.group(api, "signal", (handlers) =>
       .handle("withdraw", ({ params, payload }) =>
         withApiErrors(signals.withdraw({ id: params.id, ...payload })),
       )
-      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)))
-      .handle("snooze", ({ payload }) => withApiErrors(signals.snooze(payload)))
-      .handle("unsnooze", ({ payload }) => withApiErrors(signals.unsnooze(payload)))
-      .handle("lowerPriority", ({ payload }) => withApiErrors(signals.lowerPriority(payload)));
+      .handle("markDone", ({ payload }) => withApiErrors(signals.markDone(payload)));
   }),
 );
 
@@ -401,6 +501,34 @@ const wikiPageRoutes = HttpApiBuilder.group(api, "wikiPage", (handlers) =>
       .handle("create", ({ payload }) => withApiErrors(wiki.create(payload)))
       .handle("update", ({ params, payload }) =>
         withApiErrors(wiki.update({ ...params, ...payload })),
+      )
+      .handle("archive", ({ params, payload }) =>
+        withApiErrors(wiki.archive({ ...params, ...payload })),
+      )
+      .handle("restore", ({ params }) => withApiErrors(wiki.restore(params)));
+  }),
+);
+
+const mcpServerRoutes = HttpApiBuilder.group(api, "mcpServer", (handlers) =>
+  Effect.gen(function* () {
+    const mcpServers = yield* McpServerService;
+    return handlers
+      .handle("query", () => withApiErrors(mcpServers.query()))
+      .handle("read", ({ params }) => withApiErrors(mcpServers.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(mcpServers.create(payload)))
+      .handle("update", ({ params, payload }) =>
+        withApiErrors(mcpServers.update({ ...params, ...payload })),
+      )
+      .handle("delete", ({ params }) => withApiErrors(mcpServers.delete(params.id)))
+      .handle("check", ({ params }) => withApiErrors(mcpServers.check(params.id)))
+      .handle("setToken", ({ params, payload }) =>
+        withApiErrors(mcpServers.setToken({ ...params, ...payload })),
+      )
+      .handle("startSignIn", ({ params, payload }) =>
+        withApiErrors(mcpServers.startSignIn({ ...params, ...payload })),
+      )
+      .handle("finishSignIn", ({ params, payload }) =>
+        withApiErrors(mcpServers.finishSignIn({ ...params, ...payload })),
       );
   }),
 );
@@ -412,10 +540,12 @@ const skillRoutes = HttpApiBuilder.group(api, "skill", (handlers) =>
       .handle("query", () => withApiErrors(skills.query()))
       .handle("read", ({ params }) => withApiErrors(skills.read(params.name)))
       .handle("import", ({ query, payload }) => withApiErrors(skills.import(query, payload)))
+      .handle("propose", ({ query, payload }) => withApiErrors(skills.propose(query, payload)))
       .handle("delete", ({ params }) => withApiErrors(skills.delete(params.name)))
       .handle("check", ({ payload }) => withApiErrors(skills.check(payload)))
       .handle("diff", ({ params }) => withApiErrors(skills.diff(params)))
       .handle("apply", ({ params }) => withApiErrors(skills.apply(params)))
+      .handle("reject", ({ params }) => withApiErrors(skills.reject(params)))
       .handle("applyUpdates", ({ payload }) => withApiErrors(skills.applyUpdates(payload)));
   }),
 );
@@ -477,6 +607,9 @@ const workspaceRoutes = HttpApiBuilder.group(api, "workspace", (handlers) =>
       .handle("inspect", ({ params }) => withApiErrors(provisioning.inspectWorkspace(params.id)))
       .handle("dispose", ({ params, payload }) =>
         withApiErrors(provisioning.disposeWorkspace(params.id, payload)),
+      )
+      .handle("disposeMany", ({ payload }) =>
+        withApiErrors(provisioning.disposeWorkspaces(payload)),
       )
       .handle("detach", ({ params }) => withApiErrors(provisioning.detachWorkspace(params.id)));
   }),
@@ -574,9 +707,12 @@ const eventKindRoutes = HttpApiBuilder.group(api, "eventKind", (handlers) =>
 const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
   Effect.gen(function* () {
     const runners = yield* RunnerService;
-    // Two of this group's operations are about a runner's provider instances,
-    // which belong to the provider service, not the runner service.
-    const providers = yield* ProviderService;
+    // Probing is about a Provider Account, and the frame it sends goes out
+    // from the controller daemon, like the install of a harness and the
+    // request for a runner's facts.
+    const providerAccountOperations = yield* ProviderAccountRunnerOperations;
+    const harnessInstall = yield* HarnessInstall;
+    const factsRefresh = yield* FactsRefresh;
     // Retiring a runner does more than update its row: the sessions it hosted
     // and the workspaces it held end with it, and the runner is told.
     const retirement = yield* Retirement;
@@ -591,16 +727,23 @@ const runnerRoutes = HttpApiBuilder.group(api, "runner", (handlers) =>
       .handle("retire", ({ params, payload }) =>
         withApiErrors(retirement.retireRunner({ id: params.id, ...payload })),
       )
-      .handle("refreshFacts", ({ params }) => withApiErrors(runners.refreshFacts(params.id)))
+      .handle("refreshFacts", ({ params }) => withApiErrors(factsRefresh.refreshFacts(params.id)))
       .handle("probe", ({ params, payload }) =>
-        withApiErrors(providers.probe({ runnerId: params.id, ...payload })),
+        withApiErrors(providerAccountOperations.probe({ runnerId: params.id, ...payload })),
       )
       .handle("installHarness", ({ params, payload }) =>
-        withApiErrors(providers.installHarness({ runnerId: params.id, ...payload })),
+        withApiErrors(harnessInstall.installHarness({ runnerId: params.id, ...payload })),
       )
       .handle("createJoinToken", () => withApiErrors(runners.createJoinToken()))
       .handle("queryJoinTokens", () => withApiErrors(runners.queryJoinTokens()))
       .handle("revokeJoinToken", ({ params }) => withApiErrors(runners.revokeJoinToken(params.id)));
+  }),
+);
+
+const runnerMetricsRoutes = HttpApiBuilder.group(api, "runnerMetrics", (handlers) =>
+  Effect.gen(function* () {
+    const runnerMetrics = yield* RunnerMetricsService;
+    return handlers.handle("query", ({ query }) => withApiErrors(runnerMetrics.query(query)));
   }),
 );
 
@@ -623,23 +766,61 @@ const pluginRoutes = HttpApiBuilder.group(api, "plugin", (handlers) =>
   }),
 );
 
+const harnessRoutes = HttpApiBuilder.group(api, "harness", (handlers) =>
+  Effect.gen(function* () {
+    const harnesses = yield* HarnessService;
+    return handlers.handle("query", () => withApiErrors(harnesses.query()));
+  }),
+);
+
 const providerRoutes = HttpApiBuilder.group(api, "provider", (handlers) =>
   Effect.gen(function* () {
     const providers = yield* ProviderService;
+    return handlers.handle("query", () => withApiErrors(providers.query()));
+  }),
+);
+
+const providerAccountRoutes = HttpApiBuilder.group(api, "providerAccount", (handlers) =>
+  Effect.gen(function* () {
+    const providerAccounts = yield* ProviderAccountService;
+    // Signing in sends a frame to a runner, and a new key or token has the
+    // account probed again, so the controller daemon runs those.
+    const operations = yield* ProviderAccountRunnerOperations;
+    return (
+      handlers
+        .handle("query", () => withApiErrors(providerAccounts.query()))
+        .handle("read", ({ params }) => withApiErrors(providerAccounts.read(params.id)))
+        .handle("create", ({ payload }) => withApiErrors(operations.create(payload)))
+        .handle("update", ({ params, payload }) =>
+          withApiErrors(operations.update({ id: params.id, ...payload })),
+        )
+        .handle("delete", ({ params }) => withApiErrors(providerAccounts.delete(params.id)))
+        .handle("signIn", ({ params, payload }) =>
+          withApiErrors(operations.signIn({ id: params.id, ...payload })),
+        )
+        .handle("submitSignInCode", ({ params, payload }) =>
+          withApiErrors(operations.submitSignInCode({ id: params.id, ...payload })),
+        )
+        .handle("readCatalog", ({ params }) =>
+          withApiErrors(providerAccounts.readCatalog(params.id)),
+        )
+        // A refresh reads the catalog by probing a runner, so the daemon runs it.
+        .handle("refresh", ({ params }) => withApiErrors(operations.refresh(params.id)))
+    );
+  }),
+);
+
+const modelProfileRoutes = HttpApiBuilder.group(api, "modelProfile", (handlers) =>
+  Effect.gen(function* () {
+    const modelProfiles = yield* ModelProfileService;
     return handlers
-      .handle("query", () => withApiErrors(providers.query()))
-      .handle("read", ({ params }) => withApiErrors(providers.read(params.id)))
-      .handle("create", ({ payload }) => withApiErrors(providers.create(payload)))
+      .handle("query", () => withApiErrors(modelProfiles.query()))
+      .handle("read", ({ params }) => withApiErrors(modelProfiles.read(params.id)))
+      .handle("create", ({ payload }) => withApiErrors(modelProfiles.create(payload)))
       .handle("update", ({ params, payload }) =>
-        withApiErrors(providers.update({ id: params.id, ...payload })),
+        withApiErrors(modelProfiles.update({ id: params.id, ...payload })),
       )
-      .handle("delete", ({ params }) => withApiErrors(providers.delete(params.id)))
-      .handle("login", ({ params, payload }) =>
-        withApiErrors(providers.login({ id: params.id, ...payload })),
-      )
-      .handle("submitLoginCode", ({ params, payload }) =>
-        withApiErrors(providers.submitLoginCode({ id: params.id, ...payload })),
-      );
+      .handle("delete", ({ params }) => withApiErrors(modelProfiles.delete(params.id)));
   }),
 );
 
@@ -686,7 +867,11 @@ const sessionRoutes = HttpApiBuilder.group(api, "session", (handlers) =>
         withApiErrors(placement.continueSession({ id: params.id, ...payload })),
       )
       .handle("markDone", ({ payload }) => withApiErrors(sessions.markDone(payload)))
-      .handle("reopen", ({ payload }) => withApiErrors(sessions.reopen(payload)));
+      .handle("moveToTask", ({ params, payload }) =>
+        withApiErrors(sessions.moveToTask(params.id, payload)),
+      )
+      .handle("reopen", ({ payload }) => withApiErrors(sessions.reopen(payload)))
+      .handle("archive", ({ payload }) => withApiErrors(live.archive(payload)));
   }),
 );
 
@@ -765,6 +950,8 @@ const controllerRoutes = HttpApiBuilder.group(api, "controller", (handlers) =>
  * plugins domain. The two are wired together here, where the whole controller
  * is assembled.
  */
+const McpServerCallsWithChangesLayer = McpServerCallsLayer.pipe(Layer.provide(LiveTopicsLayer));
+
 const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCatalogLayer));
 
 /**
@@ -783,13 +970,30 @@ const EventKindsOperationLayer = EventKindsLayer.pipe(Layer.provide(EventKindCat
  * domain instead (see the event pipeline below).
  */
 const WorkflowDomainLayer = Layer.mergeAll(
-  WorkflowServiceLayer.pipe(
-    Layer.provide(EventKindsOperationLayer),
-    Layer.provide(WorkflowRunsLayer),
-    Layer.provide(WorkflowSignalsLayer),
-  ),
+  WorkflowServiceWithPortsLayer,
   CronTriggerSchedulerLayer,
 ).pipe(Layer.provideMerge(TriggerHealthLayer));
+
+/**
+ * The External Entity service with the services it is built from: the task
+ * service, which makes the Task of a thing taken on, and the plugin host's
+ * lookups, which read a thing at its source. Placement uses it to start a
+ * Thread on a new Task made from things, so placement is provided this one
+ * layer below and the whole controller builds one External Entity service.
+ */
+const ExternalEntityDomainLayer = ExternalEntityServiceLayer.pipe(
+  Layer.provide(EntityLookupsLayer),
+  Layer.provide(TaskServiceWithPortsLayer),
+);
+
+/**
+ * Placement, provided the External Entity service it needs. It is one layer
+ * so every group that uses placement shares one instance of it.
+ */
+const PlacementDomainLayer = PlacementLayer.pipe(
+  Layer.provide(ExternalEntityDomainLayer),
+  Layer.provide(SettingsOperationsLayer),
+);
 
 /**
  * The run service with the services it is built from.
@@ -810,11 +1014,13 @@ const WorkflowDomainLayer = Layer.mergeAll(
  */
 const RunDomainLayer = RunServiceLayer.pipe(
   Layer.provideMerge(WorkflowDomainLayer),
-  Layer.provideMerge(TaskServiceLayer),
+  Layer.provideMerge(TaskServiceWithPortsLayer),
   Layer.provideMerge(RunExecutorLayer),
   Layer.provideMerge(
     WorkspaceStepsLayer.pipe(
-      Layer.provide(Layer.mergeAll(PlacementLayer, LiveLayer).pipe(Layer.provide(DispatchLayer))),
+      Layer.provide(
+        Layer.mergeAll(PlacementDomainLayer, LiveLayer).pipe(Layer.provide(DispatchLayer)),
+      ),
     ),
   ),
   Layer.provide(LiveTopicsLayer),
@@ -869,18 +1075,31 @@ const BoundOperationsDomainLayer = BoundOperationsLayer.pipe(
 );
 
 /**
+ * The signal service, with the claims on signals it takes. The handoff of an
+ * External Entity ends signals through it too, so both are provided this one
+ * layer and share one instance. It still needs `BoundOperations`, which the
+ * group that holds both provides.
+ */
+const SignalServiceDomainLayer = SignalServiceLayer.pipe(
+  Layer.provide(SignalClaimsLayer),
+  Layer.provide(SignalEntitiesLayer),
+);
+
+/**
  * Every service an operation uses, together with the controller daemon. The
  * listener starts the controller daemon's drivers, so they are built here
  * rather than a second time elsewhere. It is one list because otherwise a
  * controller could boot without a layer an operation needs, and nothing would
  * show it until a request used that operation.
  *
- * Seven services are left out on purpose: `Plugins`, `ProviderService`,
- * `SessionService`, `WorkspaceService`, `RunnerConnections`,
- * `ProviderProbes` and `PromotionState`. They must be the instances the boot
- * built. A second instance would have no plugins, no connections, none of the
- * state a session's stream is coalesced in, and no promotion phase, and would
- * write over the same rows the drivers use. The handlers get them from the boot.
+ * Eight services are left out on purpose: `Plugins`,
+ * `ProviderAccountService`, `SessionService`, `WorkspaceService`,
+ * `RunnerConnections`, `ProviderAccountProbes`, `ProviderAccountProbing` and
+ * `PromotionState`. They must be the instances the boot built. A second
+ * instance would have no plugins, no connections, none of the state a
+ * session's stream is coalesced in, none of the device logins being waited
+ * for, and no promotion phase, and would write over the same rows the
+ * drivers use. The handlers get them from the boot.
  *
  * The text generation status is provided once, around the whole list, so
  * `controller.read` reads the last failure the text generation service writes.
@@ -898,6 +1117,13 @@ const operationServices = Layer.mergeAll(
   // next to it.
   PromotionFleetLayer.pipe(Layer.provideMerge(PromotionTransferLayer)),
   SettingsOperationsLayer,
+  HarnessServiceLayer,
+  ProviderServiceLayer,
+  // Deleting a Model Profile clears it from the projects that name it, so the
+  // project service is provided to it rather than merged next to it.
+  ModelProfileServiceLayer.pipe(Layer.provideMerge(ProjectServiceLayer)),
+  // Deleting an Initiative clears it from its Tasks through the task service.
+  InitiativeServiceLayer.pipe(Layer.provide(TaskServiceWithPortsLayer)),
   // The controller daemon's profile removal uses the profile service, so the
   // profile service is provided to it rather than merged next to it.
   ProfileRemovalLayer.pipe(Layer.provideMerge(ProfilesLayer)),
@@ -906,11 +1132,37 @@ const operationServices = Layer.mergeAll(
   MemoryServiceLayer,
   WikiPageServiceLayer,
   SkillServiceLayer,
-  ProjectServiceLayer,
-  // Tracking's read gets each Task's newest runs from the runs repository,
-  // which the controller daemon connects to the tasks domain.
-  TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer)),
-  YourWorkLayer,
+  // Deleting a server removes it from the lists that hold it, through the
+  // controller daemon, which reaches the Projects and Sessions the domain
+  // cannot import. The checks are merged into the output because the
+  // controller daemon's scheduler requests them too, and a check must be one
+  // instance to run at most once per server.
+  McpServerServiceLayer.pipe(
+    Layer.provideMerge(McpServerChecksLayer),
+    Layer.provide(McpServerListHoldersLayer.pipe(Layer.provide(ProjectServiceLayer))),
+  ),
+  // The gateway's calls to outside MCP servers. They follow the committed
+  // changes of servers and Connections to close the sessions of a server that
+  // lost its destination.
+  McpServerCallsWithChangesLayer,
+  // The route `/mcp` hands every request to the gateway, which answers a
+  // session's harness from the session's list of servers.
+  McpGatewayLayer.pipe(
+    Layer.provide(LiveTopicsLayer),
+    Layer.provide(McpServerCallsWithChangesLayer),
+  ),
+  // The board's read gets each Task's sessions and runs from the runs and
+  // sessions repositories, which the controller daemon connects to the tasks
+  // domain.
+  TaskBoardLayer.pipe(Layer.provide(TaskBoardFactsLayer)),
+  // The details pane's read gets the Task's sessions and runs the same way, and
+  // the card's facts and the newest runs from the ports above.
+  TaskDetailsLayer.pipe(
+    Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskRunsLayer, TaskDetailFactsLayer)),
+  ),
+  // Taking an entity on makes a Task through the task service, and reading a
+  // thing at its source goes through the plugin host's lookups.
+  ExternalEntityDomainLayer,
   ResourceServiceLayer,
   // The controller daemon's retirement uses the runner service, so the runner
   // service is provided to it rather than merged next to it. Retiring a runner
@@ -919,10 +1171,13 @@ const operationServices = Layer.mergeAll(
   // A runner that connects is sent the workspace steps still running on it,
   // and wakes the runs waiting for a runner.
   ArrivalLayer.pipe(Layer.provide(RunDomainLayer)),
+  HarnessInstallLayer,
+  FactsRefreshLayer,
   RunnerJoinLayer,
+  RunnerMetricsServiceLayer,
   // The inbound driver uses both dispatch and `Live`, placement uses dispatch,
   // and matched inputs are delivered through `Live` too. Setup creates the
-  // first assistant. So those are provided to the group rather than merged
+  // first assistant, and so does the creation of the first account. So those are provided to the group rather than merged
   // next to it, each above what it uses:
   //
   // - an assistant's create makes its conversation;
@@ -955,11 +1210,22 @@ const operationServices = Layer.mergeAll(
     InboundLayer.pipe(Layer.provide(RunDomainLayer)),
     Layer.mergeAll(
       NotificationServiceLayer.pipe(Layer.provide(SignalBuildFailuresLayer)),
-      SignalServiceLayer.pipe(Layer.provide(SignalClaimsLayer)),
+      SignalServiceDomainLayer,
+      // A handoff of an External Entity starts a run, writes a Task, and ends
+      // signals through the signal service, under the one set of claims the
+      // signal service and the Ignore Rule service share.
+      ExternalEntityHandoffsLayer.pipe(
+        Layer.provide(RunDomainLayer),
+        Layer.provide(TaskServiceWithPortsLayer),
+        Layer.provide(SignalServiceDomainLayer),
+        Layer.provide(SignalClaimsLayer),
+      ),
     ).pipe(Layer.provide(BoundOperationsDomainLayer)),
     IgnoreRuleDomainLayer,
     DiscussionInputsReferenceFill,
     SetupLayer,
+    // Creating an account creates the default assistant when none exists.
+    ProviderAccountRunnerOperationsLayer,
     // The events service reads the registered event kinds from the plugins
     // domain. The plugins domain appends to the event log, so the events
     // domain cannot import it; the two are wired together here, where the
@@ -981,7 +1247,12 @@ const operationServices = Layer.mergeAll(
     ).pipe(
       Layer.provideMerge(EventRouterLayer),
       Layer.provide(TriggerEffectsLayer.pipe(Layer.provide(TriggeredRunsLayer))),
-      Layer.provide(SignalRaisesLayer.pipe(Layer.provide(BoundOperationsDomainLayer))),
+      Layer.provide(
+        SignalRaisesLayer.pipe(
+          Layer.provide(BoundOperationsDomainLayer),
+          Layer.provide(SignalEntitiesLayer),
+        ),
+      ),
       Layer.provide(RunDomainLayer),
     ),
   ).pipe(
@@ -989,7 +1260,7 @@ const operationServices = Layer.mergeAll(
     Layer.provideMerge(ConversationServiceLayer),
     Layer.provideMerge(AssistantResponderLayer),
     Layer.provideMerge(AssistantSessionsLayer),
-    Layer.provideMerge(PlacementLayer),
+    Layer.provideMerge(PlacementDomainLayer),
     Layer.provideMerge(DiscussionInputsLayer.pipe(Layer.provideMerge(DiscussionServiceLayer))),
     Layer.provideMerge(LiveLayer),
     Layer.provideMerge(ConversationMessagesLayer),
@@ -1020,7 +1291,9 @@ export const operationLayers = operationServices.pipe(
   // arrivals, placements and retirements announce, so the drivers above and
   // `TextGeneration` share this one layer.
   Layer.provideMerge(TextGenerationTargetChangesLayer),
-  Layer.provide(TextGenerationStatusLayer),
+  // Also offered to the drivers: the summary writer asks it whether a text
+  // generation could run now.
+  Layer.provideMerge(TextGenerationStatusLayer),
 );
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */
@@ -1035,6 +1308,8 @@ export const handlerLayers = Layer.mergeAll(
   secretRoutes,
   controllerRoutes,
   taskRoutes,
+  initiativeRoutes,
+  externalEntityRoutes,
   notificationRoutes,
   signalRoutes,
   ignoreRuleRoutes,
@@ -1044,6 +1319,7 @@ export const handlerLayers = Layer.mergeAll(
   discussionRoutes,
   wikiPageRoutes,
   skillRoutes,
+  mcpServerRoutes,
   conversationRoutes,
   projectRoutes,
   resourceRoutes,
@@ -1057,8 +1333,12 @@ export const handlerLayers = Layer.mergeAll(
   eventKindRoutes,
   runRoutes,
   runnerRoutes,
+  runnerMetricsRoutes,
   pluginRoutes,
+  harnessRoutes,
   providerRoutes,
+  providerAccountRoutes,
+  modelProfileRoutes,
   sessionRoutes,
   inputRoutes,
   transcriptRoutes,

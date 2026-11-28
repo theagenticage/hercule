@@ -20,6 +20,7 @@ import {
   holdsMessageContent,
   formatAccessMode,
   isMutationRunning,
+  locateShownRequest,
   markShelfItemsExpired,
   queryKeys,
   readErrorMessage,
@@ -32,7 +33,10 @@ import {
 } from "@hercule/client-core";
 import type { SessionInputPayload } from "@hercule/contract";
 import {
+  harnessesQuery,
+  modelProfilesQuery,
   projectsQuery,
+  providerAccountsQuery,
   providersQuery,
   resourcesQuery,
   runnersQuery,
@@ -43,6 +47,7 @@ import {
   workspacesQuery,
 } from "../../app/queries";
 import { readRecentModels, rememberRecentModel } from "../../app/recent-models";
+import { useShownRequestId } from "../../app/request-drafts";
 import { BranchIcon } from "../../icons/branch";
 import { LaptopIcon } from "../../icons/laptop";
 import { ShieldIcon } from "../../icons/shield";
@@ -50,12 +55,26 @@ import { WorkspaceIcon } from "../../icons/workspace";
 import { useComposerImages } from "../attachments/use-composer-images";
 import { ComposerFrame } from "../session/composer-frame";
 import { useSendOnMenuCommand } from "../session/send-key";
+import { MESSAGE_HISTORY_KEY, useComposerAnswer } from "../session/use-composer-answer";
+import { useTypingGuard } from "../session/use-typing-guard";
 import { TallyPill } from "../subagents/tally-pill";
 import { useStopAgent } from "../use-stop-agent";
 import { AgentRequestDock } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
+import { PlusMenu } from "./plus-menu";
 import { QueuedInputs } from "./queued-inputs";
 import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
+
+/**
+ * Whether the `+` menu's MCP servers row works while the composer answers an
+ * agent's question. It edits the thread's list, not the answer, so it does.
+ * Set it to `false` to draw the row off, as the attach row is while
+ * answering, with `SERVERS_OFF_WHILE_ANSWERING` as the reason. This is the
+ * one place that decides it. Decided by Rogier, 2026-11-22 (spec 17, the `+`
+ * menu, answer mode).
+ */
+const SERVERS_WORK_WHILE_ANSWERING = true;
+const SERVERS_OFF_WHILE_ANSWERING = "Not while answering a question";
 
 /** What one send carried: the request, and the images and picks it was built from. */
 interface SentSubmission {
@@ -79,10 +98,20 @@ interface SentSubmission {
  * - the dock, while the session waits on a Request, with the pager line
  *   above it when there is one, see `AgentRequestDock`;
  * - the card: the shelf of attached images, the message field, then a row
- *   with Attach, the access mode,
+ *   with the `+` menu (Attach an image, and the thread's MCP servers, see
+ *   `PlusMenu`), the access mode,
  *   the model options when the model has any, the model, Dictate, and Send,
  *   or Stop while a turn runs;
  * - the lip under the card: where the thread works, and on which machine.
+ *
+ * While the dock shows a question the agent asked, the composer answers it
+ * instead (`useComposerAnswer`): the field shows and edits the shown
+ * question's own answer, and Send gives way to Previous and the step button,
+ * with Stop beside them while a turn runs. The field then takes text only, no
+ * images and no skills. The Message Draft below is kept as it is and comes
+ * back when the Request closes, or when the dock shows another Request. A
+ * question does not take over while the user is typing a message: it waits
+ * until they pause, send, or leave the field (`useTypingGuard`).
  *
  * ⏎ in the field sends the message and ⇧⏎ starts a new line. The controller
  * opens a turn with a message sent to an idle thread, and queues one sent
@@ -132,12 +161,16 @@ export function ThreadComposer({
   const { client, pendingSubmissions } = controller;
   const queryClient = useQueryClient();
   const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const runners = useSuspenseQuery(runnersQuery(client)).data;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
   const workspaces = useSuspenseQuery(workspacesQuery(client)).data;
   const threads = useSuspenseQuery(threadsQuery(client)).data;
+  const [shownRequestId] = useShownRequestId(sessionId);
   const pending = useSyncExternalStore(pendingSubmissions.subscribe, () =>
     pendingSubmissions.read(sessionId),
   );
@@ -150,7 +183,10 @@ export function ThreadComposer({
   // No runner is local to the desktop app. A started thread names its own
   // runner, which is the one every field reads.
   const catalogs: ThreadCatalogs = {
-    instances,
+    accounts,
+    providers,
+    harnesses,
+    modelProfiles,
     runners,
     thisMacRunnerId: null,
     projects,
@@ -162,7 +198,10 @@ export function ThreadComposer({
   const resolved = resolveThreadConfig(catalogs, thread, pending.picks);
   const { config } = resolved;
   const fields = buildComposerFields(catalogs, resolved);
-  const readOnly = findResumeBlockedReason(session);
+  const readOnly = findResumeBlockedReason(
+    session,
+    workspaces.find((each) => each.id === session.workspaceId),
+  );
   const busy = session.status === "busy";
   const workspaceLabel = buildThreadWorkspaceLabel(session, workspaces);
   const placeholder = buildComposerPlaceholder({
@@ -209,8 +248,15 @@ export function ThreadComposer({
     },
   });
   const stopAgent = useStopAgent(client, sessionId);
+  const guard = useTypingGuard();
+  // The Request the dock shows, which `AgentRequestDock` decides the same way.
+  const shownRequest =
+    locateShownRequest(session.openRequests, (request) => request.requestId, shownRequestId)
+      ?.request ?? null;
+  const answer = useComposerAnswer(sessionId, shownRequest, guard.holding);
+  const stopFailure = stopAgent.error === null ? null : readErrorMessage(stopAgent.error);
   const error =
-    pending.failure ?? (stopAgent.error === null ? null : readErrorMessage(stopAgent.error));
+    answer === null ? (pending.failure ?? stopFailure) : (answer.failure ?? stopFailure);
   const images = useComposerImages({
     storeKey: sessionId,
     shelf: pending.message.attachments,
@@ -232,6 +278,8 @@ export function ThreadComposer({
     pendingSubmissions.writePicks(sessionId, applyThreadChoice(picks, choice));
   };
   const submit = (): void => {
+    // The user is done typing, whether or not the send goes through.
+    guard.release();
     if (!canSend || isMutationRunning(queryClient, sendKey)) return;
     const submission = buildSubmission(resolved, pending.message);
     pendingSubmissions.clearFailure(sessionId);
@@ -245,7 +293,8 @@ export function ThreadComposer({
     });
     scrollTranscriptToBottom();
   };
-  useSendOnMenuCommand(submit);
+  const sendOrStep = answer === null ? submit : answer.step.onStep;
+  useSendOnMenuCommand(sendOrStep);
   const stop = (): void => {
     // `useStopAgent` already ignores a second stop, but Stop is only
     // `aria-disabled` while one is in flight, so it can still be clicked:
@@ -257,25 +306,50 @@ export function ThreadComposer({
 
   return (
     <ComposerFrame
-      text={pending.message.text}
-      onTextChange={(text) => {
-        pendingSubmissions.writeText(sessionId, text);
-      }}
-      placeholder={placeholder}
-      readOnly={readOnly !== null}
+      text={answer?.text ?? pending.message.text}
+      onTextChange={
+        answer?.onTextChange ??
+        ((text) => {
+          guard.holdAfterEdit();
+          pendingSubmissions.writeText(sessionId, text);
+        })
+      }
+      placeholder={answer?.placeholder ?? placeholder}
+      readOnly={readOnly !== null || answer?.locked === true}
       canSend={canSend}
-      onSend={submit}
+      onSend={sendOrStep}
       stop={busy ? { stopping: stopAgent.isPending, onStop: stop } : undefined}
       error={error}
-      notice={images.notice}
-      attachments={images.attachments}
-      skills={{
-        skills: sessionSkills.data?.items,
-        failure: sessionSkills.error === null ? undefined : readErrorMessage(sessionSkills.error),
-        refreshIfStale: () => {
-          readSkillsIfStale(queryClient, sessionSkillsQuery(client, sessionId));
-        },
-      }}
+      notice={answer === null ? images.notice : answer.notice}
+      attachments={answer?.attachments ?? images.attachments}
+      skills={
+        answer === null
+          ? {
+              skills: sessionSkills.data?.items,
+              failure:
+                sessionSkills.error === null ? undefined : readErrorMessage(sessionSkills.error),
+              refreshIfStale: () => {
+                readSkillsIfStale(queryClient, sessionSkillsQuery(client, sessionId));
+              },
+            }
+          : undefined
+      }
+      step={answer?.step}
+      renderPlus={(attach) => (
+        <PlusMenu
+          target={{ kind: "started", session }}
+          attach={attach}
+          serversOff={
+            answer !== null && !SERVERS_WORK_WHILE_ANSWERING ? SERVERS_OFF_WHILE_ANSWERING : null
+          }
+        />
+      )}
+      historyKey={answer?.historyKey ?? MESSAGE_HISTORY_KEY}
+      onFieldBlur={guard.release}
+      // Only a composition in the Message Draft holds off a question. While
+      // answering, the hold would make the composer show the Message Draft
+      // instead of the answer being composed.
+      onComposingChange={answer === null ? guard.reportComposing : undefined}
       start={
         <>
           <span className="pick" title={fields.accessMode.locked ?? undefined}>
@@ -300,6 +374,7 @@ export function ThreadComposer({
           catalogs={catalogs}
           config={config}
           kind="active"
+          runnerId={null}
           disabled={readOnly !== null}
           readRecent={() => readRecentModels(controller.url)}
           onChoose={recordThreadChoice}
@@ -313,7 +388,7 @@ export function ThreadComposer({
           <div className="fold">
             <QueuedInputs sessionId={sessionId} />
           </div>
-          <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} />
+          <AgentRequestDock sessionId={sessionId} pageSubagentId={undefined} composerBelow />
         </>
       }
       below={

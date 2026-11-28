@@ -17,6 +17,7 @@ import {
 import type { Bridge } from "../../ipc/bridge";
 import { createAppearanceStore, type AppearanceStore } from "./appearance";
 import { createControllerClient } from "./controller-client";
+import { createAccountScopes, type AccountScopes } from "./account-scope";
 import { createPendingSubmissions, type PendingSubmissions } from "./pending-submissions";
 import { createQueryClient } from "./query-client";
 import { createThreadCopies, type ThreadCopies } from "./thread-copies";
@@ -58,6 +59,13 @@ export interface SavedController {
    * the store built for the new URL deletes the copies when it opens.
    */
   readonly threadCopies: ThreadCopies;
+  /**
+   * What the window holds for the signed-in user: the undo stack, the card
+   * moves and the held intents, and the check that a request is still the
+   * signed-in user's. The shell opens it once it knows the user and the router
+   * closes it at sign-out (see `AccountScope`).
+   */
+  readonly accountScopes: AccountScopes;
 }
 
 export interface RouterContext {
@@ -73,13 +81,16 @@ export interface RouterContext {
 /**
  * Returns the saved controller at `url`: a client that sends `token` and
  * stores any change to it through main, a live connection that is not
- * started yet, no pending submissions, no uploads, and the store of saved
- * thread copies, which opens its database when first used.
+ * started yet, no pending submissions, no uploads, the store of saved
+ * thread copies, which opens its database when first used, and no account
+ * scope open yet. `queryClient` is the cache the account scope's requests
+ * refresh.
  */
 const buildSavedController = (
   url: string,
   token: string | null,
   bridge: Bridge,
+  queryClient: QueryClient,
 ): SavedController => {
   const client = createControllerClient(url, createDesktopTokenStore(token, bridge));
   return {
@@ -93,6 +104,12 @@ const buildSavedController = (
       concurrency: UPLOAD_CONCURRENCY,
     }),
     threadCopies: createThreadCopies(url),
+    accountScopes: createAccountScopes({
+      controllerUrl: url,
+      client,
+      queryClient,
+      storage: localStorage,
+    }),
   };
 };
 
@@ -109,10 +126,14 @@ export const buildRouterContext = async (bridge: Bridge): Promise<RouterContext>
     bridge.controllerUrl.read(),
     bridge.token.read(),
   ]);
+  const queryClient = createQueryClient();
   return {
     bridge,
-    controller: controllerUrl === null ? null : buildSavedController(controllerUrl, token, bridge),
-    queryClient: createQueryClient(),
+    controller:
+      controllerUrl === null
+        ? null
+        : buildSavedController(controllerUrl, token, bridge, queryClient),
+    queryClient,
     appearance: createAppearanceStore(bridge),
   };
 };

@@ -24,6 +24,7 @@ import { copyDatabaseAndStopWrites, resumeWrites } from "../db";
 import { openDatabase } from "../db/client";
 import { ConnectionTypesLayer } from "../connections";
 import { AuditLogLayer } from "../events";
+import { NotifierLayer } from "../notifications";
 import { get, post, send } from "../http/testing";
 import { SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer } from "../plugins";
@@ -208,6 +209,7 @@ const reopenWorkspaceDomain = (database: string, home: string) =>
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(SettingsLayer),
+    Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
@@ -308,7 +310,7 @@ describe("human and automatic workspace retention", () => {
   });
 
   it.each(["clean", "tracked", "untracked", "ignored", "multi-root"] as const)(
-    "records the actual automatic %s removal outcome without forcing files",
+    "removes a finished run's %s workspace whole, with no look at its files",
     async (kind) => {
       await withFleet(
         async (arranged) => {
@@ -333,25 +335,16 @@ describe("human and automatic workspace retention", () => {
           }
           if (kind === "multi-root")
             writeFileSync(join(resolved.root, "human-notes.txt"), "unfinished root notes\n");
-          const before = hashContents(resolved.root);
           await done.complete();
           const cleanup = await waitDisposal(arranged.wire, automatic.workspaceId);
-          expect(cleanup.discardChanges ?? false).toBe(false);
+          expect(cleanup.discardChanges).toBe(true);
           expect((await readWorkspace(arranged, automatic.workspaceId)).status).toBe("disposing");
           const outcome = await Effect.runPromise(world.manager.dispose(cleanup));
           arranged.wire.send(outcome);
-          if (kind === "clean") {
-            expect(outcome.status, outcome.message).toBe("deleted");
-            await waitStatus(arranged, automatic.workspaceId, "deleted");
-            expect(existsSync(resolved.root)).toBe(false);
-            expect(runGitOrThrow(common, "rev-parse", `refs/heads/${done.branch}`)).toBe(done.sha);
-          } else {
-            expect(outcome.status).toBe("failed");
-            const retained = await waitStatus(arranged, automatic.workspaceId, "ready");
-            expect(retained.message).toMatch(/files|changes|ignored|root|preserve|discard/i);
-            expect(hashContents(resolved.root)).toBe(before);
-            expect(Effect.runSync(world.manager.resolve(automatic.workspaceId))).toBeDefined();
-          }
+          expect(outcome.status, outcome.message).toBe("deleted");
+          await waitStatus(arranged, automatic.workspaceId, "deleted");
+          expect(existsSync(resolved.root)).toBe(false);
+          expect(runGitOrThrow(common, "rev-parse", `refs/heads/${done.branch}`)).toBe(done.sha);
         },
         { workspaceSweepInterval: SWEEP },
       );
@@ -794,13 +787,14 @@ describe("preparation during pending disposal", () => {
       const refusal = await Effect.runPromise(world.manager.dispose(removal));
       expect(refusal.status, refusal.message).toBe("failed");
       arranged.wire.send(refusal);
-      await waitUntil("recorded the correlated refusal", async () =>
-        (await arranged.harness.audit("workspace.disposalRefused")).some(
+      const refused = await waitUntil("recorded the correlated refusal", async () =>
+        (await arranged.harness.audit("workspace.disposalRefused")).find(
           (entry) => entry.payload["workspaceId"] === workspace.id,
-        )
-          ? true
-          : undefined,
+        ),
       );
+      // The runner's own words sit beside the longer message, which ends with advice.
+      expect(refused.payload["runnerMessage"]).toBe(refusal.message);
+      expect(String(refused.payload["message"]).startsWith(String(refusal.message))).toBe(true);
       expect((await readWorkspace(arranged, workspace.id)).status).toBe("ready");
       expect(
         existsSync(

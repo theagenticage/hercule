@@ -1,5 +1,5 @@
 /**
- * Sessions: one provider-backed agent conversation, as the API sees it. A
+ * Sessions: one harness-backed agent conversation, as the API sees it. A
  * caller spawns a session, reads it and sends it input; the only thing a
  * caller can change is its model selection.
  *
@@ -28,6 +28,7 @@ import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
 import {
+  Conflict,
   Forbidden,
   Internal,
   InvalidState,
@@ -38,8 +39,10 @@ import {
 import { Actor, Id, Timestamp } from "../ids";
 import { UnenforcedSpecField } from "./agent";
 import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
+import { McpServerIds, SessionMcpServer } from "./mcp-server";
 import { PermissionRequest } from "./permission";
 import { SessionSkillList } from "./session-skill";
+import { TaskTitle } from "./task-title";
 import { Branch } from "./workspace";
 import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -108,6 +111,9 @@ const PromptAttachments = Schema.optionalKey(atMost(AttachmentId, MAX_ATTACHMENT
 /** The message of the issue for a prompt or input with no text and no images. */
 export const EMPTY_PROMPT_MESSAGE = "A prompt needs text or at least one image.";
 
+/** The message of the issue for a spawn with no text, no images and no context. */
+const EMPTY_SPAWN_PROMPT_MESSAGE = "A prompt needs text, an image, or context.";
+
 /**
  * Refuses a session prompt or input with no text and no images. It checks
  * `text` or `prompt`, whichever field the payload names its text with, so one
@@ -125,6 +131,23 @@ export const refuseEmptyPrompt = Schema.makeFilter(
       return undefined;
     return { path: [field], issue: EMPTY_PROMPT_MESSAGE };
   },
+);
+
+/**
+ * Refuses a spawn with no text, no images and no context. It is
+ * `refuseEmptyPrompt` for `session.spawn`, which can start on context alone.
+ */
+const refuseEmptySpawnPrompt = Schema.makeFilter(
+  (payload: {
+    readonly prompt: string;
+    readonly attachments?: ReadonlyArray<string>;
+    readonly context?: ReadonlyArray<unknown>;
+  }) =>
+    payload.prompt.length > 0 ||
+    (payload.attachments?.length ?? 0) > 0 ||
+    (payload.context?.length ?? 0) > 0
+      ? undefined
+      : { path: ["prompt"], issue: EMPTY_SPAWN_PROMPT_MESSAGE },
 );
 
 /**
@@ -157,6 +180,19 @@ export const LIVE_SESSION_STATUSES = [
   "busy",
 ] as const satisfies ReadonlyArray<SessionStatus>;
 
+/**
+ * The statuses of a session that is working: it is running a turn, or it is
+ * about to (queued for a runner, or starting). An idle session is live but not
+ * working. The Work board shows such a session as an agent at work, and an
+ * archive refuses to cut one short. Typed as a plain list of statuses, so that
+ * `includes` accepts any session's status.
+ */
+export const WORKING_SESSION_STATUSES: ReadonlyArray<SessionStatus> = [
+  "queued",
+  "starting",
+  "busy",
+];
+
 export const SessionStatus = Schema.Literals(SESSION_STATUSES);
 
 export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
@@ -169,6 +205,16 @@ export type SessionStatus = Schema.Schema.Type<typeof SessionStatus>;
 export const ThreadDone = Schema.Struct({ at: Timestamp, by: Actor });
 
 export type ThreadDone = Schema.Schema.Type<typeof ThreadDone>;
+
+/**
+ * The mark of a session the user has put away for good: when it was archived,
+ * and by whom. The actor is always the user, because only the user archives.
+ * An archived session takes no input and is never resumed, forked or
+ * reopened; its transcript stays readable. Nothing clears the mark.
+ */
+export const SessionArchived = Schema.Struct({ at: Timestamp, by: Actor });
+
+export type SessionArchived = Schema.Schema.Type<typeof SessionArchived>;
 
 /**
  * The start of the name of the branch the controller creates a Thread's own
@@ -280,16 +326,29 @@ export const Session = Schema.Struct({
   runId: Schema.NullOr(Id),
   /** The id, in that run's plan, of the agent step this session runs; `null` when `runId` is. */
   stepId: Schema.NullOr(Schema.String),
-  instanceId: Id,
+  /**
+   * The Provider Account the session runs on. An ended session keeps the id
+   * after the account is deleted, as history.
+   */
+  providerAccountId: Id,
+  /** The qualified id of the harness the session runs in. It never changes. */
+  harnessId: Schema.String,
   /** The runner the session started on. A session never moves to another runner. */
   runnerId: Id,
   workspaceId: Schema.NullOr(Id),
   /** The project the thread belongs to. It only groups the thread; nothing is derived from it. */
   projectId: Schema.NullOr(Id),
+  /**
+   * The Task the session belongs to. Absent when it belongs to none: an
+   * assistant's session, an Agent's session with no Task to join, the session
+   * of a workflow step whose run has no Task, and a Thread that was Done or
+   * archived before Tasks existed.
+   */
+  taskId: Schema.optionalKey(Id),
   requestedAccessMode: AccessMode,
   /** The mode the session actually runs in, after the access-mode fallback. */
   accessMode: AccessMode,
-  /** The provider-native id, once the runner has reported its binding. */
+  /** The harness-native id, once the runner has reported its binding. */
   nativeSessionId: Schema.NullOr(Schema.String),
   /**
    * The model the session runs under now. It starts as the spec's and is
@@ -352,6 +411,13 @@ export const Session = Schema.Struct({
    */
   done: Schema.optionalKey(ThreadDone),
   /**
+   * Set once the session is archived (`session.archive`); absent otherwise.
+   * An archived Thread always has `done` too. When every Thread of a
+   * workspace is archived, every Agent session of that workspace is archived
+   * with them, so a sidebar row is archived whole. Final: nothing clears it.
+   */
+  archived: Schema.optionalKey(SessionArchived),
+  /**
    * The last time the Thread was reopened: by `session.reopen`, or by new
    * input while it was Done. Absent until it is first reopened. A list of
    * Threads sorts on the later of this and `createdAt`, so a reopened Thread
@@ -359,11 +425,18 @@ export const Session = Schema.Struct({
    */
   reopenedAt: Schema.optionalKey(Timestamp),
   /**
-   * The fields this session was spawned with that its provider ignores.
-   * Computed from the instance's declared capabilities every time the session
+   * The fields this session was spawned with that its harness ignores.
+   * Computed from the harness's declared capabilities every time the session
    * is read.
    */
   unenforced: Schema.Array(UnenforcedSpecField),
+  /**
+   * The session's own list of MCP Servers, in the order it was given: empty
+   * for a session that has none, and always empty for a session that is not a
+   * Thread. Changing a Project's list or the thread default later never
+   * touches it.
+   */
+  mcpServers: Schema.Array(SessionMcpServer),
 });
 
 export type Session = Schema.Schema.Type<typeof Session>;
@@ -516,6 +589,74 @@ export const SpawnWorkspace = Schema.Union([
 export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
 
 /**
+ * The most things one Thread can be started on: the bound of `newTask` in
+ * `session.spawn` and of `externalEntity.matchProject`, which finds the project
+ * of the same things.
+ */
+export const MAX_THREAD_THINGS = 50;
+
+/**
+ * The most things one session can be told about at its start. It is the same
+ * bound as `MAX_THREAD_THINGS`, because the Thread dialog sends the same list
+ * as `context` and as `newTask`.
+ */
+export const MAX_CONTEXT_REFERENCES = MAX_THREAD_THINGS;
+
+/**
+ * A reference to an External Entity ("thing", such as a pull request or an
+ * issue) that the agent is told about. The controller reads the thing's stored
+ * record and writes a short description of it after the prompt text.
+ */
+export const EntityContextReference = closedStruct({
+  kind: Schema.Literal("entity"),
+  entityId: Id,
+});
+
+export type EntityContextReference = Schema.Schema.Type<typeof EntityContextReference>;
+
+/**
+ * One piece of context sent with a prompt. Context only tells the agent about
+ * something. It never takes anything on: to make a Task of things, use
+ * `newTask`. There is one kind today, `entity`; the union is where other kinds
+ * are added.
+ */
+export const ContextReference = Schema.Union([EntityContextReference]);
+
+export type ContextReference = Schema.Schema.Type<typeof ContextReference>;
+
+/**
+ * The new Task a Thread starts, made from External Entities ("things"). Each
+ * thing is taken on by the user, as `externalEntity.takeOn` takes one on. The
+ * ids are distinct, and the list is never empty.
+ */
+const NewThreadTask = closedStruct({
+  /** The new Task's title. A title the user chose is never replaced by a generated one. */
+  title: TaskTitle,
+  entityIds: atMost(Id, MAX_THREAD_THINGS).check(
+    Schema.isMinLength(1),
+    Schema.isUnique({ message: "Each thing can be listed once; remove the repeated id." }),
+  ),
+});
+
+type NewThreadTask = Schema.Schema.Type<typeof NewThreadTask>;
+
+/** The message for a spawn that names both a new Task and an existing one or an Agent. */
+const NEW_TASK_CONFLICT_MESSAGE =
+  "newTask starts a Thread on a new Task, so it cannot be combined with taskId or agentId. Leave newTask out to join an existing Task, or leave taskId and agentId out to start on the new Task.";
+
+/**
+ * Refuses a spawn that names `newTask` together with `taskId` or `agentId`.
+ * A new Task and a Task to join contradict each other, and an Agent's session
+ * never makes a Task. The issue points at `newTask`.
+ */
+const refuseNewTaskWithTaskOrAgent = Schema.makeFilter(
+  (payload: { readonly newTask?: unknown; readonly taskId?: string; readonly agentId?: string }) =>
+    payload.newTask !== undefined && (payload.taskId !== undefined || payload.agentId !== undefined)
+      ? { path: ["newTask"], issue: NEW_TASK_CONFLICT_MESSAGE }
+      : undefined,
+);
+
+/**
  * The payload of `session.spawn`. A spawn with an `agentId` takes its settings
  * from that Agent. A spawn with no `agentId` is a Thread. When the user starts
  * it, it takes the user's `thread.*` settings. When a session starts it, it
@@ -528,6 +669,23 @@ export const SessionSpawnInput = closedStruct({
   /** Ids from `attachment.create`; the prompt's images. */
   attachments: PromptAttachments,
   /**
+   * Things the agent is told about with this prompt. The controller appends a
+   * short description of each after the prompt text, so the stored prompt is
+   * exactly what the agent got. It never takes a thing on: a Thread that
+   * should also own them as a Task sends `newTask` too. The list is never
+   * empty, holds each thing once, and a prompt with empty text is accepted
+   * when it has context. Fails `NotFound` for an unknown thing. Nothing is
+   * written when it fails.
+   */
+  context: Schema.optionalKey(
+    atMost(ContextReference, MAX_CONTEXT_REFERENCES).check(
+      Schema.isMinLength(1),
+      Schema.isUnique({
+        message: "Each thing can be listed once in context; remove the repeated entity id.",
+      }),
+    ),
+  ),
+  /**
    * The session's role, its name for its job. Once set, a role never changes:
    * `session.update` has no `role`. A Thread spawned without one gets a
    * generated role, when that succeeds.
@@ -535,13 +693,15 @@ export const SessionSpawnInput = closedStruct({
   role: Schema.optionalKey(SessionRole),
   /**
    * The Agent to spawn from. Its fields take the place of the Thread's
-   * defaults, with the same precedence. `instanceId` and `permissionProfileId`
-   * are rejected with it, because the Agent sets both.
+   * defaults, with the same precedence. `providerAccountId`, `harnessId` and
+   * `permissionProfileId` are rejected with it, because the Agent sets them.
    */
   agentId: Schema.optionalKey(Id),
   /** What every turn of this session must return. A schema outside the subset all harnesses support is rejected. */
   outputSchema: Schema.optionalKey(OutputSchema),
-  instanceId: Schema.optionalKey(Id),
+  providerAccountId: Schema.optionalKey(Id),
+  /** The harness to run in; left out, the account's default harness. */
+  harnessId: Schema.optionalKey(Schema.String),
   model: Schema.optionalKey(Schema.NonEmptyString),
   /** The per-model choices this session opens with; a choice the model does not offer is rejected. */
   options: Schema.optionalKey(ModelSelection.fields.options),
@@ -564,6 +724,23 @@ export const SessionSpawnInput = closedStruct({
    */
   projectId: Schema.optionalKey(Id),
   /**
+   * The Task to join. Fails `NotFound` when no such Task exists or it was
+   * deleted, and `InvalidState` when the Task is `done` or `dropped`: reopen
+   * the Task, or start without it. When absent, the session joins a Task by
+   * the rules in spec 09.
+   */
+  taskId: Schema.optionalKey(Id),
+  /**
+   * The new Task this Thread starts, made from these things, each taken on by
+   * the user. The Thread joins it, and its title is the one given here, never
+   * a generated one. Only the user may send it, and it is refused together
+   * with `taskId` or `agentId`. It fails `NotFound` for an unknown thing,
+   * `InvalidState` for a thing that is not work Hercule can read, and
+   * `Conflict` for a thing already on an active Task. Nothing is written when
+   * it fails.
+   */
+  newTask: Schema.optionalKey(NewThreadTask),
+  /**
    * Where the session works. When absent, a session's spawn on its caller's
    * runner joins the caller's workspace; any other spawn has no checkout.
    */
@@ -575,7 +752,15 @@ export const SessionSpawnInput = closedStruct({
    * actor and per operation.
    */
   dedupKey: Schema.optionalKey(DedupKey),
-}).check(refuseEmptyPrompt);
+  /**
+   * The MCP Servers the Thread starts with, in place of its default list; an
+   * empty list is kept as empty. Needs `mcp.manage` as well as
+   * `session.spawn`. Refused `validation` when an id is unknown or deleted,
+   * names a server twice, or when two servers share a name, and with
+   * `agentId`.
+   */
+  mcpServerIds: Schema.optionalKey(McpServerIds),
+}).check(refuseEmptySpawnPrompt, refuseNewTaskWithTaskOrAgent);
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
 
@@ -611,7 +796,15 @@ export const SESSION_INPUT_FIELDS = {
   ...SESSION_SELECTION_FIELDS,
 } as const;
 
-export const SESSION_UPDATE_FIELDS = SESSION_SELECTION_FIELDS;
+export const SESSION_UPDATE_FIELDS = {
+  ...SESSION_SELECTION_FIELDS,
+  /**
+   * Replaces the session's list of MCP Servers. Needs `mcp.manage` as well as
+   * `session.steer`. Refused `validation` for the same reasons as on
+   * `session.spawn`.
+   */
+  mcpServerIds: Schema.optionalKey(McpServerIds),
+} as const;
 
 export const SessionUpdateInput = closedStruct(SESSION_UPDATE_FIELDS);
 
@@ -680,7 +873,7 @@ export type SessionInputCall = Schema.Schema.Type<typeof SessionInputCall>;
  * needs the `session.steer` grant. `opened` and `steered` are the runner's own
  * words for what it did with the input. `queued` is the controller's word for
  * an input the session cannot take yet, including the input that resumes an
- * exited session, and a steer on a provider that does not steer natively: the
+ * exited session, and a steer on a harness that does not steer natively: the
  * running turn is interrupted, and the input is sent as the next turn.
  */
 export const SessionInputOutcome = Schema.Struct({
@@ -752,9 +945,9 @@ export type SessionRespondToQuestionInput = Schema.Schema.Type<
 >;
 
 /**
- * Branching a session: `fork` opens a second provider-native session from the
+ * Branching a session: `fork` opens a second harness-native session from the
  * one the parent left behind, and leaves the parent's own history untouched.
- * It runs on the parent's runner and provider instance, because that is where
+ * It runs on the parent's runner, Provider Account and harness, because that is where
  * the native state is. Continuing the parent itself is not done here: an
  * exited session that still has its transcript is resumed in place by its next
  * input.
@@ -801,6 +994,25 @@ export const SessionRunFilter = Schema.Union([Id, Schema.NonEmptyArray(Id)]);
  */
 export const SessionKindFilter = Schema.Union([SessionKind, Schema.NonEmptyArray(SessionKind)]);
 
+/**
+ * The most workspace ids one `session.query` names. The query string carries
+ * each id as a repeated `workspaceId` key of about 49 bytes, and the server
+ * refuses a request whose headers pass 16 KiB (about 330 ids), so a page of
+ * 500 ids could not be sent. 150 ids are about 7 KiB, which leaves room for
+ * the other filters and for headers a proxy adds.
+ */
+export const MAX_SESSION_WORKSPACE_IDS = 150;
+
+/**
+ * One workspace's id, or several, at most `MAX_SESSION_WORKSPACE_IDS`. A
+ * client that archives a sidebar row reads the Threads of its workspace in one
+ * read. The query string carries several as repeated `workspaceId` keys.
+ */
+export const SessionWorkspaceFilter = Schema.Union([
+  Id,
+  atMost(Id, MAX_SESSION_WORKSPACE_IDS).check(Schema.isMinLength(1)),
+]);
+
 export const SessionFilter = Schema.Struct({
   status: Schema.optionalKey(SessionStatusFilter),
   runnerId: Schema.optionalKey(Id),
@@ -812,13 +1024,22 @@ export const SessionFilter = Schema.Struct({
   conversationId: Schema.optionalKey(Id),
   /** Only the sessions these runs' agent steps started. */
   runId: Schema.optionalKey(SessionRunFilter),
+  /** Only the sessions of this Task. */
+  taskId: Schema.optionalKey(Id),
   /** Only the sessions of these kinds. */
   kind: Schema.optionalKey(SessionKindFilter),
+  /** Only the sessions placed in this workspace, or in one of these workspaces. */
+  workspaceId: Schema.optionalKey(SessionWorkspaceFilter),
   /**
    * `true` lists only the Threads marked Done; `false` lists only the
    * sessions that are not, which is every session that is not a Thread too.
    */
   done: Schema.optionalKey(Schema.Boolean),
+  /**
+   * `true` lists only the archived sessions; `false` lists only the ones that
+   * are not archived.
+   */
+  archived: Schema.optionalKey(Schema.Boolean),
   /**
    * Only sessions that had not exited before this instant: sessions that are
    * not exited, and sessions that exited at or after it. A resumed session
@@ -881,15 +1102,27 @@ export const SkillsPreviewFilter = Schema.Struct({
 
 export type SkillsPreviewFilter = Schema.Schema.Type<typeof SkillsPreviewFilter>;
 
-/** The most Threads one call of `session.markDone` or `session.reopen` names. */
+/** The most Threads one call of `session.markDone`, `session.reopen` or `session.archive` names. */
 export const MAX_SESSION_IDS = MAX_PAGE_LIMIT;
 
-/** The payload of `session.markDone` and `session.reopen`: the Threads to move, in one call. */
+/** The payload of `session.markDone`, `session.reopen` and `session.archive`: the Threads to move, in one call. */
 export const SessionIdsInput = Schema.Struct({
   sessionIds: atMost(Id, MAX_SESSION_IDS).check(Schema.isMinLength(1)),
 });
 
 export type SessionIdsInput = Schema.Schema.Type<typeof SessionIdsInput>;
+
+/** The payload of `session.moveToTask`. */
+export const SessionMoveToTaskInput = Schema.Struct({
+  /**
+   * The Task to move the Thread to. It must be live: `NotFound` for a Task
+   * that does not exist or was deleted, `InvalidState` for one that is `done`
+   * or `dropped`. When absent, the Thread moves to a new Task made from it.
+   */
+  taskId: Schema.optionalKey(Id),
+});
+
+export type SessionMoveToTaskInput = Schema.Schema.Type<typeof SessionMoveToTaskInput>;
 
 export const session = HttpApiGroup.make("session")
   .add(
@@ -930,7 +1163,7 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.post("spawn", "/sessions", {
       payload: SessionSpawnInput,
       success: Session,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Conflict, Internal],
     }),
     HttpApiEndpoint.patch("update", "/sessions/:id", {
       params: { id: Id },
@@ -973,12 +1206,31 @@ export const session = HttpApiGroup.make("session")
       success: Session,
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
+    /**
+     * Moves one Thread to another Task, or to a new Task made from it, when
+     * the join rule put it on the wrong one. Returns the Thread. Only the user
+     * moves a Thread. Only this Thread moves: its runs stay where they are,
+     * and so does the workspace's link to its Task, so the next Thread started
+     * in that folder still joins the old Task. Fails `InvalidState` when the
+     * session is not a Thread.
+     */
+    HttpApiEndpoint.post("moveToTask", "/sessions/:id/move-to-task", {
+      params: { id: Id },
+      payload: SessionMoveToTaskInput,
+      success: Session,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
     HttpApiEndpoint.post("markDone", "/sessions/mark-done", {
       payload: SessionIdsInput,
       success: Schema.Array(Session),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     HttpApiEndpoint.post("reopen", "/sessions/reopen", {
+      payload: SessionIdsInput,
+      success: Schema.Array(Session),
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    HttpApiEndpoint.post("archive", "/sessions/archive", {
       payload: SessionIdsInput,
       success: Schema.Array(Session),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],

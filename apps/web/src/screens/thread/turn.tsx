@@ -25,7 +25,8 @@ import { TimeSeparator } from "../time-separator";
 import { Markdown } from "../markdown";
 import { TurnDivider } from "./turn-divider";
 import { AgentSentMessage } from "./agent-sent-message";
-import { RuntimeNoteLine } from "./runtime-note-line";
+import { WithMessageContext } from "./message-context";
+import { NoteLine } from "./note-line";
 
 export function Turn({
   turn,
@@ -71,7 +72,7 @@ export function Turn({
         </div>
       )}
       {turn.runtimeNotes.map((note) => (
-        <RuntimeNoteLine key={note.key} note={note} />
+        <NoteLine key={note.key} note={note} />
       ))}
       {showsTurnDivider(turn, live) ? <TurnDivider turn={turn} live={live} /> : null}
     </div>
@@ -88,14 +89,18 @@ export function Turn({
  */
 function UserMessage({ message }: { readonly message: ThreadUserMessage }): JSX.Element | null {
   const { images, observe } = useAttachmentImages(message.attachments);
-  if (message.text === "" && images.length === 0) return null;
+  if (message.text === "" && images.length === 0 && message.context === undefined) return null;
   const bubble = (
-    <MessageBubble
-      text={message.text}
-      images={images}
-      imagesRef={observe}
-      embeddedHtml={message.senderSessionId !== undefined}
-    />
+    <WithMessageContext context={message.context}>
+      {message.text === "" && images.length === 0 ? null : (
+        <MessageBubble
+          text={message.text}
+          images={images}
+          imagesRef={observe}
+          embeddedHtml={message.senderSessionId !== undefined}
+        />
+      )}
+    </WithMessageContext>
   );
   if (message.senderSessionId !== undefined) {
     return (

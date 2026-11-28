@@ -3,7 +3,7 @@
  * the question and the lead, a draft that cannot start, starting a thread with ⏎ or Thread >
  * Send, a start the controller refuses, a start made once when the user
  * comes back while it runs, the draft kept per place, the start cards, the
- * starter threads while Intake is empty, and the picks a start carries.
+ * starter threads while the project has no planned task, and the picks a start carries.
  *
  * The menus are the browser's popovers, which jsdom does not implement, so
  * their content is tested on its own. Here a pick is written into the
@@ -12,9 +12,10 @@
 import { describe, expect, it } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ProviderInstance, Runner, Task, Workspace } from "@hercule/contract";
+import type { ProviderAccount, Runner, Task, Workspace } from "@hercule/contract";
 import { buildRunner } from "@hercule/client-core/threads/testing";
 import { buildDraftKey } from "../../app/pending-submissions";
+import { rememberRecentModel } from "../../app/recent-models";
 import {
   buildErrorBody,
   buildSidebarHandlers,
@@ -22,7 +23,8 @@ import {
   CONTROLLER_URL,
   createFakeBridge,
   FIXTURE_GITHUB_CONNECTION,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
+  FIXTURE_MODEL_PROFILE,
   holdAnswer,
   readFieldText,
   renderApp,
@@ -41,12 +43,13 @@ const [WEBSHOP, OPS] = SIDEBAR_FIXTURE.projects as [
 /** The thread the stubbed controller starts: "Bump the Bun pin". */
 const STARTED = THREAD_FIXTURES.finished;
 
-/** An open task of webshop, as the start cards read it. */
+/** A planned task of webshop, as the start cards read it. */
 const CART_TASK: Task = {
   id: "01a06d02-7700-7000-8000-000000000001",
   title: "Cart total rounding on discounts",
   description: "Totals are off by a cent.",
   status: "open",
+  stage: "planned",
   priority: "high",
   labels: [],
   projectId: WEBSHOP.id,
@@ -54,17 +57,34 @@ const CART_TASK: Task = {
   createdAt: "2026-09-10T08:00:00.000Z",
   updatedAt: "2026-09-10T08:00:00.000Z",
   statusChangedAt: "2026-09-10T08:00:00.000Z",
+  stageChangedAt: "2026-09-10T08:00:00.000Z",
+};
+
+/**
+ * A task of webshop that a Thread is working on: its stage is `exploring`,
+ * and its status is `open` like a planned task's, so only the stage filter
+ * keeps it out of the cards.
+ */
+const THREAD_TASK: Task = {
+  ...CART_TASK,
+  id: "01a06d02-7700-7000-8000-000000000002",
+  title: "Look into the slow checkout",
+  stage: "exploring",
 };
 
 /**
  * Opens the app signed in at `path`, with the sidebar fixture and the
- * provider instance, and returns the app once the draft's message field
+ * Provider Account, and returns the app once the draft's message field
  * shows. The controller starts every thread as `STARTED` and has no open
  * task, unless `handlers` say otherwise.
  */
 const openDraft = async (path: string, handlers: Readonly<Record<string, Handler>> = {}) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+    ...buildSidebarHandlers({
+      ...SIDEBAR_FIXTURE,
+      accounts: [FIXTURE_ACCOUNT],
+      modelProfiles: [FIXTURE_MODEL_PROFILE],
+    }),
     ...buildThreadHandlers(STARTED),
     "POST /api/v1/sessions": { body: STARTED.session },
     ...handlers,
@@ -92,7 +112,12 @@ describe("the new-thread screen", () => {
     expect(
       screen.getByText("It gets its own worktree of webshop, on a new branch from remote default."),
     ).toBeTruthy();
-    expect(readLip()).toBe("New workspace" + "remote default" + "moss");
+    expect(readLip()).toBe("New workspace" + "From remote default" + "moss");
+    // Each pick in the lip is its icon and its words, with no chevron.
+    for (const pick of document.querySelectorAll(".lip button")) {
+      expect(pick.querySelectorAll("svg")).toHaveLength(1);
+      expect(pick.firstElementChild?.tagName.toLowerCase()).toBe("svg");
+    }
     expect(document.activeElement).toBe(field);
   });
 
@@ -103,7 +128,7 @@ describe("the new-thread screen", () => {
     expect(screen.getByText("It works without a checkout.")).toBeTruthy();
     expect(readLip()).toBe("No workspace" + "moss");
     // A draft with no project has no tasks to start from, nor starters.
-    expect(screen.queryByRole("heading", { name: "Start from Intake" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Start from Work" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "Or start from one of these" })).toBeNull();
   });
 
@@ -158,23 +183,28 @@ describe("the new-thread screen", () => {
         totalMemoryBytes: 1024,
         docker: false,
         toolchains: [],
-        providers: [],
-        adapters: ["claude-code"],
+        harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+        adapters: ["claude-code/claude-code"],
         identityPort,
       },
     });
     const studio = withPort(buildRunner("01a06d02-7700-7000-8000-0000000000ab", "studio"), 4940);
-    const [snapshot] = FIXTURE_INSTANCE.snapshots;
+    const [snapshot] = FIXTURE_ACCOUNT.snapshots;
     stubApi({
       ...buildSidebarHandlers({
         ...SIDEBAR_FIXTURE,
         runners: [withPort(moss, 4939), studio],
-        providers: [
+        accounts: [
           {
-            ...FIXTURE_INSTANCE,
-            snapshots: [...FIXTURE_INSTANCE.snapshots, { ...snapshot!, runnerId: studio.id }],
+            ...FIXTURE_ACCOUNT,
+            snapshots: [...FIXTURE_ACCOUNT.snapshots, { ...snapshot!, runnerId: studio.id }],
+            readiness: [
+              ...FIXTURE_ACCOUNT.readiness,
+              { ...FIXTURE_ACCOUNT.readiness[0]!, runnerId: studio.id },
+            ],
           },
         ],
+        modelProfiles: [FIXTURE_MODEL_PROFILE],
       }),
     });
     await renderApp(
@@ -190,14 +220,34 @@ describe("the new-thread screen", () => {
     expect(readLip()).toBe("No workspace" + "studio");
   });
 
+  it("opens the add-account sheet from Add an account when the user has no account", async () => {
+    await openDraft(`/?project=${WEBSHOP.id}`, {
+      "GET /api/v1/provider-accounts": { body: [] },
+      "GET /api/v1/controller": {
+        body: {
+          id: "01a06d02-7800-7000-8000-000000000001",
+          publicKey: "controller-key",
+          version: "0.4.2",
+          defaultRunnerId: null,
+          localRunnerId: null,
+          textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+        },
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Add an account" }));
+
+    expect(await screen.findByRole("dialog", { name: "Add an account" })).toBeTruthy();
+  });
+
   it("says why the draft cannot start, sends nothing, and starts once the reason is gone", async () => {
-    let providers: readonly ProviderInstance[] = [];
+    let accounts: readonly ProviderAccount[] = [];
     const { calls, field, live } = await openDraft(`/?project=${WEBSHOP.id}`, {
-      "GET /api/v1/providers": () => ({ body: providers }),
+      "GET /api/v1/provider-accounts": () => ({ body: accounts }),
     });
 
     expect(screen.getByText("Can't start yet.").parentElement?.textContent).toBe(
-      "Can't start yet. No provider instance is set up.",
+      "Can't start yet. No account is set up. Add an account",
     );
     const send = screen.getByRole("button", { name: "Start thread" });
     expect(send.getAttribute("aria-disabled")).toBe("true");
@@ -205,9 +255,9 @@ describe("the new-thread screen", () => {
     await userEvent.click(send);
     expect(readFieldText(field)).toBe("Fix the cart");
 
-    // A provider is set up elsewhere, and the draft can start. The one start
+    // An account is set up elsewhere, and the draft can start. The one start
     // the controller receives is this one, so neither key above sent any.
-    providers = [FIXTURE_INSTANCE];
+    accounts = [FIXTURE_ACCOUNT];
     live.pushInvalidation("provider");
     await waitFor(() => {
       expect(send.getAttribute("aria-disabled")).toBeNull();
@@ -229,7 +279,8 @@ describe("the new-thread screen", () => {
     expect(readSpawns(calls).map((call) => call.body)).toEqual([
       {
         prompt: "Fix the cart",
-        instanceId: FIXTURE_INSTANCE.id,
+        providerAccountId: FIXTURE_ACCOUNT.id,
+        harnessId: "claude-code/claude-code",
         model: "claude-sonnet-5",
         options: {},
         accessMode: "approval-required",
@@ -301,6 +352,30 @@ describe("the new-thread screen", () => {
     expect(readFieldText(screen.getByRole("textbox", { name: "Message" }))).toBe("Fix the cart");
   });
 
+  it("drops a refused start's reason when the user changed a pick while it ran", async () => {
+    const held = holdAnswer();
+    const { field, router } = await openDraft(`/?project=${WEBSHOP.id}`, {
+      "POST /api/v1/sessions": held.handler,
+    });
+    await userEvent.type(field, "Fix the cart{Enter}");
+
+    // The refusal is about the picks the start was sent with, not the new ones.
+    act(() => {
+      router.options.context.controller!.pendingSubmissions.writePicks(
+        buildDraftKey(WEBSHOP.id, null),
+        { accessMode: "full-access" },
+      );
+    });
+    held.answer({
+      status: 409,
+      body: buildErrorBody("invalid_state", "moss is at its limit of 4 sessions."),
+    });
+    await act(() => Promise.resolve());
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(readFieldText(field)).toBe("Fix the cart");
+  });
+
   it("keeps what the user typed while the thread started, for the next draft", async () => {
     const held = holdAnswer();
     const { field, router } = await openDraft(`/?project=${WEBSHOP.id}`, {
@@ -347,9 +422,13 @@ describe("the new-thread screen", () => {
     expect(readSpawns(calls)).toHaveLength(1);
   });
 
-  it("reads the settings and the profiles once each time it opens", async () => {
+  it("reads the settings and the permission profiles once each time it opens, and not the Model Profiles", async () => {
     const calls = stubApi({
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildSidebarHandlers({
+        ...SIDEBAR_FIXTURE,
+        accounts: [FIXTURE_ACCOUNT],
+        modelProfiles: [FIXTURE_MODEL_PROFILE],
+      }),
       ...buildThreadHandlers(STARTED),
     });
     const { router, context } = await renderApp(
@@ -374,6 +453,16 @@ describe("the new-thread screen", () => {
       router.navigate({ to: "/threads/$sessionId", params: { sessionId: STARTED.session.id } }),
     );
     expect(await openAndCountReads()).toEqual([2, 2]);
+    // The Model Profiles are a shell read, so opening the draft, and the model
+    // menu in it, never reads them again.
+    const readsOfProfiles = calls.filter((call) => call.path === "/api/v1/model-profiles").length;
+    await act(() =>
+      router.navigate({ to: "/threads/$sessionId", params: { sessionId: STARTED.session.id } }),
+    );
+    await openAndCountReads();
+    expect(calls.filter((call) => call.path === "/api/v1/model-profiles")).toHaveLength(
+      readsOfProfiles,
+    );
   });
 
   it("keeps each place's draft while the user is elsewhere", async () => {
@@ -395,22 +484,30 @@ describe("the new-thread screen", () => {
   });
 
   it("adds a start card's task to the message, after what the user typed", async () => {
+    // The stub honours the `stage` filter as the controller does, so a Task at
+    // `exploring` is offered only when the cards ask for the wrong stage.
     const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`, {
-      "GET /api/v1/tasks": { body: { items: [CART_TASK] } },
+      "GET /api/v1/tasks": (call) => {
+        const stages = new URLSearchParams(call.search).getAll("stage");
+        const matches = (task: Task) => stages.length === 0 || stages.includes(task.stage);
+        return { body: { items: [THREAD_TASK, CART_TASK].filter(matches) } };
+      },
     });
     await userEvent.type(field, "Look at checkout");
 
-    const cards = screen.getByRole("region", { name: "Start from Intake" });
+    const cards = screen.getByRole("region", { name: "Start from Work" });
+    // The heading's note says a click adds to the message and starts nothing.
+    expect(within(cards).getByText("Puts the Task in your message")).toBeTruthy();
     const card = await within(cards).findByRole("button", { name: /Cart total rounding/ });
-    expect(card.textContent).toBe("Task" + "Cart total rounding on discounts");
-    expect(within(card).getByRole("img").getAttribute("aria-label")).toBe("high priority");
+    expect(card.textContent).toBe("High" + "Cart total rounding on discounts");
+    expect(within(cards).getAllByRole("button")).toHaveLength(1);
     await userEvent.click(card);
 
     expect(readFieldText(field)).toBe(
       `Look at checkout\n\nStart working on task ${CART_TASK.id}: Cart total rounding on discounts`,
     );
     expect(document.activeElement).toBe(field);
-    // The cards ask for the project's most urgent open tasks, newest first
+    // The cards ask for the project's most urgent planned tasks, newest first
     // within one priority.
     const tasksCall = calls.find(
       (call) => call.path === "/api/v1/tasks" && new URLSearchParams(call.search).has("projectId"),
@@ -421,7 +518,29 @@ describe("the new-thread screen", () => {
     expect(screen.queryByRole("region", { name: "Or start from one of these" })).toBeNull();
   });
 
-  it("offers code starters while the project's Intake is empty, and a click fills the message without sending", async () => {
+  it("says each start card's priority in words, with Urgent in the failure hue", async () => {
+    const tasks = (["urgent", "high", "normal", "low"] as const).map((priority, index): Task => ({
+      ...CART_TASK,
+      id: `01a06d02-7700-7000-8000-00000000010${String(index)}`,
+      title: `A ${priority} task`,
+      priority,
+    }));
+    await openDraft(`/?project=${WEBSHOP.id}`, {
+      "GET /api/v1/tasks": () => ({ body: { items: tasks } }),
+    });
+
+    const cards = screen.getByRole("region", { name: "Start from Work" });
+    const words = await within(cards).findAllByText(/^(Urgent|High|Normal|Low)$/);
+    expect(words.map((word) => word.textContent)).toEqual(["Urgent", "High", "Normal", "Low"]);
+    expect(words.map((word) => word.classList.contains("is-urgent"))).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("offers code starters while the project has no planned task, and a click fills the message without sending", async () => {
     const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`);
 
     const starters = await screen.findByRole("region", { name: "Or start from one of these" });
@@ -434,10 +553,10 @@ describe("the new-thread screen", () => {
       "A first fix" + "Find a failing or flaky test and fix it",
       "A small chore" + "Bring the README up to date with how webshop runs today",
     ]);
-    expect(within(starters).getByText(/^Intake is empty for now/).textContent).toBe(
-      "Intake is empty for now. Connect GitHub, and Triage brings what needs work here.",
+    expect(within(starters).getByText(/^Nothing planned yet/).textContent).toBe(
+      "Nothing planned yet. Connect GitHub, and what needs work there shows on the Inbox.",
     );
-    expect(screen.queryByRole("region", { name: "Start from Intake" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Start from Work" })).toBeNull();
 
     await userEvent.click(within(starters).getByRole("button", { name: /^Get to know it/ }));
 
@@ -462,8 +581,8 @@ describe("the new-thread screen", () => {
       "Something to find out" + "Research … and summarise what you find, with sources",
       "Something to plan" + "Write a one-page plan for …",
     ]);
-    expect((await within(starters).findByText(/^Intake is empty for now/)).textContent).toBe(
-      "Intake is empty for now. Triage reads GitHub and brings what needs work here.",
+    expect((await within(starters).findByText(/^Nothing planned yet/)).textContent).toBe(
+      "Nothing planned yet. What needs work on GitHub shows on the Inbox.",
     );
   });
 
@@ -505,10 +624,57 @@ describe("the new-thread screen", () => {
   });
 });
 
+describe("the model of a draft in a project with a Model Profile", () => {
+  // The profile's default entry is Opus, and the user's own thread default is
+  // Sonnet, so the model that starts the thread shows which one decided.
+  const OPUS = { providerAccountId: FIXTURE_ACCOUNT.id, harnessId: null, model: "claude-opus-5" };
+  const QUICK = {
+    ...FIXTURE_MODEL_PROFILE,
+    id: "01a06d02-7800-7000-8000-000000000002",
+    name: "Quick",
+    defaultEntry: OPUS,
+  };
+  const handlers = {
+    "GET /api/v1/model-profiles": { body: [FIXTURE_MODEL_PROFILE, QUICK] },
+    "GET /api/v1/projects": { body: { items: [{ ...WEBSHOP, modelProfileId: QUICK.id }, OPS] } },
+  };
+
+  it("starts on the profile's default entry when nothing was picked there lately", async () => {
+    const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`, handlers);
+
+    await userEvent.type(field, "Fix the cart{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]?.body).toMatchObject({ model: "claude-opus-5" });
+  });
+
+  it("starts on the entry of the profile picked last, and sends it", async () => {
+    rememberRecentModel(CONTROLLER_URL, {
+      providerAccountId: FIXTURE_ACCOUNT.id,
+      harnessId: "claude-code/claude-code",
+      model: "claude-sonnet-5",
+    });
+    const { calls, field } = await openDraft(`/?project=${WEBSHOP.id}`, handlers);
+
+    await userEvent.type(field, "Fix the cart{Enter}");
+
+    await waitFor(() => {
+      expect(readSpawns(calls)).toHaveLength(1);
+    });
+    expect(readSpawns(calls)[0]?.body).toMatchObject({
+      providerAccountId: FIXTURE_ACCOUNT.id,
+      harnessId: "claude-code/claude-code",
+      model: "claude-sonnet-5",
+    });
+  });
+});
+
 describe("the machine of a joined workspace", () => {
   it("starts on the machine of an existing workspace the user joined, though only the workspace was picked", async () => {
     const studio = buildRunner("01a06d02-7700-7000-8000-0000000000ab", "studio");
-    const [snapshot] = FIXTURE_INSTANCE.snapshots;
+    const [snapshot] = FIXTURE_ACCOUNT.snapshots;
     const [primary, other] = SIDEBAR_FIXTURE.workspaces as [Workspace, Workspace];
     const joined = { ...other, runnerId: studio.id };
     const calls = stubApi({
@@ -516,12 +682,17 @@ describe("the machine of a joined workspace", () => {
         ...SIDEBAR_FIXTURE,
         runners: [...SIDEBAR_FIXTURE.runners, studio],
         workspaces: [primary, joined],
-        providers: [
+        accounts: [
           {
-            ...FIXTURE_INSTANCE,
-            snapshots: [...FIXTURE_INSTANCE.snapshots, { ...snapshot!, runnerId: studio.id }],
+            ...FIXTURE_ACCOUNT,
+            snapshots: [...FIXTURE_ACCOUNT.snapshots, { ...snapshot!, runnerId: studio.id }],
+            readiness: [
+              ...FIXTURE_ACCOUNT.readiness,
+              { ...FIXTURE_ACCOUNT.readiness[0]!, runnerId: studio.id },
+            ],
           },
         ],
+        modelProfiles: [FIXTURE_MODEL_PROFILE],
       }),
       ...buildThreadHandlers(STARTED),
       "POST /api/v1/sessions": { body: STARTED.session },

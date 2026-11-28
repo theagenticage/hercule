@@ -40,8 +40,8 @@ export class MainWindow extends Context.Service<
     readonly show: Effect.Effect<void>;
 
     /**
-     * Shows the window for the first time, when the page reports that its
-     * first screen has reached the window. Does nothing once the window has
+     * Shows the window for the first time, when the page reports its first
+     * screen (see `makeWindowVisibility`). Does nothing once the window has
      * shown: the page reports again after each reload, and more than one
      * screen can report at launch.
      */

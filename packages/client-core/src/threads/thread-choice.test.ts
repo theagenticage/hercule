@@ -9,36 +9,37 @@ import type { ThreadPicks } from "./config";
 import { applyThreadChoice } from "./thread-choice";
 
 describe("applyThreadChoice", () => {
-  it("records a model together with its account", () => {
-    expect(applyThreadChoice({}, { kind: "model", instanceId: "i-codex", model: "gpt-5" })).toEqual(
-      { instanceId: "i-codex", model: "gpt-5" },
-    );
+  it("records a model together with its account and harness", () => {
+    expect(
+      applyThreadChoice(
+        {},
+        { kind: "model", providerAccountId: "a-openai", harnessId: "pi/pi", model: "gpt-5" },
+      ),
+    ).toEqual({ providerAccountId: "a-openai", harnessId: "pi/pi", model: "gpt-5" });
   });
 
-  it("replaces the account and model of an earlier model choice, and keeps the other picks", () => {
+  it("replaces the account, harness and model of an earlier model choice, and keeps the other picks", () => {
     const held: ThreadPicks = {
-      instanceId: "i-claude",
+      providerAccountId: "a-anthropic",
+      harnessId: "claude-code/claude-code",
       model: "claude-opus-5",
       runnerId: "r-remote",
       options: { effort: "max" },
     };
     expect(
-      applyThreadChoice(held, { kind: "model", instanceId: "i-codex", model: "gpt-5" }),
+      applyThreadChoice(held, {
+        kind: "model",
+        providerAccountId: "a-openai",
+        harnessId: "codex/codex",
+        model: "gpt-5",
+      }),
     ).toEqual({
-      instanceId: "i-codex",
+      providerAccountId: "a-openai",
+      harnessId: "codex/codex",
       model: "gpt-5",
       runnerId: "r-remote",
       options: { effort: "max" },
     });
-  });
-
-  it("records an account and removes the model pick, because a model belongs to its account", () => {
-    expect(
-      applyThreadChoice(
-        { instanceId: "i-claude", model: "claude-opus-5", runnerId: "r-remote" },
-        { kind: "account", instanceId: "i-codex" },
-      ),
-    ).toEqual({ instanceId: "i-codex", runnerId: "r-remote" });
   });
 
   it("merges an option into the options already picked, and keeps an explicit false", () => {
@@ -65,5 +66,49 @@ describe("applyThreadChoice", () => {
     expect(applyThreadChoice({}, { kind: "accessMode", value: "full-access" })).toEqual({
       accessMode: "full-access",
     });
+  });
+
+  it("records the MCP Servers list with the project it was made under, replacing an earlier one", () => {
+    const first = applyThreadChoice(
+      { runnerId: "r-remote" },
+      { kind: "mcpServers", projectId: "p-shop", decideMcpServerIds: () => ["s-work"] },
+    );
+    expect(first).toEqual({
+      runnerId: "r-remote",
+      mcpServers: { projectId: "p-shop", mcpServerIds: ["s-work"] },
+    });
+    expect(
+      applyThreadChoice(first, {
+        kind: "mcpServers",
+        projectId: null,
+        decideMcpServerIds: () => [],
+      }),
+    ).toEqual({ runnerId: "r-remote", mcpServers: { projectId: null, mcpServerIds: [] } });
+  });
+
+  it("decides the MCP Servers list from the pick held for the same project only", () => {
+    const held: ThreadPicks = { mcpServers: { projectId: "p-shop", mcpServerIds: ["s-work"] } };
+    const seen: (readonly string[] | undefined)[] = [];
+    const choose = (projectId: string | null) => ({
+      kind: "mcpServers" as const,
+      projectId,
+      decideMcpServerIds: (picked: readonly string[] | undefined) => {
+        seen.push(picked);
+        return undefined;
+      },
+    });
+
+    expect(applyThreadChoice(held, choose("p-shop"))).toBe(held);
+    expect(applyThreadChoice(held, choose(null))).toBe(held);
+    expect(seen).toEqual([["s-work"], undefined]);
+  });
+
+  it("forgets the MCP Servers pick and keeps the others", () => {
+    expect(
+      applyThreadChoice(
+        { runnerId: "r-remote", mcpServers: { projectId: null, mcpServerIds: ["s-work"] } },
+        { kind: "mcpServersReset" },
+      ),
+    ).toEqual({ runnerId: "r-remote" });
   });
 });

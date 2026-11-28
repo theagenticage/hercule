@@ -9,10 +9,9 @@ import {
   WORKSPACE_LIFECYCLE_CAPABILITY,
   type ControllerToRunner,
   type JoinAnswer,
-  type RunnerToController,
 } from "@hercule/protocol";
 import type { Workspaces } from "../../../../runner/src/workspaces";
-import { buildRunnerSocketUrl } from "../../runners/testing";
+import { buildRunnerSocketUrl, type RunnerWireFrame } from "../../runners/testing";
 import { waitUntil } from "../../sessions/testing";
 import { FACTS, MODELS } from "../../workspaces/testing";
 
@@ -22,24 +21,44 @@ const controllerRoot = resolve(import.meta.dirname, "../..");
 // another process before the server binds it. The configured `bind.port` is
 // left at its default: it only sets the origin of the setup URL, and the
 // tests read just the token from that URL.
+//
+// The Anthropic plugin is loaded beside Claude Code because setup's default
+// assistant needs a Provider Account to run on, and a fresh install has none.
+// The process adds a Claude subscription account before it serves, as a
+// user's first-run step does (it holds no key, so no key check is involved).
 const controllerCode = `
   import { Effect } from "effect";
   import * as HttpServer from "effect/http/HttpServer";
   import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
+  import { anthropic } from "@hercule/plugin-anthropic";
   import { claudeCode } from "@hercule/plugin-claude-code";
+  import * as SqlClient from "effect/sql/SqlClient";
+  import { nowIso, withTransaction } from ${JSON.stringify(join(controllerRoot, "db/index.ts"))};
+  import { providerAccountRepository } from ${JSON.stringify(join(controllerRoot, "provider-accounts/index.ts"))};
   import { bootWith } from ${JSON.stringify(join(controllerRoot, "bootstrap.ts"))};
-  import { operationLayers, bodyLimits, serve } from ${JSON.stringify(join(controllerRoot, "http/index.ts"))};
+  import { operationLayers, listenerOptions, serve } from ${JSON.stringify(join(controllerRoot, "http/index.ts"))};
   await Effect.runPromise(bootWith({
     argv: [], env: process.env,
-    masterKeyBackend: "file", plugins: [claudeCode]
+    masterKeyBackend: "file", plugins: [anthropic, claudeCode]
   }, () => Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    if (!(yield* accounts.hasAny())) {
+      yield* withTransaction(sql, accounts.insert({
+        providerId: "anthropic/anthropic",
+        kind: "subscription-per-machine",
+        label: null,
+        defaultHarnessId: "claude-code/claude-code",
+        at: yield* nowIso,
+      }));
+    }
     yield* serve(undefined);
     const { address } = yield* HttpServer.HttpServer;
     if (address._tag === "UnixPathAddress") throw new Error("expected a TCP address");
     console.log("proof controller listening on port " + address.port);
     yield* Effect.never;
   }).pipe(Effect.provide(operationLayers),
-    Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...bodyLimits })))));
+    Effect.provide(BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...listenerOptions })))));
 `;
 
 const assertProcessGone = (pid: number): void => {
@@ -106,7 +125,7 @@ export const connectProofRunner = async (
   const socket = new WebSocket(buildRunnerSocketUrl(base), {
     headers: { authorization: `Bearer ${joined.credential}` },
   });
-  const write = (frame: RunnerToController): void => socket.send(JSON.stringify(frame));
+  const write = (frame: RunnerWireFrame): void => socket.send(JSON.stringify(frame));
   let sequence = 0;
   socket.onmessage = (event) => {
     const frame = JSON.parse(String(event.data)) as ControllerToRunner;
@@ -122,8 +141,8 @@ export const connectProofRunner = async (
         write({
           _tag: "probeReport",
           requestId: frame.requestId,
-          instanceId: frame.instanceId,
-          result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models: MODELS },
+          providerAccountId: frame.harnessAccount.providerAccountId,
+          result: { harnessVersion: "99.0.0", auth: { status: "ok" }, models: MODELS, usage: null },
         });
         break;
       case "workspaceInspect":
@@ -134,7 +153,7 @@ export const connectProofRunner = async (
         break;
       case "sessionStart":
         if (options.finishSessions === false) break;
-        // Filesystem proofs finish the synthetic session without executing a provider or spending tokens.
+        // Filesystem proofs finish the synthetic session without executing a harness or spending tokens.
         write({
           _tag: "sessionInputResult",
           requestId: frame.requestId,
@@ -165,8 +184,8 @@ export const connectProofRunner = async (
         nonce: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64"),
         facts: {
           ...FACTS,
-          providers: [{ name: "claude", present: true, path: "/fixture/claude" }],
-          adapters: ["claude-code"],
+          harnesses: [{ name: "claude", present: true, path: "/fixture/claude" }],
+          adapters: ["claude-code/claude-code"],
         },
       });
       opened();

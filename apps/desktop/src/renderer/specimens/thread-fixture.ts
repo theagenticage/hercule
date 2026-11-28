@@ -29,6 +29,7 @@ import type {
   OpenRequest,
   PermissionRequest,
   Profile,
+  Session,
   TranscriptRow,
   Workspace,
 } from "@hercule/contract";
@@ -104,7 +105,7 @@ type ItemStartedBody = Extract<EventBody, { _tag: "item.started" }>;
 /** The kind of item a transcript row starts. */
 type ItemKind = ItemStartedBody["kind"];
 
-/** What the provider reports about an item as it starts and completes. */
+/** What the harness reports about an item as it starts and completes. */
 type ItemDetail = NonNullable<ItemStartedBody["detail"]>;
 
 /** One event of the transcript, and how many seconds after `TURN_START` it happened. */
@@ -190,7 +191,7 @@ const CAUSE_MESSAGE = [
  * The push's own item has not started: the book draws no work stretch after
  * the second message, and a started item would draw one.
  */
-const FIX_STEPS: ReadonlyArray<TranscriptStep> = [
+export const FIX_STEPS: ReadonlyArray<TranscriptStep> = [
   [0, { _tag: "turn.started", turnId: TURN_ID, model: CLAUDE_OPUS.slug }],
   ...runItem([0, 0], "it-ask", "user_message", {
     text:
@@ -307,7 +308,7 @@ const COMPACTION_SUMMARY = [
 
 /**
  * The Fix thread with the runtime notices, the labelled unknown step and the
- * finished compaction the provider reports, which the book never draws:
+ * finished compaction the harness reports, which the book never draws:
  *
  * - "Conversation was cleared", before the turn starts, in no turn;
  * - "Recalled 3 memories", between two reads of the first stretch;
@@ -615,6 +616,65 @@ export const buildFixThreadWithPermissionRequests = (several: boolean): ThreadSc
   profiles: [WORKER_PROFILE],
 });
 
+/**
+ * The Request the Fix thread waits on in the thread specimen's `?state=question`:
+ * two questions about the pull request, as the agent's AskUserQuestion tool
+ * asks them. The first has two options with descriptions, the second has two
+ * and takes the user's own answer.
+ */
+const PULL_REQUEST_QUESTIONS: OpenRequest = {
+  requestId: "rq-fix-pull-request",
+  itemId: "it-pull-request",
+  kind: "question",
+  detail: {
+    questions: [
+      {
+        question: "Which branch should the pull request target?",
+        header: "Base branch",
+        options: [
+          { label: "main", description: "Where deploy #1289 shipped from." },
+          {
+            label: "release/eu-hotfix",
+            description: "Reaches EU shoppers without the rest of main.",
+          },
+        ],
+        multiSelect: false,
+      },
+      {
+        question: "Should the fix also cover Apple Pay, which returns the same status?",
+        header: "Scope",
+        options: [
+          {
+            label: "Cards only",
+            description: "Keeps this pull request small. Apple Pay gets its own.",
+          },
+          {
+            label: "Cards and Apple Pay",
+            description: "One change for every payment that needs more action.",
+          },
+        ],
+        multiSelect: false,
+      },
+    ],
+  },
+};
+
+/**
+ * The Fix thread working and waiting on `PULL_REQUEST_QUESTIONS`, which it
+ * asks after its tests pass, for the thread specimen's `?state=question`. The
+ * Request is the last step in place of the push, so the transcript ends as the
+ * Fix thread's does.
+ */
+export const FIX_THREAD_ASKING_QUESTIONS: ThreadScreenRecords = {
+  ...FIX_THREAD,
+  session: { ...FIX_SESSION, openRequests: [PULL_REQUEST_QUESTIONS] },
+  transcript: buildTranscript([
+    ...FIX_STEPS.slice(0, -1),
+    [1740, { _tag: "request.opened", request: PULL_REQUEST_QUESTIONS }],
+  ]),
+  queuedInputs: [],
+};
+
 /** Every list the shell reads: the sidebar specimen's, with Fix and Read in `FIX_WORKSPACE`. */
 export const THREAD_PAGE_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
@@ -626,6 +686,33 @@ export const THREAD_PAGE_RECORDS: SidebarRecords = {
         : thread,
   ),
   workspaces: [FIX_WORKSPACE],
+};
+
+/** The Fix thread after the user archived it: finished, marked Done, and put away for good. */
+const ARCHIVED_FIX_SESSION: Session = {
+  ...FIX_SESSION,
+  status: "exited",
+  resumable: false,
+  openRequests: [],
+  exitedAt: new Date(SPECIMEN_NOW - 5 * 60_000).toISOString(),
+  done: { at: new Date(SPECIMEN_NOW - 4 * 60_000).toISOString(), by: "user" },
+  archived: { at: new Date(SPECIMEN_NOW - 60_000).toISOString(), by: "user" },
+};
+
+/** The archived Fix thread, for the thread specimen's `?state=archived`. */
+export const FIX_THREAD_ARCHIVED: ThreadScreenRecords = {
+  ...FIX_THREAD,
+  session: ARCHIVED_FIX_SESSION,
+  queuedInputs: [],
+};
+
+/**
+ * The shell's lists for `FIX_THREAD_ARCHIVED`: the thread page's, without the
+ * archived row, because the sidebar's read leaves archived threads out.
+ */
+export const ARCHIVED_PAGE_RECORDS: SidebarRecords = {
+  ...THREAD_PAGE_RECORDS,
+  threads: THREAD_PAGE_RECORDS.threads.filter((thread) => thread.workspaceId !== FIX_WORKSPACE.id),
 };
 
 /** The thread whose agent sends the Fix thread a message: its face is lime, a loud hue. */

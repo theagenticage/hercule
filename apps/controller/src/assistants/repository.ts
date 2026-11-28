@@ -88,6 +88,13 @@ const make = Effect.gen(function* () {
         (rows) => Option.map(Option.fromNullishOr(rows[0]), toAssistantFields),
       ),
 
+    /** Returns whether at least one assistant exists. */
+    exists: (): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly found: number }>`SELECT 1 AS found FROM assistants LIMIT 1`,
+        (rows) => rows.length > 0,
+      ),
+
     insert: (fields: NewAssistantFields): Effect.Effect<StoredAssistantFields, SqlError> =>
       Effect.gen(function* () {
         yield* sql`

@@ -1,0 +1,437 @@
+/* A machine's page: its head, room line, offline banner, the instruments, and
+   the Software and Settings sections. The measurements are the fleet prototype's (`fx-hero`,
+   `fx-banner`, `fx-room-line`, `fx-instruments`, `fx-psec`, `fx-sw`). Every class starts with
+   `machine-page-`. Each departure from the prototype is explained in a
+   comment. */
+
+.machine-page {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+/* ---------- The head ---------- */
+.machine-page-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.machine-page-tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--muted);
+}
+.machine-page-head-text {
+  flex: 1;
+  min-width: 0;
+}
+.machine-page-head-text h2 {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+}
+/* The line under the name wraps, and a "·" must never end a line or start one.
+   So the dot is not an item of its own: each piece after the first draws its dot
+   (`::before`) in a slot of its own to its left, and the line holds no dot at its
+   end. The row is moved left by one slot and clipped at the text column's edge, so
+   the dot of a piece that wraps to the start of a line falls outside the clip and
+   is not drawn. On one line the slots are what the 6px gaps and the dot used to
+   take. The slot is 6px, the dot (0.29em wide, as Inter draws it), and 6px. */
+.machine-page-head-text p {
+  --machine-page-head-slot: calc(12px + 0.29em);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 6px;
+  margin: 2px 0 0 calc(-1 * var(--machine-page-head-slot));
+  clip-path: inset(-1em 0 -1em var(--machine-page-head-slot));
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.machine-page-head-text p > * {
+  position: relative;
+  padding-left: var(--machine-page-head-slot);
+}
+/* `content: "·" / ""` gives the dot an empty text alternative, so screen readers
+   skip it as they skipped the `aria-hidden` span it replaces. */
+.machine-page-head-piece::before {
+  content: "·";
+  content: "·" / "";
+  position: absolute;
+  top: 0;
+  left: 6px;
+  width: 0.29em;
+  text-align: center;
+}
+.machine-page-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.machine-page-status .fleet-dot {
+  width: 7px;
+  height: 7px;
+}
+
+/* ---------- The room line and the offline banner ---------- */
+.machine-page-room {
+  margin: 30px 0 0;
+  color: var(--muted);
+  font-size: var(--t-14);
+}
+.machine-page-room b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.machine-page-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 22px;
+  padding: 13px 14px 13px 16px;
+  border-radius: var(--r-md);
+  background: var(--fail-tint);
+}
+.machine-page-banner > div {
+  flex: 1;
+  display: grid;
+  gap: 3px;
+}
+.machine-page-banner p {
+  margin: 0;
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.machine-page-banner span {
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.55;
+}
+.machine-page-banner code {
+  color: var(--ink);
+  font-size: var(--t-11);
+}
+
+/* ---------- Capacity: the room line and the three instruments ---------- */
+/* The section starts right under the head, unlike the sections below it: the
+   room line's own margin is the gap, and an away machine's banner has its own. */
+.machine-page-capacity {
+  scroll-margin-top: var(--fleet-header-clearance);
+}
+/* The row is the container the columns answer to, so they follow the width of
+   the page and not of the window. */
+.machine-page-instruments-box {
+  container: machine-page-instruments / inline-size;
+  margin-top: 18px;
+}
+.machine-page-instruments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px 36px;
+}
+/* The widest drawing that must show whole is 16 slots with the cap mark among
+   them (a lowered cap with 16 sessions running): 16 blocks of 7px, the 1.5px
+   mark, and 2px between all 17 parts, so 16 * 7 + 16 * 2 + 1.5 = 145.5px.
+   Three columns need 3 * 145.5 + 2 * 36 = 508.5px, rounded up to 510px. Under
+   that, Sessions takes a row of its own and CPU and Memory share the next.
+   At the narrowest window (800px wide, sidebar open) the row is about 464px,
+   so a third of it would be about 131px, too narrow. Waiting blocks beyond
+   the column are cut off at its edge, as on a card: the numbers carry the
+   counts. */
+@container machine-page-instruments (width < 510px) {
+  .machine-page-instruments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .machine-page-instruments > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+.machine-page-instrument {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.machine-page-instrument-label {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.machine-page-instrument > b {
+  font-size: var(--t-num);
+  font-weight: var(--w-medium);
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.machine-page-instrument > b small {
+  color: var(--muted);
+  font-size: var(--t-13);
+  font-weight: var(--w-regular);
+  letter-spacing: 0;
+}
+.machine-page-instrument--you > b {
+  color: var(--you-ink);
+}
+.machine-page-instrument--fail > b {
+  color: var(--fail-ink);
+}
+/* The drawings are the cards', made as big as the prototype's instruments:
+   a 6px meter, and the sessions' bar 14px tall across the tile. Both take
+   22px with their margins and centre on the same line, so the notes under
+   the three tiles line up (the prototype's meter takes 16px and its ladder
+   22px). */
+.machine-page-instrument .fleet-meter {
+  height: 6px;
+  margin: 8px 0;
+}
+.machine-page-instrument .fleet-sessions {
+  height: 14px;
+  margin: 4px 0;
+}
+/* The cells follow the card's rule with the tile's width as the budget in place of 120px: the
+   widest whole width that, with the 2px gaps and the cap's rule, keeps every cell within the tile.
+   The budget counts the waiting cells too, so the marigold that says sessions wait is never cut
+   off here, where the tile has no room beyond the bar. */
+.machine-page-instrument .fleet-sessions.is-cells {
+  width: 100%;
+}
+.machine-page-instrument .fleet-sessions.is-cells > i {
+  width: calc(round(down, (100% + 2px - var(--fleet-rule)) / var(--fleet-cells), 1px) - 2px);
+}
+.machine-page-instrument-note {
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+/* A machine that is away: what it last reported in quieter inks, as on its
+   card, never at reduced opacity. */
+.machine-page-instruments-box.is-away .machine-page-instrument > b {
+  color: var(--muted);
+}
+.machine-page-instruments-box.is-away .machine-page-instrument-label {
+  color: var(--faint);
+}
+.machine-page-instruments-box.is-away .fleet-meter {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 16%, transparent);
+}
+.machine-page-instruments-box.is-away .fleet-meter i {
+  background: var(--faint);
+}
+
+/* ---------- A section ---------- */
+.machine-page-section {
+  margin-top: 48px;
+  scroll-margin-top: var(--fleet-header-clearance);
+}
+.machine-page-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+.machine-page-section-head h3 {
+  margin: 0;
+  font-size: var(--t-14);
+  font-weight: var(--w-bold);
+}
+.machine-page-section-head small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+
+/* A section whose heading has a control at its far end, such as Running here's
+   Work | Sessions. The control is taller than the heading's text, so the first
+   row's rule sits 10px under the heading's row, where a bare heading has 14px. */
+.machine-page-section-head-with-actions {
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 10px;
+}
+
+/* ---------- Software ---------- */
+.machine-page-sw-heading {
+  margin: 16px 0 2px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.machine-page-sw {
+  container: machine-page-sw / inline-size;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+/* The prototype's row has five columns, the last two for the policy and the
+   Install and Update buttons. This page has no policy and installs nothing,
+   so the row has the name, the version, the note and the action. */
+.machine-page-sw-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 190px) 110px minmax(0, 1fr) 96px;
+  align-items: center;
+  gap: 16px;
+  min-height: 40px;
+}
+.machine-page-sw-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  font-weight: var(--w-medium);
+}
+.machine-page-sw-version {
+  font-size: var(--t-12);
+}
+.machine-page-sw-version.is-muted {
+  color: var(--muted);
+}
+.machine-page-sw-version.is-faint,
+.machine-page-sw-note {
+  color: var(--faint);
+}
+.machine-page-sw-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--t-12);
+}
+/* A tool's version is a raw string such as "go1.25.3 linux/arm64", so it is
+   cut with an ellipsis (its tooltip has the whole), and its figures line up
+   from one row to the next. */
+.machine-page-sw-version.is-tool {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.machine-page-sw-note.is-fail {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.machine-page-sw-note.is-you {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.machine-page-sw-note.is-muted {
+  color: var(--muted);
+}
+.machine-page-sw-action {
+  display: flex;
+  justify-content: flex-end;
+}
+/* The Tools rows have a name and a version only: no note, no action. */
+.machine-page-sw--tools .machine-page-sw-row {
+  grid-template-columns: minmax(140px, 190px) minmax(0, 1fr);
+}
+/* In a narrow section the note moves under the name, where it has the whole
+   row to wrap in, instead of being cut off. */
+@container machine-page-sw (width < 600px) {
+  .machine-page-sw-row {
+    grid-template-columns: minmax(0, 1fr) 110px auto;
+    grid-template-areas:
+      "name version action"
+      "note note note";
+    row-gap: 0;
+  }
+  .machine-page-sw-name {
+    grid-area: name;
+  }
+  .machine-page-sw-version {
+    grid-area: version;
+  }
+  .machine-page-sw-action {
+    grid-area: action;
+  }
+  .machine-page-sw-note {
+    grid-area: note;
+    /* Starts under the name's text, after its 13px logo and 9px gap, and
+       sits close to it, with a 2px gap between the two lines. */
+    margin-top: -6px;
+    padding: 0 0 8px 22px;
+    white-space: normal;
+  }
+  .machine-page-sw-note:empty {
+    display: none;
+  }
+}
+.machine-page-sw-footnote {
+  margin: 8px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+/* Two lines in a row, such as the tools not installed and the tools not looked for, sit closer. */
+.machine-page-sw-footnote + .machine-page-sw-footnote {
+  margin-top: 4px;
+}
+
+/* ---------- Settings ---------- */
+/* The prototype's steppers and value are static. These are fields, and the
+   Settings frame's rows are `.set-row`. */
+.machine-page-number {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+input.machine-page-number-field {
+  width: 88px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.machine-page-unit {
+  color: var(--muted);
+}
+.machine-page-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.machine-page-label {
+  padding-right: 4px;
+}
+.machine-page-label-remove {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--faint);
+  transition:
+    background var(--dur-1),
+    color var(--dur-1);
+}
+.machine-page-label-remove:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+input.machine-page-label-field {
+  width: 120px;
+  height: 26px;
+  padding: 0 9px;
+  border-radius: var(--r-pill);
+  font-size: var(--t-12);
+}
+@container machine-page-sw (width < 600px) {
+  .machine-page-sw--tools .machine-page-sw-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 60%);
+    grid-template-areas: "name version";
+  }
+}

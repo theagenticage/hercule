@@ -1,172 +1,252 @@
 /**
- * Tests `buildAssistantProviderField(instances, assistant)`, which builds the
- * Provider field of Settings > Assistants: one group per provider instance,
- * its default model first, the account as the hint.
+ * Tests `buildAssistantProviderField(accounts, providers, modelProfiles,
+ * assistant)`, which builds the Provider field of Settings > Assistants: one
+ * group per Provider Account, its default model first, then the models the
+ * Model Profiles list for it, the identity as the hint.
  */
 import { describe, expect, it } from "vitest";
-import type { ProviderInstance } from "@hercule/contract";
+import type { ModelProfile, ProviderAccount } from "@hercule/contract";
 import { toIdTail } from "@hercule/contract";
+import {
+  ANTHROPIC_IDENTITY,
+  OPENAI_IDENTITY,
+  PROVIDERS,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  buildProviderAccount,
+} from "../providers.testing";
 import { buildAssistantProviderField } from "./provider-field";
 
 const PERSONAL = "01a06d02-7600-7000-8000-000000000001";
 const WORK = "01a06d02-7600-7000-8000-000000000002";
 const CODEX = "01a06d02-7600-7000-8000-000000000003";
 
-const buildInstance = (
-  id: string,
-  providerId: string,
-  name: string,
-  displayName: string,
-  auth: ProviderInstance["snapshots"][number]["auth"] | null,
-): ProviderInstance => ({
-  id,
-  providerId,
-  name,
-  config: {},
-  displayName,
-  binaryName: providerId,
-  declared: {} as ProviderInstance["declared"],
-  secretFields: [],
-  snapshots:
-    auth === null
-      ? []
-      : [
-          {
-            runnerId: "01a06d02-7700-7000-8000-000000000001",
-            probedAt: "2026-09-05T09:14:00.000Z",
-            harnessVersion: "2.1.263",
-            versionVerdict: "ok",
-            auth,
-            models: [
-              {
-                slug: "claude-sonnet-5",
-                name: "Sonnet 5",
-                imageInput: { maxBytes: null },
-                isDefault: true,
-                options: [],
-              },
-              {
-                slug: "claude-opus-5",
-                name: "Opus 5",
-                imageInput: { maxBytes: null },
-                options: [],
-              },
-            ],
-          },
-        ],
-  createdAt: "2026-09-01T09:00:00.000Z",
-  updatedAt: "2026-09-01T09:00:00.000Z",
-});
+const SIGNED_IN = "rogier@example.com";
 
-const LOGGED_IN = { status: "ok", identity: "rogier@example.com" } as const;
+/** Returns an account signed in as `identity`, or one that knows nobody when it is null. */
+const buildAccount = (
+  base: typeof ANTHROPIC_IDENTITY,
+  id: string,
+  identity: string | null,
+): ProviderAccount => ({ ...buildProviderAccount({ ...base, id }), identity });
+
+const claude = (id: string, label: string | null = null): ProviderAccount =>
+  buildAccount({ ...ANTHROPIC_IDENTITY, label }, id, SIGNED_IN);
+
+const codexSignedOut = (): ProviderAccount => buildAccount(OPENAI_IDENTITY, CODEX, null);
+
+/** Returns a profile that lists Sonnet 5 and Opus 5 for each of the Claude accounts given. */
+const profileOf = (...ids: string[]): ModelProfile =>
+  buildModelProfile(
+    ids.map((id) => {
+      const identity = { ...ANTHROPIC_IDENTITY, id };
+      return buildProfileSection(identity, [
+        buildProfileEntry(identity, "claude-sonnet-5", { name: "Sonnet 5" }),
+        buildProfileEntry(identity, "claude-opus-5", { name: "Opus 5" }),
+      ]);
+    }),
+  );
 
 describe("buildAssistantProviderField", () => {
-  it("offers each instance's default model, then its catalog, named after the instance", () => {
-    const instances = [
-      buildInstance(PERSONAL, "claude-code", "personal", "Claude Code", LOGGED_IN),
-    ];
+  it("offers each account's default model, then the models its profile lists, named after the account", () => {
+    const field = buildAssistantProviderField(
+      [claude(PERSONAL)],
+      PROVIDERS,
+      [profileOf(PERSONAL)],
+      {
+        providerAccountId: PERSONAL,
+        harnessId: null,
+        model: null,
+      },
+    );
 
-    const field = buildAssistantProviderField(instances, { instanceId: PERSONAL, model: null });
-
+    const harnessId = null;
     expect(field.groups).toEqual([
       {
-        instanceId: PERSONAL,
-        label: "Claude Code",
+        providerAccountId: PERSONAL,
+        label: "Anthropic",
         choices: [
-          { instanceId: PERSONAL, model: null, label: "Claude Code · Default model" },
-          { instanceId: PERSONAL, model: "claude-sonnet-5", label: "Claude Code · Sonnet 5" },
-          { instanceId: PERSONAL, model: "claude-opus-5", label: "Claude Code · Opus 5" },
+          {
+            providerAccountId: PERSONAL,
+            harnessId,
+            model: null,
+            label: "Anthropic · Default model",
+          },
+          {
+            providerAccountId: PERSONAL,
+            harnessId,
+            model: "claude-sonnet-5",
+            label: "Anthropic · Sonnet 5",
+          },
+          {
+            providerAccountId: PERSONAL,
+            harnessId,
+            model: "claude-opus-5",
+            label: "Anthropic · Opus 5",
+          },
         ],
       },
     ]);
-    expect(field.providerId).toBe("claude-code");
+    expect(field.harnessId).toBe("claude-code/claude-code");
     expect(field.hint).toBe("rogier@example.com");
   });
 
-  it("names two instances of one provider by their account names", () => {
-    const instances = [
-      buildInstance(PERSONAL, "claude-code", "personal", "Claude Code", LOGGED_IN),
-      buildInstance(WORK, "claude-code", "work", "Claude Code", LOGGED_IN),
-    ];
+  it("names two accounts of one provider by their labels", () => {
+    const accounts = [claude(PERSONAL), claude(WORK, "work")];
 
-    const field = buildAssistantProviderField(instances, { instanceId: WORK, model: null });
+    const field = buildAssistantProviderField(accounts, PROVIDERS, [profileOf(PERSONAL, WORK)], {
+      providerAccountId: WORK,
+      harnessId: null,
+      model: null,
+    });
 
-    expect(field.groups.map(({ label }) => label)).toEqual(["personal", "work"]);
+    expect(field.groups.map(({ label }) => label)).toEqual(["Anthropic", "Anthropic · work"]);
   });
 
-  it("offers only the default model of an instance that is not logged in", () => {
-    const instances = [
-      buildInstance(CODEX, "codex", "codex", "Codex", { status: "unauthenticated" }),
-    ];
-
-    const field = buildAssistantProviderField(instances, { instanceId: CODEX, model: null });
+  it("offers only the default model of an account that no profile lists", () => {
+    const field = buildAssistantProviderField([codexSignedOut()], PROVIDERS, [], {
+      providerAccountId: CODEX,
+      harnessId: null,
+      model: null,
+    });
 
     expect(field.groups[0]?.choices).toEqual([
-      { instanceId: CODEX, model: null, label: "Codex · Default model" },
+      { providerAccountId: CODEX, harnessId: null, model: null, label: "OpenAI · Default model" },
     ]);
-    expect(field.hint).toBe("Codex");
+    expect(field.hint).toBe("OpenAI");
   });
 
-  it("keeps the assistant's model when the catalog no longer offers it", () => {
-    const instances = [
-      buildInstance(PERSONAL, "claude-code", "personal", "Claude Code", LOGGED_IN),
-    ];
-
-    const field = buildAssistantProviderField(instances, {
-      instanceId: PERSONAL,
-      model: "claude-sonnet-4",
-    });
+  it("keeps the assistant's model when no profile lists it", () => {
+    const field = buildAssistantProviderField(
+      [claude(PERSONAL)],
+      PROVIDERS,
+      [profileOf(PERSONAL)],
+      {
+        providerAccountId: PERSONAL,
+        harnessId: null,
+        model: "claude-sonnet-4",
+      },
+    );
 
     expect(field.groups[0]?.choices.at(-1)).toEqual({
-      instanceId: PERSONAL,
+      providerAccountId: PERSONAL,
+      harnessId: null,
       model: "claude-sonnet-4",
-      label: "Claude Code · claude-sonnet-4",
+      label: "Anthropic · claude-sonnet-4",
     });
   });
 
-  it("keeps the assistant's model on an instance that is not logged in", () => {
-    const instances = [
-      buildInstance(CODEX, "codex", "codex", "Codex", { status: "unauthenticated" }),
-    ];
-
-    const field = buildAssistantProviderField(instances, { instanceId: CODEX, model: "gpt-6" });
+  it("keeps the assistant's model on an account that no profile lists", () => {
+    const field = buildAssistantProviderField([codexSignedOut()], PROVIDERS, [], {
+      providerAccountId: CODEX,
+      harnessId: null,
+      model: "gpt-6",
+    });
 
     expect(field.groups[0]?.choices).toEqual([
-      { instanceId: CODEX, model: null, label: "Codex · Default model" },
-      { instanceId: CODEX, model: "gpt-6", label: "Codex · gpt-6" },
+      { providerAccountId: CODEX, harnessId: null, model: null, label: "OpenAI · Default model" },
+      { providerAccountId: CODEX, harnessId: null, model: "gpt-6", label: "OpenAI · gpt-6" },
     ]);
   });
 
-  it("does not add the assistant's model to another instance's group", () => {
-    const instances = [
-      buildInstance(PERSONAL, "claude-code", "personal", "Claude Code", LOGGED_IN),
-      buildInstance(CODEX, "codex", "codex", "Codex", { status: "unauthenticated" }),
-    ];
-
-    const field = buildAssistantProviderField(instances, {
-      instanceId: PERSONAL,
-      model: "claude-sonnet-4",
-    });
+  it("does not add the assistant's model to another account's group", () => {
+    const field = buildAssistantProviderField(
+      [claude(PERSONAL), codexSignedOut()],
+      PROVIDERS,
+      [profileOf(PERSONAL)],
+      {
+        providerAccountId: PERSONAL,
+        harnessId: null,
+        model: "claude-sonnet-4",
+      },
+    );
 
     expect(field.groups[1]?.choices.map((choice) => choice.model)).toEqual([null]);
   });
 
-  it.each([null, "claude-sonnet-5"])(
-    "adds a deleted instance as a last group holding only the assistant's choice, model %s",
-    (model) => {
-      const instances = [
-        buildInstance(PERSONAL, "claude-code", "personal", "Claude Code", LOGGED_IN),
-      ];
+  it("lists the entries of the assistant's own harness, and carries that harness on its own account's choices only", () => {
+    const identity = { ...ANTHROPIC_IDENTITY, id: PERSONAL };
+    const profile = buildModelProfile([
+      buildProfileSection(identity, [
+        buildProfileEntry(identity, "claude-sonnet-5", { name: "Sonnet 5" }),
+        buildProfileEntry(identity, "glm-5.3", {
+          name: "GLM 5.3",
+          harnessId: "pi/pi",
+          resolvedHarnessId: "pi/pi",
+        }),
+      ]),
+      ...profileOf(WORK).accounts,
+    ]);
 
-      const field = buildAssistantProviderField(instances, { instanceId: WORK, model });
+    const field = buildAssistantProviderField(
+      [claude(PERSONAL), claude(WORK)],
+      PROVIDERS,
+      [profile],
+      { providerAccountId: PERSONAL, harnessId: "pi/pi", model: null },
+    );
+
+    expect(field.harnessId).toBe("pi/pi");
+    expect(field.groups[0]?.choices).toEqual([
+      {
+        providerAccountId: PERSONAL,
+        harnessId: "pi/pi",
+        model: null,
+        label: "Anthropic · Default model",
+      },
+      {
+        providerAccountId: PERSONAL,
+        harnessId: "pi/pi",
+        model: "glm-5.3",
+        label: "Anthropic · GLM 5.3",
+      },
+    ]);
+    expect(field.groups[1]?.choices.every((choice) => choice.harnessId === null)).toBe(true);
+  });
+
+  it("lists a model once when several profiles hold it", () => {
+    const field = buildAssistantProviderField(
+      [claude(PERSONAL)],
+      PROVIDERS,
+      [profileOf(PERSONAL), { ...profileOf(PERSONAL), id: "profile-second" }],
+      { providerAccountId: PERSONAL, harnessId: null, model: null },
+    );
+
+    expect(field.groups[0]?.choices.map((choice) => choice.model)).toEqual([
+      null,
+      "claude-sonnet-5",
+      "claude-opus-5",
+    ]);
+  });
+
+  it.each([null, "claude-sonnet-5"])(
+    "adds a deleted account as a last group holding only the assistant's choice, model %s",
+    (model) => {
+      const field = buildAssistantProviderField(
+        [claude(PERSONAL)],
+        PROVIDERS,
+        [profileOf(PERSONAL)],
+        {
+          providerAccountId: WORK,
+          harnessId: null,
+          model,
+        },
+      );
 
       const label = `${toIdTail(WORK)} (not found)`;
       expect(field.groups.at(-1)).toEqual({
-        instanceId: WORK,
+        providerAccountId: WORK,
         label,
-        choices: [{ instanceId: WORK, model, label: `${label} · ${model ?? "Default model"}` }],
+        choices: [
+          {
+            providerAccountId: WORK,
+            harnessId: null,
+            model,
+            label: `${label} · ${model ?? "Default model"}`,
+          },
+        ],
       });
-      expect(field.providerId).toBeNull();
+      expect(field.harnessId).toBeNull();
       expect(field.hint).toBe("");
     },
   );

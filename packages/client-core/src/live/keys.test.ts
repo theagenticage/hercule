@@ -1,5 +1,6 @@
 import { assert, describe, it } from "vitest";
 import { LIVE_SESSION_STATUSES, MUTABLE_LIVE_TOPICS } from "@hercule/contract";
+import { buildMachineFiveMinuteScope, FLEET_HOUR_METRICS_SCOPE } from "../fleet/metrics-history";
 import { buildQueryKeys, queryKeys, type LiveQueryKey } from "./keys";
 
 describe("workspace pushes", () => {
@@ -19,96 +20,313 @@ describe("workspace pushes", () => {
   });
 });
 
-describe("Tracking's key", () => {
-  it("is read again on every task push, with or without ids", () => {
-    for (const ids of [[], ["t1"]]) {
-      assert.isTrue(
-        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.tracking())),
-      );
-    }
+describe("the merge checks' key", () => {
+  it("is the prefix of every pair's check", () => {
+    assert.isTrue(isPrefixOf(queryKeys.mergeCheck(), queryKeys.mergeCheck("a", "b")));
+    assert.isFalse(isPrefixOf(queryKeys.mergeCheck("a", "b"), queryKeys.mergeCheck("b", "a")));
   });
 
-  it("is left to the run push's own rule, so no key maps it for a run push", () => {
-    for (const ids of [[], ["r1"]]) {
-      assert.isFalse(
-        buildQueryKeys("run", ids).some((key) => isPrefixOf(key, queryKeys.tracking())),
-      );
+  it("is made out of date by every task push, ordinary or derived, with or without ids", () => {
+    for (const derived of [undefined, true] as const) {
+      for (const ids of [[], ["t1"]]) {
+        assert.isTrue(
+          buildQueryKeys("task", ids, undefined, derived).some((key) =>
+            isPrefixOf(key, queryKeys.mergeCheck("a", "b")),
+          ),
+        );
+      }
     }
-  });
-
-  it("is apart from the task and run lists, so no filtered read shares it", () => {
-    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.tasks()));
-    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.runs()));
   });
 });
 
-describe("a Task's Tracking detail key", () => {
-  it("is read again for the Tasks a task push names", () => {
-    const keys = buildQueryKeys("task", ["t1", "t2"]);
-    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.trackingDetail("t1"))));
-    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.trackingDetail("t2"))));
+describe("the Work board's key", () => {
+  it("is read again on every ordinary task push, with or without ids", () => {
+    for (const ids of [[], ["t1"]]) {
+      assert.isTrue(
+        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.workBoard())),
+      );
+    }
   });
 
-  it("is not read again for a Task the push does not name", () => {
-    assert.isFalse(
-      buildQueryKeys("task", ["t1"]).some((key) => isPrefixOf(key, queryKeys.trackingDetail("t2"))),
-    );
+  it("is, with the named Tasks' details and the merge checks, the only read of a derived task push", () => {
+    assert.deepStrictEqual(buildQueryKeys("task", [], undefined, true), [
+      queryKeys.workBoard(),
+      queryKeys.mergeCheck(),
+    ]);
+    assert.deepStrictEqual(buildQueryKeys("task", ["t1", "t2"], undefined, true), [
+      queryKeys.workBoard(),
+      queryKeys.taskDetail("t1"),
+      queryKeys.taskDetail("t2"),
+      queryKeys.mergeCheck(),
+    ]);
   });
 
-  it("is read again for every Task when a task push names no ids", () => {
+  it("reads the failure dot again on an ordinary task push, but not on a derived one", () => {
+    for (const ids of [[], ["t1"]]) {
+      assert.isTrue(
+        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.taskAttention())),
+      );
+      assert.isFalse(
+        buildQueryKeys("task", ids, undefined, true).some((key) =>
+          isPrefixOf(key, queryKeys.taskAttention()),
+        ),
+      );
+    }
+  });
+
+  it("reads a Task's detail again on an ordinary task push, with or without ids", () => {
     assert.isTrue(
-      buildQueryKeys("task", []).some((key) => isPrefixOf(key, queryKeys.trackingDetail("t1"))),
+      buildQueryKeys("task", ["t1"]).some((key) => isPrefixOf(key, queryKeys.taskDetail("t1"))),
     );
-  });
-
-  it("is left to the run push's own rule, so no key maps it for a run push", () => {
-    for (const ids of [[], ["r1"]]) {
-      assert.isFalse(
-        buildQueryKeys("run", ids).some((key) => isPrefixOf(key, queryKeys.trackingDetail())),
-      );
-    }
-  });
-
-  it("is apart from Tracking's own read and from the task record", () => {
-    assert.isFalse(isPrefixOf(queryKeys.tracking(), queryKeys.trackingDetail("t1")));
-    assert.isFalse(isPrefixOf(queryKeys.trackingDetail(), queryKeys.tracking()));
-    assert.isFalse(isPrefixOf(queryKeys.task("t1"), queryKeys.trackingDetail("t1")));
+    assert.isTrue(
+      buildQueryKeys("task", []).some((key) => isPrefixOf(key, queryKeys.taskDetail("t1"))),
+    );
   });
 });
 
-describe("Your work's key", () => {
-  it("is read again on every task push, with or without ids", () => {
-    for (const ids of [[], ["t1"]]) {
+describe("the Inbox's and the entities' keys", () => {
+  const inboxKeys = [queryKeys.inbox(), queryKeys.inboxCount()];
+
+  // Each row is one topic and the exact keys its push reads again. A pane's
+  // read is always the whole prefix: a pane embeds its parents' records, so a
+  // push naming one entity can change another entity's pane.
+  const rows: ReadonlyArray<{
+    readonly name: string;
+    readonly topic: "task" | "signal" | "externalEntity" | "connection" | "plugin";
+    readonly derived?: true;
+    readonly ids: ReadonlyArray<string>;
+    readonly keys: ReadonlyArray<LiveQueryKey>;
+  }> = [
+    {
+      name: "an externalEntity push naming ids reads every entity pane and Task details, not only the named ones",
+      topic: "externalEntity",
+      ids: ["e1", "e2"],
+      keys: [
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entityCards(),
+        queryKeys.workBoard(),
+        queryKeys.task(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "an externalEntity push naming no ids",
+      topic: "externalEntity",
+      ids: [],
+      keys: [
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entityCards(),
+        queryKeys.workBoard(),
+        queryKeys.task(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "a signal push naming ids reads the Inbox, the open entity panes and the signal lists, not the board or the suggestions",
+      topic: "signal",
+      ids: ["s1"],
+      keys: [queryKeys.signals(), queryKeys.signal("s1"), ...inboxKeys, queryKeys.externalEntity()],
+    },
+    {
+      name: "a signal push naming no ids",
+      topic: "signal",
+      ids: [],
+      keys: [queryKeys.signals(), queryKeys.signal(), ...inboxKeys, queryKeys.externalEntity()],
+    },
+    {
+      name: "a plain task push reads the entity panes and the suggestions",
+      topic: "task",
+      ids: ["t1"],
+      keys: [
+        queryKeys.tasks(),
+        queryKeys.task("t1"),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entitySuggestions(),
+        queryKeys.mergeCheck(),
+      ],
+    },
+    {
+      name: "a plain task push naming no ids",
+      topic: "task",
+      ids: [],
+      keys: [
+        queryKeys.tasks(),
+        queryKeys.task(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entitySuggestions(),
+        queryKeys.mergeCheck(),
+      ],
+    },
+    {
+      name: "a derived task push reads the board and the named Task's details only, which a busy agent causes every second, and marks the merge checks out of date",
+      topic: "task",
+      derived: true,
+      ids: ["t1"],
+      keys: [queryKeys.workBoard(), queryKeys.taskDetail("t1"), queryKeys.mergeCheck()],
+    },
+    {
+      name: "a connection push naming ids reads the entity panes, the board, the Task details and the suggestions",
+      topic: "connection",
+      ids: ["c1"],
+      keys: [
+        queryKeys.connections(),
+        queryKeys.connection("c1"),
+        queryKeys.signals(),
+        queryKeys.signal(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entityCards(),
+        queryKeys.workBoard(),
+        queryKeys.task(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "a connection push naming no ids",
+      topic: "connection",
+      ids: [],
+      keys: [
+        queryKeys.connections(),
+        queryKeys.connection(),
+        queryKeys.signals(),
+        queryKeys.signal(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entityCards(),
+        queryKeys.workBoard(),
+        queryKeys.task(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+    {
+      name: "a plugin push reads the entity panes, the board, the Task details and the suggestions",
+      topic: "plugin",
+      ids: ["github"],
+      keys: [
+        queryKeys.plugins(),
+        queryKeys.connection(),
+        queryKeys.signals(),
+        queryKeys.signal(),
+        ...inboxKeys,
+        queryKeys.externalEntity(),
+        queryKeys.entityCards(),
+        queryKeys.workBoard(),
+        queryKeys.task(),
+        queryKeys.entitySuggestions(),
+      ],
+    },
+  ];
+
+  for (const row of rows) {
+    it(`reads exactly these keys again after ${row.name}`, () => {
+      assert.deepStrictEqual(buildQueryKeys(row.topic, row.ids, undefined, row.derived), row.keys);
+    });
+  }
+
+  it("reads the rail's outline again on every push that reads the Inbox's pages, because its key is inside the pages' prefix", () => {
+    for (const topic of ["task", "signal", "externalEntity", "connection", "plugin"] as const) {
+      const keys = buildQueryKeys(topic, ["x"]);
       assert.isTrue(
-        buildQueryKeys("task", ids).some((key) => isPrefixOf(key, queryKeys.yourWork())),
+        keys.some((read) => isPrefixOf(read, queryKeys.inboxOutline())),
+        topic,
       );
     }
+    // The pages' own keys carry a query object, so the outline is a different cache entry.
+    assert.notDeepEqual(
+      queryKeys.inboxOutline(),
+      queryKeys.inbox({ list: { savedQuery: "waits" } }),
+    );
   });
 
-  it("is read again on every signal push, with or without ids", () => {
-    for (const ids of [[], ["s1"]]) {
+  it("reads the context cards only on the pushes that change what a card shows", () => {
+    for (const topic of ["externalEntity", "connection", "plugin"] as const) {
       assert.isTrue(
-        buildQueryKeys("signal", ids).some((key) => isPrefixOf(key, queryKeys.yourWork())),
+        buildQueryKeys(topic, []).some((key) => isPrefixOf(key, queryKeys.entityCards(["e1"]))),
+        topic,
       );
     }
-  });
-
-  it("is not read again by a push that cannot change it", () => {
-    for (const topic of ["workflow", "connection", "plugin", "run"] as const) {
+    for (const topic of ["task", "signal"] as const) {
       assert.isFalse(
-        buildQueryKeys(topic, ["x"]).some((key) => isPrefixOf(key, queryKeys.yourWork())),
+        buildQueryKeys(topic, []).some((key) => isPrefixOf(key, queryKeys.entityCards(["e1"]))),
+        topic,
       );
+    }
+  });
+
+  it("leaves the signal lists alone on an externalEntity push, because the controller announces a signal push when a thing's open signals gain their entity", () => {
+    const keys = buildQueryKeys("externalEntity", ["e1"]);
+    assert.isFalse(keys.some((read) => isPrefixOf(read, queryKeys.signals({ view: "to-do" }))));
+  });
+
+  it("reads the Inbox and the entity panes again on a push that names a workflow, because their offers come from the workflows, and not the count or the suggestions", () => {
+    const keys = buildQueryKeys("workflow", ["w1"]);
+    for (const key of [queryKeys.inbox(), queryKeys.externalEntity()]) {
+      assert.isTrue(keys.some((read) => isPrefixOf(read, key)));
+    }
+    for (const key of [queryKeys.inboxCount(), queryKeys.entitySuggestions()]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  it("leaves the Inbox, the entity panes and the signals alone on a derived workflow push, which a trigger's counts, next fire time or health cause", () => {
+    const keys = buildQueryKeys("workflow", ["w1"], undefined, true);
+    for (const key of [
+      ...inboxKeys,
+      queryKeys.externalEntity(),
+      queryKeys.entitySuggestions(),
+      queryKeys.signals(),
+    ]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  it("still reads the workflow lists, the named workflow and every trigger on a derived workflow push", () => {
+    assert.deepStrictEqual(buildQueryKeys("workflow", ["w1"], undefined, true), [
+      queryKeys.workflows(),
+      queryKeys.workflow("w1"),
+      queryKeys.triggers(),
+    ]);
+  });
+
+  it("leaves the Inbox alone on a workflow push that names no workflow, which is the first push of every subscription", () => {
+    const keys = buildQueryKeys("workflow", []);
+    for (const key of [...inboxKeys, queryKeys.externalEntity()]) {
+      assert.isFalse(keys.some((read) => isPrefixOf(read, key)));
+    }
+  });
+
+  it("leaves the entity panes, the suggestions and the Inbox alone for a push that cannot change them", () => {
+    for (const topic of ["run", "session", "wikiPage"] as const) {
+      for (const ids of [[], ["x"]]) {
+        const keys = buildQueryKeys(topic, ids);
+        for (const key of [
+          ...inboxKeys,
+          queryKeys.externalEntity(),
+          queryKeys.entitySuggestions(),
+        ]) {
+          assert.isFalse(
+            keys.some((read) => isPrefixOf(read, key)),
+            `a ${topic} push naming ${ids.join() || "no ids"}`,
+          );
+        }
+      }
     }
   });
 });
 
 describe("signal pushes", () => {
-  it("invalidates every list, the changed signals and Your work", () => {
+  it("invalidates every list, the changed signals, Your work, the Inbox and the entity panes", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", ["first", "second"]), [
       queryKeys.signals(),
       queryKeys.signal("first"),
       queryKeys.signal("second"),
-      queryKeys.yourWork(),
+      queryKeys.inbox(),
+      queryKeys.inboxCount(),
+      queryKeys.externalEntity(),
     ]);
   });
 
@@ -129,7 +347,9 @@ describe("signal pushes", () => {
     assert.deepStrictEqual(buildQueryKeys("signal", []), [
       queryKeys.signals(),
       queryKeys.signal(),
-      queryKeys.yourWork(),
+      queryKeys.inbox(),
+      queryKeys.inboxCount(),
+      queryKeys.externalEntity(),
     ]);
   });
 
@@ -252,6 +472,7 @@ describe("the desktop workflow list's keys", () => {
     const live = queryKeys.sessions({
       kind: ["agent", "run", "assistant"],
       status: LIVE_SESSION_STATUSES,
+      archived: false,
     });
     assert.isTrue(buildQueryKeys("session", ["s1"]).some((key) => isPrefixOf(key, live)));
   });
@@ -289,6 +510,37 @@ describe("skill pushes", () => {
     const diff = queryKeys.skillDiff("grilling", "e".repeat(64));
     assert.isTrue(buildQueryKeys("skill", ["grilling"]).some((key) => isPrefixOf(key, diff)));
     assert.isFalse(buildQueryKeys("skill", ["teach"]).some((key) => isPrefixOf(key, diff)));
+  });
+});
+
+describe("MCP server pushes", () => {
+  it("invalidates the list and the named servers' pages, never another server's", () => {
+    const keys = buildQueryKeys("mcpServer", ["a"], undefined, undefined, "updated");
+    assert.deepStrictEqual(keys, [queryKeys.mcpServers(), queryKeys.mcpServer("a")]);
+    assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.mcpServer("b"))));
+  });
+
+  it("invalidates every server's page after reconnect", () => {
+    assert.deepStrictEqual(buildQueryKeys("mcpServer", [], undefined, undefined, "updated"), [
+      queryKeys.mcpServers(),
+      queryKeys.mcpServer(),
+    ]);
+  });
+
+  it("leaves the projects and the settings alone on a status change, a creation and the first push", () => {
+    for (const kind of ["updated", "created", undefined] as const) {
+      for (const ids of [["a"], []]) {
+        const keys = buildQueryKeys("mcpServer", ids, undefined, undefined, kind);
+        assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.project("p1"))));
+        assert.isFalse(keys.some((key) => isPrefixOf(key, queryKeys.settings())));
+      }
+    }
+  });
+
+  it("reads the projects and the settings again on a delete, since the server leaves their lists", () => {
+    const keys = buildQueryKeys("mcpServer", ["a"], undefined, undefined, "deleted");
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.project("p1"))));
+    assert.isTrue(keys.some((key) => isPrefixOf(key, queryKeys.settings())));
   });
 });
 
@@ -348,5 +600,29 @@ describe("the composer's skill list keys", () => {
     );
     assert.isTrue(isPrefixOf(queryKeys.sessionSkills(), queryKeys.sessionSkills("s1")));
     assert.notDeepEqual(queryKeys.sessionSkills("s1"), queryKeys.sessionSkills("s2"));
+  });
+});
+
+describe("the Runner Metrics history keys", () => {
+  it("is read by no push: the runnerMetrics topic maps to no key, and no other topic's keys cover it", () => {
+    assert.deepEqual(buildQueryKeys("runnerMetrics", []), []);
+    assert.deepEqual(buildQueryKeys("runnerMetrics", ["r1"]), []);
+    const key = queryKeys.runnerMetrics(buildMachineFiveMinuteScope("r1"));
+    for (const topic of ["runner", "session", "provider"] as const) {
+      assert.isFalse(buildQueryKeys(topic, []).some((pushed) => isPrefixOf(pushed, key)));
+    }
+  });
+
+  it("tells the histories of different scopes apart", () => {
+    const keys = [
+      queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE),
+      queryKeys.runnerMetrics(buildMachineFiveMinuteScope("r1")),
+      queryKeys.runnerMetrics(buildMachineFiveMinuteScope("r2")),
+    ];
+    assert.strictEqual(new Set(keys.map((key) => JSON.stringify(key))).size, keys.length);
+    assert.deepEqual(
+      queryKeys.runnerMetrics(buildMachineFiveMinuteScope("r1")),
+      queryKeys.runnerMetrics(buildMachineFiveMinuteScope("r1")),
+    );
   });
 });

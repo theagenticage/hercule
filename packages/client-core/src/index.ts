@@ -5,6 +5,7 @@
  * import `createClient` and see only promises, plain objects and the three
  * error classes below.
  */
+export { joinNamesWithOr } from "./join-names";
 export { describeActor, readActorSessionId, type ActorReading } from "./actor-display";
 export { decideConversationActivity, type ConversationActivity } from "./assistants/activity";
 export {
@@ -23,6 +24,7 @@ export {
   buildConversationBlocks,
   collectRunningTurnRows,
   describeOpenReply,
+  hasMessageAfter,
   trimToRunningTurn,
   type ConversationBlock,
   type OpenReplyBlock,
@@ -147,6 +149,7 @@ export {
   listSetupFlows,
   type ConnectionFeed,
   type ConnectionType,
+  type CredentialField,
   type SetupFlow,
 } from "./connection-types";
 export {
@@ -187,8 +190,11 @@ export {
 export {
   ApiError,
   ConnectionError,
+  isBlockerCycle,
   isConflict,
+  isInvalidState,
   isNotFound,
+  isRequestClosed,
   readErrorMessage,
   readValidationIssues,
   RequestError,
@@ -211,7 +217,6 @@ export {
   describeHeldEvents,
   describeTrigger,
   describeTriggerOn,
-  HELD_EVENT_PREVIEW_LIMIT,
   type TriggerReading,
 } from "./trigger-display";
 export {
@@ -230,11 +235,15 @@ export {
   describeFolderWithoutSkills,
   describeLockedSkillSource,
   describeSkillImportSummary,
+  describeSkillProposal,
+  describeSkillProposedBadge,
+  describeSkillProposer,
   describeSkillRevisionApplied,
   describeSkillRevisionOrigin,
   describeSkillSource,
   describeSkillSourceInFull,
   describeSkillTooLarge,
+  describeSkillThirdPartyContent,
   describeUploadFolderProblem,
   findCurrentSkillRevision,
   findSkillMdSize,
@@ -262,6 +271,7 @@ export {
 } from "./skills";
 export { filterSessionSkills } from "./session-skills";
 export { containsSkillReference, splitSkillReferences, type SkillTextPart } from "./skill-text";
+export { lowerFirst } from "./text";
 export { formatBytes } from "./format-bytes";
 export {
   parseMarkdown,
@@ -282,6 +292,7 @@ export { buildIdOptions } from "./id-options";
 export { readJsonObject, readStringList } from "./json-shape";
 export { listJsonLines } from "./json-lines";
 export { joinCommand } from "./join-command";
+export { buildPastedRedirectUri } from "./mcp-server-sign-in";
 export {
   buildRetireQuestion,
   findRunnerConflictField,
@@ -346,8 +357,8 @@ export {
 export { createLive, type Live, type LiveInvalidatePush } from "./live/live";
 export { invalidateWithoutCancelling } from "./live/invalidation";
 export { readEveryPage } from "./read-every-page";
-export { isMutationRunning } from "./mutation-running";
-export { queryKeys, buildQueryKeys, type EventListFilter, type LiveQueryKey } from "./live/keys";
+export { isAnswerSendRunning, isMutationRunning } from "./mutation-running";
+export { queryKeys, buildQueryKeys, type LiveQueryKey } from "./live/keys";
 export { buildFetchIdentityProbe, detectLocalRunner } from "./local-runner";
 export {
   buildBoundActionRows,
@@ -360,109 +371,17 @@ export {
   isNotificationMuted,
   parseMuteKind,
   toggleMuteKey,
-  UNSEEN_COUNT_READ_LIMIT,
   type BoundActionRow,
   type NotificationMark,
 } from "./notifications";
 export { parsePluginId } from "./plugin-id";
-export { formatBlocksAsText, isKnownBlock, UNKNOWN_BLOCK_TEXT } from "./signal-blocks";
 export {
-  buildHandlingLabels,
-  buildInitials,
-  buildIntakeTabs,
-  buildSignalAnswers,
-  computeEventHorizonStart,
-  countToDo,
-  cutHandlingLabels,
-  DEFAULT_INTAKE_LIST_WIDTH,
-  decidePluginMark,
-  describeAnswerKey,
-  describeBuildFailure,
-  describeEventHorizon,
-  describeEventListEnd,
-  describeEventSystem,
-  describeEventTitle,
-  describeHandlingCaption,
-  describeNotScreened,
-  describeOrchestrationSegment,
-  describeResolvedElsewhere,
-  describeSignalAsker,
-  describeSignalOutcome,
-  describeSignalOutcomeMoment,
-  describeSignalKindAndPlace,
-  describeSignalProvenance,
-  describeSignalRow,
-  EVENT_HANDLING_OPTIONS,
-  findReplyAnswer,
-  findSuggestedAnswer,
-  fitIntakeListWidth,
-  fitsIntakePane,
-  groupEventsByDay,
-  groupSignalsByDay,
-  groupSignalsIntoSections,
-  isBackFromSnooze,
-  listUrgentSignals,
-  lowerFirst,
-  MIN_INTAKE_LIST_WIDTH,
-  MIN_INTAKE_PANE_WIDTH,
-  moveEventSelection,
-  moveSignalSelection,
-  nameSignalSource,
-  parseIntakeListWidth,
-  trimAnswerEllipsis,
-  type EventDaySection,
-  type EventHandlingLabel,
-  type IntakeSection,
-  type IntakeTab,
-  type IntakeTabPlugin,
-  type IntakeView,
-  type PluginIdentity,
-  type PluginMarkDrawing,
-  type PluginName,
-  type RaiserName,
-  type SignalAnswer,
-  type SignalAnswerStyle,
-  type SignalOutcome,
-  type SignalRaiserNames,
-  type UrgentSignal,
-} from "./intake";
-export {
-  buildTrackingRows,
-  canMarkTrackingRowDone,
-  countWaitingTrackingRows,
-  decideTrackingRowPose,
-  decideTrackingStatePose,
-  describeTrackingLine,
-  findTrackingTasksAffectedByRunPush,
-  groupTrackingRows,
-  listRecentTrackingRows,
-  nameTrackingState,
-  readTrackingFaceSeed,
-  type TrackingDestination,
-  type TrackingGroup,
-  type TrackingLine,
-  type TrackingRead,
-  type TrackingRow,
-  type TrackingState,
-} from "./tracking";
-export {
-  describeHandoffTrip,
-  isAnyLegAffectedByRunPush,
-  isAnyLegAffectedByTaskPush,
-  type HandoffTrip,
-  type HandoffTripDestination,
-} from "./handoff-leg";
-export {
-  describeTrackingOutputValue,
-  describeTrackingStanding,
-  describeTrackingTrip,
-  findNextTrackingElapsedChange,
-  listTrackingAnswers,
-  readTrackingRunStart,
-  type TrackingAnswer,
-  type TrackingTrip,
-  type TrackingTripRun,
-} from "./tracking-pane";
+  describeChecks,
+  describeDaysAgo,
+  formatBlocksAsText,
+  isKnownBlock,
+  UNKNOWN_BLOCK_TEXT,
+} from "./signal-blocks";
 export {
   decideSidebarDragEnd,
   DEFAULT_SIDEBAR_LAYOUT,
@@ -474,72 +393,85 @@ export {
   type SidebarLayout,
 } from "./sidebar-layout";
 export {
-  canIgnoreSignal,
-  describeIgnoreDialogEffect,
-  describeIgnoreRuleCatches,
-  describeOfferedRuleMatchCount,
-  describeRuleMatchesTakenOff,
-  isIgnoreRuleOffer,
-  KIND_SWITCH_OFF_LINE,
-  LAST_MATCH_VALUE_REASON,
-  listDeclaredMatchValues,
-  listPluginIgnoreRules,
-  listSignalsMatchedByRule,
-  readSignalKindLabels,
-} from "./ignore-rules";
+  CORE_SOURCE_NAME,
+  decidePluginColor,
+  decidePluginMark,
+  namePlugin,
+  type PluginColorDrawing,
+  type PluginIdentity,
+  type PluginMarkDrawing,
+  type PluginName,
+} from "./plugin-names";
+export { nameSignalKind } from "./signal-kinds";
 export {
-  applySignalMove,
-  buildSnoozeChoices,
-  countClearedToday,
-  countClearedTodayByPlugin,
-  decideSignalPaneMoves,
-  decideSignalRowControls,
-  describeBulkDoneTitle,
-  describeDoneRowOutcome,
-  describeIntakeFoot,
-  describeMoveToast,
-  describeSnoozeLine,
-  hasDoneAction,
-  isMoveLeavingView,
-  listBulkMoves,
-  parsePickedSnoozeTime,
-  planSignalMove,
-  reachesBeforeToday,
-  SIGNAL_MOVE_LABELS,
-  toggleSignalCheck,
-  type PluginClearedToday,
-  type SignalMove,
-  type SignalMovePlan,
-  type SignalPaneMove,
-} from "./intake-moves";
-export {
-  dropOwnChanges,
-  followListedSignals,
-  recordOwnChanges,
-  startHeldSignals,
-  switchHeldScope,
-  updateHolding,
-  type HeldSignals,
-} from "./held-signals";
-export {
-  dropTrackingHandoff,
-  dropTrackingRowTakenOff,
-  followListedTrackingRows,
-  followTrackingRead,
-  isTrackingHandoffAcknowledged,
-  recordTrackingHandoff,
-  recordTrackingHandoffCommitted,
-  recordTrackingRowTakenOff,
-  startHeldTrackingRows,
-  updateTrackingRowsHolding,
-  type HeldTrackingRows,
-} from "./held-tracking-rows";
-export { describeInboxZeroLine, type InboxZeroLine } from "./inbox-zero";
-export { matchYourWork, type YourWork } from "./your-work";
-export { describeYourWork, describeYourWorkOnRow, type YourWorkItem } from "./your-work-display";
+  buildSignalAnswers,
+  findSuggestedAnswer,
+  trimAnswerEllipsis,
+  type SignalAnswer,
+  type SignalAnswerStyle,
+} from "./signal-answers";
+export { listUrgentSignals, type UrgentSignal } from "./urgent-signals";
+export { describeIgnoreRuleCatches, listPluginIgnoreRules } from "./ignore-rules";
 export { describeRefusalReason } from "./plugin-refusal";
 export { describeCapacity, listQueuedSessions, RUNNING_STATUSES } from "./runner-capacity";
-export { buildProviderRows, type ProviderRow, type SecretFieldOffer } from "./provider-rows";
+export {
+  listProviderAccountHarnessChoices,
+  type ProviderAccountHarnessChoice,
+} from "./provider-account-harnesses";
+export {
+  decideProviderAccountReach,
+  listProviderAccountMachines,
+  type ProviderAccountMachine,
+  type ProviderAccountMachineAction,
+  type ProviderAccountReach,
+} from "./provider-account-machines";
+export {
+  describeProviderAccountReach,
+  type ProviderAccountReachView,
+  type ReachPip,
+} from "./provider-account-reach";
+export {
+  asksForAccountLabel,
+  buildProviderAccountCreateInput,
+  isAddAccountStepFilled,
+  listSignInRunnerOptions,
+  offersKindChoice,
+  planAddAccountSteps,
+  type AddAccountDraft,
+  type AddAccountStep,
+  type SignInRunnerChoice,
+  type SignInRunnerOption,
+} from "./add-provider-account";
+export { buildProviderRows, type CredentialFieldOffer, type ProviderRow } from "./provider-rows";
+export {
+  buildProviderAccountName,
+  describeProviderAccountIdentity,
+  type ProviderAccountIdentityLine,
+  findDefaultHarnessSnapshot,
+  findHarnessLoginMethod,
+  findProviderAccountKind,
+  findProviderAccountNameIfAmbiguous,
+  findProviderPluginId,
+  listProviderAccountCredentialFields,
+  signsInPerMachine,
+  resolveThreadHarnessId,
+  type HarnessLoginMethod,
+} from "./provider-accounts";
+export {
+  describeAccountUsage,
+  type AccountUsageGauge,
+  type AccountUsageCreditLine,
+  type AccountUsageLine,
+  type AccountUsageTone,
+  type AccountUsageWindowLine,
+} from "./account-usage";
+export {
+  decideAccountState,
+  describeCredentialExpiry,
+  findCredentialReplacement,
+  type AccountFix,
+  type AccountState,
+} from "./account-state";
 export {
   decideDeviceLoginStep,
   describeDeviceLoginWait,
@@ -556,7 +488,7 @@ export {
 } from "./minutes-left";
 export { isLoginCodeRejected } from "./login-code";
 export { describeReadOnlySecret, WRITABLE_OWNER_KINDS } from "./secret-owners";
-export { decideSessionsEmptyState, hasLoggedInRunner } from "./sessions-empty-state";
+export { decideSessionsEmptyState, hasSignedInRunner } from "./sessions-empty-state";
 export {
   createProjectWithRepositories,
   findProjectLocalRunner,
@@ -571,7 +503,9 @@ export {
 export { completeSetup, validatePasswordLength } from "./setup";
 export {
   addPutOffStep,
+  buildAllSetAccountOffer,
   buildAllSetRecap,
+  type AllSetAccountOffer,
   findDoneSteps,
   buildFirstRunHost,
   findGitHubAccount,
@@ -629,9 +563,9 @@ export {
   chooseStamps,
   computeNextMidnight,
   formatClock,
+  formatDay,
   formatDayStamp,
   formatPreciseStamp,
-  formatRelativeMoment,
   formatSince,
   formatStamp,
   formatTimeContext,
@@ -682,7 +616,7 @@ export {
 export { resolveThreadRowsMode } from "./thread-rows";
 export {
   buildTextGenerationField,
-  describeTextGenerationFailure,
+  describeTextGenerationProblem,
   describeTextGenerationModel,
   describeTextGenerationRecap,
   type TextGenerationChoice,
@@ -710,14 +644,73 @@ export {
 export { MAX_UNBROKEN_CODE_WORD, splitCodeSpans } from "./threads/code-spans";
 export { applyThreadChoice, type ThreadChoice } from "./threads/thread-choice";
 export {
+  addModelProfileAccount,
+  addModelProfileEntries,
+  addNewModel,
+  dismissNewModel,
+  makeDefaultModelProfileEntry,
+  moveModelProfileAccount,
+  moveModelProfileEntry,
+  moveModelProfileEntryToHarness,
+  offerModelProfileEntryIn,
+  renameModelProfile,
+  setModelProfileAccountHarness,
+  setModelProfileEntryIncluded,
+  takeOutModelProfileEntry,
+} from "./model-profiles/profile-edits";
+export {
+  buildModelProfileSections,
+  type ModelSection,
+  type ModelSectionRow,
+} from "./model-profiles/profile-sections";
+export type { NewModelRow } from "./model-profiles/new-model-rows";
+export type { ModelProfileHarnessChoice, SectionHarness } from "./model-profiles/profile-harnesses";
+export { searchPickerModels, type PickerModels } from "./model-profiles/catalog-search";
+export { opensModelBrowser } from "./model-profiles/opens-model-browser";
+export {
+  MODEL_CONTEXT_CHOICES,
+  MODEL_PRICE_CHOICES,
+  MODEL_SORT_CHOICES,
+  NO_MODEL_FACETS,
+  NO_MODEL_MATCHES_TEXT,
+  browseModels,
+  describeContextWindow,
+  describeModelPrice,
+  hasActiveFacets,
+  indexModelCatalog,
+  type ModelBrowserChoice,
+  type ModelBrowserIndex,
+  type ModelBrowserQuery,
+  type ModelFacets,
+  type ModelMaker,
+  type ModelSort,
+} from "./model-profiles/model-browser";
+export {
+  findModelProfileOrFirst,
+  findProjectModelProfile,
+  listAccountModelProfiles,
+  listProjectsOfModelProfile,
+} from "./model-profiles/profile-lookup";
+export { countProfileEntries, formatProfileEntryKey } from "./model-profiles/profile-entries";
+export { buildModelProfileCopyName } from "./model-profiles/profile-tabs";
+export { readCachedModelProfile } from "./model-profiles/run-profile-save";
+export {
+  buildModelProfileUpdateOptions,
+  type ModelProfileSave,
+  type NewModelEdit,
+  type ModelProfilesQueryKey,
+} from "./model-profiles/profile-save";
+export { updateModelProfile } from "./model-profiles/update-profile";
+export {
   resolveThreadConfig,
+  type ModelDescription,
   type OutgoingChange,
   type ResolvedActive,
   type ResolvedConfig,
   type ResolvedDraft,
   type ResolvedThread,
 } from "./threads/resolve-thread";
-export type { LoginTarget } from "./threads/catalog";
+export type { SignInTarget } from "./threads/sign-in-target";
 export {
   buildComposerFields,
   buildPendingModelNote,
@@ -728,7 +721,12 @@ export {
   type ModelPill,
 } from "./threads/composer-fields";
 export { holdsMessageContent, readThreadConfig } from "./threads/config";
-export { buildDraftView, type DraftAddress, type DraftView } from "./threads/draft-view";
+export {
+  buildDraftView,
+  type DraftAddress,
+  type DraftReads,
+  type DraftView,
+} from "./threads/draft-view";
 export type {
   MessageDraft,
   Thread,
@@ -751,9 +749,23 @@ export {
   describeWaitingNote,
   formatMessageTime,
 } from "./threads/message-time";
-export { buildThreadModelField } from "./threads/model-field";
-export { buildModelMenu, type ModelMenu } from "./threads/model-menu";
-export { describeAccountRow, describeModelRow } from "./threads/model-menu-details";
+export {
+  buildThreadModelField,
+  type ThreadModelField,
+  type ThreadModelFieldOption,
+} from "./threads/model-field";
+export {
+  buildModelMenu,
+  type ModelMenu,
+  type ModelMenuCurrent,
+  type ModelMenuLane,
+  type ModelMenuProblem,
+  type ModelMenuProfile,
+  type ModelMenuRecentRow,
+  type ModelMenuRow,
+  type ModelMenuView,
+} from "./threads/model-menu";
+export { describeModelRow } from "./threads/model-menu-details";
 export { findOpenItem } from "./threads/open-item";
 export {
   canSteerQueuedInputs,
@@ -765,11 +777,13 @@ export {
   decideThreadRowEnd,
   decideThreadRowStatus,
   describePose,
+  describeThreadRowState,
   isAbsentPose,
   POSES,
   type Pose,
   type SessionPose,
   type ThreadRowEnd,
+  type ThreadRowState,
   type ThreadRowStatus,
 } from "./threads/pose";
 export { createTailBuffer } from "./threads/tail-buffer";
@@ -781,7 +795,11 @@ export {
   mergeTranscript,
 } from "./threads/transcript";
 export { isThreadCopy, ThreadCopy } from "./threads/thread-copy";
-export { buildOptionsLabel } from "./threads/options-label";
+export {
+  buildOptionsLabel,
+  describeOptionsLabel,
+  type OptionsLabel,
+} from "./threads/options-label";
 export { buildOptionsMenu } from "./threads/options-menu";
 export { parseOptionChoice } from "./threads/option-choice";
 export {
@@ -806,6 +824,24 @@ export {
   type RequestDraft,
 } from "./threads/request-drafts";
 export {
+  ANSWER_ATTACH_OFF_REASON,
+  FOLD_QUESTION_LABEL,
+  NEXT_QUESTION_LABEL,
+  PREVIOUS_QUESTION_LABEL,
+  REFUSED_FILE_NOTICE,
+  SEND_ANSWERS_LABEL,
+  TYPING_PAUSE_MS,
+  UNFOLD_QUESTION_LABEL,
+  buildQuestionStepper,
+  describeFoldedQuestion,
+  findComposerQuestion,
+  decideQuestionStep,
+  typeAnswerInRequestDraft,
+  type ComposerQuestion,
+  type QuestionStep,
+  type QuestionStepper,
+} from "./threads/question-composer";
+export {
   buildQuestionAnswers,
   buildQuestionDraft,
   isQuestionAnswered,
@@ -813,7 +849,16 @@ export {
   typeQuestionAnswer,
   type QuestionDraft,
 } from "./threads/question-draft";
+export { locateShownRequest } from "./threads/shown-request";
+export { createTypingGuard, type TypingGuard } from "./threads/typing-guard";
 export { findResumeBlockedReason } from "./threads/resume-blocked";
+export {
+  archiveRows,
+  buildArchiveTitle,
+  findArchiveBlockReason,
+  planArchiveAll,
+  type ArchivePlan,
+} from "./threads/archive";
 export { isMarkedDone } from "./threads/status";
 export { buildThreadRows, type ThreadRow } from "./threads/rows";
 export { describeAgent } from "./threads/model-name";
@@ -831,14 +876,17 @@ export {
   type SessionPresentation,
 } from "./threads/session-presentation";
 export {
+  buildRowSecondLine,
   findGroupRow,
   findWorkspaceGroupRow,
   type GroupAsk,
   type GroupMember,
   type GroupRow,
   type GroupSummary,
+  type RowLinePart,
   type SessionDot,
 } from "./threads/group-row";
+export { indexRowMembers, type RowMember } from "./threads/row-members";
 export {
   DONE_SHELF_LIMIT,
   DONE_SHELF_STEP,
@@ -899,6 +947,7 @@ export {
   type DraftSubject,
   findDraftSubject,
   isJoinable,
+  formatRepoName,
   joinLabelText,
   joinPhraseText,
   listProjectRepos,
@@ -913,20 +962,17 @@ export { buildSubmission } from "./threads/submission";
 export { appendToMessage, buildStartCards } from "./threads/start-cards";
 export {
   chooseStarterThreads,
-  describeEmptyIntake,
+  describeNoPlannedWork,
   type StarterThread,
 } from "./threads/starter-threads";
-export {
-  buildDraftConfig,
-  computeInstanceDefaults,
-  computeThreadDefaults,
-} from "./threads/thread-defaults";
+export { buildDraftConfig, computeThreadDefaults } from "./threads/thread-defaults";
 export {
   describeThreadItem,
   describeTurnDivider,
   describeTurnEnding,
   showsTurnDivider,
 } from "./threads/turn-divider";
+export { splitSendingTexts, type SentText } from "./threads/first-message";
 export {
   buildTurns,
   mayBeRunningTurn,
@@ -944,6 +990,7 @@ export {
   type SenderReading,
   waitForOptionalReads,
 } from "./threads/sender";
+export { HELD_EVENT_PREVIEW_LIMIT, UNSEEN_COUNT_READ_LIMIT } from "./read-limits";
 export {
   resolveBrowserTimezone,
   resolveDisplayTimezone,

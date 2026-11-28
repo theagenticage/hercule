@@ -1,0 +1,1110 @@
+/**
+ * Tests Model Catalogs on a real database and the real plugin host: what a
+ * read stores, what a failed or late read leaves alone, which reads are due
+ * and where they go, and the readiness rows beside the catalog on the
+ * account's record.
+ */
+import { describe, expect, it } from "vitest";
+import { Duration, Effect } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { HarnessDefinition } from "@hercule/plugin-host";
+import type { CatalogModel, ModelDescriptor, ProbeResult } from "@hercule/protocol";
+import { nowIso, withTransaction } from "../db";
+import { ModelProfileService } from "../model-profiles";
+import { runWithProfiles } from "../model-profiles/testing";
+import {
+  buildHarnessDefinition,
+  buildProviderDefinition,
+  createPluginFixture,
+} from "../plugins/testing";
+import { ModelCatalogs, computeArrivedModels, computeDefaultSelection } from "./model-catalogs";
+import { modelCatalogRepository } from "./model-catalog-repository";
+import { ProviderAccountProbes } from "./probes";
+import { providerAccountRepository } from "./repository";
+import { ProviderAccountService } from "./service";
+import {
+  type AccountServices,
+  addAccount,
+  addRunner,
+  addSnapshot,
+  ALPHA_HARNESS_ID,
+  BETA_HARNESS_ID,
+  buildAccountPlugins,
+  buildCataloguedPlugin,
+  CATALOGUED_KEY_KIND,
+  CATALOGUED_PROVIDER_ID,
+  KEY_KIND,
+  MACHINE_KIND,
+  runWithAccounts,
+  setTokenExpiry,
+  storeCredential,
+  TOKEN_KIND,
+} from "./testing";
+
+const MISSING = "0199e0e7-9999-7000-8000-000000000000";
+
+const model = (slug: string, extra: Partial<ModelDescriptor> = {}): ModelDescriptor => ({
+  slug,
+  name: slug,
+  imageInput: null,
+  options: [],
+  ...extra,
+});
+
+const signedInWith = (...models: ReadonlyArray<ModelDescriptor>): ProbeResult => ({
+  harnessVersion: "1.2.3",
+  auth: { status: "ok", identity: "someone@example.com" },
+  models,
+  usage: null,
+});
+
+const signedOut = (message?: string): ProbeResult => ({
+  harnessVersion: "1.2.3",
+  auth: { status: "unauthenticated", ...(message === undefined ? {} : { message }) },
+  models: [],
+  usage: null,
+});
+
+/** The time a probe was sent, `n` seconds into a fixed minute. */
+const sentAt = (n: number): string => `2026-10-31T10:00:${String(n).padStart(2, "0")}.000Z`;
+
+/** Stores a probe's result as the read of the account's catalog, as the controller daemon does. */
+const recordRead = (
+  runnerId: string,
+  accountId: string,
+  result: ProbeResult,
+  sentSeconds: number,
+  readsCatalog = true,
+) =>
+  Effect.flatMap(ProviderAccountProbes, (probes) =>
+    probes.recordProbe(
+      runnerId,
+      accountId,
+      ALPHA_HARNESS_ID,
+      result,
+      { sentAt: sentAt(sentSeconds), credentialGeneration: 0, readUsage: false },
+      { readsCatalog },
+    ),
+  );
+
+const readCatalog = (accountId: string) =>
+  Effect.flatMap(ModelCatalogs, (catalogs) => catalogs.read(accountId));
+
+/** Reads the profile "Main", which the migration made. */
+const readMain = Effect.gen(function* () {
+  const profiles = yield* ModelProfileService;
+  const [main] = yield* profiles.query();
+  return main!;
+});
+
+/** Puts the account into "Main" as a section that waits for the account's first catalog read. */
+const joinMain = (accountId: string) =>
+  Effect.gen(function* () {
+    const profiles = yield* ModelProfileService;
+    const main = yield* readMain;
+    yield* profiles.update({
+      id: main.id,
+      expectedRevision: main.revision,
+      name: main.name,
+      accounts: [{ providerAccountId: accountId, harnessId: null }],
+      defaultEntry: null,
+      dismissedNewModels: [],
+    });
+  });
+
+/** A key account with its key stored, ready on every runner that has the harness. */
+const addKeyAccount = (label: string | null = null) =>
+  Effect.gen(function* () {
+    const account = yield* addAccount({ kind: KEY_KIND, label });
+    yield* storeCredential(account.id, "apiKey");
+    return account;
+  });
+
+describe("computeArrivedModels", () => {
+  // The rules of what arrives are tested through the Model Profile service,
+  // except these two: a catalog never read, and a provider that names one maker.
+  it("returns nothing before the first successful read", () => {
+    expect(
+      computeArrivedModels(
+        { defaultSelection: "current-models" },
+        { models: [], firstReadAt: null },
+      ),
+    ).toEqual([]);
+  });
+
+  it("announces only the models of the provider's maker that arrived after the first read", () => {
+    const firstReadAt = "2026-11-01T00:00:00.000Z";
+    const arrived = (slug: string, maker?: string): CatalogModel & { firstSeenAt: string } => ({
+      ...model(slug, maker === undefined ? {} : { maker }),
+      firstSeenAt: "2026-11-02T00:00:00.000Z",
+    });
+
+    const announced = computeArrivedModels(
+      { defaultSelection: "current-models", defaultSelectionMaker: "Google" },
+      {
+        models: [arrived("gemini", "Google"), arrived("claude", "Anthropic"), arrived("unknown")],
+        firstReadAt,
+      },
+    );
+
+    expect(announced.map((one) => one.model)).toEqual(["gemini"]);
+  });
+});
+
+describe("computeDefaultSelection", () => {
+  const models = [
+    model("old", { isLegacy: true }),
+    model("new"),
+    model("best", { isDefault: true }),
+  ];
+
+  it("selects the models that are not legacy, in order, and names the default among them", () => {
+    expect(computeDefaultSelection({ defaultSelection: "current-models" }, models)).toEqual({
+      models: ["new", "best"],
+      defaultModel: "best",
+    });
+  });
+
+  it("names no default when the default model is legacy", () => {
+    const selection = computeDefaultSelection({ defaultSelection: "current-models" }, [
+      model("a"),
+      model("b", { isDefault: true, isLegacy: true }),
+    ]);
+
+    expect(selection).toEqual({ models: ["a"], defaultModel: null });
+  });
+
+  it("selects nothing for the provider rule none", () => {
+    expect(computeDefaultSelection({ defaultSelection: "none" }, models)).toEqual({
+      models: [],
+      defaultModel: null,
+    });
+  });
+
+  describe("for a provider that names one maker", () => {
+    const google = { defaultSelection: "current-models", defaultSelectionMaker: "Google" } as const;
+
+    it("selects only the models of that maker, compared exactly, and leaves out a model with no maker or a legacy one", () => {
+      const selection = computeDefaultSelection(google, [
+        model("flash", { maker: "Google" }),
+        model("sonnet", { maker: "Anthropic" }),
+        model("lowercase", { maker: "google" }),
+        model("unknown"),
+        model("old-gemini", { maker: "Google", isLegacy: true }),
+        model("pro", { maker: "Google" }),
+      ]);
+
+      expect(selection.models).toEqual(["flash", "pro"]);
+    });
+
+    it("names the default model only when it is of that maker", () => {
+      const others = [model("flash", { maker: "Google" }), model("opus", { maker: "Anthropic" })];
+
+      expect(
+        computeDefaultSelection(google, [others[0]!, { ...others[1]!, isDefault: true }]),
+      ).toEqual({ models: ["flash"], defaultModel: null });
+      expect(
+        computeDefaultSelection(google, [{ ...others[0]!, isDefault: true }, others[1]!]),
+      ).toEqual({ models: ["flash"], defaultModel: "flash" });
+    });
+  });
+});
+
+describe("a catalog read", () => {
+  it("stores the models with the time each was first seen, sets the read time and clears the error", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedOut("Sign in on a machine first."), 1);
+        const failed = yield* readCatalog(account.id);
+        yield* recordRead(
+          runner,
+          account.id,
+          signedInWith(model("a", { maker: "Google" }), model("b")),
+          2,
+        );
+        return { failed, read: yield* readCatalog(account.id) };
+      }),
+    );
+
+    expect(outcome.failed).toMatchObject({
+      models: [],
+      readAt: null,
+      error: "Sign in on a machine first.",
+    });
+    expect(outcome.read.models.map((one) => [one.slug, one.maker])).toEqual([
+      ["a", "Google"],
+      ["b", undefined],
+    ]);
+    expect(outcome.read.readAt).not.toBeNull();
+    expect(outcome.read.error).toBeNull();
+    expect(outcome.read.models.map((one) => one.firstSeenAt)).toEqual([
+      outcome.read.readAt,
+      outcome.read.readAt,
+    ]);
+  });
+
+  it("fills the account's section of Main on the first successful read, once: entries, default and revision", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* joinMain(account.id);
+        const pending = yield* readMain;
+        yield* recordRead(runner, account.id, signedOut(), 1);
+        const afterFailure = yield* readMain;
+        yield* recordRead(
+          runner,
+          account.id,
+          signedInWith(model("old", { isLegacy: true }), model("new", { isDefault: true })),
+          2,
+        );
+        const filled = yield* readMain;
+        yield* recordRead(runner, account.id, signedInWith(model("other")), 3);
+        yield* recordRead(runner, account.id, signedOut("Sign in on a machine first."), 4);
+        return { account, pending, afterFailure, filled, last: yield* readMain };
+      }),
+    );
+
+    expect(outcome.pending.accounts[0]).toMatchObject({ selectionPending: true, entries: [] });
+    expect(outcome.afterFailure).toEqual(outcome.pending);
+    // The legacy model is left out, and the model the harness marks as its default becomes Main's.
+    expect(outcome.filled.accounts[0]?.entries.map((one) => one.model)).toEqual(["new"]);
+    expect(outcome.filled.accounts[0]?.selectionPending).toBe(false);
+    expect(outcome.filled.defaultEntry).toMatchObject({
+      providerAccountId: outcome.account.id,
+      model: "new",
+    });
+    expect(outcome.filled.revision).toBe(outcome.pending.revision + 1);
+    // A later read, successful or not, does not fill the section again.
+    expect(outcome.last.revision).toBe(outcome.filled.revision);
+    expect(outcome.last.accounts[0]?.entries.map((one) => one.model)).toEqual(["new"]);
+  });
+
+  it("keeps the models and their read time when a later read fails, and records why", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b")), 1);
+        const before = yield* readCatalog(account.id);
+        yield* recordRead(runner, account.id, signedOut("Sign in on a machine first."), 2);
+        return { before, after: yield* readCatalog(account.id) };
+      }),
+    );
+
+    expect(outcome.after.models).toEqual(outcome.before.models);
+    expect(outcome.after.readAt).toBe(outcome.before.readAt);
+    expect(outcome.after.error).toBe("Sign in on a machine first.");
+  });
+
+  it("records a sign-in as someone else than the account's person as a failed read, saying who", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const account = yield* addKeyAccount();
+        yield* withTransaction(
+          sql,
+          accounts.setIdentityIfUnset(account.id, "owner@example.com", "Max", sentAt(0), sentAt(0)),
+        );
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedInWith(model("a")), 1);
+        return yield* readCatalog(account.id);
+      }),
+    );
+
+    expect(outcome.models).toEqual([]);
+    expect(outcome.error).toContain(
+      "Signed in as someone@example.com; this account is owner@example.com",
+    );
+  });
+
+  it("keeps a model's first-seen time when the model leaves the catalog and comes back", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b")), 1);
+        const first = yield* readCatalog(account.id);
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(runner, account.id, signedInWith(model("a")), 2);
+        const withoutB = yield* readCatalog(account.id);
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b"), model("c")), 3);
+        return { first, withoutB, last: yield* readCatalog(account.id) };
+      }),
+    );
+
+    const firstSeen = (catalog: typeof outcome.last, slug: string) =>
+      catalog.models.find((one) => one.slug === slug)?.firstSeenAt;
+    expect(outcome.withoutB.models.map((one) => one.slug)).toEqual(["a"]);
+    expect(firstSeen(outcome.last, "b")).toBe(firstSeen(outcome.first, "b"));
+    expect(firstSeen(outcome.last, "c")).toBe(outcome.last.readAt);
+    expect(firstSeen(outcome.last, "c")).not.toBe(firstSeen(outcome.first, "b"));
+  });
+
+  it("ignores an answer to a probe sent before the outcome the catalog already holds", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const near = yield* addRunner("near");
+        const far = yield* addRunner("far");
+        // The probe sent second answers first; the one sent first answers last.
+        yield* recordRead(near, account.id, signedInWith(model("newer")), 20);
+        const afterNewer = yield* readCatalog(account.id);
+        yield* recordRead(far, account.id, signedInWith(model("older")), 10);
+        const afterOlderSuccess = yield* readCatalog(account.id);
+        yield* recordRead(far, account.id, signedOut("late failure"), 5);
+        return { afterNewer, afterOlderSuccess, final: yield* readCatalog(account.id) };
+      }),
+    );
+
+    expect(outcome.afterOlderSuccess).toEqual(outcome.afterNewer);
+    expect(outcome.final).toEqual(outcome.afterNewer);
+    expect(outcome.final.models.map((one) => one.slug)).toEqual(["newer"]);
+  });
+
+  it("stores a read sent before a failure whose answer came first, and keeps the failure's error", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const near = yield* addRunner("near");
+        const far = yield* addRunner("far");
+        // The read sent second fails and answers first; the one sent first succeeds and answers last.
+        yield* recordRead(near, account.id, signedOut("Sign in on a machine first."), 20);
+        yield* recordRead(far, account.id, signedInWith(model("older")), 10);
+        const afterOlderSuccess = yield* readCatalog(account.id);
+        // A success sent even earlier is older than those models and is dropped.
+        yield* recordRead(far, account.id, signedInWith(model("oldest")), 5);
+        return { afterOlderSuccess, final: yield* readCatalog(account.id) };
+      }),
+    );
+
+    expect(outcome.afterOlderSuccess.models.map((one) => one.slug)).toEqual(["older"]);
+    expect(outcome.afterOlderSuccess.readAt).not.toBeNull();
+    expect(outcome.afterOlderSuccess.error).toBe("Sign in on a machine first.");
+    expect(outcome.final).toEqual(outcome.afterOlderSuccess);
+  });
+
+  it("is stored even when an ordinary probe sent after it was stored first, as a read but not as a snapshot", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        // An ordinary probe sent at 20s is stored; the forced read sent at 10s answers after it.
+        yield* recordRead(runner, account.id, signedInWith(model("ordinary")), 20, false);
+        const forced = yield* recordRead(runner, account.id, signedInWith(model("forced")), 10);
+        return {
+          forced,
+          catalog: yield* readCatalog(account.id),
+          snapshots: yield* Effect.flatMap(providerAccountRepository, (accounts) =>
+            accounts.listSnapshots(account.id),
+          ),
+        };
+      }),
+    );
+
+    expect(outcome.forced).toEqual({ _tag: "superseded" });
+    expect(outcome.catalog.models.map((one) => one.slug)).toEqual(["forced"]);
+    expect(outcome.snapshots.map((snapshot) => snapshot.models.map((one) => one.slug))).toEqual([
+      ["ordinary"],
+    ]);
+  });
+
+  it("refuses a read sent before the account's credential changed, even when its snapshot would be stale anyway", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedInWith(model("ordinary")), 20, false);
+        // A sign-in advances the credential generation past the one the read was sent with.
+        yield* probes.acceptDeviceSignIn(account.id, runner, ALPHA_HARNESS_ID);
+        const refused = yield* recordRead(runner, account.id, signedInWith(model("old-key")), 10);
+        return { refused, catalog: yield* readCatalog(account.id) };
+      }),
+    );
+
+    expect(outcome.refused).toEqual({ _tag: "superseded" });
+    expect(outcome.catalog).toMatchObject({ models: [], readAt: null, error: null });
+  });
+
+  it("keeps models whose slugs are names every object has, with the time each was first seen", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(
+          runner,
+          account.id,
+          signedInWith(model("constructor"), model("__proto__"), model("toString")),
+          1,
+        );
+        const first = yield* readCatalog(account.id);
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(
+          runner,
+          account.id,
+          signedInWith(model("constructor"), model("__proto__"), model("fresh")),
+          2,
+        );
+        return { first, second: yield* readCatalog(account.id) };
+      }),
+    );
+
+    expect(outcome.first.models.map((one) => [one.slug, one.firstSeenAt])).toEqual([
+      ["constructor", outcome.first.readAt],
+      ["__proto__", outcome.first.readAt],
+      ["toString", outcome.first.readAt],
+    ]);
+    // The two that stayed keep their first time; the new one is first seen at the second read.
+    expect(outcome.second.models.map((one) => [one.slug, one.firstSeenAt])).toEqual([
+      ["constructor", outcome.first.readAt],
+      ["__proto__", outcome.first.readAt],
+      ["fresh", outcome.second.readAt],
+    ]);
+  });
+
+  it("is made only by a probe sent as a catalog read", async () => {
+    const catalog = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedInWith(model("a")), 1, false);
+        return yield* readCatalog(account.id);
+      }),
+    );
+
+    expect(catalog).toMatchObject({ models: [], readAt: null, error: null });
+  });
+});
+
+describe("reading the stored catalogs", () => {
+  it("lists every account, with an empty catalog for one that was never read, and fails NotFound for a missing account", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
+        const read = yield* addKeyAccount();
+        const unread = yield* addKeyAccount("second");
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, read.id, signedInWith(model("a")), 1);
+        return {
+          ids: [read.id, unread.id],
+          all: yield* catalogs.listCatalogs(),
+          missing: yield* Effect.flip(catalogs.read(MISSING)),
+        };
+      }),
+    );
+
+    expect(outcome.all.map((catalog) => catalog.providerAccountId)).toEqual(outcome.ids);
+    expect(outcome.all.map((catalog) => catalog.models.length)).toEqual([1, 0]);
+    expect(outcome.all[1]).toMatchObject({ readAt: null, error: null });
+    expect(outcome.missing).toMatchObject({ error: { code: "not_found" } });
+  });
+
+  it("is what providerAccount.readCatalog returns, and what the account's record summarises", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const service = yield* ProviderAccountService;
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        const before = yield* service.read(account.id);
+        yield* recordRead(runner, account.id, signedInWith(model("a"), model("b")), 1);
+        yield* recordRead(runner, account.id, signedOut("Sign in on a machine first."), 2);
+        return {
+          before,
+          catalog: yield* service.readCatalog(account.id),
+          record: (yield* service.query())[0]!,
+        };
+      }),
+    );
+
+    expect(outcome.before).toMatchObject({
+      modelCount: 0,
+      catalogReadAt: null,
+      catalogError: null,
+    });
+    expect(outcome.catalog.models).toHaveLength(2);
+    // The first read time is for the controller only, not part of the public catalog.
+    expect(outcome.catalog).not.toHaveProperty("firstReadAt");
+    expect(outcome.record).toMatchObject({
+      modelCount: 2,
+      catalogReadAt: outcome.catalog.readAt,
+      catalogError: "Sign in on a machine first.",
+    });
+  });
+
+  it("fails NotFound for an account that does not exist", async () => {
+    const failure = await runWithAccounts(
+      Effect.flatMap(ProviderAccountService, (service) =>
+        Effect.flip(service.readCatalog(MISSING)),
+      ),
+    );
+
+    expect(failure).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("the first read of a catalog", () => {
+  it("is the first successful read, even when it lists no model, and a later read does not move it", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        const firstReadAt = () =>
+          Effect.map(catalogs.listCatalogs(), (all) => all[0]?.firstReadAt ?? null);
+        yield* recordRead(runner, account.id, signedOut(), 1);
+        const afterFailure = yield* firstReadAt();
+        yield* recordRead(runner, account.id, signedInWith(), 2);
+        const afterEmptyRead = yield* firstReadAt();
+        yield* Effect.sleep(Duration.millis(5));
+        yield* recordRead(runner, account.id, signedInWith(model("a")), 3);
+        const afterLaterRead = yield* firstReadAt();
+        return {
+          afterFailure,
+          afterEmptyRead,
+          afterLaterRead,
+          arrived: computeArrivedModels(
+            { defaultSelection: "current-models" },
+            (yield* catalogs.listCatalogs())[0]!,
+          ),
+        };
+      }),
+    );
+
+    expect(outcome.afterFailure).toBeNull();
+    expect(outcome.afterEmptyRead).not.toBeNull();
+    expect(outcome.afterLaterRead).toBe(outcome.afterEmptyRead);
+    // The model of the second read arrived after the first (empty) read.
+    expect(outcome.arrived.map((one) => one.model)).toEqual(["a"]);
+  });
+
+  it("dates a model that first appears after a backwards clock step after the first read", async () => {
+    const arrived = await runWithAccounts(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const repository = yield* modelCatalogRepository;
+        const catalogs = yield* ModelCatalogs;
+        const account = yield* addKeyAccount();
+        const record = (models: ReadonlyArray<ModelDescriptor>, readAt: string, stamp: string) =>
+          withTransaction(sql, repository.recordSuccess(account.id, models, readAt, stamp));
+        yield* record([model("a")], "2026-10-31T09:00:00.000Z", sentAt(1));
+        // The second read ends before the first one, as when the clock was set back.
+        yield* record([model("a"), model("b")], "2026-10-31T08:00:00.000Z", sentAt(2));
+        const catalog = (yield* catalogs.listCatalogs())[0]!;
+        return computeArrivedModels({ defaultSelection: "current-models" }, catalog);
+      }),
+    );
+
+    expect(arrived).toEqual([{ model: "b", name: "b", firstSeenAt: "2026-10-31T09:00:00.001Z" }]);
+  });
+});
+
+describe("which catalog reads are due, and where they go", () => {
+  const choose = (
+    options: { force?: boolean; localRunnerId?: string; accountIds?: ReadonlyArray<string> } = {},
+  ) =>
+    Effect.flatMap(ModelCatalogs, (catalogs) =>
+      catalogs.chooseDueReads({
+        force: options.force ?? false,
+        localRunnerId: options.localRunnerId,
+        ...(options.accountIds === undefined ? {} : { accountIds: options.accountIds }),
+      }),
+    );
+
+  it("reads a catalog that was never read, on the local runner when it can serve it, else on the first runner", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addKeyAccount();
+        const first = yield* addRunner("first");
+        const local = yield* addRunner("local");
+        return {
+          account,
+          first,
+          local,
+          withLocal: yield* choose({ localRunnerId: local }),
+          withoutLocal: yield* choose(),
+        };
+      }),
+    );
+
+    const pair = (runnerId: string) => ({
+      reads: [{ runnerId, providerAccountId: outcome.account.id, harnessId: ALPHA_HARNESS_ID }],
+      apiReads: [],
+      unserved: [],
+    });
+    expect(outcome.withLocal).toEqual(pair(outcome.local));
+    expect(outcome.withoutLocal).toEqual(pair(outcome.first));
+  });
+
+  it("does not read a catalog read less than four hours ago, unless forced, and reads it when it is older", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* recordRead(runner, account.id, signedInWith(model("a")), 1);
+        const fresh = yield* choose();
+        const forced = yield* choose({ force: true });
+        yield* withTransaction(
+          sql,
+          sql`UPDATE model_catalogs SET read_at = '2020-01-01T00:00:00.000Z'`,
+        );
+        return { fresh, forced, stale: yield* choose() };
+      }),
+    );
+
+    expect(outcome.fresh.reads).toEqual([]);
+    expect(outcome.forced.reads).toHaveLength(1);
+    expect(outcome.stale.reads).toHaveLength(1);
+  });
+
+  it("only considers the accounts it is asked about", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const wanted = yield* addKeyAccount();
+        yield* addKeyAccount("other");
+        yield* addRunner("laptop");
+        return { wanted, chosen: yield* choose({ accountIds: [wanted.id] }) };
+      }),
+    );
+
+    expect(outcome.chosen.reads.map((read) => read.providerAccountId)).toEqual([outcome.wanted.id]);
+  });
+
+  it("never picks an offline runner, and says so when no runner is left", async () => {
+    const chosen = await runWithAccounts(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* addKeyAccount();
+        yield* addRunner("laptop");
+        yield* withTransaction(sql, sql`UPDATE runners SET connectivity = 'offline'`);
+        return yield* choose();
+      }),
+    );
+
+    expect(chosen.reads).toEqual([]);
+    expect(chosen.unserved).toHaveLength(1);
+    expect(chosen.unserved[0]?.message).toContain("Connect one to list this account's models");
+  });
+
+  it("says which harness to install when no machine has it, and keeps the models when that is recorded", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const catalogs = yield* ModelCatalogs;
+        const probes = yield* ProviderAccountProbes;
+        const account = yield* addKeyAccount();
+        const bare = yield* addRunner("bare", { binaryPresent: false });
+        // An earlier read, from when a machine still had the harness.
+        yield* recordRead(bare, account.id, signedInWith(model("a")), 1);
+        const chosen = yield* choose({ force: true });
+        yield* catalogs.recordCatalogRead(
+          account.id,
+          { _tag: "failed", message: chosen.unserved[0]!.message },
+          yield* probes.buildReadStamp(account.id),
+        );
+        return { chosen, catalog: yield* readCatalog(account.id) };
+      }),
+    );
+
+    expect(outcome.chosen.reads).toEqual([]);
+    expect(outcome.catalog.error).toContain("not installed on any connected machine");
+    expect(outcome.catalog.models.map((one) => one.slug)).toEqual(["a"]);
+  });
+
+  it("tells a sign-in account that is signed in nowhere to sign in on a machine", async () => {
+    const chosen = await runWithAccounts(
+      Effect.gen(function* () {
+        yield* addAccount({ kind: MACHINE_KIND });
+        yield* addRunner("laptop");
+        return yield* choose();
+      }),
+    );
+
+    expect(chosen.reads).toEqual([]);
+    expect(chosen.unserved[0]?.message).toContain("not signed in on any connected machine");
+  });
+
+  describe("for a provider that lists its models through its API", () => {
+    const runWithCatalogued = <A, E>(body: Parameters<typeof runWithAccounts<A, E>>[0]) =>
+      runWithAccounts(body, undefined, [...buildAccountPlugins(), buildCataloguedPlugin()]);
+
+    it("returns the account as an API read, with no runner connected and no complaint about it", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          return { account, chosen: yield* choose() };
+        }),
+      );
+
+      expect(outcome.chosen).toEqual({
+        reads: [],
+        apiReads: [{ providerAccountId: outcome.account.id }],
+        unserved: [],
+      });
+    });
+
+    it("keeps the rule for when a read is due: not within four hours of a good read, unless forced", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const catalogs = yield* ModelCatalogs;
+          const probes = yield* ProviderAccountProbes;
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          yield* catalogs.recordCatalogRead(
+            account.id,
+            { _tag: "listed", models: [model("a")] },
+            yield* probes.buildReadStamp(account.id),
+          );
+          const fresh = yield* choose();
+          const forced = yield* choose({ force: true });
+          yield* withTransaction(
+            sql,
+            sql`UPDATE model_catalogs SET read_at = '2020-01-01T00:00:00.000Z'`,
+          );
+          return { fresh, forced, stale: yield* choose() };
+        }),
+      );
+
+      expect(outcome.fresh.apiReads).toEqual([]);
+      expect(outcome.forced.apiReads).toHaveLength(1);
+      expect(outcome.stale.apiReads).toHaveLength(1);
+    });
+
+    it("skips a due read of an account whose key the provider refused, until the read is forced", async () => {
+      const outcome = await runWithCatalogued(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const accounts = yield* providerAccountRepository;
+          const account = yield* addAccount({
+            providerId: CATALOGUED_PROVIDER_ID,
+            kind: CATALOGUED_KEY_KIND,
+          });
+          const before = yield* choose();
+          yield* withTransaction(
+            sql,
+            accounts.markCredentialRefused(
+              account.id,
+              account.credentialGeneration,
+              "Key revoked",
+              "2026-10-31T10:00:00.000Z",
+            ),
+          );
+          return {
+            account,
+            before,
+            refused: yield* choose(),
+            forced: yield* choose({ force: true }),
+          };
+        }),
+      );
+
+      const read = [{ providerAccountId: outcome.account.id }];
+      expect(outcome.before.apiReads).toEqual(read);
+      expect(outcome.refused.apiReads).toEqual([]);
+      expect(outcome.forced.apiReads).toEqual(read);
+    });
+  });
+
+  it("serves a sign-in account on the machine where it is signed in", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        yield* addRunner("other");
+        const signedInRunner = yield* addRunner("laptop");
+        yield* addSnapshot(account.id, ALPHA_HARNESS_ID, signedInRunner);
+        return { signedInRunner, chosen: yield* choose() };
+      }),
+    );
+
+    expect(outcome.chosen.reads.map((read) => read.runnerId)).toEqual([outcome.signedInRunner]);
+  });
+});
+
+describe("the readiness rows of an account", () => {
+  const readinessOf = (accountId: string) =>
+    Effect.map(
+      Effect.flatMap(ProviderAccountService, (service) => service.read(accountId)),
+      (account) => account.readiness,
+    );
+
+  it("lists a key account as ready on each runner once its key is stored, one row per harness it may run in", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: KEY_KIND });
+        const laptop = yield* addRunner("laptop");
+        const server = yield* addRunner("server");
+        const withoutKey = yield* readinessOf(account.id);
+        yield* storeCredential(account.id, "apiKey");
+        return { laptop, server, withoutKey, withKey: yield* readinessOf(account.id) };
+      }),
+    );
+
+    expect(outcome.withoutKey.map((row) => row.state)).toEqual([
+      "credential-missing",
+      "credential-missing",
+    ]);
+    // Beta is listed by the kind but runs nothing, so only Alpha has rows.
+    expect(outcome.withKey).toEqual([
+      { harnessId: ALPHA_HARNESS_ID, runnerId: outcome.laptop, state: "ready" },
+      { harnessId: ALPHA_HARNESS_ID, runnerId: outcome.server, state: "ready" },
+    ]);
+    expect(outcome.withKey.some((row) => row.harnessId === BETA_HARNESS_ID)).toBe(false);
+  });
+
+  it("lists a token account as expired once its token has expired", async () => {
+    const rows = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: TOKEN_KIND });
+        yield* addRunner("laptop");
+        yield* storeCredential(account.id, "token");
+        yield* setTokenExpiry(account.id, "2020-01-01T00:00:00.000Z");
+        return yield* readinessOf(account.id);
+      }),
+    );
+
+    expect(rows.map((row) => row.state)).toEqual(["token-expired"]);
+  });
+
+  it("lists a per-machine account as ready only where it is signed in, and says what is wrong elsewhere", async () => {
+    const outcome = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: MACHINE_KIND });
+        const signedIn = yield* addRunner("signed-in");
+        const signedOutRunner = yield* addRunner("signed-out");
+        const bare = yield* addRunner("bare", { binaryPresent: false });
+        yield* addSnapshot(account.id, ALPHA_HARNESS_ID, signedIn);
+        return { signedIn, signedOutRunner, bare, rows: yield* readinessOf(account.id) };
+      }),
+    );
+
+    expect(outcome.rows).toEqual([
+      { harnessId: ALPHA_HARNESS_ID, runnerId: outcome.signedIn, state: "ready" },
+      { harnessId: ALPHA_HARNESS_ID, runnerId: outcome.signedOutRunner, state: "not-signed-in" },
+      { harnessId: ALPHA_HARNESS_ID, runnerId: outcome.bare, state: "harness-missing" },
+    ]);
+  });
+
+  it("leaves a retired runner out", async () => {
+    const rows = await runWithAccounts(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const account = yield* addKeyAccount();
+        yield* addRunner("gone");
+        yield* withTransaction(sql, sql`UPDATE runners SET lifecycle = 'retired'`);
+        return yield* readinessOf(account.id);
+      }),
+    );
+
+    expect(rows).toEqual([]);
+  });
+});
+
+describe("deleting an account", () => {
+  it("deletes its catalog and takes it out of the Model Profiles in the same transaction", async () => {
+    const outcome = await runWithProfiles(
+      Effect.gen(function* () {
+        const service = yield* ProviderAccountService;
+        const account = yield* addKeyAccount();
+        const runner = yield* addRunner("laptop");
+        yield* joinMain(account.id);
+        yield* recordRead(runner, account.id, signedInWith(model("a")), 1);
+        const before = yield* readMain;
+        yield* service.delete(account.id);
+        return {
+          before,
+          after: yield* readMain,
+          catalogRead: yield* Effect.flip(readCatalog(account.id)),
+        };
+      }),
+    );
+
+    expect(outcome.before.accounts).toHaveLength(1);
+    expect(outcome.after.accounts).toEqual([]);
+    expect(outcome.after.defaultEntry).toBeNull();
+    expect(outcome.after.revision).toBe(outcome.before.revision + 1);
+    expect(outcome.catalogRead).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("the declarations a frame carries for a catalog", () => {
+  const WIDE = "wide/wide";
+  const NARROW = "narrow/narrow";
+  const OTHER = "other/other";
+  const API_PROVIDER = "apiprov/apiprov";
+  const PROBED_PROVIDER = "probed/probed";
+
+  const runs = (providerId: string, models: "all" | "own-list") => ({
+    providerId,
+    kinds: [{ kind: "api-key", modelArgument: "{model}" }],
+    models,
+  });
+
+  /**
+   * Two providers and three harnesses:
+   *
+   * - `apiprov` reads its catalog from its API. `wide` runs any of its models,
+   *   `narrow` only those it lists itself.
+   * - `probed` reads its catalog by probing `wide`. `wide` and `other` both run
+   *   any of its models.
+   */
+  const buildPlugins = () => {
+    const harness = (id: string, supports: HarnessDefinition["runs"]) =>
+      createPluginFixture({ id, definitions: [buildHarnessDefinition(id, supports)] }).plugin;
+    return [
+      harness("wide", [runs(API_PROVIDER, "all"), runs(PROBED_PROVIDER, "all")]),
+      harness("narrow", [runs(API_PROVIDER, "own-list")]),
+      harness("other", [runs(PROBED_PROVIDER, "all")]),
+      createPluginFixture({
+        id: "apiprov",
+        capabilities: ["providers"],
+        definitions: [],
+        providers: [
+          {
+            ...buildProviderDefinition("apiprov", [WIDE, NARROW]),
+            catalogSource: {
+              kind: "provider-api",
+              url: "https://api.example.com/v1/models",
+              headers: { authorization: "Bearer {apiKey}" },
+            },
+          },
+        ],
+        providerOptions: { parseCatalogBody: () => [] },
+      }).plugin,
+      createPluginFixture({
+        id: "probed",
+        capabilities: ["providers"],
+        definitions: [],
+        providers: [buildProviderDefinition("probed", [WIDE, OTHER])],
+      }).plugin,
+    ];
+  };
+
+  const catalogModel = (slug: string, extra: Partial<CatalogModel> = {}): CatalogModel => ({
+    slug,
+    name: `Model ${slug}`,
+    imageInput: null,
+    options: [],
+    ...extra,
+  });
+
+  /** The details a provider's API gives, which a harness probe does not. */
+  const WITH_DETAILS = { maker: "Maker", contextWindow: 200_000, inputPrice: 1.5, reasoning: true };
+
+  const catalog = [
+    catalogModel("a"),
+    catalogModel("b", WITH_DETAILS),
+    catalogModel("c", { contextWindow: 8_000 }),
+  ];
+
+  /** Stores the catalog the account has after a successful read. */
+  const storeCatalog = (accountId: string, models: ReadonlyArray<CatalogModel>) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const catalogs = yield* modelCatalogRepository;
+      yield* withTransaction(
+        sql,
+        catalogs.recordSuccess(accountId, models, yield* nowIso, "2026-10-31T10:00:00.000Z"),
+      );
+    });
+
+  /** Finds the declarations for a frame that runs `harnessId` for the account. */
+  const findDeclarations = (accountId: string, harnessId: string) =>
+    Effect.flatMap(ModelCatalogs, (catalogs) =>
+      catalogs.findModelDeclarations(accountId, harnessId),
+    );
+
+  /** Runs `body` against an account of `apiprov`, running in `wide` by default, whose catalog holds `models`. */
+  const withApiAccount = <A, E>(
+    body: (accountId: string) => Effect.Effect<A, E, AccountServices>,
+    models: ReadonlyArray<CatalogModel> = catalog,
+  ) =>
+    runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ providerId: API_PROVIDER, defaultHarnessId: WIDE });
+        yield* storeCatalog(account.id, models);
+        return yield* body(account.id);
+      }),
+      undefined,
+      buildPlugins(),
+    );
+
+  it("returns the whole catalog in catalog order, with only what a runner needs, whatever any runner lists", async () => {
+    const declarations = await withApiAccount((accountId) =>
+      Effect.gen(function* () {
+        const runner = yield* addRunner("laptop");
+        yield* addSnapshot(accountId, WIDE, runner, {
+          harnessVersion: "1.0.0",
+          auth: { status: "ok" },
+          models: [catalogModel("a")],
+          usage: null,
+        });
+        return yield* findDeclarations(accountId, WIDE);
+      }),
+    );
+
+    expect(declarations).toEqual([
+      { slug: "a", name: "Model a", imageInput: null },
+      {
+        slug: "b",
+        name: "Model b",
+        imageInput: null,
+        contextWindow: 200_000,
+        reasoning: true,
+      },
+      { slug: "c", name: "Model c", imageInput: null, contextWindow: 8_000 },
+    ]);
+  });
+
+  it("returns nothing for a harness that runs only the models it lists itself", async () => {
+    const declarations = await withApiAccount((accountId) => findDeclarations(accountId, NARROW));
+
+    expect(declarations).toBeUndefined();
+  });
+
+  it("returns an empty list for a catalog that was read and holds no models", async () => {
+    const declarations = await withApiAccount((accountId) => findDeclarations(accountId, WIDE), []);
+
+    expect(declarations).toEqual([]);
+  });
+
+  it("returns nothing for a catalog that was never read", async () => {
+    const declarations = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ providerId: API_PROVIDER, defaultHarnessId: WIDE });
+        return yield* findDeclarations(account.id, WIDE);
+      }),
+      undefined,
+      buildPlugins(),
+    );
+
+    expect(declarations).toBeUndefined();
+  });
+
+  it("returns nothing for the harness the provider's catalog is read from, but the catalog for another harness that runs any model", async () => {
+    const { source, other } = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ providerId: PROBED_PROVIDER, defaultHarnessId: WIDE });
+        yield* storeCatalog(account.id, catalog);
+        return {
+          source: yield* findDeclarations(account.id, WIDE),
+          other: yield* findDeclarations(account.id, OTHER),
+        };
+      }),
+      undefined,
+      buildPlugins(),
+    );
+
+    expect(source).toBeUndefined();
+    expect(other?.map((one) => one.slug)).toEqual(["a", "b", "c"]);
+  });
+});

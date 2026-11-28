@@ -25,13 +25,19 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { ConnectionTypes } from "../../connections";
 import { withTransaction } from "../../db";
-import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
+import { createInvalidStateError } from "@hercule/contract";
+import {
+  findRunnerRefusal,
+  HarnessAccounts,
+  ModelCatalogs,
+  ProviderAccountRunners,
+} from "../../provider-accounts";
+import { Secrets } from "../../secrets";
 import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
-import { readInstanceSecrets, Secrets } from "../../secrets";
 import { SessionService, type StartRequest } from "../../sessions";
 import { githubAccounts } from "../../workspaces";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 import { buildSessionCoordination } from "./coordination";
 
 const make = Effect.gen(function* () {
@@ -40,8 +46,9 @@ const make = Effect.gen(function* () {
   const runners = yield* runnerRepository;
   const connections = yield* RunnerConnections;
   const accounts = yield* githubAccounts;
-  const secrets = yield* Secrets;
-  const host = yield* PluginHost;
+  const harnessAccounts = yield* HarnessAccounts;
+  const modelCatalogs = yield* ModelCatalogs;
+  const accountRunners = yield* ProviderAccountRunners;
   const localRunnerId = yield* LocalRunnerId;
   const promotion = yield* PromotionState;
   // Each start waits for the runner's answer on a fiber of its own, owned by
@@ -133,9 +140,9 @@ const make = Effect.gen(function* () {
               // its sessions yet. A start sent before that report arrives would
               // be missing from the report, so the report would mark it exited.
               if (!(yield* connections.hasReportedSessions(runnerId))) return [];
-              const watermark = runner.watermark;
-              // No watermark reported yet does not mean the disk is full.
-              if (watermark !== null && watermark.diskFreeBytes < runner.diskWatermarkBytes) {
+              const metrics = runner.metrics;
+              // No metrics reported yet does not mean the disk is full.
+              if (metrics !== null && metrics.diskFreeBytes < runner.diskWatermarkBytes) {
                 return [];
               }
               const room =
@@ -144,10 +151,16 @@ const make = Effect.gen(function* () {
               return yield* sessions.claimStarts(runnerId, room, {
                 readGithubAccount: accounts.readGithubAccount,
                 readGitIdentity: accounts.readGitIdentity,
-                readSecrets: (instanceId, providerId) =>
-                  Effect.flatMap(host.providers(), (registered) =>
-                    readInstanceSecrets(secrets, registered, instanceId, providerId),
-                  ),
+                requireAccountRunnable: (providerAccountId, harnessId) =>
+                  Effect.gen(function* () {
+                    const available = yield* accountRunners.list(providerAccountId, harnessId);
+                    const refusal = findRunnerRefusal(available, runnerId);
+                    if (refusal !== null) {
+                      return yield* Effect.fail(createInvalidStateError(refusal));
+                    }
+                  }),
+                prepareHarnessAccount: harnessAccounts.prepare,
+                findModelDeclarations: modelCatalogs.findModelDeclarations,
                 buildCoordination: (sessionId) =>
                   Effect.provideService(
                     buildSessionCoordination(sessionId),
@@ -186,7 +199,9 @@ export const DispatchLayer: Layer.Layer<
   | ConnectionTypes
   | RunnerConnections
   | Secrets
-  | PluginHost
+  | HarnessAccounts
+  | ModelCatalogs
+  | ProviderAccountRunners
   | LocalRunnerId
   | PromotionState
 > = Layer.effect(Dispatch)(make);

@@ -11,7 +11,6 @@
  * the controller passes an id it read from a stored row.
  */
 import * as Context from "effect/Context";
-import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -37,6 +36,7 @@ import {
   type MintedJoinToken,
   type NotFound,
   type Runner,
+  type RunnerDiskUsage,
   type RunnerDetail,
   type RunnerLifecycle,
   type SortDirection,
@@ -53,9 +53,9 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
-import { requireOnline } from "./adapters";
+import { announceProviderRunnerChange } from "./announce-provider-change";
 import { JoinTokens } from "./join-tokens";
-import { RunnerFactsDeadline, RunnerConnections } from "./connections";
+import { RunnerConnections } from "./connections";
 import { runnerRepository, type RunnerEdit } from "./repository";
 
 const QueryInput = Schema.Struct({
@@ -177,7 +177,6 @@ const make = Effect.gen(function* () {
   const joinTokens = yield* JoinTokens;
   const settings = yield* Settings;
   const audit = yield* AuditLog;
-
   const connections = yield* RunnerConnections;
 
   const readRunner = readRunnerOrFail(runners);
@@ -208,6 +207,7 @@ const make = Effect.gen(function* () {
             return yield* Effect.fail(createInvalidStateError(move.refusal));
           }
           yield* runners.setLifecycle(id, move.to, at);
+          yield* announceProviderRunnerChange(id);
           yield* audit.append({
             kind: move.kind,
             actor: yield* currentStamp,
@@ -328,13 +328,13 @@ const make = Effect.gen(function* () {
               payload: { runnerId: id, changes },
               at,
             });
-            // The new override may move the watermark past the free disk this
-            // runner already reported. That is the same change a
-            // `watermarkReport` would detect, and it is recorded the same way.
+            // The new override may move the disk watermark past the free disk
+            // this runner already reported. That is the same change a report of
+            // the Runner Metrics would detect, and it is recorded the same way.
             let becameAccepting = false;
-            if (before.watermark !== null && edit.diskWatermarkBytes !== undefined) {
-              const wasAccepting = before.watermark.diskFreeBytes >= before.diskWatermarkBytes;
-              const accepting = before.watermark.diskFreeBytes >= edit.diskWatermarkBytes;
+            if (before.metrics !== null && edit.diskWatermarkBytes !== undefined) {
+              const wasAccepting = before.metrics.diskFreeBytes >= before.diskWatermarkBytes;
+              const accepting = before.metrics.diskFreeBytes >= edit.diskWatermarkBytes;
               becameAccepting = !wasAccepting && accepting;
               if (wasAccepting !== accepting) {
                 yield* audit.append({
@@ -435,6 +435,7 @@ const make = Effect.gen(function* () {
               }
             }
             yield* runners.setLifecycle(id, "retired", at);
+            yield* announceProviderRunnerChange(id);
             // A default that cannot take work is worse than no default. The
             // default is cleared, and the audit entry records that, rather
             // than promoting a runner nobody chose.
@@ -453,25 +454,21 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Asks the runner to report its facts now, and returns the updated runner.
-     * Fails with `InvalidState` when the runner is not connected or does not
-     * report in time. The runner reports by itself only hourly, and only when
-     * something changed, so this is the only way to see a newly installed
-     * provider CLI without waiting up to an hour.
+     * Stores what a runner measured outside its workspaces, as the runner's
+     * disk usage. Nothing is announced: a screen that shows it reads the
+     * runner again when it reads the runner's metrics. A runner that has
+     * measured nothing yet reports no usage, and the earlier values stay.
      */
-    refreshFacts: (id: Id): Effect.Effect<RunnerDetail, Exclude<MoveError, Validation>> =>
-      Effect.gen(function* () {
-        yield* requireGrant("runner.refreshFacts");
-        const before = yield* readRunner(id);
-        yield* requireOnline(before);
-        if (!(yield* connections.refreshedFacts(id))) {
-          const waited = Duration.format(yield* RunnerFactsDeadline);
-          return yield* Effect.fail(
-            createInvalidStateError(`that runner did not report its facts within ${waited}`),
-          );
-        }
-        return yield* readRunner(id);
-      }),
+    recordDiskUsage: (
+      runnerId: string,
+      usage: RunnerDiskUsage | null,
+    ): Effect.Effect<void, SqlError> =>
+      usage === null
+        ? Effect.void
+        : withTransaction(
+            sql,
+            Effect.flatMap(nowIso, (at) => runners.recordDiskUsage(runnerId, usage, at)),
+          ),
 
     /**
      * Creates a join token and returns it. The token appears only in this

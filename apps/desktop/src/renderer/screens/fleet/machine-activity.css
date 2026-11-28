@@ -1,0 +1,277 @@
+/* A machine's activity: the entries of the Recent section and of the Activity
+   page. The measurements are the fleet prototype's (`fx-act`, `fx-day-group`).
+   Every class starts with `machine-activity-`.
+
+   Departures from the prototype:
+   - A line is a fixed height and its text is cut with an ellipsis, where the
+     prototype's wraps. The Activity page is a virtual list, which places its
+     lines by their heights and never measures one. The heights are in
+     styles/row-heights.css and follow the Text size.
+   - Time, "by" and the day headings are --muted, not --faint, which is too
+     faint to read as text.
+   - A day's heading does not stick to the top: a virtual list draws only the
+     lines near the view, so the heading of the day on screen may not be drawn. */
+
+/* The time column. The Activity page has the days above its entries, so a
+   time is only "09:12" and fits a fixed width. Recent has no days, so an
+   entry that is not from today starts with its day ("Yesterday, 17:48"). Its
+   lines share one grid, so the column grows to the longest time instead of
+   cutting it, and every dot stays in one column. */
+.machine-activity {
+  --machine-activity-time-width: 52px;
+}
+.machine-activity--recent {
+  display: grid;
+  grid-template-columns: minmax(120px, max-content) 18px minmax(0, 1fr);
+  column-gap: 8px;
+}
+.machine-activity--recent > .machine-activity-row,
+.machine-activity--recent > .machine-activity-detail {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+/* ---------- An entry ---------- */
+.machine-activity-row,
+.machine-activity-detail {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--machine-activity-time-width) 18px minmax(0, 1fr);
+  column-gap: 8px;
+  box-sizing: border-box;
+}
+/* The space below the text is the rest of the line's fixed height. The time
+   and the sentence share a baseline, so the small time sits on the line of
+   the larger sentence. */
+.machine-activity-row {
+  grid-template-rows: var(--line-18);
+  align-items: baseline;
+  height: var(--fleet-activity-height-entry);
+  padding-top: 8px;
+  line-height: var(--line-18);
+}
+.machine-activity-time {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.machine-activity-dot {
+  align-self: center;
+  justify-self: center;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--ink) 32%, transparent);
+}
+.machine-activity-row.is-connection .machine-activity-dot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px color-mix(in oklab, var(--ink) 40%, transparent);
+}
+.machine-activity-row.is-problem .machine-activity-dot {
+  background: var(--fail);
+  box-shadow: none;
+}
+
+/* The thread that joins the dots: from the dot above to this one. A line
+   that unfolds carries it on, down through its details. */
+.machine-activity-row.joins-above::before,
+.machine-activity-row.is-open::after,
+.machine-activity-detail::before {
+  content: "";
+  position: absolute;
+  /* Placed in the dot's column, and centred in it. */
+  grid-column: 2;
+  left: 8.25px;
+  width: 1.5px;
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+}
+.machine-activity-row.joins-above::before {
+  top: -9px;
+  height: 22px;
+}
+.machine-activity-row.is-open::after {
+  top: 21px;
+  bottom: 0;
+}
+.machine-activity-detail::before {
+  top: 0;
+  bottom: 0;
+}
+
+/* The sentence, who did it, and the button that unfolds it, in one line. The
+   sentence gives way first. */
+.machine-activity-text {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+.machine-activity-sentence {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.machine-activity-row.is-problem .machine-activity-sentence {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.machine-activity-by,
+.machine-activity-about {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--t-12);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.machine-activity-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.machine-activity-more {
+  flex: none;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  color: var(--accent-ink);
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  line-height: var(--line-16);
+}
+.machine-activity-more:hover {
+  background: var(--hover);
+}
+
+/* ---------- A line of an unfolded entry ---------- */
+/* The text sits at the top of the line, so the first detail is as far below
+   its entry as the prototype's list is, and the last has room below it. */
+.machine-activity-detail {
+  align-items: start;
+  height: var(--fleet-activity-height-detail);
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: var(--line-16);
+}
+.machine-activity-detail.is-last {
+  height: var(--fleet-activity-height-last-detail);
+}
+.machine-activity-detail-text {
+  position: relative;
+  grid-column: 3;
+  min-width: 0;
+  overflow: hidden;
+  /* Puts the first detail as far below its entry as the prototype's list does. */
+  margin-top: -1px;
+  padding-left: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The hollow bullet. */
+.machine-activity-detail-text::before {
+  content: "";
+  position: absolute;
+  top: calc((var(--line-16) - 5px) / 2);
+  left: 4px;
+  width: 5px;
+  height: 5px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+/* ---------- A day ---------- */
+.machine-activity-day {
+  box-sizing: border-box;
+  height: var(--fleet-activity-height-day);
+  margin: 0;
+  /* The space around the heading is inside the line's height. */
+  padding: 24px 0 8px;
+  color: var(--muted);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  line-height: var(--line-16);
+  text-transform: uppercase;
+}
+
+/* ---------- The Activity page ---------- */
+.machine-activity-page {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.machine-activity-head h2 {
+  margin: 0;
+  font-size: var(--t-20);
+  font-weight: var(--w-bold);
+  letter-spacing: -0.015em;
+}
+.machine-activity-head p {
+  max-width: 620px;
+  margin: 4px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+/* The filters: flat buttons, the pressed one on a pale fill. */
+.machine-activity-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 20px 0 0;
+}
+.machine-activity-filters button {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-weight: var(--w-medium);
+}
+.machine-activity-filters button:hover {
+  background: var(--hover);
+}
+.machine-activity-filters button[aria-pressed="true"] {
+  background: var(--selected);
+  color: var(--ink);
+}
+/* The note after the entries or in their place: reading on, a failed read,
+   or nothing to show. */
+.machine-activity-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0 0;
+  color: var(--muted);
+}
+.machine-activity-note[role="alert"] {
+  color: var(--fail-ink);
+}
+
+/* The Recent section: "All activity" under the entries, and the line that
+   says there are none. */
+.machine-activity-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  margin: 8px 0 0 -8px;
+  padding: 0 8px;
+  border-radius: var(--r-sm);
+  color: var(--accent-ink);
+  font-weight: var(--w-medium);
+}
+.machine-activity-all:hover {
+  background: var(--hover);
+}
+.machine-activity-empty {
+  margin: 0;
+  color: var(--muted);
+}

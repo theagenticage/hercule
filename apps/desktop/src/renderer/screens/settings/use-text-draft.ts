@@ -1,4 +1,6 @@
 import { useState, type ChangeEvent, type KeyboardEvent } from "react";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
+import { isPrimaryModifierHeld } from "../../app/primary-modifier";
 
 /** The props `useTextDraft` returns for a text input or a textarea. */
 export interface TextDraftProps {
@@ -17,7 +19,7 @@ export interface TextDraftProps {
  * its own.
  *
  * - Leaving the control commits.
- * - Cmd+Enter commits and leaves the control.
+ * - Cmd+Enter commits and leaves the control; on Linux, `platform`, it is Ctrl+Enter.
  * - Enter commits in a one-line input, which has no other use for it.
  * - Esc drops the typed text and shows `stored` again.
  *
@@ -25,6 +27,7 @@ export interface TextDraftProps {
  * caller can note what the edit began on before a later read changes it.
  */
 export function useTextDraft(
+  platform: DesktopPlatform,
   stored: string,
   onCommit: (text: string) => void,
   onEditStart?: () => void,
@@ -46,7 +49,7 @@ export function useTextDraft(
     onKeyDown: (event) => {
       if (event.key === "Escape") {
         setDraft(null);
-      } else if (event.key === "Enter" && event.metaKey) {
+      } else if (event.key === "Enter" && isPrimaryModifierHeld(event, platform)) {
         event.preventDefault();
         // Leaving the control commits the text, so committing here as well
         // would save it twice.

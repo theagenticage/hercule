@@ -20,7 +20,7 @@ import {
   CLAUDE_OPUS,
   CLAUDE_SONNET,
   GPT,
-  SPECIMEN_INSTANCES,
+  SPECIMEN_ACCOUNTS,
   SPECIMEN_NOW,
   STUDIO_MAC,
   type SpecimenModel,
@@ -299,6 +299,6 @@ export const ROWS_RECORDS: SidebarRecords = {
   workspaces: [PAYOUT_WORKSPACE, THREE_DS_WORKSPACE, RESULT_WORKSPACE],
   resources: [PAYMENTS_REPO, WEBSHOP_REPO],
   runners: [STUDIO_MAC],
-  instances: SPECIMEN_INSTANCES,
+  accounts: SPECIMEN_ACCOUNTS,
   user: { username: "Rogier" },
 };

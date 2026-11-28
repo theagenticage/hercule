@@ -44,7 +44,7 @@ const stopCapturedProcess = async (pid: number): Promise<void> => {
   await waitForProcessGone(pid);
 };
 
-/** Establishes provider facts before the real runner takes over the enrolled identity. */
+/** Establishes harness facts before the real runner takes over the enrolled identity. */
 const bootstrapRunner = async (
   arranged: Arranged,
 ): Promise<{
@@ -86,8 +86,13 @@ const bootstrapRunner = async (
           JSON.stringify({
             _tag: "probeReport",
             requestId: frame.requestId,
-            instanceId: frame.instanceId,
-            result: { harnessVersion: "1.0.0", auth: { status: "ok" }, models: MODELS },
+            providerAccountId: frame.harnessAccount.providerAccountId,
+            result: {
+              harnessVersion: "99.0.0",
+              auth: { status: "ok" },
+              models: MODELS,
+              usage: null,
+            },
           }),
         );
       }
@@ -95,10 +100,10 @@ const bootstrapRunner = async (
   });
   try {
     await waitUntil("probed the proof runner", async () => {
-      const providers = (await (
-        await get(arranged.harness.base, "/api/v1/providers", arranged.token)
+      const accounts = (await (
+        await get(arranged.harness.base, "/api/v1/provider-accounts", arranged.token)
       ).json()) as ReadonlyArray<{ readonly snapshots: ReadonlyArray<unknown> }>;
-      return providers.every((provider) => provider.snapshots.length === 2) ? true : undefined;
+      return accounts.every((account) => account.snapshots.length === 2) ? true : undefined;
     });
   } catch (error) {
     socket.close();
@@ -148,7 +153,7 @@ describe("preparation after a real runner process dies", () => {
         import { Effect } from "effect";
         import { connect } from ${JSON.stringify(join(moduleRoot, "socket.ts"))};
         import { makeCredentialRelay } from ${JSON.stringify(join(moduleRoot, "credentials/index.ts"))};
-        import { providerLogins } from ${JSON.stringify(join(moduleRoot, "providers/index.ts"))};
+        import { harnessLogins } from ${JSON.stringify(join(moduleRoot, "harnesses/index.ts"))};
         import { sessions } from ${JSON.stringify(join(moduleRoot, "sessions/index.ts"))};
         import { makeWorkspaceSteps } from ${JSON.stringify(join(moduleRoot, "workspace-steps/index.ts"))};
         import { makeWorkspaces } from ${JSON.stringify(join(moduleRoot, "workspaces/index.ts"))};
@@ -158,10 +163,10 @@ describe("preparation after a real runner process dies", () => {
         const workspaces = yield* makeWorkspaces({ storageDir, gitEnv });
         yield* connect({
           pin, facts, probe: Effect.succeed(facts),
-          headroom: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1024 ** 3 }),
-          providersDir: storageDir + "/providers", scratchDir: storageDir + "/scratch",
-          workspaces, workspaceSteps: makeWorkspaceSteps({ storageDir, workspaces, socketPath, baseEnv: process.env }),
-          socketPath, credentials: makeCredentialRelay(), providerLogins, sessions,
+          readDiskAndMemory: Effect.succeed({ diskFreeBytes: 200 * 1024 ** 3, availableMemoryBytes: 1024 ** 3 }),
+          storageDir, scratchDir: storageDir + "/scratch",
+          workspaces, diskMeasurements: { reportTo: () => Effect.never }, workspaceSteps: makeWorkspaceSteps({ storageDir, workspaces, socketPath, baseEnv: process.env }),
+          socketPath, credentials: makeCredentialRelay(), harnessLogins, sessions,
           binDir: storageDir + "/bin", herculeTool: { skill: "# fixture", claudePluginDir: storageDir + "/claude-plugin" }
         });
         })));

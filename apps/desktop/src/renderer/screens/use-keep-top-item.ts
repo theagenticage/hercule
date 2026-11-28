@@ -119,7 +119,7 @@ export function useKeepTopItem(virtualizer: Placed, sizes: unknown): void {
       const top = topBefore.current;
       const scrolledTo = top === null ? null : scrollToTopItem(virtualizer, top);
       if (scrolledTo !== null && Math.abs(scrolledTo - offset) > 0.01) {
-        offsetBeforeScroll.current ??= offset;
+        if (offsetBeforeScroll.current === null) offsetBeforeScroll.current = offset;
         topBefore.current = findTopItem(items, scrolledTo);
         return;
       }

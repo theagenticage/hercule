@@ -1,14 +1,16 @@
 import { type Effect, Schema } from "effect";
-import { AccessMode } from "@hercule/protocol";
+import { AccessMode, CredentialVariable, ModelArgument } from "@hercule/protocol";
 import type { ConnectionUnavailable } from "./connections";
-import { SchemaValue } from "./manifest";
+import type { EntityKindDeclaration, EntityLookup, IngestEntities } from "./entities";
+import { PLUGIN_ID_SOURCE } from "./manifest";
 import { TaskPriority } from "./limits";
 import type { KeyValueStore, PluginError } from "./plugin";
+import type { SavedQuery } from "./saved-queries";
 
 const Support = Schema.Literals(["native", "unsupported"]);
 
 /**
- * Static facts about the pinned harness version behind a provider. Every value
+ * Static facts about the pinned harness version behind a harness definition. Every value
  * is a fact, never a fallback: the controller decides what an unsupported mode
  * falls back to, so nothing here records it.
  */
@@ -25,6 +27,11 @@ export const DeclaredCapabilities = Schema.Struct({
   mcpPassthrough: Support,
   disallowedTools: Support,
   structuredOutput: Schema.Literals(["supported", "unsupported"]),
+  /**
+   * `unsupported` means the harness makes no text generations (spec 06 section 14), so the
+   * controller never offers or picks a model in it for `textGeneration.model`.
+   */
+  textGeneration: Schema.Literals(["supported", "unsupported"]),
 });
 
 export type DeclaredCapabilities = Schema.Schema.Type<typeof DeclaredCapabilities>;
@@ -37,18 +44,18 @@ export type DeclaredCapabilities = Schema.Schema.Type<typeof DeclaredCapabilitie
 export const MAX_CONTRIBUTION_NAME_LENGTH = 128;
 
 /**
- * The name of one contribution: a provider, an event source, or whatever a
+ * The name of one contribution: a harness, an event source, or whatever a
  * later extension point contributes. One limit for all of them, because they
  * are all stored in the same columns.
  */
-const ContributionName = Schema.String.check(
+export const ContributionName = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(MAX_CONTRIBUTION_NAME_LENGTH),
 );
 
 /**
- * The unqualified id a plugin gives an event source, a workflow action or a
- * Connection type. The host prefixes it with the plugin id and a `/` to build
+ * The unqualified id a plugin gives a harness, an event source, a workflow
+ * action or a Connection type. The host prefixes it with the plugin id and a `/` to build
  * the qualified id (`github/pr.merge`). A `/` in the word would make the
  * qualified id ambiguous, so it is rejected.
  */
@@ -60,32 +67,152 @@ export const ContributionWord = ContributionName.check(
 );
 
 /**
- * A provider's static self-description, which is all a provider plugin
- * contributes. `defaultConfig` is a value rather than a function, because a
- * function cannot be stored in the catalog.
+ * The longest a folder name in a Harness Home path may be. A harness's
+ * qualified id becomes two such folder names, its plugin id and its own word
+ * (`providers/homes/<account>/<plugin id>/<word>`), and the runner refuses any
+ * home whose names are longer.
  */
-export const ProviderDefinition = Schema.Struct({
-  id: ContributionName,
-  displayName: ContributionName,
-  /** The harness's executable name on `PATH`, which links a runner's facts to an instance. */
-  binaryName: ContributionName,
-  /** Several accounts of one harness, kept apart by per-instance config dirs. */
-  supportsMultipleInstances: Schema.Boolean,
-  /** Per-instance logical settings only: environment and model defaults, never paths. */
-  configSchema: SchemaValue,
-  defaultConfig: Schema.Json,
-  declared: DeclaredCapabilities,
+export const MAX_HARNESS_HOME_SEGMENT_LENGTH = 64;
+
+/**
+ * The unqualified id a plugin gives a harness. It is a `ContributionWord`
+ * that is also usable as a folder name: letters, digits, `.`, `_` and `-`,
+ * starting with a letter or digit, at most `MAX_HARNESS_HOME_SEGMENT_LENGTH`
+ * characters. A harness's folder in each account's Harness Home is named
+ * after it, and a plugin accepted with a word the runner cannot use as a
+ * folder name would fail only when its first session starts.
+ */
+export const HarnessWord = ContributionWord.check(
+  Schema.isMaxLength(MAX_HARNESS_HOME_SEGMENT_LENGTH, {
+    message: `A harness id may be at most ${String(MAX_HARNESS_HOME_SEGMENT_LENGTH)} characters, because it names a folder in the Harness Home.`,
+  }),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, {
+    message:
+      "A harness id may hold only letters, digits, . _ and -, and must start with a letter or digit, because it names a folder in the Harness Home.",
+  }),
+);
+
+/**
+ * The qualified id of a contribution: the id of the plugin that owns it, a `/`,
+ * and the plugin's own word, such as `claude-code/claude-code`. The host mints
+ * these ids at registration (ADR 0034). A definition that names a contribution
+ * of another plugin, such as the provider a harness runs, writes this form,
+ * because it cannot know the other plugin's word any other way.
+ */
+export const QualifiedContributionId = ContributionName.check(
+  Schema.isPattern(new RegExp(`^${PLUGIN_ID_SOURCE}/[^/]+$`), {
+    message:
+      "A qualified id is the id of a plugin, a / character and the plugin's own word, such as claude-code/claude-code.",
+  }),
+);
+
+/**
+ * How a harness runs one account kind of a provider: how it names the
+ * provider's models for accounts of this kind, and where the account's
+ * credential goes.
+ */
+export const HarnessKindSupport = Schema.Struct({
+  /** The account kind's id, as the provider declares it. */
+  kind: ContributionWord,
   /**
-   * The model slug this provider suggests for text generation: a small, cheap
-   * model from its catalog. The controller's `Automatic` text generation
-   * model picks the first provider, in its own order, whose suggested model
-   * a logged-in instance offers (spec 06 section 14). Absent when the
-   * provider suggests none.
+   * How the harness names a model of this provider for accounts of this kind,
+   * with `{model}` standing for the provider's own model id: `{model}`, or
+   * `zai/{model}` for pi. It is per kind because a harness may run two kinds of
+   * one provider under different names, such as pi's `opencode-go/{model}` and
+   * `opencode/{model}`.
    */
-  suggestedTextGenerationModel: Schema.optionalKey(Schema.NonEmptyString),
+  modelArgument: ModelArgument,
+  /**
+   * The environment variable the account's credential goes in, in the
+   * harness process only. Absent for a kind whose login lives in the
+   * Harness Home instead.
+   */
+  credentialVariable: Schema.optionalKey(CredentialVariable),
 });
 
-export type ProviderDefinition = Schema.Schema.Type<typeof ProviderDefinition>;
+export type HarnessKindSupport = Schema.Schema.Type<typeof HarnessKindSupport>;
+
+/**
+ * How a harness runs the models of one provider: the account kinds it can run
+ * for that provider, each with how it names a model, and which of the
+ * account's models it can run (spec 06 section 2).
+ */
+export const HarnessProviderSupport = Schema.Struct({
+  /** The qualified id of the provider, such as `anthropic/anthropic`. The provider's plugin need not be loaded. */
+  providerId: QualifiedContributionId,
+  /** The account kinds of that provider the harness can run. */
+  kinds: Schema.Array(HarnessKindSupport),
+  /**
+   * Which of the account's models the harness can run: `all` of them, or only
+   * those in the harness's own model list for the account (`own-list`).
+   */
+  models: Schema.Literals(["all", "own-list"]),
+});
+
+export type HarnessProviderSupport = Schema.Schema.Type<typeof HarnessProviderSupport>;
+
+/**
+ * The name of a package on the public npm registry: at most 214 characters,
+ * lowercase, an optional `@scope/` and then a name. The characters are
+ * `a-z`, `0-9` and `-._~`, and neither the scope nor the name starts with `.`
+ * or `_`. These are npm's own rules. They also keep the name from changing the
+ * URL the controller builds from it (`..` is refused).
+ */
+const NpmPackageName = Schema.String.check(
+  Schema.isMaxLength(214),
+  Schema.isPattern(/^(?:@[a-z0-9~-][a-z0-9._~-]*\/)?[a-z0-9~-][a-z0-9._~-]*$/),
+);
+
+/**
+ * The name of a GitHub repository, `<owner>/<name>`, such as
+ * `google-antigravity/antigravity-cli`. Each part is made of letters, digits,
+ * `.`, `_` and `-`, because the controller puts the name into a URL. A part
+ * may not be `.` or `..`, which would change the path of that URL. GitHub
+ * allows an owner of at most 39 characters and a name of at most 100, so the
+ * whole is at most 140 characters (39, the `/`, and 100).
+ */
+const GithubRepositoryName = Schema.String.check(
+  Schema.isMaxLength(140),
+  Schema.isPattern(/^(?!\.\.?\/)[A-Za-z0-9._-]+\/(?!\.\.?$)[A-Za-z0-9._-]+$/, {
+    message:
+      "A GitHub repository must be written <owner>/<name>, such as google-antigravity/antigravity-cli. Each part may hold only letters, digits, . _ and -, and may not be . or .., because it goes into a URL.",
+  }),
+);
+
+/**
+ * Where a harness's releases are published, so the controller can read the
+ * newest one. It is one of:
+ *
+ * - `npm`: the public npm registry. `package` is the package's name there,
+ *   such as `@openai/codex`.
+ * - `github-releases`: the releases of a GitHub repository. `repository` is
+ *   `<owner>/<name>`, such as `google-antigravity/antigravity-cli`.
+ */
+export const HarnessReleaseSource = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("npm"), package: NpmPackageName }),
+  Schema.Struct({ kind: Schema.Literal("github-releases"), repository: GithubRepositoryName }),
+]);
+
+export type HarnessReleaseSource = Schema.Schema.Type<typeof HarnessReleaseSource>;
+
+/**
+ * A harness's static self-description, which is all a harness plugin
+ * contributes. `id` is the plugin's bare word; the host mints the qualified id
+ * (`claude-code/claude-code`) at registration.
+ */
+export const HarnessDefinition = Schema.Struct({
+  id: HarnessWord,
+  displayName: ContributionName,
+  /** The harness's executable name on `PATH`, which links a runner's facts to a harness. */
+  binaryName: ContributionName,
+  /** Where the harness's releases are published. */
+  releaseSource: HarnessReleaseSource,
+  declared: DeclaredCapabilities,
+  /** The providers, and the account kinds of each, that the harness can run. */
+  runs: Schema.Array(HarnessProviderSupport),
+});
+
+export type HarnessDefinition = Schema.Schema.Type<typeof HarnessDefinition>;
 
 /**
  * One event kind, as the plugin that emits it declares it: the schema of the
@@ -255,6 +382,8 @@ export interface IngestContext {
   readonly credentials: () => Effect.Effect<Record<string, string>, ConnectionUnavailable>;
   /** Present only when the manifest requested the `resources` capability. */
   readonly resources?: ConnectionResources;
+  /** Present only when the manifest requested the `entities` capability. */
+  readonly entities?: IngestEntities;
   /**
    * Returns the open signals raised from this Connection's events, read at
    * the moment of the call. A source uses it to watch the threads that have
@@ -353,6 +482,34 @@ export interface EventSourceContribution {
    */
   readonly signalKinds?: ReadonlyArray<SignalKindDeclaration>;
   /**
+   * The kinds of External Entity this source reports, such as a pull request.
+   * None when left out. A kind is not a signal kind: `linear/issue` can be
+   * both, in two namespaces. A source that declares entity kinds, or an
+   * `entityLookup`, needs the `entities` capability. The host refuses the
+   * source when two kinds share a word, when two kinds' `refPrefix` overlap
+   * (also across plugins), when an identifier template names no field, when a
+   * `home` or `section` names a kind this source does not declare, or when a
+   * status maps to a stage that is not a Task stage.
+   */
+  readonly entityKinds?: ReadonlyArray<EntityKindDeclaration>;
+  /**
+   * The saved queries this source adds to the Inbox's rail, at most
+   * `MAX_SAVED_QUERIES_PER_PLUGIN` for the whole plugin. None when left out.
+   * The host refuses the source when two queries share a word, when a clause
+   * has a key that is neither a core key nor a field this source declares,
+   * when an operator does not fit the field's type, or when a `kind` or
+   * `signal` clause names a kind this plugin does not declare.
+   */
+  readonly savedQueries?: ReadonlyArray<SavedQuery>;
+  /**
+   * Recognizes, searches and reads this source's things for the Add button on
+   * Work. A plugin declares one `entityLookup` at most, because the host
+   * reaches it by plugin id: the host refuses a second source of the same
+   * plugin that declares one. A plugin with several sources puts its lookup on
+   * one of them and makes it cover the things of all.
+   */
+  readonly entityLookup?: EntityLookup;
+  /**
    * Starts ingesting for one Connection. The host opens a handle for every
    * Connection of the source's type that is `connected` or `error` while the
    * plugin is active. Its first poll of each feed records where the feed
@@ -375,6 +532,14 @@ export interface EventSourceContribution {
  *   id, so `review-requested` becomes `github/review-requested`.
  * - `label` and `description` are shown to the user: the label on Intake,
  *   the description in Intake's settings.
+ * - `noun` names one signal of the kind in a sentence, singular and in lower
+ *   case, such as "review request", "mention" or "failing checks". It is 1 to
+ *   40 characters.
+ * - `asks` says whether an open signal of the kind asks the user to make a
+ *   move, such as a review request, a mention or failing checks on the user's
+ *   pull request. A thing with an open asking signal is one someone waits on
+ *   the user for. A kind that only informs, such as a new issue in a watched
+ *   project, does not ask.
  * - `from` lists the event kinds the rule reads. The rule never runs on
  *   another kind.
  * - `rule` returns `"yes"`, `"no"` or `"undecided"`: whether the event is a
@@ -397,6 +562,8 @@ export interface SignalKindDeclaration {
   readonly word: string;
   readonly label: string;
   readonly description: string;
+  readonly noun: string;
+  readonly asks: boolean;
   readonly from: ReadonlyArray<string>;
   readonly rule: string;
   readonly guidance: string;

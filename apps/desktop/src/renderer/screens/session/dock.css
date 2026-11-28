@@ -35,6 +35,17 @@
   user-select: text;
   background: color-mix(in oklab, var(--raised) 70%, transparent);
 }
+/* Not in the book, which draws no async question. The button at the end of
+   the row is Answer on a folded question and Later on an open one. It keeps its
+   size beside a long line of text. A folded question is only this row, so the
+   row needs no room under it for a ledger or a question. */
+.dock-q .btn {
+  flex: none;
+  margin-left: auto;
+}
+.dock-q--folded {
+  margin-bottom: 0;
+}
 .dock .ledger {
   gap: 2px;
 }

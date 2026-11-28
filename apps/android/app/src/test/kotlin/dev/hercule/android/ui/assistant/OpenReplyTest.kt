@@ -7,7 +7,7 @@ import dev.hercule.android.wire.ConversationSenderRole
 import dev.hercule.android.wire.ExitReason
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.Session
 import dev.hercule.android.wire.SessionStatus
 import dev.hercule.android.wire.StreamKind
@@ -30,29 +30,29 @@ class OpenReplyTest {
     private var position = 0L
     private var messagePosition = 0L
 
-    private fun buildRow(event: ProviderEvent) = TranscriptRow(++position, TODAY, event)
+    private fun buildRow(event: HarnessEvent) = TranscriptRow(++position, TODAY, event)
 
-    private fun turnStarted(turnId: String) = buildRow(ProviderEvent.TurnStarted(turnId = turnId))
+    private fun turnStarted(turnId: String) = buildRow(HarnessEvent.TurnStarted(turnId = turnId))
 
     private fun turnCompleted(turnId: String, state: TurnState = TurnState.Completed) =
-        buildRow(ProviderEvent.TurnCompleted(turnId = turnId, state = state))
+        buildRow(HarnessEvent.TurnCompleted(turnId = turnId, state = state))
 
     private fun itemStarted(turnId: String, itemId: String, kind: ItemKind = ItemKind.AssistantMessage) =
-        buildRow(ProviderEvent.ItemStarted(turnId = turnId, itemId = itemId, kind = kind))
+        buildRow(HarnessEvent.ItemStarted(turnId = turnId, itemId = itemId, kind = kind))
 
     private fun itemCompleted(
         turnId: String,
         itemId: String,
         status: ItemStatus = ItemStatus.Completed,
         kind: ItemKind = ItemKind.AssistantMessage,
-    ) = buildRow(ProviderEvent.ItemCompleted(turnId = turnId, itemId = itemId, kind = kind, status = status))
+    ) = buildRow(HarnessEvent.ItemCompleted(turnId = turnId, itemId = itemId, kind = kind, status = status))
 
     private fun text(turnId: String, itemId: String, delta: String) =
-        buildRow(ProviderEvent.ContentDelta(turnId = turnId, itemId = itemId, streamKind = StreamKind.AssistantText, delta = delta))
+        buildRow(HarnessEvent.ContentDelta(turnId = turnId, itemId = itemId, streamKind = StreamKind.AssistantText, delta = delta))
 
-    private fun sessionExited() = buildRow(ProviderEvent.SessionExited(ExitReason("crash")))
+    private fun sessionExited() = buildRow(HarnessEvent.SessionExited(ExitReason("crash")))
 
-    private fun sessionStarted() = buildRow(ProviderEvent.SessionStarted)
+    private fun sessionStarted() = buildRow(HarnessEvent.SessionStarted)
 
     /** Returns the rows of a whole assistant text: its start, its words, and its end. */
     private fun assistantText(turnId: String, itemId: String, text: String) =

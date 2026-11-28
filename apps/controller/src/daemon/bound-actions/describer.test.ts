@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { Effect, Layer, Option } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import type {
   AnswerOperation,
@@ -17,7 +18,7 @@ import type {
   WorkflowDefinition,
 } from "@hercule/contract";
 import { connectionRepository } from "../../connections";
-import { mintUuid, uuidToString } from "../../db";
+import { mintUuid, uuidFromString, uuidToString } from "../../db";
 import {
   permissionRequestRepository,
   PermissionProfiles,
@@ -77,6 +78,7 @@ const insertTask = (title: string) =>
         title,
         description: "",
         status: "open",
+        stage: "planned",
         priority: "normal",
         labels: [],
         projectId: undefined,
@@ -106,12 +108,14 @@ const insertSession = (
         agentId: undefined,
         conversationId: undefined,
         step: undefined,
-        instanceId: mintId(),
+        providerAccountId: mintId(),
+        harnessId: "test/test",
         runnerId: mintId(),
         requestedAccessMode: "approval-required",
         accessMode: "approval-required",
         workspaceId: null,
         projectId: undefined,
+        taskId: undefined,
         checkoutBranch: undefined,
         githubConnectionId: undefined,
         spec: "{}",
@@ -255,6 +259,24 @@ describe("task.create", () => {
   });
 });
 
+describe("task.create stage", () => {
+  it("names the stage the task is created at", async () => {
+    const line = await run(
+      describeOperation({
+        op: "task.create",
+        input: { title: "Fix login", description: "", stage: "planned" },
+      }),
+    );
+
+    expect(line).toEqual([
+      text("Create task "),
+      marked("Fix login"),
+      text(" with "),
+      text("stage planned"),
+    ]);
+  });
+});
+
 describe("task.update", () => {
   it("names the task and the project, and lists each change in full", async () => {
     const longDescription = "new words ".repeat(50);
@@ -263,7 +285,7 @@ describe("task.update", () => {
         const taskId = yield* insertTask("Fix the login page");
         const project = yield* inTransaction(
           Effect.flatMap(projectRepository, (projects) =>
-            projects.insert({ name: "Website", description: undefined, at: AT }),
+            projects.insert({ name: "Website", description: undefined, mcpServerIds: [], at: AT }),
           ),
         );
         return {
@@ -329,6 +351,121 @@ describe("task.update", () => {
       text(": "),
       text("move to project "),
       marked(MISSING_ID),
+    ]);
+  });
+});
+
+describe("task.update stage", () => {
+  it("lists the stage beside the other changes, so an approval hides none of them", async () => {
+    const line = await run(
+      Effect.gen(function* () {
+        const taskId = yield* insertTask("Fix the login page");
+        return yield* describeOperation({
+          op: "task.update",
+          input: { taskId, priority: "low", stage: "dropped" },
+        });
+      }),
+    );
+
+    expect(line).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("stage → dropped"),
+      text(", "),
+      text("priority → low"),
+    ]);
+  });
+});
+
+describe("the initiative of a task", () => {
+  it("names the initiative a task is created on, put on, or taken off", async () => {
+    const lines = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const initiativeId = mintId();
+        yield* inTransaction(
+          sql`INSERT INTO initiatives (id, name, intent, hue, created_at, updated_at, created_by, updated_by)
+              VALUES (${uuidFromString(initiativeId)}, 'Platform', '', 245, ${AT}, ${AT}, 'user', 'user')`,
+        );
+        const taskId = yield* insertTask("Fix the login page");
+        return {
+          created: yield* describeOperation({
+            op: "task.create",
+            input: { title: "Fix login", description: "", initiativeId },
+          }),
+          put: yield* describeOperation({
+            op: "task.update",
+            input: { taskId, initiativeId },
+          }),
+          taken: yield* describeOperation({
+            op: "task.update",
+            input: { taskId, initiativeId: null },
+          }),
+          missing: yield* describeOperation({
+            op: "task.update",
+            input: { taskId, initiativeId: MISSING_ID },
+          }),
+        };
+      }),
+    );
+
+    expect(lines.created).toEqual([
+      text("Create task "),
+      marked("Fix login"),
+      text(" with "),
+      text("in initiative "),
+      marked("Platform"),
+    ]);
+    expect(lines.put).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("put on initiative "),
+      marked("Platform"),
+    ]);
+    expect(lines.taken).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("remove from its initiative"),
+    ]);
+    expect(lines.missing).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("put on initiative "),
+      marked(MISSING_ID),
+    ]);
+  });
+});
+
+describe("task.update stage fact", () => {
+  it("lists the fact that guards the stage and the finished-work condition, so an approval hides neither", async () => {
+    const line = await run(
+      Effect.gen(function* () {
+        const taskId = yield* insertTask("Fix the login page");
+        return yield* describeOperation({
+          op: "task.update",
+          input: {
+            taskId,
+            stage: "landed",
+            stageFactId: 12,
+            onlyWhenLinkedWorkFinished: true,
+          },
+        });
+      }),
+    );
+
+    expect(line).toEqual([
+      text("Update task "),
+      marked("Fix the login page"),
+      text(": "),
+      text("stage → landed"),
+      text(", "),
+      text("only if fact 12 is newer than the last stage decision"),
+      text(", "),
+      text("only when all linked work is finished"),
     ]);
   });
 });
@@ -668,8 +805,7 @@ describe("ignoreRule.create", () => {
       ),
   });
 
-  const SOURCE_NOTE =
-    " still sends them; they show in Everything. Also takes matching open signals off your list.";
+  const SOURCE_NOTE = " still sends them. Also takes matching open signals off your list.";
 
   it("names the kind, each field and its value, and the plugin that still sends them", async () => {
     const line = await run(

@@ -69,7 +69,13 @@ import {
   type WorkflowSaveResult,
   type WorkflowSummary,
 } from "@hercule/contract";
-import { checkActorHoldsGrant, currentStamp, requireGrant, type Actor } from "../actor";
+import {
+  checkActorHoldsGrant,
+  currentStamp,
+  requireGrant,
+  SYSTEM_ACTOR,
+  type Actor,
+} from "../actor";
 import { connectionRepository } from "../connections";
 import {
   nowIso,
@@ -84,15 +90,22 @@ import type { PluginHost } from "../plugins";
 import { Settings } from "../settings";
 import { workflowReferences } from "./references";
 import { workflowRepository, type DeclaredTrigger, type ParsedSource } from "./repository";
+import { WorkflowEntities } from "./entities";
 import { WorkflowRuns } from "./runs";
 import { WorkflowSignals } from "./signals";
 import { readDefaultSpawnBound } from "./spawn-bounds";
+import type { ShippedWorkflowSource } from "./shipped";
 import {
   RESUME_ACTION_ID,
   RESUME_AND_DISCARD_ACTION_ID,
   triggerEffectRepository,
 } from "./trigger-effects";
-import { listConnectionParams, validateDefinition, type ConnectionParam } from "./validation";
+import {
+  listConnectionParams,
+  validateDefinition,
+  type ConnectionParam,
+  type ResolvedReferences,
+} from "./validation";
 
 const QueryInput = Schema.Struct({
   ...WorkflowFilter.fields,
@@ -297,11 +310,30 @@ const make = Effect.gen(function* () {
   const connections = yield* connectionRepository;
   const runs = yield* WorkflowRuns;
   const signals = yield* WorkflowSignals;
+  const entities = yield* WorkflowEntities;
   const effects = yield* triggerEffectRepository;
   const settings = yield* Settings;
 
   const { readConnectionParamReferences, readReferences, readReferencesAndValidate } =
     yield* workflowReferences;
+
+  /**
+   * Validates `definition` against what exists now, and returns its warnings
+   * with the references it was validated against. Fails with `Validation`
+   * listing every error when it does not validate. Checks no grant.
+   */
+  const checkDefinition = (
+    definition: WorkflowDefinition,
+  ): Effect.Effect<
+    { readonly problems: WorkflowIssues; readonly references: ResolvedReferences },
+    Validation | SqlError
+  > =>
+    Effect.gen(function* () {
+      const references = yield* readReferences(definition);
+      const problems = yield* validateDefinition(definition, references);
+      yield* failOnErrors(problems);
+      return { problems, references };
+    });
 
   /**
    * Checks that `actor` may save `definition`, and returns its warnings.
@@ -323,14 +355,45 @@ const make = Effect.gen(function* () {
     actor: Actor,
   ): Effect.Effect<WorkflowIssues, Validation | Forbidden | SqlError> =>
     Effect.gen(function* () {
-      const references = yield* readReferences(definition);
-      const problems = yield* validateDefinition(definition, references);
-      yield* failOnErrors(problems);
+      const { problems, references } = yield* checkDefinition(definition);
       if (listConnectionParams(definition, references).length > 0) {
         const refused = checkActorHoldsGrant("connection.use", actor, SAVE_CONNECTION_USE_REFUSAL);
         if (refused !== undefined) return yield* Effect.fail(refused);
       }
       return problems;
+    });
+
+  /**
+   * Writes a new workflow, its trigger rows and the `workflow.created` audit
+   * entry, all stamped with the same timestamp, and returns the workflow. The
+   * caller holds the transaction and has validated the definition.
+   */
+  const storeNewWorkflow = (
+    parsedSource: ParsedSource,
+    stamp: string,
+    enabled: boolean,
+  ): Effect.Effect<Workflow, SqlError> =>
+    Effect.gen(function* () {
+      // Read the clock once, so the workflow, its triggers and the audit
+      // event all get the same timestamp.
+      const savedAt = yield* nowIso;
+      const stored = yield* workflows.insert(parsedSource, savedAt, enabled);
+      yield* workflows.reconcileTriggers(
+        stored.id,
+        buildDeclaredTriggers(parsedSource.definition),
+        savedAt,
+      );
+      yield* audit.append({
+        kind: "workflow.created",
+        actor: stamp,
+        record: { topic: "workflow", id: stored.id },
+        // Only the id and the name. The source contains the prompts
+        // given to the workflow's agents, and more people can read the
+        // audit log than can read workflows.
+        payload: { workflowId: stored.id, name: parsedSource.definition.name },
+        at: savedAt,
+      });
+      return stored;
     });
 
   /**
@@ -423,13 +486,22 @@ const make = Effect.gen(function* () {
      * - a required input with no value;
      * - a value that does not match the input's JSON Schema;
      * - a Connection id for a Connection that does not exist, is of another
-     *   type, or is disabled.
+     *   type, or is disabled;
+     * - a signal id for a Signal that does not exist or is of another kind;
+     * - an External Ref for an External Entity that does not exist or is of
+     *   a kind the entity input does not list.
+     *
+     * With `areFrozen`, the values are those of a run that already started,
+     * which a re-run copies. An entity that was pruned since is then fine,
+     * because the run froze its ref and not the entity. An entity that still
+     * exists must still be of a listed kind.
      *
      * Checks no grant: the run engine calls it while it starts a run.
      */
     resolveRunInputs: (
       definition: WorkflowDefinition,
       given: Readonly<Record<string, unknown>>,
+      options: { readonly areFrozen?: boolean } = {},
     ): Effect.Effect<Result.Result<Record<string, unknown>, ReadonlyArray<Issue>>, SqlError> =>
       Effect.gen(function* () {
         const declarations = definition.inputs ?? [];
@@ -499,6 +571,23 @@ const make = Effect.gen(function* () {
                 message: `This signal is of kind ${kind.value}, but the input takes only these kinds: ${wanted.join(", ")}.`,
               });
             }
+          } else if (input.entity !== undefined) {
+            const wanted = input.entity.kinds;
+            const kind =
+              typeof value === "string" ? yield* entities.readKind(value) : Option.none();
+            if (Option.isNone(kind)) {
+              if (options.areFrozen !== true) {
+                issues.push({
+                  path,
+                  message: `No External Entity has this ref. Give the External Ref of an entity of one of these kinds: ${wanted.join(", ")}.`,
+                });
+              }
+            } else if (!wanted.includes(kind.value)) {
+              issues.push({
+                path,
+                message: `This entity is of kind ${kind.value}, but the input takes only these kinds: ${wanted.join(", ")}.`,
+              });
+            }
           }
           resolved[input.name] = value;
         }
@@ -547,29 +636,49 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             const problems = yield* checkSave(parsedSource.definition, actor);
-            // Read the clock once, inside the transaction, so the workflow,
-            // its triggers and the audit event all get the same timestamp.
-            const savedAt = yield* nowIso;
-            const stored = yield* workflows.insert(parsedSource, savedAt);
-            yield* workflows.reconcileTriggers(
-              stored.id,
-              buildDeclaredTriggers(parsedSource.definition),
-              savedAt,
-            );
-            yield* audit.append({
-              kind: "workflow.created",
-              actor: yield* currentStamp,
-              record: { topic: "workflow", id: stored.id },
-              // Only the id and the name. The source contains the prompts
-              // given to the workflow's agents, and more people can read the
-              // audit log than can read workflows.
-              payload: { workflowId: stored.id, name: parsedSource.definition.name },
-              at: savedAt,
-            });
+            const stored = yield* storeNewWorkflow(parsedSource, yield* currentStamp, false);
             return { workflow: stored, warnings: problems.warnings };
           }),
         );
       }),
+
+    /**
+     * Returns the keys of the shipped workflows that were installed once,
+     * including those whose workflow the user deleted since. Checks no grant:
+     * the controller reads it while it boots.
+     */
+    listInstalledShippedKeys: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
+      workflows.listShippedKeys(),
+
+    /**
+     * Installs a workflow that ships with Hercule: parses and validates
+     * `shipped.source` like `create`, then stores the workflow enabled with
+     * its triggers, writes the `workflow.created` audit entry stamped
+     * `system`, and records `shipped.key` as installed. Returns the workflow.
+     *
+     * Checks no grant, because the controller installs it on nobody's
+     * behalf, and a shipped source acts through no Connection. Fails with
+     * `Validation` listing every error when the source does not parse or
+     * validate, and writes nothing then. Fails with `SqlError` when the key
+     * was installed before, because the row of an installed key is never
+     * replaced.
+     *
+     * It joins the caller's transaction, so the controller can install every
+     * shipped workflow and run the first-install reconciliation as one unit.
+     */
+    installShipped: (
+      shipped: ShippedWorkflowSource,
+    ): Effect.Effect<Workflow, Validation | SqlError> =>
+      withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const parsedSource = yield* parseContentOrFail({ source: shipped.source });
+          yield* checkDefinition(parsedSource.definition);
+          const stored = yield* storeNewWorkflow(parsedSource, SYSTEM_ACTOR, true);
+          yield* workflows.insertShippedKey(shipped.key, stored.id, stored.createdAt);
+          return stored;
+        }),
+      ),
 
     /**
      * Replaces a workflow's source, enables or disables it, or both. A new
@@ -854,5 +963,6 @@ export const WorkflowServiceLayer: Layer.Layer<
   | EventKinds
   | WorkflowRuns
   | WorkflowSignals
+  | WorkflowEntities
   | Settings
 > = Layer.effect(WorkflowService)(make);

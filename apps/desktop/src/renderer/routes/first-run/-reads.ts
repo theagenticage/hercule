@@ -5,8 +5,10 @@ import type {
   Assistant,
   Connection,
   ControllerInfo,
+  Harness,
   Project,
-  ProviderInstance,
+  Provider,
+  ProviderAccount,
   Runner,
 } from "@hercule/contract";
 import type { Bridge } from "../../../ipc/bridge";
@@ -16,7 +18,9 @@ import {
   connectionsQuery,
   controllerQuery,
   firstRunQuery,
+  harnessesQuery,
   projectsQuery,
+  providerAccountsQuery,
   providersQuery,
   runnersQuery,
 } from "../../app/queries";
@@ -34,7 +38,9 @@ interface CachedFirstRunReads {
   readonly setupComplete: boolean;
   readonly controller: ControllerInfo | undefined;
   readonly runners: readonly Runner[] | undefined;
-  readonly instances: readonly ProviderInstance[] | undefined;
+  readonly accounts: readonly ProviderAccount[] | undefined;
+  readonly providers: readonly Provider[] | undefined;
+  readonly harnesses: readonly Harness[] | undefined;
   readonly connections: readonly Connection[] | undefined;
   readonly projects: readonly Project[] | undefined;
   readonly assistants: readonly Assistant[] | undefined;
@@ -49,7 +55,9 @@ const buildFirstRunData = (cached: CachedFirstRunReads): FirstRunData => ({
     setupComplete: cached.setupComplete,
     localRunner:
       cached.runners?.find((runner) => runner.id === cached.controller?.localRunnerId) ?? null,
-    instances: cached.instances ?? NONE,
+    accounts: cached.accounts ?? NONE,
+    providers: cached.providers ?? NONE,
+    harnesses: cached.harnesses ?? NONE,
     connections: cached.connections ?? NONE,
     projects: cached.projects ?? NONE,
   },
@@ -77,7 +85,9 @@ export const useFirstRunData = (
   // The controller answers none of these reads before the user has an account.
   const controller = useQuery({ ...controllerQuery(client), enabled: setupComplete }).data;
   const runners = useQuery({ ...runnersQuery(client), enabled: setupComplete }).data;
-  const instances = useQuery({ ...providersQuery(client), enabled: setupComplete }).data;
+  const accounts = useQuery({ ...providerAccountsQuery(client), enabled: setupComplete }).data;
+  const providers = useQuery({ ...providersQuery(client), enabled: setupComplete }).data;
+  const harnesses = useQuery({ ...harnessesQuery(client), enabled: setupComplete }).data;
   const connections = useQuery({ ...connectionsQuery(client), enabled: setupComplete }).data;
   const projects = useQuery({ ...projectsQuery(client), enabled: setupComplete }).data;
   const assistants = useQuery({ ...assistantsQuery(client), enabled: setupComplete }).data;
@@ -89,13 +99,26 @@ export const useFirstRunData = (
         setupComplete,
         controller,
         runners,
-        instances,
+        accounts,
+        providers,
+        harnesses,
         connections,
         projects,
         assistants,
         progress,
       }),
-    [setupComplete, controller, runners, instances, connections, projects, assistants, progress],
+    [
+      setupComplete,
+      controller,
+      runners,
+      accounts,
+      providers,
+      harnesses,
+      connections,
+      projects,
+      assistants,
+      progress,
+    ],
   );
 };
 
@@ -113,7 +136,9 @@ export const readFirstRunData = (
     setupComplete: true,
     controller: queryClient.getQueryData(controllerQuery(client).queryKey),
     runners: queryClient.getQueryData(runnersQuery(client).queryKey),
-    instances: queryClient.getQueryData(providersQuery(client).queryKey),
+    accounts: queryClient.getQueryData(providerAccountsQuery(client).queryKey),
+    providers: queryClient.getQueryData(providersQuery(client).queryKey),
+    harnesses: queryClient.getQueryData(harnessesQuery(client).queryKey),
     connections: queryClient.getQueryData(connectionsQuery(client).queryKey),
     projects: queryClient.getQueryData(projectsQuery(client).queryKey),
     assistants: queryClient.getQueryData(assistantsQuery(client).queryKey),

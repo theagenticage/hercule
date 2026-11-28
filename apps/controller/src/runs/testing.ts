@@ -21,7 +21,7 @@ import {
   withSetUpController,
   type SetUpController,
 } from "../workflows/testing";
-import { FACTS, MODELS, PROVIDER, runEffect } from "../daemon/testing";
+import { FACTS, MODELS, HARNESS, runEffect } from "../daemon/testing";
 
 const FINAL_STATUSES: ReadonlyArray<RunStatus> = ["completed", "failed", "cancelled"];
 
@@ -547,14 +547,14 @@ export const RUN_WATCHER_GRANTS: ReadonlyArray<Grant> = [
 /**
  * Runs `body` against a controller with one connected runner, so sessions can
  * be spawned with the grants a test needs, and with `plugins` installed next
- * to the agent provider.
+ * to the agent harness.
  */
 export const withRunFleet = (
   body: (arranged: Arranged) => Promise<void>,
   plugins: ReadonlyArray<Plugin> = [],
 ): Promise<void> =>
   sharedWithFleet(body, {
-    plugins: [createPluginFixture({ id: "providers", definitions: [PROVIDER] }).plugin, ...plugins],
+    plugins: [createPluginFixture({ id: "harnesses", definitions: [HARNESS] }).plugin, ...plugins],
     facts: FACTS,
     models: MODELS,
   });

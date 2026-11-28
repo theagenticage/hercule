@@ -1,7 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "types": ["bun"]
+    "types": ["bun"],
+    // Vite loads `vitest.config.ts` and what it imports, and asks for each
+    // import's full file name, such as `./scripts/test-shards.ts`. TypeScript
+    // refuses that extension unless this is on.
+    "allowImportingTsExtensions": true
   },
   // Globbed, never hand-listed: a new package under apps, packages or plugins
   // is typechecked the day it lands. The two React packages, the desktop app

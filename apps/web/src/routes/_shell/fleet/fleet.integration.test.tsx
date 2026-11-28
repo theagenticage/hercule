@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hercule/client-core";
+import { HARNESSES } from "@hercule/client-core/testing";
 import { readPageText, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 import { CONTROLLER_VERSION, GIB, MOSS, ZONE, type Fixture } from "./-fixtures";
 
@@ -34,11 +35,11 @@ const HETZNER: Fixture = {
     totalMemoryBytes: 16 * GIB,
     docker: false,
     toolchains: [{ name: "git", version: "2.43.0", path: "/usr/bin/git" }],
-    providers: [],
-    adapters: ["claude-code"],
+    harnesses: [],
+    adapters: ["claude-code/claude-code"],
     identityPort: 5000,
   },
-  watermark: { diskFreeBytes: 42 * GIB, availableMemoryBytes: 4 * GIB },
+  metrics: { diskFreeBytes: 42 * GIB, availableMemoryBytes: 4 * GIB },
   maxConcurrentSessions: 2,
   lastSeenAt: "2026-09-05T08:02:00.000Z",
 };
@@ -97,7 +98,11 @@ const buildController = (
   "GET /api/v1/runners": { body: { items: runners } },
   "POST /api/v1/runners/join-tokens": {
     status: 201,
-    body: { token: TOKEN, expiresAt: "2026-09-05T10:14:00.000Z" },
+    body: {
+      id: "01a06d02-7400-7000-8000-00000000fe5a",
+      token: TOKEN,
+      expiresAt: "2026-09-05T10:14:00.000Z",
+    },
   },
   // No unused tokens unless a test adds some; the screen fetches them either way.
   "GET /api/v1/runners/join-tokens": { body: [] },
@@ -188,7 +193,7 @@ describe("Fleet", () => {
     expect(moss).toContain("2.50.1");
     expect(moss).toContain("2.99.0");
     expect(showsSize(moss, MOSS.facts!.totalMemoryBytes), `memory in: ${moss}`).toBe(true);
-    expect(showsSize(moss, MOSS.watermark!.diskFreeBytes), `free disk in: ${moss}`).toBe(true);
+    expect(showsSize(moss, MOSS.metrics!.diskFreeBytes), `free disk in: ${moss}`).toBe(true);
 
     const hetzner = readPageText(await findRunnerRow(HETZNER.name, [MOSS.name]));
     expect(hetzner).toContain("unreachable");
@@ -196,7 +201,7 @@ describe("Fleet", () => {
     expect(hetzner).toContain("x64");
     expect(hetzner).toContain("2.43.0");
     expect(showsSize(hetzner, HETZNER.facts!.totalMemoryBytes), `memory in: ${hetzner}`).toBe(true);
-    expect(showsSize(hetzner, HETZNER.watermark!.diskFreeBytes), `free disk in: ${hetzner}`).toBe(
+    expect(showsSize(hetzner, HETZNER.metrics!.diskFreeBytes), `free disk in: ${hetzner}`).toBe(
       true,
     );
   });
@@ -218,9 +223,23 @@ describe("Fleet", () => {
   });
 
   it("shows a placeholder row and the add card when no runner has joined", async () => {
-    await openApp([]);
+    await openApp([], {
+      extra: {
+        "GET /api/v1/harnesses": {
+          body: [
+            ...HARNESSES,
+            { ...HARNESSES[0]!, id: "antigravity/antigravity", displayName: "Antigravity" },
+          ],
+        },
+      },
+    });
 
     expect(readPageText()).toContain("no runner has joined yet");
+    // Each harness is a row of its own, so the name must be the whole text of
+    // its element: a bare "pi" would match any word that contains it.
+    for (const harness of ["Claude Code", "Codex", "pi", "Antigravity"]) {
+      expect(screen.getByText(harness)).toBeTruthy();
+    }
     expect(readPageText()).toContain(
       "A runner probes the machine it runs on and reports what it found. Until one joins, Hercule knows nothing about this machine.",
     );

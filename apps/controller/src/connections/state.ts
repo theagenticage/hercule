@@ -20,6 +20,15 @@ const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json)
 export const INGESTING_STATUSES: ReadonlyArray<ConnectionStatus> = ["connected", "error"];
 
 /**
+ * Checks that a Connection can poll now: its status is an ingesting one and
+ * its plugin is running. `pluginIsActive` is passed in because the plugins
+ * domain owns that state, and each caller already knows it for its own
+ * Connections.
+ */
+export const canConnectionPoll = (status: ConnectionStatus, pluginIsActive: boolean): boolean =>
+  pluginIsActive && INGESTING_STATUSES.includes(status);
+
+/**
  * The defect an ingest handle's write dies with when its Connection was
  * deleted, or left the ingesting statuses, while the handle was still open.
  * It is a defect rather than a `PluginError` so that a plugin which catches

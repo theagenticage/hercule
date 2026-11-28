@@ -21,9 +21,13 @@
  * to the database happens inside a transaction, so such a change is not a
  * database change: it is a `tap`, which is never written to the database.
  *
- * The listener is optional. A controller with no live socket, such as a
- * migration run or a repository test, provides none, and then nothing is
- * published.
+ * The listener is optional. The controller provides one `AfterCommit` that
+ * hands every committed change to everything that follows changes: the live
+ * topics and the in-process followers of `RecordChanges` (see
+ * `LiveTopicsLayer`). It is one service so that no code path, such as the
+ * fiber of a run, can reach one follower and miss the other. A controller
+ * with no live socket, such as a migration run or a repository test, provides
+ * none, and then nothing is published.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -36,11 +40,25 @@ import type { SubagentId } from "@hercule/protocol";
  * delta is never written to the database, so it is announced as soon as it is
  * reported, with no transaction involved.
  *
- * - A `record` change with `countsOnly` changed nothing about the record but
- *   its counts: its Token Usage and, for a session, its tool calls, or for a
- *   workflow, how many runs a trigger used of its spawn bound and how many
- *   events it holds. These counts can change with almost every event, so the
- *   change is sent at a slower pace than other changes.
+ * - A `record` change on the `session` topic with `countsOnly` changed
+ *   nothing about the session but its counts: its Token Usage and its tool
+ *   calls. These counts can change with almost every event, so the change is
+ *   sent at a slower pace than other changes.
+ * - A `record` change on the `workflow` topic with `derived` says that a
+ *   trigger changed in a way no definition edit causes: how many runs it used
+ *   of its spawn bound, how many events it holds, when it fires next, or its
+ *   health. A busy trigger causes these changes with almost every event, so
+ *   they are sent at the slower pace too. A client that draws offers from the
+ *   workflows' definitions reads nothing for them. A definition change, an
+ *   enable or disable, a validity change and a trigger pause or resume are not
+ *   `derived`.
+ * - A `record` change on the `task` topic with `derived` says that a fact a
+ *   Task's card shows changed (a session of the Task started or stopped
+ *   working, a question opened or closed, a run ended), not a field of the
+ *   Task itself. A working agent causes these changes in bursts, so they are
+ *   sent at the slower pace. A change a person makes to a Task is not
+ *   `derived` and keeps the short window. The two paces collect independently,
+ *   so one Task can be named by one push of each in the same moment.
  * - A `record` change on the `session` topic names the conversation the
  *   session answers, or `null` for a session in none, so the push can tell a
  *   client which conversations it touches. A session's conversation is set
@@ -52,10 +70,16 @@ import type { SubagentId } from "@hercule/protocol";
 export type Change =
   | {
       readonly _tag: "record";
-      readonly topic: Exclude<MutableLiveTopic, "session">;
+      readonly topic: Exclude<MutableLiveTopic, "session" | "task" | "workflow">;
       readonly id: string;
       readonly kind: InvalidateKind;
-      readonly countsOnly?: true;
+    }
+  | {
+      readonly _tag: "record";
+      readonly topic: "task" | "workflow";
+      readonly id: string;
+      readonly kind: InvalidateKind;
+      readonly derived?: true;
     }
   | {
       readonly _tag: "record";
@@ -66,6 +90,12 @@ export type Change =
       readonly countsOnly?: true;
     }
   | { readonly _tag: "event" }
+  /**
+   * The grants of a permission profile changed. No live topic carries it:
+   * only in-process followers of `RecordChanges` hear it, such as the MCP
+   * Gateway, whose answer depends on the profile's `mcp.use`.
+   */
+  | { readonly _tag: "profileGrants"; readonly profileId: string }
   | { readonly _tag: "transcript"; readonly sessionId: string; readonly subagentId?: SubagentId }
   | { readonly _tag: "tap"; readonly sessionId: string; readonly item: TapItem };
 
@@ -187,3 +217,13 @@ export const withAnnouncements = <A, E, R>(
         }),
     }),
   );
+
+/**
+ * Records that a fact shown on the card of the Task `taskId` changed, to
+ * announce once the transaction commits: one of its sessions started or
+ * stopped working, a question opened or closed, or a run ended. It writes no
+ * platform event, because the Task's own fields did not change and a
+ * `task.updated` event would start workflows.
+ */
+export const announceTaskCardChange = (taskId: string): Effect.Effect<void> =>
+  announce({ _tag: "record", topic: "task", id: taskId, kind: "updated", derived: true });

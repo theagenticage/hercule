@@ -27,8 +27,8 @@ import type { Plugin } from "@hercule/plugin-host";
 import { github } from "@hercule/plugin-github";
 import { withTransaction } from "../db";
 import { appendIngestedEvent } from "../events";
-import { get, post, type ServerHarness } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { get, post, TEST_HARNESS_ID, type ServerHarness } from "../http/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   spawnThreadWithGrants,
   at,
@@ -87,7 +87,7 @@ export const UNKNOWN_FUNCTION = 'shout(event.kind) == "X"';
  */
 export const READS_RAW = "event.raw != null";
 
-export const PROVIDER = buildProviderDefinition("full-provider", { token: "t" });
+export const HARNESS = buildHarnessDefinition("full");
 
 export const FACTS: RunnerFacts = {
   os: "darwin",
@@ -95,8 +95,10 @@ export const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  // The test controller also registers the `test` harness and an account that
+  // runs in it, and an account is probed only on a runner with its harness.
+  adapters: ["harnesses/full", TEST_HARNESS_ID],
   identityPort: 4939,
 };
 
@@ -105,7 +107,7 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 export const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "providers", definitions: [PROVIDER] }).plugin,
+  buildPluginWithProviderPerHarness("harnesses", [HARNESS]),
   github,
 ];
 
@@ -215,7 +217,7 @@ export const spawnSubscriber = (arranged: Arranged, name: string): Promise<Spawn
 
 /**
  * Spawns a Thread that cannot be resumed once it exits: the fake runner never
- * reports a provider-native session for it, so it has no transcript.
+ * reports a harness-native session for it, so it has no transcript.
  */
 export const spawnStrandedThread = async (
   arranged: Arranged,

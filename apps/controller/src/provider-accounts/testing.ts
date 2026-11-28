@@ -1,0 +1,649 @@
+/**
+ * Helpers for tests that run the Provider Account services on a real database
+ * and the real plugin host, with no HTTP in between:
+ *
+ * - three fixture plugins: the provider `acme/acme`, and the harnesses
+ *   `alpha/alpha` (which runs both of Acme's account kinds) and `beta/beta`
+ *   (which the provider allows for keys but which runs nothing);
+ * - the provider `metered/metered`, whose key kind has a usage endpoint, for
+ *   the suites that read usage;
+ * - `runWithAccounts`, which boots them and runs an effect as the user;
+ * - functions that insert the rows other domains own (agents, sessions,
+ *   settings), which the delete check reads.
+ */
+import { Context, Effect, Layer, Option, Redacted, Schema } from "effect";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as SqlClient from "effect/sql/SqlClient";
+import type {
+  ParseCatalogBody,
+  ParseUsageBody,
+  Plugin,
+  ProviderDefinition,
+} from "@hercule/plugin-host";
+import type { ProbeResult } from "@hercule/protocol";
+import { mintUuid, nowIso, uuidFromString, withTransaction } from "../db";
+import { NotifierLayer } from "../notifications";
+import { PluginHost } from "../plugins";
+import {
+  asUser,
+  buildHarnessDefinition,
+  buildPluginStack,
+  createPluginFixture,
+} from "../plugins/testing";
+import {
+  LocalRunnerId,
+  RunnerConnections,
+  RunnerConnectionsLayer,
+  runnerRepository,
+} from "../runners";
+import { buildProviderAccountOwner, Secrets } from "../secrets";
+import { RunnerMetricsServiceLayer } from "../runner-metrics";
+import { SettingsLayer } from "../settings";
+import { AccountUsage, AccountUsageLayer } from "../usage";
+import { HarnessAccounts, HarnessAccountsLayer } from "./harness-account";
+import { ProviderAccountRunners, ProviderAccountRunnersLayer } from "./account-runners";
+import { ProviderKeyRequestsLayer } from "./provider-key-requests";
+import { ModelCatalogs, ModelCatalogsLayer } from "./model-catalogs";
+import { ModelProfileMembership } from "./model-profile-membership";
+import { ProviderAccountProbes, ProviderAccountProbesLayer } from "./probes";
+import { providerAccountRepository, type StoredProviderAccount } from "./repository";
+import { ProviderAccountObserver } from "./observer";
+import { ProviderAccountService, ProviderAccountServiceLayer } from "./service";
+
+export const ACME_PROVIDER_ID = "acme/acme";
+export const ALPHA_HARNESS_ID = "alpha/alpha";
+export const BETA_HARNESS_ID = "beta/beta";
+
+/** The account kind of Acme that holds a key. */
+export const KEY_KIND = "api-key";
+
+/** The account kind of Acme that is signed in on each machine. */
+export const MACHINE_KIND = "subscription";
+
+/** The account kind of Acme whose runner makes a token the controller keeps. */
+export const TOKEN_KIND = "subscription-token";
+
+const ACME: ProviderDefinition = {
+  id: "acme",
+  displayName: "Acme",
+  kinds: [
+    {
+      id: KEY_KIND,
+      title: "API key",
+      description: "A key for Acme.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: {
+        url: "https://api.acme.test/v1/models",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+      harnesses: [ALPHA_HARNESS_ID, BETA_HARNESS_ID],
+    },
+    {
+      id: MACHINE_KIND,
+      title: "Subscription",
+      description: "A plan signed in on each machine.",
+      setup: [{ kind: "harness-login", method: "sign-in" }],
+      harnesses: [ALPHA_HARNESS_ID],
+    },
+    {
+      id: TOKEN_KIND,
+      title: "Subscription token",
+      description: "A token that works on every machine.",
+      setup: [{ kind: "harness-login", method: "create-token" }],
+      harnesses: [ALPHA_HARNESS_ID],
+    },
+  ],
+  defaultHarnessId: ALPHA_HARNESS_ID,
+  catalogSource: { kind: "harness-probe", harnessId: ALPHA_HARNESS_ID },
+  defaultSelection: "current-models",
+};
+
+/** The plugins the tests boot: Acme, and the two harnesses that may run it. */
+export const buildAccountPlugins = (): ReadonlyArray<Plugin> => [
+  createPluginFixture({
+    id: "acme",
+    capabilities: ["providers"],
+    definitions: [],
+    providers: [ACME],
+  }).plugin,
+  createPluginFixture({
+    id: "alpha",
+    definitions: [
+      buildHarnessDefinition("alpha", [
+        {
+          providerId: ACME_PROVIDER_ID,
+          kinds: [
+            { kind: KEY_KIND, modelArgument: "acme/{model}", credentialVariable: "ACME_API_KEY" },
+            { kind: MACHINE_KIND, modelArgument: "acme/{model}" },
+            { kind: TOKEN_KIND, modelArgument: "acme/{model}", credentialVariable: "ACME_API_KEY" },
+          ],
+          models: "own-list",
+        },
+      ]),
+    ],
+  }).plugin,
+  createPluginFixture({ id: "beta", definitions: [buildHarnessDefinition("beta", [])] }).plugin,
+];
+
+export const METERED_PROVIDER_ID = "metered/metered";
+export const METERED_USAGE_URL = "https://api.metered.test/v1/usage";
+
+/** The account kind of Metered that holds a key and whose usage is read from an endpoint. */
+export const METERED_KEY_KIND = "api-key";
+
+/** A provider whose one account kind holds a key and reads its usage from `METERED_USAGE_URL`. */
+export const METERED: ProviderDefinition = {
+  id: "metered",
+  displayName: "Metered",
+  kinds: [
+    {
+      id: METERED_KEY_KIND,
+      title: "API key",
+      description: "A key for Metered.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: {
+        url: "https://api.metered.test/v1/models",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+      usage: {
+        readBy: "endpoint",
+        url: METERED_USAGE_URL,
+        headers: { authorization: "{apiKey}" },
+      },
+      harnesses: [ALPHA_HARNESS_ID],
+    },
+  ],
+  defaultHarnessId: ALPHA_HARNESS_ID,
+  catalogSource: { kind: "harness-probe", harnessId: ALPHA_HARNESS_ID },
+  defaultSelection: "current-models",
+};
+
+/**
+ * Reads Metered's usage body: `{ "used": 40 }` is a five-hour reading of 40%,
+ * and `"weekly": 20` beside it adds a weekly reading of 20%. `{ "empty": true }`
+ * is an accepted answer with no readings. `{ "refuse": "..." }` is a refusal, `{ "nothing": true }` makes the parser
+ * return nothing, and any other body is a defect the parser throws on. A
+ * reading may also carry `"expires"`: a timestamp is the key's expiry, `null`
+ * says the key does not expire, and leaving it out says nothing about expiry.
+ */
+const parseMeteredUsageBody: ParseUsageBody = (body, takenAt) => {
+  const answer = body as {
+    used?: number;
+    weekly?: number;
+    empty?: boolean;
+    refuse?: string;
+    nothing?: boolean;
+    expires?: string | null;
+  };
+  if (typeof answer.refuse === "string") return { refused: answer.refuse };
+  if (answer.nothing === true) return undefined as never;
+  if (answer.empty === true) return { readings: [] };
+  if (typeof answer.used !== "number") {
+    throw new Error("not a Metered answer\nsecond line \u001b[31mred");
+  }
+  return {
+    readings: [
+      {
+        kind: "window",
+        window: "five-hour",
+        usedPercent: answer.used,
+        resetsAt: null,
+        hit: false,
+        takenAt,
+      },
+      ...(answer.weekly === undefined
+        ? []
+        : [
+            {
+              kind: "window" as const,
+              window: "weekly" as const,
+              usedPercent: answer.weekly,
+              resetsAt: null,
+              hit: false,
+              takenAt,
+            },
+          ]),
+    ],
+    ...(answer.expires === undefined ? {} : { expiresAt: answer.expires }),
+  };
+};
+
+/** The plugin that registers Metered, or `provider` in its place when a suite adds account kinds to it. */
+export const buildMeteredPlugin = (provider: ProviderDefinition = METERED): Plugin =>
+  createPluginFixture({
+    id: "metered",
+    capabilities: ["providers"],
+    definitions: [],
+    providers: [provider],
+    providerOptions: { parseUsageBody: { [METERED_KEY_KIND]: parseMeteredUsageBody } },
+  }).plugin;
+
+export const CATALOGUED_PROVIDER_ID = "catalogued/catalogued";
+export const CATALOGUED_CATALOG_URL = "https://api.catalogued.test/v1/models";
+
+/** The account kind of Catalogued, which holds a key. */
+export const CATALOGUED_KEY_KIND = "api-key";
+
+/** A provider whose Model Catalog is read from `CATALOGUED_CATALOG_URL` with the account's key, on no runner. */
+export const CATALOGUED: ProviderDefinition = {
+  id: "catalogued",
+  displayName: "Catalogued",
+  kinds: [
+    {
+      id: CATALOGUED_KEY_KIND,
+      title: "API key",
+      description: "A key for Catalogued.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: {
+        url: "https://api.catalogued.test/v1/key",
+        headers: { authorization: "Bearer {apiKey}" },
+      },
+      harnesses: [ALPHA_HARNESS_ID],
+    },
+  ],
+  defaultHarnessId: ALPHA_HARNESS_ID,
+  catalogSource: {
+    kind: "provider-api",
+    url: CATALOGUED_CATALOG_URL,
+    headers: { authorization: "Bearer {apiKey}" },
+  },
+  defaultSelection: "current-models",
+};
+
+const CataloguedBody = Schema.Struct({
+  models: Schema.Array(
+    Schema.Struct({
+      id: Schema.optionalKey(Schema.String),
+      name: Schema.optionalKey(Schema.String),
+      context: Schema.optionalKey(Schema.Number),
+      price: Schema.optionalKey(Schema.Number),
+    }),
+  ),
+});
+
+/**
+ * Reads Catalogued's catalog body: `{ "models": [{ "id": "a", "name": "A",
+ * "context": 1000, "price": 2 }] }`. An item with no id is skipped, and any
+ * body without a well-formed `models` list is a defect the parser throws on.
+ */
+export const parseCataloguedBody: ParseCatalogBody = (body) => {
+  if (!Schema.is(CataloguedBody)(body)) throw new Error("the body has no models list");
+  const { models } = body;
+  return models.flatMap((model) =>
+    model.id !== undefined
+      ? [
+          {
+            slug: model.id,
+            name: model.name ?? model.id,
+            imageInput: null,
+            options: [],
+            ...(model.context === undefined ? {} : { contextWindow: model.context }),
+            ...(model.price === undefined ? {} : { inputPrice: model.price }),
+          },
+        ]
+      : [],
+  );
+};
+
+/** Builds the plugin that registers `CATALOGUED` with its catalog parser. */
+export const buildCataloguedPlugin = (): Plugin =>
+  createPluginFixture({
+    id: "catalogued",
+    capabilities: ["providers"],
+    definitions: [],
+    providers: [CATALOGUED],
+    providerOptions: { parseCatalogBody: parseCataloguedBody },
+  }).plugin;
+
+/** What the fake provider API does with a request: answer it, fail to connect, or never answer. */
+export type FakeProviderAnswer = Response | "unreachable" | "silent";
+
+/** One request the fake provider API received. */
+export interface FakeProviderRequest {
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  /** The `redirect` mode the request was sent with; `manual` means a redirect is not followed. */
+  readonly redirect: string | undefined;
+}
+
+/**
+ * A fake provider API for the key check: an `HttpClient` that answers each
+ * request as `answer` says (a 200 with an empty JSON body by default) and
+ * records the requests it received.
+ */
+export const buildFakeProviderApi = (
+  answer: (request: FakeProviderRequest) => FakeProviderAnswer = () => new Response("{}"),
+) => {
+  const requests: Array<FakeProviderRequest> = [];
+  const client = HttpClient.make((request, _url, _signal, fiber) => {
+    const received: FakeProviderRequest = {
+      url: request.url,
+      headers: { ...request.headers },
+      redirect: Context.getOrUndefined(fiber.context, FetchHttpClient.RequestInit)?.redirect,
+    };
+    requests.push(received);
+    const outcome = answer(received);
+    if (outcome === "silent") return Effect.never;
+    if (outcome === "unreachable") {
+      return Effect.fail(
+        new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({ request, cause: "connection refused" }),
+        }),
+      );
+    }
+    return Effect.succeed(HttpClientResponse.fromWeb(request, outcome));
+  });
+  return { client, requests };
+};
+
+/**
+ * The stand-in for Model Profiles that isolated Provider Account tests run
+ * against: a layer for the `ModelProfileMembership` port that holds no
+ * profiles. A test that claims something about profiles uses
+ * `ModelProfileMembershipLayer` over the real tables instead.
+ */
+export const inertMembership: Layer.Layer<ModelProfileMembership> = Layer.succeed(
+  ModelProfileMembership,
+  {
+    removeProviderAccount: () => Effect.void,
+    fillPendingSelections: () => Effect.succeed(false),
+    findDefaultHarnessClashes: () => Effect.succeed([]),
+  },
+);
+
+/**
+ * A `ProviderAccountObserver` that does nothing, for a stack that stores no
+ * workflows, so no one listens to a change of an account's default harness.
+ */
+export const inertProviderAccountObserver: Layer.Layer<ProviderAccountObserver> = Layer.succeed(
+  ProviderAccountObserver,
+  { defaultHarnessChanged: () => Effect.void },
+);
+
+const buildStack = (
+  providerApi: HttpClient.HttpClient,
+  membership: Layer.Layer<ModelProfileMembership>,
+) =>
+  ProviderAccountServiceLayer.pipe(
+    Layer.provideMerge(inertProviderAccountObserver),
+    Layer.provideMerge(ProviderKeyRequestsLayer),
+    Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
+    Layer.provideMerge(ProviderAccountProbesLayer),
+    Layer.provideMerge(ModelCatalogsLayer),
+    Layer.provideMerge(membership),
+    // These tests have no local runner.
+    Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: () => undefined })),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(HarnessAccountsLayer),
+    Layer.provideMerge(AccountUsageLayer),
+    Layer.provideMerge(RunnerConnectionsLayer),
+    Layer.provideMerge(RunnerMetricsServiceLayer),
+    Layer.provideMerge(SettingsLayer),
+    Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(buildPluginStack()),
+  );
+
+export type AccountServices =
+  | ProviderAccountService
+  | AccountUsage
+  | ModelCatalogs
+  | ModelProfileMembership
+  | LocalRunnerId
+  | ProviderAccountProbes
+  | ProviderAccountRunners
+  | HarnessAccounts
+  | RunnerConnections
+  | PluginHost
+  | SqlClient.SqlClient
+  | Layer.Success<ReturnType<typeof buildPluginStack>>;
+
+/**
+ * Runs an effect as the user on a fresh database, after the fixture plugins
+ * have been booted. Key checks and usage reads go to `providerApi`, which
+ * accepts every key unless the test gives its own. A test that needs other
+ * providers passes `plugins` in place of the fixture plugins. Model Profiles are
+ * `membership`, which holds none unless the test gives the real one.
+ */
+export const runWithAccounts = <A, E>(
+  body: Effect.Effect<A, E, AccountServices>,
+  providerApi: HttpClient.HttpClient = buildFakeProviderApi().client,
+  plugins: ReadonlyArray<Plugin> = buildAccountPlugins(),
+  membership: Layer.Layer<ModelProfileMembership> = inertMembership,
+): Promise<A> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      yield* Effect.flatMap(PluginHost, (host) => host.boot(plugins));
+      return yield* body;
+    }).pipe(Effect.provide(buildStack(providerApi, membership)), asUser) as Effect.Effect<
+      A,
+      E,
+      never
+    >,
+  );
+
+/** Inserts an account of Acme and returns its row. */
+export const addAccount = (
+  account: {
+    readonly kind?: string;
+    readonly label?: string | null;
+    readonly defaultHarnessId?: string;
+    readonly providerId?: string;
+  } = {},
+): Effect.Effect<StoredProviderAccount, unknown, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    return yield* withTransaction(
+      sql,
+      accounts.insert({
+        providerId: account.providerId ?? ACME_PROVIDER_ID,
+        kind: account.kind ?? KEY_KIND,
+        label: account.label ?? null,
+        defaultHarnessId: account.defaultHarnessId ?? ALPHA_HARNESS_ID,
+        at: yield* nowIso,
+      }),
+    );
+  });
+
+/**
+ * Stores the account's credential under the Secret name its kind uses:
+ * `apiKey` for a key kind, `token` for a token kind. Needs `Secrets`, which
+ * `runWithAccounts` provides.
+ */
+export const storeCredential = (
+  accountId: string,
+  name: "apiKey" | "token",
+  value = "a-secret",
+): Effect.Effect<void, unknown, SqlClient.SqlClient | Secrets> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const secrets = yield* Secrets;
+    yield* withTransaction(
+      sql,
+      secrets.set(buildProviderAccountOwner(accountId), name, Redacted.make(value)),
+    );
+  });
+
+/** Sets the time at which the account's key or token expires. */
+export const setTokenExpiry = (
+  accountId: string,
+  expiresAt: string,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    yield* withTransaction(
+      sql,
+      accounts.setCredentialExpiry(accountId, expiresAt, "2026-10-31T00:00:00.000Z"),
+    );
+  });
+
+/** Gives an account a legacy home, as the upgrade does for an account it made from the previous version's data. */
+export const giveLegacyHome = (
+  accountId: string,
+  folder: string,
+  harnessId: string,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
+      sql`
+        UPDATE provider_accounts
+        SET legacy_home_folder = ${folder}, legacy_home_harness_id = ${harnessId}
+        WHERE id = ${uuidFromString(accountId)}
+      `,
+    ),
+  );
+
+/** The binary name every fixture harness declares (`buildHarnessDefinition`). */
+const FIXTURE_BINARY_NAME = "harness";
+
+/**
+ * Inserts an online runner with facts and returns its id. By default the
+ * facts show an adapter for both fixture harnesses and their binary on the
+ * machine; `adapters`, `binaryPresent` and `saidHello` change that.
+ */
+export const addRunner = (
+  name: string,
+  {
+    adapters = [ALPHA_HARNESS_ID, BETA_HARNESS_ID],
+    binaryPresent = true,
+    saidHello = true,
+  }: {
+    readonly adapters?: ReadonlyArray<string>;
+    readonly binaryPresent?: boolean;
+    /** False leaves the runner without facts, like one that has not said hello yet. */
+    readonly saidHello?: boolean;
+  } = {},
+): Effect.Effect<string, unknown, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const runners = yield* runnerRepository;
+    const at = yield* nowIso;
+    return yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const runner = yield* runners.insert({
+          name,
+          connectivity: "online",
+          lifecycle: "active",
+          reserved: false,
+          labels: [],
+          credentialHash: `hash-${name}`,
+          at,
+        });
+        if (!saidHello) return runner.id;
+        yield* runners.recordFacts(
+          runner.id,
+          {
+            os: "linux",
+            arch: "x64",
+            totalMemoryBytes: 8 * 1024 ** 3,
+            docker: false,
+            toolchains: [],
+            harnesses: [{ name: FIXTURE_BINARY_NAME, present: binaryPresent }],
+            adapters,
+            identityPort: 4937,
+          },
+          at,
+        );
+        return runner.id;
+      }),
+    );
+  });
+
+/** A probe result that shows a runner signed in, with one model. */
+export const SIGNED_IN: ProbeResult = {
+  harnessVersion: "1.2.3",
+  auth: { status: "ok", identity: "someone@example.com" },
+  models: [{ slug: "model-1", name: "Model 1", imageInput: null, options: [] }],
+  usage: null,
+};
+
+/** Stores a snapshot for an account in a harness on a runner. */
+export const addSnapshot = (
+  accountId: string,
+  harnessId: string,
+  runnerId: string,
+  result: ProbeResult = SIGNED_IN,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const accounts = yield* providerAccountRepository;
+    yield* withTransaction(
+      sql,
+      accounts.recordSnapshot(accountId, harnessId, runnerId, result, yield* nowIso),
+    );
+  });
+
+const AT = "2026-10-31T00:00:00.000Z";
+
+/** Inserts an agent, or with `kind: "assistant"` an assistant's agent row, on an account. */
+export const addAgent = (
+  accountId: string,
+  name: string,
+  kind: "agent" | "assistant" = "agent",
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) => {
+    const none = mintUuid();
+    return withTransaction(
+      sql,
+      sql`INSERT INTO agents (id, kind, name, system_prompt, provider_account_id,
+                              permission_profile_id, access_mode, disallowed_tools,
+                              created_at, updated_at)
+          VALUES (${mintUuid()}, ${kind}, ${name}, '', ${uuidFromString(accountId)}, ${none},
+                  'auto', '[]', ${AT}, ${AT})`,
+    );
+  });
+
+/** Inserts a session on an account with the given status. */
+export const addSession = (
+  accountId: string,
+  status: "queued" | "starting" | "idle" | "busy" | "exited",
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) => {
+    const none = mintUuid();
+    return withTransaction(
+      sql,
+      sql`INSERT INTO sessions (id, permission_profile_id, provider_account_id, harness_id,
+                                runner_id, requested_access_mode, access_mode, spec, title, status,
+                                created_at, last_activity_at)
+          VALUES (${mintUuid()}, ${none}, ${uuidFromString(accountId)}, ${ALPHA_HARNESS_ID},
+                  ${none}, 'auto', 'auto', '{}', 'a session', ${status}, ${AT}, ${AT})`,
+    );
+  });
+
+/** Writes the controller setting `textGeneration.model` as the JSON text it is stored as. */
+export const setTextGenerationModel = (
+  value: unknown,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
+      sql`INSERT INTO settings (scope, key, value, updated_at)
+          VALUES ('controller', 'textGeneration.model', ${JSON.stringify(value)}, ${AT})`,
+    ),
+  );
+
+/** Inserts a user and gives them a thread default account (or none, with `Option.none()`). */
+export const addUserWithThreadDefault = (
+  username: string,
+  accountId: Option.Option<string>,
+): Effect.Effect<void, unknown, SqlClient.SqlClient> =>
+  Effect.flatMap(SqlClient.SqlClient, (sql) =>
+    withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const id = mintUuid();
+        yield* sql`INSERT INTO users (id, username, password_hash, created_at, updated_at)
+                   VALUES (${id}, ${username}, 'x', ${AT}, ${AT})`;
+        if (Option.isSome(accountId)) {
+          yield* sql`INSERT INTO user_settings (user_id, key, value, updated_at)
+                     VALUES (${id}, 'thread.providerAccountId', ${JSON.stringify(accountId.value)}, ${AT})`;
+        }
+      }),
+    ),
+  );

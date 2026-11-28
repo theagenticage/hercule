@@ -119,7 +119,7 @@ export function useOfficeKeys(world: World): void {
           if (isInside(event.target, ".dock")) return;
           if (state.drawer) setOffice({ drawer: false });
           else if (state.selectedId !== null) setOffice({ selectedId: null });
-          else if (state.roomId !== null) sendOfficeCommand({ kind: "overview" });
+          else if (state.roomId !== null) sendOfficeCommand({ kind: "show-whole-office" });
           else return;
           break;
         }

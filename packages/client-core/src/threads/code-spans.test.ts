@@ -11,11 +11,11 @@ describe("splitCodeSpans", () => {
   it("returns the command a message ends with as a code part", () => {
     expect(
       splitCodeSpans(
-        "Codex is not logged in. Log in with: `hercule provider login 7b41 --runner 01a1`",
+        "Codex is not logged in. Sign in with: `hercule provider-account sign-in 7b41 --runner 01a1`",
       ),
     ).toEqual([
-      { kind: "text", text: "Codex is not logged in. Log in with: " },
-      { kind: "code", text: "hercule provider login 7b41 --runner 01a1" },
+      { kind: "text", text: "Codex is not logged in. Sign in with: " },
+      { kind: "code", text: "hercule provider-account sign-in 7b41 --runner 01a1" },
     ]);
   });
 

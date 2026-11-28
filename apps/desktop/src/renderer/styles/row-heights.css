@@ -92,22 +92,53 @@
   initial-value: 46px;
 }
 
-/* ---------- Intake and Tracking ---------- */
+/* ---------- The model browser ---------- */
 
-/* A section's heading, in Intake's list and in opened Tracking. */
-@property --intake-height-section {
+/* A model's row in the model browser, two lines: the name, then the maker and
+   the id. */
+@property --model-browser-height-row {
   syntax: "<length>";
   inherits: true;
-  initial-value: 40px;
+  initial-value: 46px;
 }
-/* A signal's row in Intake's list, two lines. */
-@property --intake-height-row {
+
+/* ---------- A machine's activity ---------- */
+
+/* A day's heading: one small line between 24px above and 8px below. */
+@property --fleet-activity-height-day {
   syntax: "<length>";
   inherits: true;
-  initial-value: 52px;
+  initial-value: 48px;
 }
-/* A row of opened Tracking, two lines. */
-@property --tracking-height-row {
+/* An entry: one line of text between 8px above and 9px below. */
+@property --fleet-activity-height-entry {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 35px;
+}
+/* A line of an unfolded entry: one small line and 3px below it. */
+@property --fleet-activity-height-detail {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 19px;
+}
+/* The last line of an unfolded entry: a line of an entry and 9px more below it. */
+@property --fleet-activity-height-last-detail {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 28px;
+}
+
+/* ---------- A machine's Running here ---------- */
+
+/* A group's row: its title over what it is and its status. */
+@property --fleet-running-height-work {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 54px;
+}
+/* A session's row: one line. */
+@property --fleet-running-height-session {
   syntax: "<length>";
   inherits: true;
   initial-value: 46px;
@@ -127,7 +158,13 @@
   --list-height-two-line-row: calc(52px + 2 * var(--text-size-step));
   --list-height-column-row: calc(46px + 2 * var(--text-size-step));
 
-  --intake-height-section: calc(40px + var(--text-size-step));
-  --intake-height-row: calc(52px + 2 * var(--text-size-step));
-  --tracking-height-row: calc(46px + 2 * var(--text-size-step));
+  --model-browser-height-row: calc(46px + 2 * var(--text-size-step));
+
+  --fleet-activity-height-day: calc(var(--line-16) + 32px);
+  --fleet-activity-height-entry: calc(var(--line-18) + 17px);
+  --fleet-activity-height-detail: calc(var(--line-16) + 3px);
+  --fleet-activity-height-last-detail: calc(var(--line-16) + 12px);
+
+  --fleet-running-height-work: calc(54px + 2 * var(--text-size-step));
+  --fleet-running-height-session: calc(46px + var(--text-size-step));
 }

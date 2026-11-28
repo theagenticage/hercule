@@ -36,13 +36,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Fragment } from "effect/sql/Statement";
 import {
-  atMost,
   bounded,
   DEFAULT_PAGE_LIMIT,
   EventEmitInput,
   EVENT_COUNT_HOURS,
-  EventHandling,
-  EVENT_HANDLINGS,
   EVENT_SORT_FIELDS,
   type EventId,
   Id,
@@ -58,7 +55,7 @@ import {
   type EventCountsByConnection,
   type EventEmitted,
   type Event,
-  type EventWithFacts,
+  type ListedEvent,
   type Forbidden,
   type NotFound,
   type Unauthenticated,
@@ -83,7 +80,7 @@ import { appendEvent } from "./append";
 import { SECURITY_KINDS } from "./audit-log";
 import { PluginIntake } from "../intake-settings";
 import { EventKindCatalog } from "./catalog";
-import { buildAnyHandling, readEventFacts } from "./event-facts";
+import { readEventFacts } from "./event-facts";
 import { buildIsInIntake, readSwitchedOnEventKinds } from "./intake-events";
 import {
   EVENT_COLUMNS,
@@ -104,9 +101,9 @@ const QueryInput = Schema.Struct({
   intake: Schema.optionalKey(Schema.Boolean),
   text: Schema.optionalKey(bounded(1, MAX_SEARCH_TEXT_LENGTH)),
   source: Schema.optionalKey(bounded(1, MAX_EVENT_SOURCE_LENGTH)),
-  handling: Schema.optionalKey(atMost(EventHandling, EVENT_HANDLINGS.length)),
   workflowId: Schema.optionalKey(Id),
   triggerId: Schema.optionalKey(Schema.String),
+  runnerId: Schema.optionalKey(Id),
   ...buildPageInputFields(EVENT_SORT_FIELDS),
 });
 
@@ -117,7 +114,7 @@ const decodeEmit = Schema.decodeUnknownEffect(EventEmitInput, { errors: "all" })
 
 /** One page of the log, in the contract's shape. */
 export interface EventPage {
-  readonly items: ReadonlyArray<EventWithFacts>;
+  readonly items: ReadonlyArray<ListedEvent>;
   readonly nextCursor?: string;
 }
 
@@ -237,6 +234,9 @@ const make = Effect.gen(function* () {
         if (decoded.since !== undefined) where.push(sql`received_at >= ${decoded.since}`);
         if (decoded.until !== undefined) where.push(sql`received_at <= ${decoded.until}`);
         if (decoded.source !== undefined) where.push(sql`events.source = ${decoded.source}`);
+        if (decoded.runnerId !== undefined) {
+          where.push(sql`events.runner_id = ${uuidFromString(decoded.runnerId)}`);
+        }
         if (decoded.text !== undefined) {
           // Text with no word to search for matches nothing. A page ordered
           // by id and a search ordered by relevance cannot share a cursor, so
@@ -249,9 +249,6 @@ const make = Effect.gen(function* () {
         }
         if (decoded.intake === true) {
           where.push(buildIsInIntake(sql, yield* readSwitchedOnEventKinds(sql, pluginIntake)));
-        }
-        if (decoded.handling !== undefined && decoded.handling.length > 0) {
-          where.push(buildAnyHandling(sql, decoded.handling));
         }
         if (decoded.workflowId !== undefined && decoded.triggerId !== undefined) {
           where.push(
@@ -278,25 +275,19 @@ const make = Effect.gen(function* () {
           SELECT ${sql.literal(LISTED_EVENT_COLUMNS)} FROM events
           WHERE ${sql.and(where)} ${order} LIMIT ${limit + 1}
         `;
-        // A holder's title is private to whoever may read that kind of holder.
-        const titleAccess = {
-          sessions: checkActorHoldsGrant("session.read", actor) === undefined,
-          runs: checkActorHoldsGrant("run.read", actor) === undefined,
-        };
-        // The facts are read after the page, for the ids on it only, so the
-        // cost of the facts follows the page's size and not the filters'.
         const page = yield* buildPage(
           rows,
           limit,
+          // The facts are read after the page, for the ids on it only, so the
+          // cost of the facts follows the page's size and not the filters'.
           (read) =>
             Effect.map(
               readEventFacts(
                 sql,
                 read.map((row) => row.id),
-                titleAccess,
               ),
               (facts) =>
-                read.map((row): EventWithFacts => ({
+                read.map((row): ListedEvent => ({
                   ...parseListedEventRow(row),
                   // `readEventFacts` returns an entry for every id it is given.
                   ...facts.get(row.id)!,

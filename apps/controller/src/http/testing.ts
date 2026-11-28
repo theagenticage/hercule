@@ -18,8 +18,12 @@ import type * as Exit from "effect/Exit";
 import type * as Fiber from "effect/Fiber";
 import * as FiberMap from "effect/FiberMap";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
+import * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as HttpServer from "effect/http/HttpServer";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as RpcClient from "effect/rpc/RpcClient";
@@ -39,6 +43,7 @@ import {
 } from "@hercule/contract";
 import type { Plugin } from "@hercule/plugin-host";
 import { buildHomePaths, BootstrapConfig } from "@hercule/home";
+import type { AssistantService } from "../assistants";
 import { HerculeHome } from "../config";
 import { ConnectionTypesLayer } from "../connections";
 import { CredentialsLayer, hashToken } from "../credentials";
@@ -50,10 +55,13 @@ import {
   EventRoutingInterval,
   IngestExecutorLayer,
   IngestReconcileInterval,
+  McpServerCheckInterval,
   Live,
   LostRunnerSweepInterval,
+  EntityObservationsLayer,
   OpenSignalsLayer,
   RunFibers,
+  RunnerMetricsPruneInterval,
   SchedulerInterval,
   AttachmentSweepInterval,
   SkillUpdateCheckInterval,
@@ -61,9 +69,15 @@ import {
   TextGenerationDeadline,
   RunServiceReferenceLayer,
   DiscussionInputsReferenceLayer,
+  ProviderAccountProbeDeadline,
+  ProviderAccountProbeInterval,
+  ProviderAccountProbingLayer,
+  ProviderAccountSignInDeadline,
   SessionEditObserverLayer,
   SessionObserverLayer,
+  TaskServiceWithPortsLayer,
   revalidateStoredWorkflowsOrLog,
+  WorkflowServiceWithPortsLayer,
   WorkflowValidityObserversLayer,
   WorkspaceSweepInterval,
 } from "../daemon";
@@ -77,32 +91,46 @@ import {
   type AuditKind,
   type PlatformEventKind,
 } from "../events";
-import { NotifierLayer } from "../notifications";
+import { Notifier, NotifierLayer } from "../notifications";
+import { TaskService } from "../tasks";
+import { WorkflowService } from "../workflows";
 import { readEventsOfKind, type LoggedEvent } from "../events/testing";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
 import { COALESCE_WINDOW_MS, LiveTopics } from "../live";
 import {
+  buildProviderAccountOwner,
   masterKeyLayer,
   Secrets,
   secretsLayer,
   type MasterKeyBackend,
   type SecurityRunner,
 } from "../secrets";
-import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
-import { PluginConfigsLayer, PluginHost, PluginHostLayer, PluginsLayer } from "../plugins";
-import { createPluginFixture } from "../plugins/testing";
+import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "../model-profiles";
+import { HarnessReleasesLayer } from "../harnesses";
+import { PermissionProfilesLayer, SessionTokens, SessionTokensLayer } from "../permissions";
 import {
-  ensureProviderInstances,
-  ProviderLoginDeadline,
-  ProviderProbeDeadline,
-  ProviderProbeInterval,
-  ProviderProbesLayer,
-  ProviderServiceLayer,
-} from "../providers";
+  findCredentialSecretName,
+  PluginConfigsLayer,
+  PluginHost,
+  PluginHostLayer,
+  PluginsLayer,
+} from "../plugins";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
+import {
+  providerAccountRepository,
+  HarnessAccountsLayer,
+  ModelCatalogsLayer,
+  ProviderAccountProbesLayer,
+  ProviderAccountRunnersLayer,
+  ProviderAccountServiceLayer,
+  ProviderKeyRequestsLayer,
+} from "../provider-accounts";
 import { SessionService, SessionServiceLayer } from "../sessions";
 import { ConversationMessagesLayer } from "../conversations";
 import { ResourceServiceLayer } from "../resources";
+import { RunnerMetricsServiceLayer } from "../runner-metrics";
 import { SettingsLayer } from "../settings";
+import { AccountUsageLayer } from "../usage";
 import { GithubSkillSources } from "../skills";
 import { makeFakeGithub } from "../skills/testing";
 import type { TextGeneration } from "../text-generation";
@@ -118,12 +146,14 @@ import {
   runnerRepository,
   type RunnerPings,
 } from "../runners";
+import { McpGateway } from "../mcp-gateway";
+import { McpServerCalls, McpServerCheckDeadline } from "../mcp-servers";
 import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../promotion";
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
 import { operationLayers } from "./routes";
-import { bodyLimits, serve } from "./server";
+import { listenerOptions, serve } from "./server";
 import type { WebBundle } from "./static";
 
 /** The setup token the test server starts with, and the password `completeSetup` sets. */
@@ -140,8 +170,10 @@ export const USERNAME = "rogier";
 const buildServices = (
   home: string,
   githubSkillSources: GithubSkillSources["Service"],
+  providerKeyHttpClient: HttpClient.HttpClient,
   masterKeyBackend: MasterKeyBackend = "file",
   securityRunner?: SecurityRunner,
+  readLocalRunnerId: () => string | undefined = () => undefined,
 ) =>
   // The routes' layer includes the controller daemon, which uses the session
   // and workspace services and the plugin host. So this block's output is
@@ -151,7 +183,6 @@ const buildServices = (
     Layer.provideMerge(
       Layer.mergeAll(
         PluginsLayer,
-        ProviderServiceLayer,
         // Observed by the assistants and runs domains, as in the real boot,
         // so a session's replies and notices reach its conversation, and an
         // agent step whose turn no runner will report fails.
@@ -159,6 +190,8 @@ const buildServices = (
           Layer.provide(SessionObserverLayer),
           Layer.provide(SessionEditObserverLayer),
           Layer.provide(ConversationMessagesLayer),
+          // As in the real boot: a reopened Thread joins a Task.
+          Layer.provide(TaskServiceWithPortsLayer),
         ),
         // As in the real boot: a Connection's delete asks the resources and
         // workflows domains what still names it.
@@ -173,20 +206,41 @@ const buildServices = (
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
         Layer.provideMerge(DiscussionInputsReferenceLayer),
-        // As in the real boot: a plugin's lifecycle change and a Connection's
-        // or an agent's delete validate the stored workflows again.
-        Layer.provideMerge(WorkflowValidityObserversLayer),
+        // As in the real boot: the step that installs the shipped workflows
+        // uses the workflow service and the task service.
+        Layer.provideMerge(WorkflowServiceWithPortsLayer),
+        Layer.provideMerge(TaskServiceWithPortsLayer),
+        Layer.provideMerge(
+          HarnessReleasesLayer.pipe(
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableReleaseClient)),
+          ),
+        ),
       ),
     ),
-    // One connection map and one probe driver: the socket route and every
-    // service must use the same `RunnerConnections`. The catalog is provided
-    // to the probe driver, which reads provider definitions from it.
+    // One connection map and one set of awaited device logins: the socket
+    // route and every service must use the same `RunnerConnections` and
+    // `ProviderAccountProbing`. The catalog is provided to the probes, which
+    // read harness definitions from it.
     Layer.provideMerge(
-      ProviderProbesLayer.pipe(
+      ProviderAccountProbingLayer.pipe(
+        // Probing reads the catalogs that the provider's own API lists, which
+        // the provider account service does.
+        Layer.provideMerge(ProviderAccountServiceLayer),
+        // As in the real boot: provides the observer ports that validate the
+        // stored workflows again, and `WorkflowValidity` itself. It sits here
+        // because the provider account service above needs its port, and the
+        // services built on this stack need the others.
+        Layer.provideMerge(WorkflowValidityObserversLayer),
+        Layer.provideMerge(ProviderAccountProbesLayer),
+        Layer.provideMerge(ModelCatalogsLayer),
+        Layer.provideMerge(ProviderAccountRunnersLayer),
+        Layer.provideMerge(Layer.succeed(LocalRunnerId, { read: readLocalRunnerId })),
+        Layer.provideMerge(HarnessAccountsLayer),
         Layer.provideMerge(RunnerConnectionsLayer),
+        Layer.provideMerge(RunnerMetricsServiceLayer),
         Layer.provideMerge(
           PluginHostLayer.pipe(
-            Layer.provide([IngestExecutorLayer, OpenSignalsLayer]),
+            Layer.provide([IngestExecutorLayer, OpenSignalsLayer, EntityObservationsLayer]),
             Layer.provideMerge(ConnectionTypesLayer),
             Layer.provideMerge(PluginConfigsLayer),
           ),
@@ -194,6 +248,7 @@ const buildServices = (
       ),
     ),
     Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(PromotionStateLayer),
     Layer.provideMerge(
       Layer.mergeAll(
@@ -203,11 +258,18 @@ const buildServices = (
         PermissionProfilesLayer,
         AuditLogLayer,
         PlatformEventsLayer,
+        // As in the real boot: Provider Accounts declares this port.
+        ModelProfileMembershipLayer,
+        // Projects declares this port as well, to check that a profile exists.
+        ModelProfileLookupLayer,
         controllerIdentityLayer,
         JoinTokensLayer,
         SessionTokensLayer,
         PromotionTokensLayer,
         Layer.succeed(GithubSkillSources, githubSkillSources),
+        ProviderKeyRequestsLayer.pipe(
+          Layer.provide(Layer.succeed(HttpClient.HttpClient, providerKeyHttpClient)),
+        ),
       ),
     ),
     Layer.provideMerge(
@@ -229,22 +291,92 @@ const buildServices = (
           bindHost: "127.0.0.1",
           bindPort: 0,
           logLevel: "debug",
+          otlpEndpoint: undefined,
         }),
       ),
     ),
   );
 
+/** The qualified id of the harness the test controller adds, and of its provider. */
+export const TEST_HARNESS_ID = "test/test";
+
 /**
- * Returns the plugins a test controller boots: the test's own, plus a
- * provider plugin when none of the test's plugins offers providers. Setup
- * creates the default assistant, which needs a provider instance, so a
- * controller with no provider cannot finish setup. The provider plugin is
+ * Returns the plugins a test controller boots: the test's own, plus a plugin
+ * with one provider and one harness when none of the test's plugins offers a
+ * provider. Setup creates the default assistant, which needs a Provider
+ * Account, so a controller with no provider cannot finish setup. The plugin is
  * built per call, so it holds nothing from a controller that has finished.
  */
 const buildPluginRegistry = (plugins: ReadonlyArray<Plugin>): ReadonlyArray<Plugin> =>
   plugins.some((plugin) => plugin.manifest.capabilities.includes("providers"))
     ? plugins
-    : [...plugins, createPluginFixture({ id: "test" }).plugin];
+    : [...plugins, buildPluginWithProviderPerHarness("test", [buildHarnessDefinition("test")])];
+
+/**
+ * Gives a test controller one account, so setup can create the default
+ * assistant. The account is of the first registered provider's first account
+ * kind that has a registered harness to run in, and that harness is its
+ * default. A kind that holds a key or token gets one stored, so the account
+ * can run. Does nothing when the controller already has an account.
+ */
+const addTestProviderAccount = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const accounts = yield* providerAccountRepository;
+  const secrets = yield* Secrets;
+  const host = yield* PluginHost;
+  if (yield* accounts.hasAny()) return;
+  const harnesses = yield* host.harnesses();
+  for (const provider of yield* host.providers()) {
+    for (const kind of provider.kinds) {
+      const harnessId = kind.harnesses.find((id) => harnesses.some((one) => one.id === id));
+      if (harnessId === undefined) continue;
+      yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const account = yield* accounts.insert({
+            providerId: provider.id,
+            kind: kind.id,
+            label: null,
+            defaultHarnessId: harnessId,
+            at: yield* nowIso,
+          });
+          const credentialName = findCredentialSecretName(kind);
+          if (credentialName !== undefined) {
+            yield* secrets.set(
+              buildProviderAccountOwner(account.id),
+              credentialName,
+              Redacted.make("test-credential"),
+            );
+          }
+        }),
+      );
+      return;
+    }
+  }
+}).pipe(Effect.catchTag("SecretNameError", Effect.die));
+
+/**
+ * The provider every key check reads when the test gives none: it accepts any
+ * key, and no test reaches a real provider by accident.
+ */
+const acceptingProviderKeyClient = HttpClient.make((request) =>
+  Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}"))),
+);
+
+/**
+ * The release publishers a test controller reads: no request gets an answer,
+ * so no test reaches npm or GitHub by accident.
+ */
+const unreachableReleaseClient = HttpClient.make((request) =>
+  Effect.fail(
+    new HttpClientError.HttpClientError({
+      reason: new HttpClientError.TransportError({
+        request,
+        cause: "no release publisher in this test",
+      }),
+    }),
+  ),
+);
 
 /**
  * The GitHub a test controller reads when the test gives none: every read
@@ -326,6 +458,7 @@ export type LiveSessionsRunner = <A, E>(
 
 /** What `LiveSessionsRunner` provides. */
 export type LiveSessionsServices =
+  | AssistantService
   | Live
   | DiscussionInputs
   | DiscussionService
@@ -333,6 +466,23 @@ export type LiveSessionsServices =
   | PluginHost
   | PromotionState
   | TextGeneration
+  | SqlClient.SqlClient;
+
+/**
+ * Runs an effect against the running controller's workflow service, its
+ * task service, its notifier and its database, as the boot does, and returns the effect's
+ * `Exit`. Tests use it to run the boot step that installs the shipped
+ * workflows with a list of sources of their own.
+ */
+export type ShippedWorkflowServicesRunner = <A, E>(
+  effect: Effect.Effect<A, E, ShippedWorkflowServices>,
+) => Promise<Exit.Exit<A, E>>;
+
+/** What `ShippedWorkflowServicesRunner` provides. */
+export type ShippedWorkflowServices =
+  | WorkflowService
+  | Notifier
+  | TaskService
   | SqlClient.SqlClient;
 
 /** The user that `LiveSessionsRunner` runs an effect as. */
@@ -361,6 +511,7 @@ export interface ServerHarness {
   readonly joinToken: JoinTokenArranger;
   readonly reboot: RebootArranger;
   readonly runWithLiveSessions: LiveSessionsRunner;
+  readonly runWithShippedWorkflowServices: ShippedWorkflowServicesRunner;
   /**
    * The controller's secrets repository. A test uses it to arrange a secret
    * the public API refuses to write, such as a connection's credentials.
@@ -371,6 +522,18 @@ export interface ServerHarness {
    * waits at the gate while the controller is frozen or sealed.
    */
   readonly promotion: PromotionState["Service"];
+  /**
+   * The controller's calls to outside MCP servers, which only the gateway's
+   * route uses. A test calls its methods directly.
+   */
+  readonly mcpServerCalls: McpServerCalls["Service"];
+  /**
+   * The MCP Gateway, and the Session Tokens it resolves a caller with. A test
+   * that needs a response before its body is read, which the HTTP listener
+   * never allows, calls `handle` directly.
+   */
+  readonly mcpGateway: McpGateway["Service"];
+  readonly sessionTokens: SessionTokens["Service"];
   /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
@@ -404,6 +567,8 @@ export interface ServerOptions {
   readonly workspaceSweepInterval?: Duration.Duration;
   /** The default hour is longer than a test can wait. */
   readonly attachmentSweepInterval?: Duration.Duration;
+  /** The default hour is longer than a test can wait. */
+  readonly runnerMetricsPruneInterval?: Duration.Duration;
   /** The default three hours is longer than a test can wait. */
   readonly skillUpdateCheckInterval?: Duration.Duration;
   /**
@@ -411,12 +576,21 @@ export interface ServerOptions {
    * fails, so no test reaches the real GitHub.
    */
   readonly githubSkillSources?: GithubSkillSources["Service"];
+  /**
+   * The HTTP client a key check goes through. Without it, every key is
+   * accepted, so no test reaches a real provider.
+   */
+  readonly providerKeyHttpClient?: HttpClient.HttpClient;
   /** The default second is too long for a test that waits several ticks. */
   readonly eventRoutingInterval?: Duration.Duration;
   /** The default minute is longer than a test can wait. */
   readonly lostRunnerSweepInterval?: Duration.Duration;
   /** How often the scheduler looks for cron triggers that are due. The default is a second. */
   readonly schedulerInterval?: Duration.Duration;
+  /** How often the scheduler looks for MCP Server checks that are due. The default is a minute. */
+  readonly mcpServerCheckInterval?: Duration.Duration;
+  /** How long a whole MCP Server check may take. The default is under a freeze's wait for running work. */
+  readonly mcpServerCheckDeadline?: Duration.Duration;
   /** How often the Ingest Reconciler opens and closes ingest handles. The default is two seconds. */
   readonly ingestReconcileInterval?: Duration.Duration;
   /** How long a text generation may wait for a slot and an answer. The default is over a minute. */
@@ -436,7 +610,7 @@ export interface ServerOptions {
   readonly expressionBudget?: Duration.Duration;
   /**
    * The plugin registry. The real one is compiled in, so a test passes its
-   * own. A provider plugin is added when none of these offers providers.
+   * own. A harness plugin is added when none of these offers harnesses.
    */
   readonly plugins?: ReadonlyArray<Plugin>;
   /**
@@ -491,7 +665,7 @@ export const withServer = (
             host.boot(buildPluginRegistry(options.plugins ?? [])),
           );
           yield* revalidateStoredWorkflowsOrLog;
-          yield* ensureProviderInstances;
+          yield* addTestProviderAccount;
         });
         yield* bootSteps;
         // A restart first interrupts every run's fiber and waits until they
@@ -560,8 +734,14 @@ export const withServer = (
               TEST_USER,
             ),
           );
+        const shippedWorkflowServices = yield* Effect.context<ShippedWorkflowServices>();
+        const runWithShippedWorkflowServices: ShippedWorkflowServicesRunner = (effect) =>
+          Effect.runPromiseExit(Effect.provideContext(effect, shippedWorkflowServices));
         const secrets = yield* Secrets;
         const promotion = yield* PromotionState;
+        const mcpServerCalls = yield* McpServerCalls;
+        const mcpGateway = yield* McpGateway;
+        const sessionTokens = yield* SessionTokens;
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -583,8 +763,12 @@ export const withServer = (
             joinToken,
             reboot,
             runWithLiveSessions,
+            runWithShippedWorkflowServices,
             secrets,
             promotion,
+            mcpServerCalls,
+            mcpGateway,
+            sessionTokens,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );
@@ -594,21 +778,20 @@ export const withServer = (
         buildServices(
           home,
           options.githubSkillSources ?? unreachableGithub.service,
+          options.providerKeyHttpClient ?? acceptingProviderKeyClient,
           options.masterKeyBackend,
           options.securityRunner,
+          options.readLocalRunnerId,
         ).pipe(
           // The same listener `hercule serve` builds, including the body size
           // limit. The limit is enforced by the transport, so without it the
           // tests would run a different server from the one that ships.
           Layer.provideMerge(
-            BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...bodyLimits }),
+            BunHttpServer.layer({ hostname: "127.0.0.1", port: 0, ...listenerOptions }),
           ),
         ),
       ),
       Effect.provideService(PasswordCost, TEST_PASSWORD_PARAMS),
-      Effect.provideService(LocalRunnerId, {
-        read: options.readLocalRunnerId ?? (() => undefined),
-      }),
       provideTimings(options),
     ),
   ).finally(() => rmSync(home, { recursive: true, force: true }));
@@ -628,17 +811,20 @@ const provideTimings =
     };
     provideIfSet(RunnerPingSchedule, options.pings);
     provideIfSet(RunnerFactsDeadline, options.factsDeadline);
-    provideIfSet(ProviderProbeDeadline, options.probeDeadline);
-    provideIfSet(ProviderProbeInterval, options.probeInterval);
-    provideIfSet(ProviderLoginDeadline, options.loginDeadline);
+    provideIfSet(ProviderAccountProbeDeadline, options.probeDeadline);
+    provideIfSet(ProviderAccountProbeInterval, options.probeInterval);
+    provideIfSet(ProviderAccountSignInDeadline, options.loginDeadline);
     provideIfSet(SessionInputDeadline, options.inputDeadline);
     provideIfSet(WorkspaceSweepInterval, options.workspaceSweepInterval);
     provideIfSet(AttachmentSweepInterval, options.attachmentSweepInterval);
+    provideIfSet(RunnerMetricsPruneInterval, options.runnerMetricsPruneInterval);
     provideIfSet(SkillUpdateCheckInterval, options.skillUpdateCheckInterval);
     provideIfSet(EventRoutingInterval, options.eventRoutingInterval);
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
     provideIfSet(SchedulerInterval, options.schedulerInterval);
     provideIfSet(IngestReconcileInterval, options.ingestReconcileInterval);
+    provideIfSet(McpServerCheckInterval, options.mcpServerCheckInterval);
+    provideIfSet(McpServerCheckDeadline, options.mcpServerCheckDeadline);
     provideIfSet(TextGenerationDeadline, options.textGenerationDeadline);
     provideIfSet(ExpressionBudget, options.expressionBudget ?? Duration.infinity);
     return provided;

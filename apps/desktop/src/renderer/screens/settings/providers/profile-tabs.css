@@ -1,0 +1,121 @@
+/* The Models section's profile tabs, from the prototype `prototype/desktop-
+   settings-providers`, variant I (docs/design/providers-directions/r3.css,
+   the `.vh-tab` and `.vi-tab` rules). Its measurements decide. The tabs are
+   text on one rule, with an ink bar under the selected one; the rule is the
+   top border of the first account's section. */
+.pm-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  margin-top: 4px;
+  border-bottom: 1px solid var(--divider);
+}
+/* The tabs wrap rather than scroll. */
+.pm-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+.pm-tabwrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  /* The tab's menu opens under the whole tab, not under the small ⌄ button
+     that opens it. The name is scoped to each tab, so every tab can have it. */
+  anchor-name: --pm-tab;
+  anchor-scope: --pm-tab;
+}
+.pm-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px 0 8px;
+  color: var(--muted);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.pm-tab small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.pm-tab:hover,
+.pm-tab[aria-selected="true"] {
+  color: var(--ink);
+}
+.pm-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--ink);
+}
+.pm-tab:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--r-sm);
+}
+.pm-tab--new {
+  gap: 6px;
+  margin-left: 4px;
+  color: var(--faint);
+}
+
+/* The open tab's ⌄ button, drawn over the tab's right padding. The icon is the
+   app's right chevron, turned to point down. */
+.pm-tabmore {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin: 0 4px 0 -8px;
+  border-radius: 6px;
+  color: var(--faint);
+}
+.pm-tabmore > .ic {
+  transform: rotate(90deg);
+}
+.pm-tabmore:hover,
+.pm-tabmore:focus-visible {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* The prototype's menu starts 2px above the tab's lower edge. */
+.pm-tabmenu {
+  width: 200px;
+  margin-top: -2px;
+  position-anchor: --pm-tab;
+  position-area: block-end span-inline-end;
+}
+.pm-tabmenu [role="menuitem"] > .ic {
+  flex: none;
+}
+.pm-tabmenu .pm-danger,
+.pm-tabmenu .pm-danger > .ic {
+  color: var(--fail-ink);
+}
+
+/* Renaming in the tab. */
+.pm-tab--edit {
+  padding-right: 12px;
+}
+.pm-rename {
+  height: 26px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  outline: 0;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+  color: var(--ink);
+  font: inherit;
+  font-weight: var(--w-medium);
+}

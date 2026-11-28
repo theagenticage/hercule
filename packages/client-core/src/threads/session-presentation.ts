@@ -12,7 +12,7 @@
  */
 import type {
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -72,7 +72,8 @@ export interface SessionPresentation {
  *   leaves out an old Done Thread, so an open one is added here, and its
  *   group keeps a row on the Done shelf. A record `listedSessions` holds wins
  *   over `openSession`. A session that is not a Thread or an Agent's is never
- *   added.
+ *   added, and neither is an archived one: an archived thread that is open
+ *   has no row anywhere in the sidebar.
  *
  * Every session's pose is decided once here, and the rows' poses, the counts
  * and the seats all use it. (A row's status is decided from the session and
@@ -87,7 +88,7 @@ export const prepareSessionPresentation = ({
   workspaces,
   resources,
   runners,
-  instances,
+  accounts,
 }: {
   readonly listedSessions: readonly Session[];
   readonly openSession: Session | null;
@@ -95,11 +96,12 @@ export const prepareSessionPresentation = ({
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
-  readonly instances: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
 }): SessionPresentation => {
   const mergesOpenSession =
     openSession !== null &&
     (openSession.kind === "thread" || openSession.kind === "agent") &&
+    openSession.archived === undefined &&
     !listedSessions.some((session) => session.id === openSession.id);
   const sessions = mergesOpenSession ? [...listedSessions, openSession] : listedSessions;
 
@@ -124,7 +126,7 @@ export const prepareSessionPresentation = ({
     workspaces,
     resources,
     runners,
-    instances,
+    accounts,
   });
   return {
     sessions,

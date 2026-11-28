@@ -1,10 +1,14 @@
 /**
  * The age clock: the one timer behind every label on screen that counts the
- * time since or until a moment. There are four kinds of such labels:
+ * time since or until a moment. There are five kinds of such labels:
  *
  * - an age, such as a thread row's "20m" or the "10m" a thread has waited on
  *   the user (`useAgeLabel`), which changes minutes or hours apart
  *   (`findNextAgeChange`);
+ * - a card's age on the Overview, such as "today", "2d" or "3w"
+ *   (`useDeskAgeLabel`, in the desk's own module so it loads with Work and
+ *   stays off the first screen), which counts whole days and so changes at
+ *   most once a day (`findNextDeskAgeChange`);
  * - a duration, such as a live turn's "Working for 12s"
  *   (`useDurationText`), which changes every second under an hour
  *   (`findNextDurationChange`);
@@ -229,10 +233,10 @@ export const NEVER = new Date(8.64e15);
  *
  * The label registers with the clock only while `counting` is true. Otherwise
  * it keeps the value it had, and reads a fresh one as soon as it counts again.
- * The value is a string or a number, so that an unchanged value compares equal
- * and draws nothing.
+ * The value is a string, a number or a boolean, so that an unchanged value
+ * compares equal and draws nothing.
  */
-export const useClockValue = <Value extends string | number | null>(
+export const useClockValue = <Value extends string | number | boolean | null>(
   moment: string,
   counting: boolean,
   findNextChange: (moment: string, now: Date) => Date,

@@ -8,10 +8,9 @@
  * An event's id is its position in the log, so it is an integer: the only
  * integer id in a system of UUIDv7s.
  *
- * The record lives apart from the `event` endpoints in `./event`, because the
- * signal, task and subscription schemas name an event's id, and `event.query`
- * names theirs in what came of each event. With both in one file, the two
- * would import each other.
+ * The record lives apart from the `event` endpoints in `./event`, so the
+ * signal, task and subscription schemas can name an event's id without
+ * importing the endpoints.
  */
 import { Schema } from "effect";
 import {

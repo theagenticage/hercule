@@ -1,6 +1,7 @@
 /**
  * Tests the tables and indexes the signal snoozes migration adds, on a
- * migrated temporary database:
+ * temporary database migrated up to it. Migration 132 drops the snoozes
+ * again, so the tests stop at 68:
  *
  * - deleting a signal deletes its snooze;
  * - a signal is not lowered until it is marked so;
@@ -14,10 +15,16 @@
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import { inTransaction, TestDatabase } from "../testing";
+import { runMigrations } from "../migrate";
+import { inTransaction, TestDatabaseWriter } from "../testing";
+import { migrations } from "./index";
+
+const UP_TO_SIGNAL_SNOOZES = migrations.filter(([id]) => id <= 68);
 
 const run = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>): Promise<A> =>
-  Effect.runPromise(Effect.provide(effect, TestDatabase));
+  Effect.runPromise(
+    Effect.provide(Effect.andThen(runMigrations(UP_TO_SIGNAL_SNOOZES), effect), TestDatabaseWriter),
+  );
 
 const ID = "0199e0e77b2170008000000000000001";
 const at = "2026-10-01T00:00:00.000Z";

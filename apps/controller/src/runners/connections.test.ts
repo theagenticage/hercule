@@ -20,7 +20,7 @@ import type {
   RunnerConnectivity,
   RunnerFacts,
   RunnerLifecycle,
-  RunnerWatermark,
+  RunnerMetrics,
 } from "@hercule/contract";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
@@ -49,9 +49,13 @@ import {
   type Connection,
   type Departure,
 } from "./connections";
+import { RunnerMetricsServiceLayer } from "../runner-metrics";
+import { SettingsLayer } from "../settings";
 import { runnerRepository } from "./repository";
 
 const layer = RunnerConnectionsLayer.pipe(
+  Layer.provideMerge(RunnerMetricsServiceLayer),
+  Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(ServingPromotionStateLayer),
   Layer.provideMerge(AuditLogLayer),
@@ -216,12 +220,12 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [],
-  adapters: ["claude-code"],
+  harnesses: [],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 };
 
-const WATERMARK: RunnerWatermark = {
+const METRICS: RunnerMetrics = {
   diskFreeBytes: 200 * 1024 * 1024 * 1024,
   availableMemoryBytes: 1,
 };
@@ -347,10 +351,13 @@ it("reports a text generation request as not sent when the runner is not connect
   const request: TextGenerationRequest = {
     _tag: "textGenerationRequest",
     requestId: "text-generation-request",
-    instanceId: "instance",
-    providerId: "codex",
-    config: {},
-    secrets: {},
+    harnessId: "codex/codex",
+    harnessAccount: {
+      providerAccountId: "0199e0e7-0000-7000-8000-0000000000a1",
+      harnessHome: "providers/0199e0e7-0000-7000-8000-0000000000a1",
+      modelArgument: "{model}",
+      credentialVariables: [],
+    },
     spec: {
       model: "model",
       instructions: "Name the thread.",
@@ -508,7 +515,7 @@ describe("a draining runner whose socket drops", () => {
 
 describe("a report from a connection the runner has replaced", () => {
   it("is dropped, so the older connection cannot overwrite what the newer one reported", async () => {
-    const row = await Effect.runPromise(
+    const { row, history } = await Effect.runPromise(
       Effect.gen(function* () {
         const connections = yield* RunnerConnections;
         const runners = yield* runnerRepository;
@@ -532,16 +539,74 @@ describe("a report from a connection the runner has replaced", () => {
 
         // A frame the older connection had already sent, arriving late.
         yield* connections.reportedFacts(runner!.id, older, { ...FACTS, docker: false });
-        yield* connections.reportedWatermark(runner!.id, older, WATERMARK);
+        yield* connections.reportedMetrics(runner!.id, older, METRICS);
 
-        return yield* runners.read(runner!.id);
+        const sql = yield* SqlClient.SqlClient;
+        const history = yield* sql<{ minute: number }>`SELECT minute FROM runner_metrics`;
+        return { row: yield* runners.read(runner!.id), history };
       }).pipe(Effect.provide(layer)),
     );
 
     expect(Option.isSome(row)).toBe(true);
     const one = Option.getOrThrow(row);
     expect(one.facts?.docker, "the newer connection's hello still stands").toBe(true);
-    expect(one.watermark, "a stale watermark is not a reading of this machine").toBeNull();
+    expect(one.metrics, "stale metrics are not a reading of this machine").toBeNull();
+    expect(history, "stale metrics add nothing to the history").toEqual([]);
+  });
+});
+
+describe("a facts report", () => {
+  /** Greets a runner with `FACTS`, sends each report, then returns the first fleet traffic after them. */
+  const readTrafficAfterReports = (reports: ReadonlyArray<RunnerFacts>) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const connections = yield* RunnerConnections;
+        const [runner] = yield* insertFleet([{ connectivity: "offline" }]);
+        const connection = mintConnection();
+        yield* connections.greeted(runner!.id, connection, HELD, HELLO);
+        for (const facts of reports)
+          yield* connections.reportedFacts(runner!.id, connection, facts);
+        // A marker after the reports: when it is the first item, no report published anything.
+        yield* connections.placementsChanged(runner!.id);
+        const traffic = yield* connections.fleetTraffic.pipe(Stream.runHead);
+        return { runnerId: runner!.id, traffic: Option.getOrThrow(traffic) };
+      }).pipe(Effect.provide(layer), Effect.orDie),
+    );
+
+  it.each([
+    {
+      change: "a harness binary appears",
+      facts: { ...FACTS, harnesses: [{ name: "pi", present: true, path: "/bin/pi" }] },
+    },
+    {
+      change: "the runner build gains an adapter",
+      facts: { ...FACTS, adapters: [...FACTS.adapters, "pi/pi"] },
+    },
+  ])("publishes harnessesChanged when $change", async ({ facts }) => {
+    const { runnerId, traffic } = await readTrafficAfterReports([facts]);
+    expect(traffic).toEqual({ _tag: "harnessesChanged", runnerId });
+  });
+
+  it("publishes harnessesChanged when a harness binary moves or disappears", async () => {
+    const withPi = {
+      ...FACTS,
+      harnesses: [{ name: "pi", present: true, path: "/bin/pi" }],
+    };
+    const moved = await readTrafficAfterReports([
+      withPi,
+      { ...withPi, harnesses: [{ name: "pi", present: true, path: "/opt/pi" }] },
+    ]);
+    expect(moved.traffic).toEqual({ _tag: "harnessesChanged", runnerId: moved.runnerId });
+    const gone = await readTrafficAfterReports([withPi, FACTS]);
+    expect(gone.traffic).toEqual({ _tag: "harnessesChanged", runnerId: gone.runnerId });
+  });
+
+  it("publishes nothing when only something else changed, or the report repeats the hello", async () => {
+    const { runnerId, traffic } = await readTrafficAfterReports([
+      FACTS,
+      { ...FACTS, docker: true, totalMemoryBytes: 1 },
+    ]);
+    expect(traffic).toEqual({ _tag: "placementsChanged", runnerId });
   });
 });
 
@@ -724,6 +789,8 @@ describe("sendFrameCarryingInput", () => {
  * around a promotion, not the key.
  */
 const promotableLayer = RunnerConnectionsLayer.pipe(
+  Layer.provideMerge(RunnerMetricsServiceLayer),
+  Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(
     PromotionStateLayer.pipe(

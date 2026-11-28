@@ -113,14 +113,17 @@ describe("computeTimelineDay", () => {
   });
 
   it("starts a day whose clock skips midnight at 01:00, and one that reads midnight twice at the first", () => {
-    // Havana skips 00:00 on Sunday 8 March 2026, and reads it twice on Sunday 1 November.
+    // The Azores skip 00:00 on Sunday 29 March 2026, and read it twice on
+    // Sunday 25 October. The rule is the European Union's, which changes
+    // less often than most: Havana, used here before, stopped turning its
+    // clock back in 2026, so the answer depended on the machine's zone data.
     assert.deepStrictEqual(
-      readDay(computeTimelineDay(new Date("2026-03-09T15:00:00Z"), 1, "America/Havana")),
-      ["2026-03-08T05:00:00.000Z", "2026-03-09T04:00:00.000Z"],
+      readDay(computeTimelineDay(new Date("2026-03-30T15:00:00Z"), 1, "Atlantic/Azores")),
+      ["2026-03-29T01:00:00.000Z", "2026-03-30T00:00:00.000Z"],
     );
     assert.deepStrictEqual(
-      readDay(computeTimelineDay(new Date("2026-11-02T15:00:00Z"), 1, "America/Havana")),
-      ["2026-11-01T04:00:00.000Z", "2026-11-02T05:00:00.000Z"],
+      readDay(computeTimelineDay(new Date("2026-10-26T15:00:00Z"), 1, "Atlantic/Azores")),
+      ["2026-10-25T00:00:00.000Z", "2026-10-26T01:00:00.000Z"],
     );
     // Santiago skips 00:00 on Sunday 6 September 2026, and on Sunday 5 April
     // goes back from 00:00 to 23:00 on Saturday 4 April, which is 25 hours long.

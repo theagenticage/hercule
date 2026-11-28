@@ -1,0 +1,348 @@
+/* The Fleet page's Software section: a grid of tools down and machines across,
+   a key under it, and a tool's detail opened under its row. The measurements
+   are the fleet prototype's, variant G. Every class starts with `fleet-sw-`
+   (the section itself is `fleet-software`). */
+
+.fleet-software {
+  container: fleet-software / inline-size;
+  margin-top: 64px;
+  scroll-margin-top: var(--fleet-header-clearance);
+}
+/* The heading sits flush with the section's top margin. */
+.fleet-software > .fleet-sec-h {
+  margin-top: 0;
+}
+
+/* The line that stands in for the grid when no machine has joined. */
+.fleet-sw-empty {
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+
+/* ---------- The grid ---------- */
+/* A grid with more machines than fit scrolls sideways in this box, so the page
+   itself never does. The Tool and Latest columns are pinned. */
+.fleet-sw-scroll {
+  /* The least widths of the grid's columns. The Tool column is as wide as this
+     whenever the grid scrolls, because then every column is at its least
+     width, so the Latest column is pinned at exactly this offset. */
+  --fleet-sw-tool: 170px;
+  --fleet-sw-latest: 128px;
+  --fleet-sw-machine: 78px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.fleet-sw-table {
+  /* The least width of every column added up. */
+  min-width: calc(
+    var(--fleet-sw-tool) + var(--fleet-sw-latest) + var(--fleet-sw-columns) *
+      var(--fleet-sw-machine)
+  );
+}
+.fleet-sw-head,
+.fleet-sw-row,
+.fleet-sw-group {
+  display: grid;
+  grid-template-columns:
+    minmax(var(--fleet-sw-tool), 1.3fr) var(--fleet-sw-latest)
+    repeat(var(--fleet-sw-columns), minmax(var(--fleet-sw-machine), 1fr));
+  align-items: center;
+}
+
+/* The two pinned columns of every row. They cover what scrolls under them, so
+   they take the page's colour; a hovered row tints them like the rest of it. */
+.fleet-sw-head > :nth-child(-n + 2),
+.fleet-sw-group > :first-child,
+.fleet-sw-row > :nth-child(-n + 2) {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--fleet-sw-fill, linear-gradient(transparent, transparent)), var(--surface);
+}
+.fleet-sw-head > :nth-child(2),
+.fleet-sw-row > :nth-child(2) {
+  left: var(--fleet-sw-tool);
+}
+
+.fleet-sw-head {
+  min-height: 38px;
+  box-shadow: 0 1px 0 var(--divider);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+/* The head of a machine's column: its name, centred over its cells. */
+.fleet-sw-machine-cell {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+.fleet-sw-machine {
+  min-width: 0;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: var(--r-xs);
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-weight: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background var(--dur-1);
+}
+.fleet-sw-machine:hover {
+  background: var(--hover);
+}
+.fleet-sw-machine.is-away {
+  color: var(--muted);
+}
+
+/* "Harnesses" and "Toolchains". */
+.fleet-sw-group {
+  min-height: 40px;
+  padding-top: 14px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.fleet-sw-row {
+  position: relative;
+  min-height: 40px;
+}
+/* The divider above a row. It is over the pinned cells, which cover the row's
+   own top edge. */
+.fleet-sw-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  border-top: 1px solid var(--divider);
+  pointer-events: none;
+}
+.fleet-sw-row:hover {
+  --fleet-sw-fill: linear-gradient(var(--hover), var(--hover));
+  background: var(--fleet-sw-fill);
+}
+
+/* ---------- A tool's name ---------- */
+/* The right padding keeps the name's focus ring off the Latest column's text,
+   without changing the column's width. */
+.fleet-sw-tool {
+  min-width: 0;
+  padding-right: 12px;
+}
+.fleet-sw-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  text-align: left;
+  font-weight: var(--w-medium);
+}
+/* The ring is drawn inside the button: the grid's box would cut one drawn outside. */
+.fleet-sw-name:focus-visible {
+  outline-offset: -2px;
+}
+.fleet-sw-name > .ic {
+  flex: none;
+  color: var(--faint);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.fleet-sw-name[aria-expanded="true"] > .ic {
+  transform: rotate(90deg);
+}
+.fleet-sw-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- The Latest column ---------- */
+/* The version, and after it, or under it when the column is too narrow, the
+   note such as "checked 09:00". */
+.fleet-sw-latest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 6px;
+  min-width: 0;
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+}
+.fleet-sw-latest > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fleet-sw-latest > small {
+  color: var(--muted);
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.fleet-sw-latest.is-muted {
+  color: var(--muted);
+}
+.fleet-sw-latest.is-faint {
+  color: var(--faint);
+}
+
+/* ---------- A machine's cell ---------- */
+.fleet-sw-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: center;
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 0 4px;
+  color: var(--ink);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* A raw version string such as "go1.25.3 linux/arm64" is cut with an ellipsis.
+   The tooltip has it whole. */
+.fleet-sw-cell.is-version,
+.fleet-sw-cell.is-older,
+.fleet-sw-cell.is-below-floor,
+.fleet-sw-cell.is-latest.is-away {
+  display: block;
+  line-height: 26px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fleet-sw-cell.is-latest {
+  color: var(--ok);
+}
+.fleet-sw-cell.is-older {
+  color: var(--you-ink);
+  font-weight: var(--w-medium);
+}
+.fleet-sw-cell.is-below-floor {
+  color: var(--fail-ink);
+  font-weight: var(--w-medium);
+}
+.fleet-sw-cell.is-not-installed {
+  color: var(--faint);
+}
+.fleet-sw-cell.is-unknown-version {
+  color: var(--muted);
+}
+/* "Unknown": the machine's runner is too old to look for this toolchain. */
+.fleet-sw-cell.is-not-probed {
+  color: var(--faint);
+}
+/* A machine that is away shows the versions it last reported, muted (a check
+   becomes its version). A dash stays faint. This rule has three classes to
+   the two above, so it wins over `is-not-probed` whatever the order. */
+.fleet-sw-cell.is-away:not(.is-not-installed) {
+  color: var(--muted);
+}
+
+/* The drawn check or dash. It carries the cell's accessible name, so it must
+   be a box of its own that wraps the icon without a line's gap under it. */
+.fleet-sw-mark {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---------- A tool's detail ---------- */
+/* The detail is as wide as the box, and stays in view while the grid scrolls. */
+.fleet-sw-detail {
+  position: sticky;
+  left: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 240px;
+  gap: 24px;
+  box-sizing: border-box;
+  width: 100cqw;
+  margin: 0 0 8px;
+  padding: 4px 16px 18px 40px;
+  background: color-mix(in oklab, var(--ink) 2.5%, transparent);
+  border-radius: 0 0 var(--r-md) var(--r-md);
+}
+.fleet-sw-blurb {
+  margin: 10px 0 0;
+  color: var(--muted);
+}
+.fleet-sw-latest-line {
+  margin: 6px 0 0;
+}
+.fleet-sw-detail-main > :first-child {
+  margin-top: 10px;
+}
+/* The machines by version: the version, then the machines that have it. The
+   labels share one column, so every machine name starts at the same x. A long
+   raw version wraps inside half the width and never reaches the names. */
+.fleet-sw-versions {
+  display: grid;
+  grid-template-columns: fit-content(50%) minmax(0, 1fr);
+  gap: 6px 12px;
+  align-content: start;
+  align-items: baseline;
+  margin: 0;
+  padding-top: 12px;
+  font-size: var(--t-12);
+}
+.fleet-sw-versions > div {
+  display: contents;
+}
+.fleet-sw-versions dt {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.fleet-sw-versions dd {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- The key ---------- */
+.fleet-sw-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin: 14px 0 0;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.fleet-sw-key > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fleet-sw-key .ic {
+  color: var(--ok);
+}
+.fleet-sw-key b {
+  font-weight: var(--w-medium);
+  font-variant-numeric: tabular-nums;
+}
+.fleet-sw-key b.is-older {
+  color: var(--you-ink);
+}
+
+/* ---------- A narrow section ---------- */
+@container fleet-software (width < 800px) {
+  .fleet-sw-scroll {
+    --fleet-sw-tool: 130px;
+    --fleet-sw-latest: 104px;
+    --fleet-sw-machine: 60px;
+  }
+  .fleet-sw-detail {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .fleet-sw-versions {
+    padding-top: 0;
+  }
+}

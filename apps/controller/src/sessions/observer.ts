@@ -32,7 +32,7 @@
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type { SqlError } from "effect/sql/SqlError";
-import type { ExitReason, ProviderEvent } from "@hercule/protocol";
+import type { ExitReason, HarnessEvent } from "@hercule/protocol";
 import type { StoredSession } from "./repository";
 
 /**
@@ -101,7 +101,7 @@ export class SessionObserver extends Context.Service<
      */
     readonly sessionReported: (
       session: StoredSession,
-      event: ProviderEvent,
+      event: HarnessEvent,
     ) => Effect.Effect<void, SqlError>;
     /**
      * Handles one session that has just exited, whatever the reason, an idle

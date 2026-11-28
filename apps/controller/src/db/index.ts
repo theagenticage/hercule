@@ -2,7 +2,13 @@
  * The controller's database: one SQLite database, ambient transactions and
  * forward-only migrations.
  */
-export { afterCommit, AfterCommit, announce, type Change } from "./after-commit";
+export {
+  afterCommit,
+  AfterCommit,
+  announce,
+  announceTaskCardChange,
+  type Change,
+} from "./after-commit";
 export {
   DatabaseError,
   createDatabaseError,
@@ -10,13 +16,22 @@ export {
   openDatabaseCopy,
   lockDatabaseFile,
   takeControllerLock,
+  withReadSnapshot,
   withTransaction,
   type DatabaseFiles,
 } from "./client";
+export {
+  PROFILE_GRANTS_TOPIC,
+  RecordChanges,
+  RecordChangesLayer,
+  type ChangeTopic,
+  type RecordChange,
+} from "./record-changes";
 export { buildMatchExpression } from "./full-text";
 export { mintUuid, uuidFromString, uuidHexToString, uuidToString, UUID_PATTERN } from "./id";
 export {
   CursorError,
+  dropCursorError,
   decodeCursor,
   decodeIntegerKeyCursor,
   decodeOffsetCursor,
@@ -39,7 +54,8 @@ export {
   type ResolvedSortKey,
   type SortColumn,
 } from "./page";
-export { nowIso } from "./time";
+export { MigrationMasterKey } from "./migration-master-key";
+export { addSeconds, nowIso } from "./time";
 export {
   backupBeforeMigration,
   copyDatabaseTo,

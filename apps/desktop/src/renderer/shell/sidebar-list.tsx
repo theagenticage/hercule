@@ -47,20 +47,27 @@ import { useThreadHover } from "./use-thread-hover";
  *   marks.
  * - `onReopen`: a Done shelf row's Reopen button, with the ids of the
  *   Threads it reopens.
+ * - `onArchive`: a Done shelf row's Archive button, with the row's group key.
+ * - `onArchiveAll`: the Done shelf heading's "Archive all".
  * - `onToggleDoneShelf`: the Done shelf's heading.
  * - `onToggleGroup`: the dots button of a group's row, in a project or on the
  *   Done shelf, and the arrow keys, with the group's key and whether to
  *   unfold it (true) or fold it (false).
  * - `onShowQuiet`: an unfolded group's "n quiet" line, with the group's key.
+ * - `onOpenProjectMenu`: a right-click on a project's heading, with the
+ *   project's id and the point clicked, in window coordinates.
  */
 export interface SidebarListActions {
   readonly onExpand: (section: SectionKey) => void;
   readonly onCollapse: (section: SectionKey) => void;
   readonly onMarkDone: (sessionIds: readonly string[]) => void;
   readonly onReopen: (sessionIds: readonly string[]) => void;
+  readonly onArchive: (groupKey: string) => void;
+  readonly onArchiveAll: () => void;
   readonly onToggleDoneShelf: () => void;
   readonly onToggleGroup: (groupKey: string, unfold: boolean) => void;
   readonly onShowQuiet: (groupKey: string) => void;
+  readonly onOpenProjectMenu: (projectId: string, x: number, y: number) => void;
 }
 
 /**
@@ -87,7 +94,7 @@ const renderItem = (
     case "waiting-run-row":
       return <WaitingRunRow key={item.key} item={item} officeOpen={officeOpen} />;
     case "project-header":
-      return <ProjectHeader key={item.key} item={item} />;
+      return <ProjectHeader key={item.key} item={item} onOpenMenu={actions.onOpenProjectMenu} />;
     case "group-row":
       return (
         <GroupRow
@@ -121,7 +128,14 @@ const renderItem = (
     case "draft-row":
       return <DraftRow key={item.key} item={item} />;
     case "done-header":
-      return <DoneHeader key={item.key} item={item} onToggle={actions.onToggleDoneShelf} />;
+      return (
+        <DoneHeader
+          key={item.key}
+          item={item}
+          onToggle={actions.onToggleDoneShelf}
+          onArchiveAll={actions.onArchiveAll}
+        />
+      );
     case "done-group-row":
       return (
         <DoneGroupRow
@@ -130,6 +144,7 @@ const renderItem = (
           onScreen={onScreen}
           officeOpen={officeOpen}
           onReopen={actions.onReopen}
+          onArchive={actions.onArchive}
           onToggleGroup={actions.onToggleGroup}
         />
       );

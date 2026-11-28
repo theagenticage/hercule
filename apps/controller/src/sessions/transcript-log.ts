@@ -23,9 +23,10 @@
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { parseStoredEvent, type SubagentId } from "@hercule/protocol";
+import { parseStoredEvent, type HarnessEvent, type SubagentId } from "@hercule/protocol";
 import type { TranscriptRow } from "@hercule/contract";
 import { UUID_PATTERN, uuidFromString } from "../db";
+import { takeTail } from "../text";
 import { buildAgentClause } from "./repository";
 
 /**
@@ -70,14 +71,30 @@ export const readTranscriptHead = (
   );
 
 /**
+ * Returns `event` without its `raw`, the vendor's untouched payload, which
+ * makes up most of a transcript's bytes and which no client draws. Only the
+ * event's own `raw` goes: an `unknown` event keeps its `payload` whole, `raw`
+ * included, because that payload is the event this build could not read.
+ * The stored event keeps its `raw`; only what a read sends leaves it out.
+ */
+export const omitRawPayload = (event: HarnessEvent): HarnessEvent => {
+  if (!("raw" in event)) return event;
+  const copy = { ...event };
+  delete copy.raw;
+  return copy;
+};
+
+/**
  * Returns up to `limit` rows of an agent's transcript after a position, oldest
- * first. Each comes with `bytes`, the size in bytes of its stored JSON text. A
- * live subscription uses it to limit the memory it holds for a client that
- * reads slowly, without encoding the row again. The size is
- * `length(CAST(event AS BLOB))`, which counts bytes in every SQLite version
- * (`octet_length` needs SQLite 3.43, and the SQLite that Bun links on macOS can
- * be older). An event of a type this build does not know comes back as an
- * `unknown` event (see `parseStoredEvent`).
+ * first, each without its `raw` (see `omitRawPayload`): the live topics never
+ * send it. Each comes with `bytes`, the size in bytes of its stored JSON text.
+ * A live subscription uses it to limit the memory it holds for a client that
+ * reads slowly, without encoding the row again. The stored text still holds
+ * `raw`, so `bytes` is more than the row costs: the limit errs on the safe
+ * side. The size is `length(CAST(event AS BLOB))`, which counts bytes in every
+ * SQLite version (`octet_length` needs SQLite 3.43, and the SQLite that Bun
+ * links on macOS can be older). An event of a type this build does not know
+ * comes back as an `unknown` event (see `parseStoredEvent`).
  */
 export const readTranscriptRowsAfter = (
   sql: SqlClient.SqlClient,
@@ -106,7 +123,7 @@ export const readTranscriptRowsAfter = (
         row: {
           position: row.position,
           at: row.at,
-          event: parseStoredEvent(row.event),
+          event: omitRawPayload(parseStoredEvent(row.event)),
         },
         bytes: row.bytes,
       })),
@@ -151,18 +168,20 @@ export const hasOtherTurn = (
   );
 
 /**
- * Returns the id of a subagent's open turn: the turn of its newest
+ * Returns the id of an agent's open turn: the turn of its newest
  * `turn.started` row, when no `turn.completed` row comes after it. Returns
- * `undefined` when the subagent has no turn, or its last turn ended.
+ * `undefined` when the agent has no turn, or its last turn ended. Without
+ * `subagentId` it is the session's own agent.
  *
  * Used when the session ends while the subagent is still running, to find
- * the turn whose last message becomes its result. Only rows already written
- * are read, like `readAssistantTexts`.
+ * the turn whose last message becomes its result, and to tell whether the
+ * session is inside a turn. Only rows already written are read, like
+ * `readAssistantTexts`.
  */
 export const readOpenTurnId = (
   sql: SqlClient.SqlClient,
   sessionId: string,
-  subagentId: SubagentId,
+  subagentId: SubagentId | undefined,
 ): Effect.Effect<string | undefined, SqlError> =>
   Effect.map(
     sql<{ readonly tag: string; readonly turnId: string }>`
@@ -249,3 +268,56 @@ export const readAssistantTexts = (
     for (const row of rows) byItem.set(row.itemId, (byItem.get(row.itemId) ?? "") + row.delta);
     return [...byItem].map(([id, text]) => ({ itemId: id, text }));
   });
+
+/**
+ * How many of an agent's newest stream rows `readRecentAssistantText` looks
+ * at. Tool events sit between the text deltas, so this is far more than the
+ * deltas it needs. A fixed window keeps the read from growing with the turn.
+ */
+const RECENT_TEXT_WINDOW = 200;
+
+/**
+ * Returns the newest assistant text of a session's own agent, at most
+ * `maxChars` characters, in reading order. A subagent's text is never
+ * included. Returns an empty string when the newest rows hold no assistant
+ * text.
+ *
+ * The read looks at the newest `RECENT_TEXT_WINDOW` stream rows of the agent
+ * and takes the newest `maxRows` text deltas among them. It keeps the newest
+ * `maxChars` characters of those, so it cuts the oldest text and never the end
+ * of the answer. An item longer than the delta flush size is stored as several
+ * rows, which are joined directly. The text of different items is separated by
+ * a blank line.
+ *
+ * Unlike `readAssistantTexts`, the work does not grow with the turn: it
+ * walks the `session_stream_agent` index back from the newest row and stops
+ * at the window, so a turn of thousands of deltas costs the same as a short
+ * one. The text may therefore start in the middle of an answer.
+ */
+export const readRecentAssistantText = (
+  sql: SqlClient.SqlClient,
+  { sessionId, maxRows, maxChars }: { sessionId: string; maxRows: number; maxChars: number },
+): Effect.Effect<string, SqlError> =>
+  Effect.map(
+    sql<{ readonly itemId: string; readonly delta: string }>`
+      SELECT json_extract(event, '$.itemId') AS itemId, json_extract(event, '$.delta') AS delta
+      FROM (
+        SELECT position, event FROM session_stream
+        WHERE session_id = ${uuidFromString(sessionId)} AND ${buildAgentClause(sql, undefined)}
+        ORDER BY position DESC LIMIT ${RECENT_TEXT_WINDOW}
+      )
+      WHERE json_extract(event, '$._tag') = 'content.delta'
+        AND json_extract(event, '$.streamKind') = 'assistant_text'
+      ORDER BY position DESC LIMIT ${maxRows}
+    `,
+    (newestFirst) => {
+      const inOrder = newestFirst.toReversed();
+      const text = inOrder
+        .map((row, index) => {
+          const startsNewItem = index > 0 && inOrder[index - 1]!.itemId !== row.itemId;
+          return (startsNewItem ? "\n\n" : "") + row.delta;
+        })
+        .join("");
+      return takeTail(text, maxChars);
+    },
+  );

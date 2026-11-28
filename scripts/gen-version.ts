@@ -16,20 +16,50 @@
  * Codex has no SDK to read a version from, so its release is written here as a
  * literal: a devDependency on `@openai/codex` would pull a per-platform binary
  * into `node_modules` for one string. pi's release is a literal for the same
- * reason.
+ * reason. Antigravity has no SDK either, so its release is a literal too.
  */
 import { fileURLToPath } from "node:url";
 import { $ } from "bun";
 
 /** The Codex release that this build's generated types and its installer both use. */
-const CODEX_RELEASE = "0.154.0";
+const CODEX_RELEASE = "0.171.0";
 
 /**
- * The pi release this build's adapter was verified against. pi is pre-1.0 and
- * has broken its RPC mode between releases, so this is both the oldest version
- * a machine may run and the newest anyone has tested.
+ * The pi release this build's adapter was verified against, and the oldest
+ * version a machine may run. pi's MCP needs 0.99 or newer: `-e builtin:mcp`
+ * makes pi 0.85 to 0.87 exit at start. 1.3.0 and 1.6.0 were both run against
+ * the MCP Gateway, and behaved the same.
  */
-const PI_RELEASE = "0.85.1";
+const PI_RELEASE = "1.3.0";
+
+/**
+ * The newest pi release anyone ran this build's adapter against. A pi newer
+ * than this is reported as untested. It is apart from `PI_RELEASE` because
+ * both 1.3.0 and 1.6.0 ran the MCP Gateway tests on 2026-11-22, so the oldest
+ * supported release and the newest tested one are no longer the same.
+ */
+const PI_TESTED_RELEASE = "1.6.0";
+
+/**
+ * The one Antigravity release (Google's CLI `agy`) this build is tested with,
+ * and the SHA-256 digest of each of its assets, keyed by the asset's name
+ * without `.tar.gz`. The release is both the oldest version a machine may run
+ * and the newest one tested. The digests belong to the release: change them
+ * together. GitHub lists the digest of each asset on the page of the release
+ * in `google-antigravity/antigravity-cli`. The installer refuses a download
+ * whose digest differs.
+ */
+const ANTIGRAVITY = {
+  release: "1.5.15",
+  checksums: {
+    agy_cli_linux_arm64: "e5b5d7ca1dda2cfdc0b09c72931320c3ef5c481a14dbda137304107ce6e776b1",
+    agy_cli_linux_arm64_musl: "455d20cc37507058bd9287d47d51aa7e6110351eb717fbf17e19619a7dc9d32e",
+    agy_cli_linux_x64: "8d9913298602049ef29e9669f35252b6b79571979ce1bd0fb27753c7bac84114",
+    agy_cli_linux_x64_musl: "a12514fb33e8835186082a00b60725f6fb15941ba061f0403347b86c4dbd8f46",
+    agy_cli_mac_arm64: "9e25108f3ea70cc6c846d88b9397456d13ae472a010016c3d625eb3fe99afc3a",
+    agy_cli_mac_x64: "91fee043a384b76cee5d5f1568b946ab2f25bf38c938f0bd7c4b27fefa0c4e43",
+  },
+};
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const { version } = (await Bun.file(`${root}package.json`).json()) as { version: string };
@@ -49,7 +79,16 @@ export const CLAUDE_CODE_VERSION = ${JSON.stringify(claudeCodeVersion)};
 /** The Codex release \`scripts/gen-codex-types.ts\` generated this build's types from. */
 export const CODEX_VERSION = ${JSON.stringify(CODEX_RELEASE)};
 
-/** The pi release this build's adapter was verified against. */
+/** The oldest pi release this build's adapter supports. */
 export const PI_VERSION = ${JSON.stringify(PI_RELEASE)};
+
+/** The newest pi release this build's adapter was tested against. */
+export const PI_TESTED_VERSION = ${JSON.stringify(PI_TESTED_RELEASE)};
+
+/** The Antigravity release this build was tested against, which is also the oldest it supports. */
+export const ANTIGRAVITY_VERSION = ${JSON.stringify(ANTIGRAVITY.release)};
+
+/** The SHA-256 digest of each asset of that Antigravity release, keyed by the asset's name without \`.tar.gz\`. */
+export const ANTIGRAVITY_CHECKSUMS: Readonly<Record<string, string>> = ${JSON.stringify(ANTIGRAVITY.checksums, null, 2)};
 `,
 );

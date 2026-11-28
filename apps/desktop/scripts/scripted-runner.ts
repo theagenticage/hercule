@@ -9,8 +9,12 @@
  * It answers the controller on its own, the way a healthy runner does:
  *
  * - a ping with a pong;
- * - a probe with a logged-in report that offers two models, each with a
- *   reasoning effort and a fast mode;
+ * - a probe with a signed-in report that offers two models, each with a
+ *   reasoning effort and a fast mode, or, after `setSignedIn(false)`, with a
+ *   report that the harness has no login;
+ * - a login start with the URL of a sign-in page where the user pastes a
+ *   code back, so a sign-in dialog opens without a vendor's login running.
+ *   A pasted code is never answered: nothing signs in;
  * - a workspace provision with `ready`, and a dispose with `deleted`;
  * - a session start with `session.started`, and then the input the start
  *   carries as it answers any other input;
@@ -26,7 +30,9 @@
  *   `request.resolved`;
  * - a request for the repository skills of a workspace or of a draft with the
  *   list `setSkills` gave, which is empty until it is called. A user message
- *   lists in `detail.skills` the Skill References it names from that list.
+ *   lists in `detail.skills` the Skill References it names from that list;
+ * - a text generation, when it was enlisted with `answersTextGeneration`, at
+ *   once with the texts of a Task summary (`SCRIPTED_TEXT_GENERATION`).
  *
  * Any agent can ask: the session's own agent, or a subagent at any depth. A
  * Request a subagent opens carries its `subagentId`.
@@ -37,7 +43,7 @@
  * by word, tool calls that may ask for approval and wait for the user to
  * allow them, Token Usage, and subagents that play steps of their own. It
  * reports the same events, with the same details, that the Claude Code
- * adapter in `apps/runner/src/providers` reports for that work, so a screen
+ * adapter in `apps/runner/src/harnesses` reports for that work, so a screen
  * sees what it would see from a real agent.
  *
  * Like the root `scripts/controller-process.ts`, it uses only Node's APIs,
@@ -49,11 +55,18 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
+import {
+  ANTIGRAVITY_VERSION,
+  CLAUDE_CODE_VERSION,
+  CODEX_VERSION,
+  PI_VERSION,
+} from "../../../packages/home/src/version.ts";
 import { pollUntil } from "./poll.ts";
 import type {
   ATTACHMENTS_CAPABILITY,
   AttachmentReference,
   ControllerToRunner,
+  DISK_USAGE_CAPABILITY,
   ExitReason,
   ItemKind,
   JoinAnswer,
@@ -62,20 +75,24 @@ import type {
   PROTOCOL_VERSION,
   ProbeResult,
   RUNNER_ATTACHMENTS_PATH,
-  ProviderEvent,
+  HarnessEvent,
   REPOSITORY_SKILLS_CAPABILITY,
   RepositorySkill,
   RequestResolution,
+  RunnerDiskUsageReport,
   RunnerFacts,
+  RunnerMetrics,
   RunnerToController,
   SessionBinding,
   SessionInput,
   SessionStart,
   SKILLS_CAPABILITY,
+  TEXT_GENERATION_CAPABILITY,
   ToolResultAttachment,
   ToolResultImage,
   TurnState,
   Usage,
+  UsageReading,
   WORKSPACE_LIFECYCLE_CAPABILITY,
   WorkspaceReport,
 } from "../../../packages/protocol/src/index";
@@ -85,7 +102,7 @@ const MAX_REPORTED_SESSIONS = 256;
 
 /**
  * A Mac with Claude Code installed. The fleet places threads on the Claude
- * Code instance, so the facts say its harness is present, and a screen that
+ * Code account, so the facts say its harness is present, and a screen that
  * checks for it shows the runner as healthy. The identity port is the
  * caller's to choose; see `enlistScriptedRunner`.
  */
@@ -95,8 +112,8 @@ const FACTS: Omit<RunnerFacts, "identityPort"> = {
   totalMemoryBytes: 64 * 1024 ** 3,
   docker: false,
   toolchains: [],
-  providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-  adapters: ["claude-code"],
+  harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code/claude-code"],
 };
 
 /**
@@ -119,11 +136,10 @@ const MODEL_OPTIONS: ReadonlyArray<ModelOption> = [
 ];
 
 /**
- * A logged-in report with two models, so a test can pick a model other than
+ * A signed-in report with two models, so a test can pick a model other than
  * the default, and options on both, so it can pick an option.
  */
-const PROBE_RESULT: ProbeResult = {
-  harnessVersion: "1.0.0",
+const PROBE_RESULT: Omit<ProbeResult, "harnessVersion"> = {
   auth: { status: "ok" },
   models: [
     {
@@ -140,7 +156,30 @@ const PROBE_RESULT: ProbeResult = {
       options: MODEL_OPTIONS,
     },
   ],
+  usage: null,
 };
+
+/** The report of a probe after `setSignedIn(false)`: the harness holds no login and lists no models. */
+const SIGNED_OUT_PROBE_RESULT: Omit<ProbeResult, "harnessVersion"> = {
+  auth: { status: "unauthenticated" },
+  models: [],
+  usage: null,
+};
+
+/**
+ * The version each harness reports: the floor this build pins for it, which
+ * is the oldest version placement accepts. A harness with no pinned floor
+ * reports any version.
+ */
+const HARNESS_VERSIONS: ReadonlyMap<string, string> = new Map([
+  ["claude-code/claude-code", CLAUDE_CODE_VERSION],
+  ["codex/codex", CODEX_VERSION],
+  ["pi/pi", PI_VERSION],
+  ["antigravity/antigravity", ANTIGRAVITY_VERSION],
+]);
+
+/** The sign-in page a login start reports. Nothing serves it, and no test opens it. */
+const SIGN_IN_URL = "https://sign-in.scripted-runner.invalid/authorize";
 
 const APPROVAL_DECISIONS = ["allow", "allow_always", "deny", "cancel"] as const;
 
@@ -324,7 +363,7 @@ interface ParkedRequest {
 /** A session the runner holds: its start has arrived and it has not exited. */
 interface HostedSession {
   readonly sessionId: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
   /** The credential the controller minted for the session's start, which an agent calls the API with. */
   readonly token: string;
   /** The sequence number of the last event sent. A new process numbers from 1 again. */
@@ -353,6 +392,13 @@ export interface ScriptedRunner {
    * when it is busy.
    */
   readonly openRequest: (sessionId: string, kind: RequestKind) => string;
+  /**
+   * Reports the usage of the session's Provider Account, as a running
+   * session's harness does when its provider sends a rate limit update. The
+   * controller stores the readings and announces the account on the
+   * `provider` topic.
+   */
+  readonly reportAccountUsage: (sessionId: string, readings: ReadonlyArray<UsageReading>) => void;
   /**
    * Plays a script into the running turn of the session's own agent: each
    * step reports its events in order, over the time the step takes. Waits up
@@ -406,7 +452,57 @@ export interface ScriptedRunner {
    * lists no repository skills and translates no Skill Reference.
    */
   readonly setSkills: (skills: ScriptedSkills) => void;
+  /**
+   * Chooses what the runner's later probes report: a login in every account's
+   * harness (the default), or none. A probe that already ran keeps its
+   * report, so the caller asks the controller to probe again to see the
+   * change.
+   */
+  readonly setSignedIn: (signedIn: boolean) => void;
+  /**
+   * Sends one Runner Metrics report, as a runner's periodic check does. A
+   * scripted runner sends none on its own, so a machine's card and page show
+   * no metrics until a test calls this. Fails if the runner is not connected.
+   */
+  readonly reportMetrics: (metrics: RunnerMetrics) => void;
+  /**
+   * Sends one disk usage report, as a runner does after it measured its
+   * workspaces. A scripted runner measures nothing and sends none on its own.
+   * The controller stores only entries for workspaces this runner holds.
+   * Fails if the runner is not connected.
+   */
+  readonly reportDiskUsage: (report: RunnerDiskUsageReport) => void;
 }
+
+/** What a scripted runner reports about the machine it stands in for. */
+export interface ScriptedMachine extends Partial<
+  Pick<RunnerFacts, "totalMemoryBytes" | "diskTotalBytes">
+> {
+  /**
+   * Whether the runner says it measures disk usage (the `diskUsage`
+   * capability), so a machine page draws its Storage section instead of
+   * saying that the runner is too old. Off unless set.
+   */
+  readonly measuresDiskUsage?: boolean;
+  /**
+   * Whether the runner makes text generations (the `textGeneration`
+   * capability). It answers each at once with `SCRIPTED_TEXT_GENERATION`,
+   * which has the three texts of a Task summary, so the controller's summary
+   * writer can run against it. Off unless set.
+   */
+  readonly answersTextGeneration?: boolean;
+}
+
+/**
+ * The value a scripted runner answers every text generation with: the three
+ * texts of a Task summary, each about as long as a model writes them.
+ */
+export const SCRIPTED_TEXT_GENERATION = {
+  line: "Two designs drafted, depots still worried",
+  standing:
+    "Two designs for the delivery slot cache are drafted, and the second one is in review. The depots asked for a fallback when the cache is cold.",
+  left: "The fallback for a cold cache and a load test against the Friday peak.",
+};
 
 /** The skills a scripted runner knows about; see `ScriptedRunner.setSkills`. */
 export interface ScriptedSkills {
@@ -438,11 +534,17 @@ export interface ScriptedSkills {
  * itself. There is no default, because the natural one, the first identity
  * port, is where the developer's own runner listens: a client would find
  * that runner instead.
+ *
+ * `machine` overrides the memory size the runner reports, which the machine
+ * page needs for its Memory graph, can add the disk's size, which the disk
+ * gauge and forecast need, and can make the runner claim it measures disk
+ * usage (see `ScriptedMachine`).
  */
 export async function enlistScriptedRunner(
   url: string,
   joinToken: string,
   identityPort: number,
+  { measuresDiskUsage = false, answersTextGeneration = false, ...machine }: ScriptedMachine = {},
 ): Promise<ScriptedRunner> {
   const joined = await fetch(`${url}/api/v1/runners/join`, {
     method: "POST",
@@ -457,6 +559,7 @@ export async function enlistScriptedRunner(
   const sessions = new Map<string, HostedSession>();
   const workspaces = new Map<string, WorkspaceReport>();
   let skills: ScriptedSkills = { repository: [], names: [] };
+  let signedIn = true;
   let socket: WebSocket;
   /** The code and reason of the last close, so a send on a closed connection can say why. */
   let lastClose: string | undefined;
@@ -483,7 +586,7 @@ export async function enlistScriptedRunner(
   };
 
   /** Sends one event of a session with the session's next sequence number. */
-  const reportEvent = (session: HostedSession, event: ProviderEvent): void => {
+  const reportEvent = (session: HostedSession, event: HarnessEvent): void => {
     session.seq += 1;
     send({ _tag: "sessionEvent", seq: session.seq, event });
   };
@@ -1126,8 +1229,19 @@ export async function enlistScriptedRunner(
         return send({
           _tag: "probeReport",
           requestId: frame.requestId,
-          instanceId: frame.instanceId,
-          result: PROBE_RESULT,
+          providerAccountId: frame.harnessAccount.providerAccountId,
+          result: {
+            ...(signedIn ? PROBE_RESULT : SIGNED_OUT_PROBE_RESULT),
+            harnessVersion: HARNESS_VERSIONS.get(frame.harnessId) ?? "1.0.0",
+          },
+        });
+      case "loginStart":
+        return send({ _tag: "loginUrl", requestId: frame.requestId, url: SIGN_IN_URL });
+      case "textGenerationRequest":
+        return send({
+          _tag: "textGenerationReport",
+          requestId: frame.requestId,
+          outcome: { outcome: "ok", value: SCRIPTED_TEXT_GENERATION, usage: null },
         });
       case "workspaceProvision": {
         const report: WorkspaceReport = {
@@ -1178,7 +1292,7 @@ export async function enlistScriptedRunner(
       case "sessionStart": {
         const session: HostedSession = {
           sessionId: frame.sessionId,
-          instanceId: frame.spec.instanceId,
+          providerAccountId: frame.spec.providerAccountId,
           token: frame.token,
           seq: 0,
           main: {
@@ -1196,7 +1310,7 @@ export async function enlistScriptedRunner(
         reportEvent(session, {
           _tag: "session.started",
           ...stampEvent(frame.sessionId),
-          providerRefs: { nativeSessionId: buildNativeSessionId(frame.sessionId) },
+          harnessRefs: { nativeSessionId: buildNativeSessionId(frame.sessionId) },
         });
         return deliverInput(session, frame);
       }
@@ -1290,16 +1404,20 @@ export async function enlistScriptedRunner(
             _tag: "runnerHello",
             // Plain Node cannot load the protocol package, so the version is
             // written out; `satisfies` fails the typecheck when it changes.
-            protocolVersion: 13 satisfies typeof PROTOCOL_VERSION,
+            protocolVersion: 19 satisfies typeof PROTOCOL_VERSION,
             capabilities: [
               "workspaceLifecycle" satisfies typeof WORKSPACE_LIFECYCLE_CAPABILITY,
               "attachments" satisfies typeof ATTACHMENTS_CAPABILITY,
               "skills" satisfies typeof SKILLS_CAPABILITY,
               "repositorySkills" satisfies typeof REPOSITORY_SKILLS_CAPABILITY,
+              ...(measuresDiskUsage ? ["diskUsage" satisfies typeof DISK_USAGE_CAPABILITY] : []),
+              ...(answersTextGeneration
+                ? ["textGeneration" satisfies typeof TEXT_GENERATION_CAPABILITY]
+                : []),
             ],
             binaryVersion: "0.1.0",
             nonce: randomBytes(16).toString("base64"),
-            facts: { ...FACTS, identityPort },
+            facts: { ...FACTS, ...machine, identityPort },
           } satisfies RunnerToController),
         );
       };
@@ -1360,12 +1478,23 @@ export async function enlistScriptedRunner(
       reportEvent(session, { _tag: "request.opened", ...stampEvent(sessionId), request });
       return request.requestId;
     },
+    reportAccountUsage: (sessionId, readings) => {
+      findSession(sessionId);
+      send({ _tag: "accountUsageReported", sessionId, readings: [...readings] });
+    },
     playScript,
     endSession,
     readSessionToken: (sessionId) => findSession(sessionId).token,
     setSkills: (next) => {
       skills = next;
     },
+    setSignedIn: (next) => {
+      signedIn = next;
+    },
+    // The wire keeps the report's old name: the frame is `watermarkReport`
+    // and its key `watermark`.
+    reportMetrics: (metrics) => send({ _tag: "watermarkReport", watermark: metrics }),
+    reportDiskUsage: (diskUsage) => send({ _tag: "diskUsageReport", diskUsage }),
     goOffline: async () => {
       if (socket.readyState === WebSocket.OPEN) send({ _tag: "goodbye" });
       await closeSocket();
@@ -1374,7 +1503,7 @@ export async function enlistScriptedRunner(
       const bindings: Array<SessionBinding> = [...sessions].map(([sessionId, session]) => ({
         sessionId,
         nativeSessionId: buildNativeSessionId(sessionId),
-        instanceId: session.instanceId,
+        providerAccountId: session.providerAccountId,
       }));
       if (bindings.length > MAX_REPORTED_SESSIONS) {
         throw new Error(
@@ -1516,7 +1645,7 @@ function buildOpenRequest(kind: RequestKind): OpenRequest {
 }
 
 /**
- * Returns the provider-native id a session reports when it starts, which
+ * Returns the harness-native id a session reports when it starts, which
  * makes the session resumable, as it is with a real harness.
  */
 function buildNativeSessionId(sessionId: string): string {

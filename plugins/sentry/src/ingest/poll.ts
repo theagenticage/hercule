@@ -34,6 +34,7 @@ import type { SentryFailure } from "../api";
 import type { SentryConnectionConfig } from "../connection-type";
 import { readUserId } from "../identity";
 import { SENTRY_EVENT_KINDS, type LatestEvent } from "../kinds";
+import { lookUpIssues } from "../issue-list";
 import type { OrganizationAccess } from "../organization";
 import {
   buildIssueBlock,
@@ -45,7 +46,7 @@ import {
 } from "../sentry-objects";
 import { buildIssueEvent } from "./events";
 import { resolveFilter, type ResolvedFilter } from "./filter";
-import { listWatchedIssues, lookUpIssues } from "./list";
+import { listWatchedIssues } from "./list";
 import { readLatestEvent, readRegressions } from "./reads";
 import {
   readWatchState,

@@ -1,51 +1,31 @@
 /**
- * Tests the details the model menu shows beside a row's name: "default" on
- * the account's default model unless it is the current one, and who is
- * logged in to an account and on what plan.
+ * Tests the detail the model menu shows beside a row's name: "in pi" for an
+ * entry in another harness, and "default" on the profile's default entry
+ * unless it is the current one.
  */
 import { describe, expect, it } from "vitest";
-import type { ModelMenuInstanceRow, ModelMenuRow } from "./model-menu";
-import { describeAccountRow, describeModelRow } from "./model-menu-details";
+import { describeModelRow } from "./model-menu-details";
 
-const SONNET: ModelMenuRow = {
-  instanceId: "claude",
-  slug: "claude-sonnet-5",
-  name: "Claude Sonnet 5",
-  isDefault: true,
-  current: false,
-};
-
-const ACCOUNT: ModelMenuInstanceRow = {
-  instanceId: "work",
-  providerId: "claude-code",
-  name: "work",
-  identity: "work@example.com",
-  planLabel: "Claude Pro",
-  models: "1 model",
-  dimmed: null,
-  login: null,
-  rows: [],
-};
+const ROW = { inHarness: null, isDefault: false, isCurrent: false };
 
 describe("describeModelRow", () => {
-  it("marks the account's default model", () => {
-    expect(describeModelRow(SONNET)).toBe("default");
+  it("has no detail for an ordinary entry", () => {
+    expect(describeModelRow(ROW)).toBeNull();
   });
 
-  it("leaves the current model and every other model without a detail", () => {
-    expect(describeModelRow({ ...SONNET, current: true })).toBeNull();
-    expect(describeModelRow({ ...SONNET, isDefault: false })).toBeNull();
-  });
-});
-
-describe("describeAccountRow", () => {
-  it("names who is logged in and on what plan", () => {
-    expect(describeAccountRow(ACCOUNT)).toBe("work@example.com · Claude Pro");
+  it("marks the profile's default entry", () => {
+    expect(describeModelRow({ ...ROW, isDefault: true })).toBe("default");
   });
 
-  it("names only what the account knows", () => {
-    expect(describeAccountRow({ ...ACCOUNT, identity: null })).toBe("Claude Pro");
-    expect(describeAccountRow({ ...ACCOUNT, planLabel: null })).toBe("work@example.com");
-    expect(describeAccountRow({ ...ACCOUNT, identity: null, planLabel: null })).toBeNull();
+  it("names the harness of an entry that runs in another harness than its lane", () => {
+    expect(describeModelRow({ ...ROW, inHarness: "pi" })).toBe("in pi");
+    expect(describeModelRow({ ...ROW, inHarness: "pi", isDefault: true })).toBe("in pi · default");
+  });
+
+  it("leaves the default mark off the current entry, whose check mark already says it is in use", () => {
+    expect(describeModelRow({ ...ROW, isDefault: true, isCurrent: true })).toBeNull();
+    expect(describeModelRow({ ...ROW, inHarness: "pi", isDefault: true, isCurrent: true })).toBe(
+      "in pi",
+    );
   });
 });

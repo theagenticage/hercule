@@ -16,6 +16,7 @@ import { ChatIcon } from "../../../icons/chat";
 import { HeartIcon } from "../../../icons/heart";
 import { SettingTextRow } from "../setting-text-row";
 import { TimeField } from "./time-field";
+import type { DesktopPlatform } from "../../../../ipc/platform/desktop-platform";
 import "./schedule.css";
 
 /**
@@ -54,6 +55,7 @@ export function HeartbeatSection({
   onSave,
   promptError,
   onSavePrompt,
+  platform,
 }: {
   readonly assistantName: string;
   readonly heartbeat: Heartbeat;
@@ -64,6 +66,8 @@ export function HeartbeatSection({
   readonly onSave: (change: Partial<Omit<Heartbeat, "prompt">>) => void;
   readonly promptError: string | null;
   readonly onSavePrompt: (prompt: string) => void;
+  /** The platform the app runs on, which decides the key that commits a text with ⏎: ⌘ on a Mac, Ctrl on Linux. */
+  readonly platform: DesktopPlatform;
 }): JSX.Element {
   const heartbeatWindow = parseHeartbeatWindow(heartbeat.schedule);
   const [timeError, setTimeError] = useState<string | null>(null);
@@ -144,6 +148,7 @@ export function HeartbeatSection({
               onCommit={(text) => {
                 commitEdit(moveHeartbeatStart(heartbeatWindow, text));
               }}
+              platform={platform}
             />{" "}
             to{" "}
             <TimeField
@@ -152,6 +157,7 @@ export function HeartbeatSection({
               onCommit={(text) => {
                 commitEdit(moveHeartbeatEnd(heartbeatWindow, text));
               }}
+              platform={platform}
             />
           </>
         )}{" "}
@@ -177,6 +183,7 @@ export function HeartbeatSection({
         <DayTimeline heartbeatWindow={heartbeatWindow} nowMinutes={nowMinutes} />
       )}
       <SettingTextRow
+        platform={platform}
         label="Prompt"
         hint={`What ${assistantName} is told at each heartbeat.`}
         value={heartbeat.prompt}

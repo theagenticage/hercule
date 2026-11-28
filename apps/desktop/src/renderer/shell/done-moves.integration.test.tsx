@@ -13,6 +13,8 @@ import { matchQuery, QueryClientProvider, useQuery } from "@tanstack/react-query
 import {
   createClient,
   invalidateWithoutCancelling,
+  prepareSessionPresentation,
+  type GroupRow,
   type HerculeClient,
 } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
@@ -33,6 +35,8 @@ const MARK_DONE_PATH = "/api/v1/sessions/mark-done";
 const REOPEN_PATH = "/api/v1/sessions/reopen";
 const MARK_DONE = `POST ${MARK_DONE_PATH}`;
 const REOPEN = `POST ${REOPEN_PATH}`;
+const ARCHIVE_PATH = "/api/v1/sessions/archive";
+const ARCHIVE = `POST ${ARCHIVE_PATH}`;
 
 /** The moment the controller says it marked Threads done. */
 const DONE_AT = "2026-09-10T09:30:00.000Z";
@@ -46,6 +50,18 @@ const buildThread = (number: number, done = false): Session => ({
   title: `Thread ${String(number)}`,
   ...(done ? { done: { at: "2026-09-10T09:00:00.000Z", by: "user" as const } } : {}),
 });
+
+/** Returns the sidebar's row of `thread`, a Thread in no workspace, which is a row of its own. */
+const buildRow = (thread: Session): GroupRow =>
+  prepareSessionPresentation({
+    listedSessions: [thread],
+    openSession: null,
+    projects: [],
+    workspaces: [],
+    resources: [],
+    runners: [],
+    accounts: [],
+  }).groupRows[0]!;
 
 /**
  * Returns the controller's Threads, as `readThreads` answers them, with the
@@ -64,7 +80,9 @@ const buildController = (initial: readonly Session[]) => {
       return { body: threads.filter((session) => sessionIds.includes(session.id)) };
     };
   return {
-    readThreads: () => threads,
+    // The controller's list leaves out the archived Threads.
+    readThreads: () => threads.filter((session) => session.archived === undefined),
+    archive: apply((session) => ({ ...session, archived: { at: DONE_AT, by: "user" } })),
     markDone: apply((session) => ({ ...session, done: { at: DONE_AT, by: "user" } })),
     reopen: apply((session) => {
       const { done, ...open } = session;
@@ -99,7 +117,7 @@ function Harness({
   readonly client: HerculeClient;
   readonly openIds: readonly string[];
 }) {
-  const { markDone, reopen } = useDoneMoves();
+  const { markDone, reopen, archive } = useDoneMoves();
   const { data = [] } = useQuery(threadAndAgentSessionsQuery(client));
   const idsOf = (numbers: readonly number[]) => numbers.map((number) => buildThread(number).id);
   return (
@@ -160,6 +178,14 @@ function Harness({
       >
         Reopen Thread 1
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          archive({ rows: [buildRow(buildThread(1))], skippedWorking: 0, leftOver: 0 });
+        }}
+      >
+        Archive Thread 1
+      </button>
       <Toast />
     </>
   );
@@ -191,6 +217,7 @@ const startHarness = async (
     "GET /api/v1/sessions": () => ({ body: { items: controller.readThreads() } }),
     [MARK_DONE]: controller.markDone,
     [REOPEN]: controller.reopen,
+    [ARCHIVE]: controller.archive,
     ...Object.fromEntries(
       openThreads.map((thread) => [
         `GET /api/v1/sessions/${thread.id}`,
@@ -629,5 +656,48 @@ describe("the Done moves on a Thread the sidebar holds by its own record", () =>
     await waitFor(() => {
       expect(screen.getByText("Open Thread 5: done")).toBeTruthy();
     });
+  });
+});
+
+describe("archiving among the Done moves", () => {
+  it("is sent after the Done move before it, writes nothing until the controller answers, then drops the Thread and says Archived with no Undo", async () => {
+    const heldDone = holdAnswer();
+    const heldArchive = holdAnswer();
+    const controller = buildController(OPEN_THREADS);
+    const { readMoves, readCachedThreads } = await startHarness(controller, {
+      [MARK_DONE]: heldDone.handler,
+      [ARCHIVE]: heldArchive.handler,
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Done Thread 1" }));
+    await userEvent.click(screen.getByRole("button", { name: "Archive Thread 1" }));
+
+    // The archive waits for the Done move in front of it, and the list shows only the Done move.
+    expect(readMoves()).toEqual([expectMove(MARK_DONE_PATH, [1])]);
+    expect(screen.queryByText("Archived")).toBeNull();
+    heldDone.answer(controller.markDone({ body: { sessionIds: [buildThread(1).id] } }));
+    await waitFor(() => {
+      expect(readMoves()).toEqual([expectMove(MARK_DONE_PATH, [1]), expectMove(ARCHIVE_PATH, [1])]);
+    });
+    expect(readCachedThreads()?.map((session) => session.id)).toContain(buildThread(1).id);
+
+    heldArchive.answer(controller.archive({ body: { sessionIds: [buildThread(1).id] } }));
+
+    const toast = (await screen.findByText("Archived")).parentElement!;
+    expect(within(toast).queryByRole("button", { name: "Undo" })).toBeNull();
+    expect(readCachedThreads()?.map((session) => session.id)).not.toContain(buildThread(1).id);
+  });
+
+  it("shows the controller's message as an alert when it refuses, and leaves the list as it is", async () => {
+    const controller = buildController(OPEN_THREADS);
+    const { readCachedThreads } = await startHarness(controller, {
+      [ARCHIVE]: { status: 409, body: buildErrorBody("invalid_state", "Thread 1 is working.") },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Archive Thread 1" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Couldn't archive: Thread 1 is working.");
+    expect(readCachedThreads()).toHaveLength(OPEN_THREADS.length);
   });
 });

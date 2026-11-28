@@ -100,6 +100,23 @@ describe("createPendingSubmissions", () => {
     });
   });
 
+  it("keeps the Task a start card pointed at until the message is sent or emptied", () => {
+    const store = createPendingSubmissions();
+    store.writeText(THREAD, "Start working on task t1: Fix the login bug");
+    store.writeTask(THREAD, "t1");
+    store.writeText(THREAD, "Start working on task t1: Fix the login bug. Be quick.");
+    expect(store.read(THREAD).message.taskId).toBe("t1");
+
+    const sent = { ...store.read(THREAD).message, picks: store.read(THREAD).picks };
+    store.clearSent(THREAD, sent);
+    expect(store.read(THREAD)).toBe(store.read(OTHER));
+
+    store.writeText(THREAD, "Start working on task t1: Fix the login bug");
+    store.writeTask(THREAD, "t1");
+    store.writeText(THREAD, "");
+    expect(store.read(THREAD)).toBe(store.read(OTHER));
+  });
+
   it("keeps a thread that holds only images, and applies each update to its images as they are then", () => {
     const store = createPendingSubmissions();
     store.updateAttachments(THREAD, (shelf) => [...shelf, buildImage("one")]);

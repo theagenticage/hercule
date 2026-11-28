@@ -1,20 +1,25 @@
 /**
  * The GitHub plugin: the GitHub connection type, the event source that polls
- * GitHub for what changed, and the workflow actions that act on GitHub.
+ * GitHub for what changed, the workflow actions that act on GitHub, and the
+ * MCP server that gives sessions GitHub's tools.
  */
 import { Effect, Schema } from "effect";
 import {
   HOST_API,
   registerConnectionType,
   registerEventSource,
+  registerMcpServer,
   registerWorkflowAction,
   type EventSourceContribution,
   type Plugin,
 } from "@hercule/plugin-host";
 import { GITHUB_WORKFLOW_ACTIONS } from "./actions";
 import { connectionType, GITHUB_CONNECTION_TYPE } from "./connection-type";
+import { githubEntityLookup } from "./entity-lookup";
+import { GITHUB_ENTITY_KINDS } from "./entity-kinds";
 import { openGithubIngest } from "./ingest";
 import { GITHUB_EVENT_KINDS } from "./kinds";
+import { githubMcpServer } from "./mcp-server";
 import { GITHUB_SIGNAL_KINDS } from "./signal-kinds";
 
 /**
@@ -31,7 +36,7 @@ const GITHUB_MARK_PATH =
  *
  * The default intervals are spec 08 section 5.1's. The floors are this
  * plugin's: the notifications feed may not go below its default because
- * GitHub's `X-Poll-Interval` is 60 seconds, and the other two stay well
+ * GitHub's `X-Poll-Interval` is 60 seconds, and the others stay well
  * inside the hourly quota at their floor.
  */
 const eventSource: EventSourceContribution = {
@@ -42,8 +47,20 @@ const eventSource: EventSourceContribution = {
     notifications: { defaultIntervalSeconds: 60 },
     repos: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
     checks: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+    entities: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
   },
   signalKinds: GITHUB_SIGNAL_KINDS,
+  entityKinds: GITHUB_ENTITY_KINDS,
+  savedQueries: [
+    {
+      word: "review-requests",
+      name: "Review requests",
+      order: "waiting",
+      // A review asked of the user or of one of the user's teams.
+      clauses: [{ key: "signal", op: "is", value: ["review-requested", "team-review-requested"] }],
+    },
+  ],
+  entityLookup: githubEntityLookup,
   open: openGithubIngest,
 };
 
@@ -52,7 +69,15 @@ export const github: Plugin = {
     id: "github",
     displayName: "GitHub",
     hostApi: HOST_API,
-    capabilities: ["connections", "event-sources", "events", "resources", "workflow-actions"],
+    capabilities: [
+      "connections",
+      "event-sources",
+      "events",
+      "resources",
+      "entities",
+      "workflow-actions",
+      "mcp-servers",
+    ],
     configSchema: Schema.Struct({}),
     mark: { paths: [GITHUB_MARK_PATH] },
   },
@@ -61,6 +86,7 @@ export const github: Plugin = {
       yield* registerConnectionType(host, connectionType);
       yield* registerEventSource(host, eventSource);
       for (const action of GITHUB_WORKFLOW_ACTIONS) yield* registerWorkflowAction(host, action);
+      yield* registerMcpServer(host, githubMcpServer);
     }),
   // The host opens and polls the ingest handles itself, so there is nothing
   // for the plugin to start.

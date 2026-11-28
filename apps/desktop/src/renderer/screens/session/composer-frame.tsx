@@ -1,5 +1,5 @@
 import { useRef, type FocusEvent, type JSX, type ReactNode, type Ref } from "react";
-import type { ShelfItem, ShelfModel } from "@hercule/client-core";
+import { PREVIOUS_QUESTION_LABEL, type ShelfItem, type ShelfModel } from "@hercule/client-core";
 import { IMAGE_MIME_TYPES } from "@hercule/contract";
 import { MicIcon } from "../../icons/mic";
 import { PlusIcon } from "../../icons/plus";
@@ -51,8 +51,55 @@ export interface ComposerAttachments {
   readonly onFiles: (files: readonly File[]) => void;
 }
 
+/**
+ * What the `+` menu's "Attach an image" row needs: whether the row is off,
+ * its tooltip (the reason it is off, or "Attach images"), and what a press
+ * does, which opens the file picker.
+ */
+export interface PlusAttach {
+  readonly off: boolean;
+  readonly title: string;
+  readonly onAttach: () => void;
+}
+
+/**
+ * Renders what `render` returns for `attach`. The card calls `render` here
+ * rather than in its own body, because `attach.onAttach` reads the file
+ * input's ref, which a render must not hand to a function call.
+ */
+function PlusSlot({
+  render,
+  attach,
+}: {
+  readonly render: (attach: PlusAttach) => ReactNode;
+  readonly attach: PlusAttach;
+}): ReactNode {
+  return render(attach);
+}
+
 /** The types the file picker offers: the image types the controller takes. */
 const PICKER_ACCEPT = IMAGE_MIME_TYPES.join(",");
+
+/**
+ * The step controls that take Send's place while the composer answers an
+ * agent's question: Previous, from the second question on, and the step
+ * button, which shows the next question or sends the answers.
+ *
+ * - `label` is the step button's label, "Next" or "Send answers".
+ * - `showsPrevious` draws Previous. `canGoBack` draws it as off when the
+ *   answers are already sent.
+ * - `ready` draws the step button as off, such as while the shown question is
+ *   unanswered. The callbacks are called whether or not the button is off,
+ *   so the caller decides, as with `onSend`.
+ */
+export interface ComposerStep {
+  readonly label: string;
+  readonly showsPrevious: boolean;
+  readonly canGoBack: boolean;
+  readonly ready: boolean;
+  readonly onPrevious: () => void;
+  readonly onStep: () => void;
+}
 
 /** Stop, drawn in Send's place while a turn runs. */
 export interface ComposerStop {
@@ -74,8 +121,20 @@ export interface ComposerStop {
  * decides; `canSend` only draws Send as off. A `readOnly` field takes no
  * text.
  *
- * `error` is drawn in the app's error colour and announced; `notice`, shown
- * only when there is no `error`, is a quiet line, such as why Send is off.
+ * `error` is drawn in the app's error colour, on one line, and announced;
+ * `notice`, shown only when there is no `error`, is a quiet line, such as why
+ * Send is off.
+ *
+ * With `step`, Send gives way to the step controls and Stop, when given,
+ * stays at the row's end beside them: the composer is answering a question
+ * (see `ComposerStep`). Nothing else in the row moves. The caller makes the
+ * field a plain-text one by leaving out `skills`, and keeps images out by
+ * passing `attachments` with an empty `shelf` and an `attachBlockedReason`.
+ *
+ * `historyKey`, `onFieldBlur` and `onComposingChange` are the message field's
+ * own, see `MessageField`: `historyKey` names what `text` is, `onFieldBlur`
+ * is called when the field (not the card) loses the focus, and
+ * `onComposingChange` tells when an IME composition starts and ends.
  *
  * With `skills`, the message field offers the thread's skills (see
  * `MessageField`), and its list opens against the top edge of this card.
@@ -84,6 +143,11 @@ export interface ComposerStop {
  * into the field or dropped on the card (see `ComposerAttachments`). Without
  * it, and on a `readOnly` field, Attach does nothing and carries
  * `aria-disabled`. Dictate is drawn but does nothing yet.
+ *
+ * With `renderPlus`, the thread's composers draw a menu in the `+`'s place
+ * (see `PlusMenu`) and Attach becomes one of its rows. `renderPlus` receives
+ * what that row needs. Without it, the `+` is the Attach button itself, as the
+ * assistant's Conversation draws it.
  */
 export function ComposerCard({
   text,
@@ -94,8 +158,10 @@ export function ComposerCard({
   onSend,
   stop,
   error,
-  notice = null,
+  notice,
   attachments,
+  aboveField,
+  replaceMessageRef,
   start,
   note,
   end,
@@ -103,7 +169,12 @@ export function ComposerCard({
   fieldId,
   autoFocus,
   skills,
-  sendTitle = "Send",
+  step,
+  historyKey,
+  onFieldBlur,
+  onComposingChange,
+  sendTitle,
+  renderPlus,
 }: {
   readonly text: string;
   readonly onTextChange: (text: string) => void;
@@ -118,6 +189,14 @@ export function ComposerCard({
   readonly notice?: string | null;
   /** Given when the composer takes images. */
   readonly attachments?: ComposerAttachments | undefined;
+  /**
+   * Content drawn inside the card above the message field, and above the
+   * shelf of images: a caller's row of chips. It has the shelf's spacing
+   * around it and draws nothing of its own.
+   */
+  readonly aboveField?: ReactNode;
+  /** Receives the function that replaces the message as one undoable edit, see `MessageField`. */
+  readonly replaceMessageRef?: Ref<(text: string) => void> | undefined;
   /** The controls after Attach. */
   readonly start?: ReactNode;
   /** The text that fills the space between `start` and `end`, so no control moves when it shows. */
@@ -131,8 +210,15 @@ export function ComposerCard({
   readonly autoFocus?: boolean;
   /** Given when the message field handles Skill References, see `MessageField`. */
   readonly skills?: ComposerSkills | undefined;
+  /** Given while the composer answers a question: replaces Send. */
+  readonly step?: ComposerStep | undefined;
+  readonly historyKey?: string | undefined;
+  readonly onFieldBlur?: (() => void) | undefined;
+  readonly onComposingChange?: ((composing: boolean) => void) | undefined;
   /** The tooltip of Send, which names what sending does. */
   readonly sendTitle?: string;
+  /** Draws the menu that replaces the Attach button, see above. */
+  readonly renderPlus?: ((attach: PlusAttach) => ReactNode) | undefined;
 }): JSX.Element {
   const pickerRef = useRef<HTMLInputElement>(null);
   // A read-only field takes no images either.
@@ -143,8 +229,14 @@ export function ComposerCard({
   const attachOff = taking === undefined || taking.attachBlockedReason !== null;
   const attachTitle =
     taking === undefined ? "Attach" : (taking.attachBlockedReason ?? "Attach images");
+  const openPicker = (): void => {
+    if (!attachOff) pickerRef.current?.click();
+  };
   return (
     <div className="composer-card" {...handlers}>
+      {aboveField === undefined || aboveField === null ? null : (
+        <div className="fold composer-above-field">{aboveField}</div>
+      )}
       {taking === undefined ? null : (
         <div className="fold">
           <AttachmentShelf
@@ -157,6 +249,7 @@ export function ComposerCard({
       )}
       <MessageField
         ref={fieldRef}
+        replaceMessageRef={replaceMessageRef}
         id={fieldId}
         text={text}
         onTextChange={onTextChange}
@@ -166,26 +259,34 @@ export function ComposerCard({
         onPasteFiles={taking?.onFiles}
         autoFocus={autoFocus}
         skills={skills}
+        historyKey={historyKey}
+        onBlur={onFieldBlur}
+        onComposingChange={onComposingChange}
       />
       {dragging ? <div className="drop-overlay">Drop images to attach</div> : null}
       <div className="fold">
         <div className="composer-row">
-          <button
-            type="button"
-            className={
-              taking === undefined || taking.attachBlockedReason === null
-                ? "icon-btn"
-                : "icon-btn icon-btn--blocked"
-            }
-            title={attachTitle}
-            aria-label="Attach"
-            aria-disabled={attachOff || undefined}
-            onClick={() => {
-              if (!attachOff) pickerRef.current?.click();
-            }}
-          >
-            <PlusIcon />
-          </button>
+          {renderPlus === undefined ? (
+            <button
+              type="button"
+              className={
+                taking === undefined || taking.attachBlockedReason === null
+                  ? "icon-btn"
+                  : "icon-btn icon-btn--blocked"
+              }
+              title={attachTitle}
+              aria-label="Attach"
+              aria-disabled={attachOff || undefined}
+              onClick={openPicker}
+            >
+              <PlusIcon />
+            </button>
+          ) : (
+            <PlusSlot
+              render={renderPlus}
+              attach={{ off: attachOff, title: attachTitle, onAttach: openPicker }}
+            />
+          )}
           {taking === undefined ? null : (
             <input
               ref={pickerRef}
@@ -207,17 +308,33 @@ export function ComposerCard({
           <button type="button" className="icon-btn" title="Dictate" aria-disabled="true">
             <MicIcon />
           </button>
-          {stop === undefined ? (
-            <button
-              type="button"
-              className={canSend ? "send" : "send send--off"}
-              title={sendTitle}
-              aria-disabled={!canSend || undefined}
-              onClick={onSend}
-            >
-              <SendIcon />
-            </button>
-          ) : (
+          {step === undefined ? null : (
+            <span className="composer-step">
+              {step.showsPrevious ? (
+                <button
+                  type="button"
+                  className="btn btn--quiet btn--sm"
+                  aria-disabled={!step.canGoBack}
+                  data-unready={!step.canGoBack || undefined}
+                  onClick={step.onPrevious}
+                >
+                  {PREVIOUS_QUESTION_LABEL}
+                </button>
+              ) : null}
+              {/* `aria-disabled` rather than `disabled`, so the button keeps the
+                  focus when Next turns into Send answers. */}
+              <button
+                type="button"
+                className="btn btn--accent btn--sm"
+                aria-disabled={!step.ready}
+                data-unready={!step.ready || undefined}
+                onClick={step.onStep}
+              >
+                {step.label}
+              </button>
+            </span>
+          )}
+          {stop !== undefined ? (
             <button
               type="button"
               className="stop"
@@ -227,13 +344,23 @@ export function ComposerCard({
             >
               <StopIcon size={14} />
             </button>
-          )}
+          ) : step === undefined ? (
+            <button
+              type="button"
+              className={canSend ? "send" : "send send--off"}
+              title={sendTitle ?? "Send"}
+              aria-disabled={!canSend || undefined}
+              onClick={onSend}
+            >
+              <SendIcon />
+            </button>
+          ) : null}
         </div>
         {error !== null ? (
-          <p className="composer-error" role="alert">
+          <p className="composer-error" role="alert" title={error}>
             {error}
           </p>
-        ) : notice !== null ? (
+        ) : notice !== undefined && notice !== null ? (
           <p className="composer-error composer-notice">{notice}</p>
         ) : null}
       </div>
@@ -265,7 +392,8 @@ export function ComposerCard({
  *   is what the composer covers of the messages, less the 18px the stack
  *   sits above the pane's bottom edge.
  * - `error` is the line under the row, when the last send or Stop failed.
- * - `notice`, `attachments` and `skills` are the card's, see `ComposerCard`.
+ * - `notice`, `attachments`, `skills`, `step`, `historyKey`, `onFieldBlur`,
+ *   `onComposingChange` and `renderPlus` are the card's, see `ComposerCard`.
  *   While the card's skill list is open, the stack above the card is hidden
  *   (see composer.css), so the list does not cover half of it.
  */
@@ -278,9 +406,14 @@ export function ComposerFrame({
   onSend,
   stop,
   error,
-  notice = null,
+  notice,
   attachments,
   skills,
+  step,
+  historyKey,
+  onFieldBlur,
+  onComposingChange,
+  renderPlus,
   start,
   note,
   end,
@@ -302,6 +435,11 @@ export function ComposerFrame({
   readonly notice?: string | null;
   readonly attachments?: ComposerAttachments | undefined;
   readonly skills?: ComposerSkills | undefined;
+  readonly step?: ComposerStep | undefined;
+  readonly historyKey?: string | undefined;
+  readonly onFieldBlur?: (() => void) | undefined;
+  readonly onComposingChange?: ((composing: boolean) => void) | undefined;
+  readonly renderPlus?: ((attach: PlusAttach) => ReactNode) | undefined;
   /** The controls after Attach. */
   readonly start?: ReactNode;
   /** The text that fills the space between `start` and `end`, so no control moves when it shows. */
@@ -367,9 +505,14 @@ export function ComposerFrame({
           onSend={onSend}
           stop={stop}
           error={error}
-          notice={notice}
+          notice={notice ?? null}
           attachments={attachments}
           skills={skills}
+          step={step}
+          historyKey={historyKey}
+          onFieldBlur={onFieldBlur}
+          onComposingChange={onComposingChange}
+          renderPlus={renderPlus}
           start={start}
           note={note}
           end={end}

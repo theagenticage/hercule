@@ -68,12 +68,7 @@ import { PluginHost } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { sessionRepository } from "../../sessions";
 import { Settings } from "../../settings";
-import {
-  findTaskToContinue,
-  readThreadRef,
-  signalRepository,
-  type SignalSummary,
-} from "../../signals";
+import { readThreadRef, signalRepository, type SignalSummary } from "../../signals";
 import { taskRepository } from "../../tasks";
 import { readDefaultSpawnBound, workflowRepository } from "../../workflows";
 
@@ -242,6 +237,7 @@ const describeProvenance = (
 const describeNewTaskFields = (
   input: AnswerOperationInput<"task.create">,
   projectName: string | undefined,
+  initiativeName: string | undefined,
 ): DescribeLine =>
   joinParts(
     [
@@ -249,12 +245,16 @@ const describeNewTaskFields = (
         ? []
         : [[buildTextPart("description "), buildMarkedPart(input.description)]]),
       ...(input.priority === undefined ? [] : [[buildTextPart(`priority ${input.priority}`)]]),
+      ...(input.stage === undefined ? [] : [[buildTextPart(`stage ${input.stage}`)]]),
       ...(input.labels === undefined || input.labels.length === 0
         ? []
         : [[buildTextPart(formatLabels(input.labels))]]),
       ...(projectName === undefined
         ? []
         : [[buildTextPart("in project "), buildMarkedPart(projectName)]]),
+      ...(initiativeName === undefined
+        ? []
+        : [[buildTextPart("in initiative "), buildMarkedPart(initiativeName)]]),
       ...(input.provenance === undefined || input.provenance.length === 0
         ? []
         : [
@@ -347,9 +347,16 @@ export const buildDescribe: Effect.Effect<
    * most once however many answers name it.
    */
   const buildDescriber = (sitsOn: ReadonlyArray<Signal>) => {
-    /** Returns a task's title, or its id once it is deleted. */
+    /**
+     * Returns a task's title, or its id once it is deleted. A Task that was
+     * merged into another gives the survivor's title, because the approved
+     * action lands on the survivor.
+     */
     const readTaskTitle = readOncePerId((id) =>
-      Effect.map(tasks.live(id), Option.match({ onNone: () => id, onSome: (task) => task.title })),
+      Effect.map(
+        tasks.readLiveOrSurvivor(id),
+        Option.match({ onNone: () => id, onSome: (task) => task.title }),
+      ),
     );
 
     /** Returns a project's name, or its id once it is deleted. */
@@ -357,6 +364,14 @@ export const buildDescribe: Effect.Effect<
       Effect.map(
         projects.live(id),
         Option.match({ onNone: () => id, onSome: (project) => project.name }),
+      ),
+    );
+
+    /** Returns an Initiative's name, or its id once it is deleted. */
+    const readInitiativeName = readOncePerId((id) =>
+      Effect.map(
+        tasks.readInitiative(id),
+        Option.match({ onNone: () => id, onSome: (initiative) => initiative.name }),
       ),
     );
 
@@ -408,7 +423,7 @@ export const buildDescribe: Effect.Effect<
      * continue, or nothing. Several handoffs in one describe call usually name
      * signals of the same thread, so each thread is looked up once.
      */
-    const readTaskToContinue = readOncePerId((ref) => findTaskToContinue(tasks, ref));
+    const readTaskToContinue = readOncePerId((ref) => tasks.findActiveTaskForRef(ref));
 
     /**
      * Returns a session's name as a `marked` part, and every Request the
@@ -505,6 +520,19 @@ export const buildDescribe: Effect.Effect<
         if (changes.status !== undefined) {
           described.push([buildTextPart(`status → ${changes.status}`)]);
         }
+        if (changes.stage !== undefined) {
+          described.push([buildTextPart(`stage → ${changes.stage}`)]);
+        }
+        if (changes.stageFactId !== undefined) {
+          described.push([
+            buildTextPart(
+              `only if fact ${changes.stageFactId} is newer than the last stage decision`,
+            ),
+          ]);
+        }
+        if (changes.onlyWhenLinkedWorkFinished === true) {
+          described.push([buildTextPart("only when all linked work is finished")]);
+        }
         if (changes.priority !== undefined) {
           described.push([buildTextPart(`priority → ${changes.priority}`)]);
         }
@@ -513,6 +541,15 @@ export const buildDescribe: Effect.Effect<
           described.push([
             buildTextPart("move to project "),
             buildMarkedPart(yield* readProjectName(changes.projectId)),
+          ]);
+        }
+        if (changes.initiativeId === null) {
+          described.push([buildTextPart("remove from its initiative")]);
+        }
+        if (typeof changes.initiativeId === "string") {
+          described.push([
+            buildTextPart("put on initiative "),
+            buildMarkedPart(yield* readInitiativeName(changes.initiativeId)),
           ]);
         }
         if (changes.addLabels !== undefined && changes.addLabels.length > 0) {
@@ -611,7 +648,11 @@ export const buildDescribe: Effect.Effect<
         Effect.gen(function* () {
           const projectName =
             input.projectId === undefined ? undefined : yield* readProjectName(input.projectId);
-          const fields = describeNewTaskFields(input, projectName);
+          const initiativeName =
+            input.initiativeId === undefined
+              ? undefined
+              : yield* readInitiativeName(input.initiativeId);
+          const fields = describeNewTaskFields(input, projectName, initiativeName);
           return [
             buildTextPart("Create task "),
             buildMarkedPart(input.title),
@@ -726,7 +767,7 @@ export const buildDescribe: Effect.Effect<
               " and ",
             ),
             buildTextPart(
-              `. ${source} still sends them; they show in Everything. Also takes matching open signals off your list.`,
+              `. ${source} still sends them. Also takes matching open signals off your list.`,
             ),
           ];
         }),

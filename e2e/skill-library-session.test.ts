@@ -47,12 +47,12 @@
  *
  * - Claude Code: either of the two routes `e2e/harness.ts` documents.
  * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
- *   into the instance's `CODEX_HOME` on the second runner. Two live copies of an
+ *   into the account's `CODEX_HOME` on the second runner. Two live copies of an
  *   OAuth login can rotate each other out, so prefer a file written by
  *   `codex login --with-api-key`, which holds no refresh token. `codex` must
  *   be on the `PATH`.
  * - pi: `ZAI_API_KEY` on the environment, which is stored as the pi
- *   instance's Z.ai key. `pi` must be on the `PATH`.
+ *   account's Z.ai key. `pi` must be on the `PATH`.
  */
 import { readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -192,7 +192,7 @@ const stopRemoteRunner = async (): Promise<string> => {
 };
 
 /**
- * Gives the harness's instance its login on the second runner, and waits
+ * Gives the harness's account its login on the second runner, and waits
  * until that runner's probe reports it logged in.
  */
 const prepare = (harness: LiveHarness): Promise<PreparedHarness> => {

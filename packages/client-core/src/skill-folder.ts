@@ -62,6 +62,12 @@ export interface SkillFolders {
   readonly displayPath: string;
   /** One line about a lock file that could not be read, or null. */
   readonly lockFileProblem: string | null;
+  /**
+   * True when the picked folder is itself one skill, because it holds a
+   * `SKILL.md`. False when it is a folder of skills, whose subfolders are the
+   * skills, or holds none.
+   */
+  readonly isSkill: boolean;
   /** The skill folders, sorted by name. Empty when the folder holds none. */
   readonly skills: ReadonlyArray<FoundSkill>;
 }
@@ -110,6 +116,7 @@ export const findSkillFolders = (
         folder: resolved,
         displayPath,
         lockFileProblem: lock.problem,
+        isSkill: true,
         // The path as given, not the link's target, so `buildSkillFolderArchive` names
         // the skill and its files by the name the user knows.
         skills: [{ name, folder: given, source: findLockedSkillSource(name) }],
@@ -133,7 +140,7 @@ export const findSkillFolders = (
         source: findLockedSkillSource(entry.name),
       }))
       .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return { folder: resolved, displayPath, lockFileProblem: lock.problem, skills };
+    return { folder: resolved, displayPath, lockFileProblem: lock.problem, isSkill: false, skills };
   });
 
 /**

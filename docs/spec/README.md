@@ -4,6 +4,8 @@ The buildable specification for Hercule v1: architecture, domain model, scope, a
 
 **Status:** assembled 2026-08-28. Every decision the map closed is in here. The open questions that assembly surfaced are listed in [16-open-items.md](./16-open-items.md), each either handed to a follow-up ticket on the map, marked as an implementer's choice, or marked as a build-time verification. Implementation can start on any subsystem whose open items are implementer choices only; the ticketed items are amendments, not redesigns.
 
+*(Amended 2026-10-31, [#932](https://github.com/theagenticage/hercule/issues/932).)* The older text of the spec was renamed: where "provider" meant the harness, it now reads "harness", and harness ids are qualified (`claude-code/claude-code`, `codex/codex`, `pi/pi`). Text about Provider Instances still says "provider" until the next ticket replaces them.
+
 ## How to read
 
 Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, what does not, and a walk of one event through the whole system) and [02-domain-model.md](./02-domain-model.md) (every entity and how they relate). Then read the subsystem you are building. Each document ends with a `## Sources` section naming the tickets and ADRs it consolidates, and a `## Post-v1` section listing what its area deliberately leaves for later and the constraint v1 keeps to make it possible.
@@ -15,7 +17,7 @@ Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, w
 | [03-controller-and-runners.md](./03-controller-and-runners.md) | controller/runner split, runner protocol, join, placement, runner states, execution substrate (workspaces, checkouts, teardown), promotion |
 | [04-state-store.md](./04-state-store.md) | the SQLite store, repositories, event log and session streams, queues and cursors, retention, signal rows, event search, backups, migrations |
 | [05-plugins.md](./05-plugins.md) | the plugin model: manifest, register/activate, extension points, host API and plugin capabilities, plugin state, lifecycle |
-| [06-providers.md](./06-providers.md) | provider definitions and adapters, session spec, capability snapshots, the normalized event taxonomy, access modes, structured output, per-provider build notes |
+| [06-providers.md](./06-providers.md) | harness definitions and adapters, providers and Provider Accounts, Model Catalogs, Model Profiles, Account Usage, Harness Homes, session spec, capability snapshots, the normalized event taxonomy, access modes, structured output, per-harness build notes *(amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406))* |
 | [07-workflows.md](./07-workflows.md) | workflow definitions, triggers, steps, routing and cycles, CEL, runs and re-runs, the agent-to-graph contract, built-in actions |
 | [08-events-and-connections.md](./08-events-and-connections.md) | the event pipeline and envelope, event sources, subscriptions, Connections and their setup flows |
 | [09-tasks.md](./09-tasks.md) | the Task model: fields, status axis, labels, provenance, search |
@@ -29,6 +31,8 @@ Start with [01-overview-and-scope.md](./01-overview-and-scope.md) (what ships, w
 | [17-desktop-app.md](./17-desktop-app.md) | the desktop app: process model, reaching the controller, token storage, Electron security, the IPC contract, native behaviour, the Crew Bureau design system, the Intake screen, performance budgets, slices |
 | [18-android-app.md](./18-android-app.md) | the Android app: scope, the Gradle project and its stack, sign-in and the stored API Key, the live connection and its foreground service, screens, alerts and the Live Update, the Crew Bureau design system on Compose, the performance baseline, testing and distribution |
 | [19-agent-coordination.md](./19-agent-coordination.md) | agent coordination: Edit Overlaps, Discussions and Posts, Discussion Inputs, the per-repo Wiki, the prompt paragraph and the skill section, the desktop Discussions and Wiki screens |
+| [20-external-entities.md](./20-external-entities.md) | External Entities and the Inbox *(added 2026-11-07, [#1032](https://github.com/theagenticage/hercule/issues/1032))*: the records and their lifecycle, observations and the `reconcile` contract, relation claims and the graph reads, Inbox membership and counts, the `externalEntity` operations, search, recognition and resolution, Work's context, the live causes |
+| [21-mcp.md](./21-mcp.md) | MCP Servers and the MCP Gateway *(added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207))*: the `mcp-servers` and `mcp-gateway` domains and the domain graph, the catalogue (names, one server per address and account), the gateway (route rules, revisions, what a session sees, tool names, a call, a refused call, list changes, left out at the last start, audit, upstream sessions), which servers a session gets, credentials and status, the Sentry, Linear and GitHub servers |
 
 ## Conventions inside the documents
 

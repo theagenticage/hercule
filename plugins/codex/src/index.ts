@@ -1,23 +1,21 @@
 import { Effect, Schema } from "effect";
 import {
   HOST_API,
-  registerProvider,
+  registerHarness,
   type Plugin,
-  type ProviderDefinition,
+  type HarnessDefinition,
 } from "@hercule/plugin-host";
 
 /**
  * What `codex app-server` can do, at the version Hercule pins. Every value is a
  * fact, so the controller and the UI decide what to offer from these values
- * rather than from the provider's name.
+ * rather than from the harness's name.
  */
-const definition: ProviderDefinition = {
+const definition: HarnessDefinition = {
   id: "codex",
   displayName: "Codex",
   binaryName: "codex",
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({}),
-  defaultConfig: {},
+  releaseSource: { kind: "npm", package: "@openai/codex" },
   declared: {
     steering: "native",
     fork: "native",
@@ -28,15 +26,29 @@ const definition: ProviderDefinition = {
       auto: "native",
       "full-access": "native",
     },
+    // The adapter maps the gateway entry into the config of `thread/start`,
+    // `thread/resume` and `thread/fork`, so the servers of the session's list
+    // are callable.
     mcpPassthrough: "native",
     // The app-server exposes no per-turn tool denylist.
     disallowedTools: "unsupported",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
-  // Codex lists this model from release 0.162 on. On an older release it is
-  // not in the instance's model list, so Automatic passes over Codex rather
-  // than ask for a model that is not there.
-  suggestedTextGenerationModel: "gpt-6-luna",
+  // The login of a ChatGPT subscription lives in the Harness Home, so that
+  // kind has no credential variable. An API key is handed over in
+  // OPENAI_API_KEY. Codex accepts every model the account lists under its own
+  // id.
+  runs: [
+    {
+      providerId: "openai/openai",
+      kinds: [
+        { kind: "subscription-per-machine", modelArgument: "{model}" },
+        { kind: "api-key", modelArgument: "{model}", credentialVariable: "OPENAI_API_KEY" },
+      ],
+      models: "all",
+    },
+  ],
 };
 
 export const codex: Plugin = {
@@ -44,11 +56,11 @@ export const codex: Plugin = {
     id: "codex",
     displayName: "Codex",
     hostApi: HOST_API,
-    capabilities: ["providers"],
+    capabilities: ["harnesses"],
     configSchema: Schema.Struct({}),
   },
-  register: (host) => registerProvider(host, definition),
-  // Nothing runs on the controller for a provider: the runner runs sessions,
+  register: (host) => registerHarness(host, definition),
+  // Nothing runs on the controller for a harness: the runner runs sessions,
   // based on the definition above.
   activate: () => Effect.succeed(Effect.void),
 };

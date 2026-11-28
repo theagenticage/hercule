@@ -5,11 +5,11 @@
  *
  * - `off`: the step fails at once with `text_generation_off`, because the
  *   user chose Off and waiting would hide that choice.
- * - `automatic` with no logged-in Provider Instance, which is what a
+ * - `automatic` with no logged-in Provider Account, which is what a
  *   throwaway Hercule Home has: the step waits, the run stays running, and
  *   `controller read` says why no text generation can run. Cancelling the
  *   run ends the wait.
- * - `automatic` with a logged-in instance: the step makes a real model call
+ * - `automatic` with a logged-in account: the step makes a real model call
  *   and completes with an output that matches its schema. This case spends
  *   real tokens, so it is opt-in like `session.test.ts`: set
  *   `HERCULE_LIVE_SESSION_TEST=1`, and provide a login by either of the two
@@ -38,7 +38,7 @@ import {
   isLiveSessionTestEnabled,
   isLoginAvailable,
   parseJsonOutputOrFail,
-  prepareLoggedInInstance,
+  prepareLoggedInAccount,
   readApiKey,
   type TemporaryHome,
 } from "./harness";
@@ -201,7 +201,7 @@ describe("a text generation step with no model to run on", () => {
 
   beforeAll(async () => {
     // An empty key, so a developer's own `ANTHROPIC_API_KEY` cannot log the
-    // runner in: these cases need a controller with no logged-in instance.
+    // runner in: these cases need a controller with no logged-in account.
     instance = await startInstance(findReleaseBinary(), { ANTHROPIC_API_KEY: "" });
   }, 90_000);
 
@@ -267,7 +267,7 @@ describe.skipIf(!wanted)("a text generation step with a logged-in model", () => 
   beforeAll(async () => {
     if (!isLoginAvailable()) return;
     instance = await startInstance(binary);
-    await prepareLoggedInInstance({
+    await prepareLoggedInAccount({
       home: instance.state.home,
       binary,
       url: instance.controller.url,
@@ -284,7 +284,7 @@ describe.skipIf(!wanted)("a text generation step with a logged-in model", () => 
     async (ctx) => {
       if (instance === undefined) {
         ctx.skip(
-          "no login for the claude-code instance: name a credentials file in " +
+          "no login for the claude-code account: name a credentials file in " +
             "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
         );
         return;

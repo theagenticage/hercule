@@ -3,6 +3,8 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import prettier from "eslint-config-prettier/flat";
+import css from "@eslint/css";
+import { transitionProperties } from "./apps/desktop/scripts/eslint-transition-rule.ts";
 
 /** Imports banned everywhere, each one encoding a spec or ADR rule. */
 const bannedEverywhere = [
@@ -128,7 +130,8 @@ const buildImportCalls = (source, message) => [
  * Each library that draws or edits a workflow sits behind a facade, so that
  * it can be replaced there without a change anywhere else. A fence rejects an
  * import of the library's packages everywhere but in its facade, in a static
- * import and in a dynamic `import()` alike.
+ * import and in a dynamic `import()` alike. The fence of the copy of T3 Code's
+ * ACP client, further down, is held the same way.
  */
 const fenceLibrary = (scopes, message) => ({
   pattern: { group: scopes.map((scope) => `${scope}/*`), message },
@@ -148,9 +151,63 @@ const dagreFence = fenceLibrary(
   ["@dagrejs"],
   `The layout engine is imported only in ${graphLayout}, so that it can be replaced there alone. Use computeGraphLayout from @hercule/client-core/graph-layout.`,
 );
-const editorLibraryFences = [codeMirrorFence, reactFlowFence, dagreFence];
-const editorLibraryPatterns = editorLibraryFences.map((fence) => fence.pattern);
-const editorLibraryCalls = editorLibraryFences.flatMap((fence) => fence.calls);
+/**
+ * The ACP client of `packages/acp` is a copy of T3 Code's, replaced as a whole
+ * on every sync, so its API can change under us. Only `src/connection.ts`
+ * imports the copy and turns what it returns into the package's own types.
+ * Everyone else, tests of the package included, imports `@hercule/acp`, and
+ * `@hercule/acp/testing` for the fake harness. The fence matches the text of
+ * the specifier, so a relative path, an absolute path and a path through
+ * `node_modules` are all refused, and so is an import of a type. It also
+ * refuses every other subpath of `@hercule/acp`, which would reach the copy
+ * through the package.
+ */
+const acpFenceMessage =
+  "The copy of T3 Code's ACP client is imported only in packages/acp/src/connection.ts, so that a sync with T3 Code can break that one file and nothing else learns the library's types. Import from @hercule/acp, and from @hercule/acp/testing for the fake harness; export from the package's index.ts what you need.";
+const acpFenceSpecifiers = "vendor/effect-acp|^@hercule/acp/(?!testing$)";
+const acpFenceSource = `/${acpFenceSpecifiers.replaceAll("/", "\\x2F")}/`;
+const acpFence = {
+  pattern: { regex: acpFenceSpecifiers, message: acpFenceMessage },
+  calls: [
+    ...buildImportCalls(acpFenceSource, acpFenceMessage),
+    {
+      selector: `CallExpression[callee.name='require'][arguments.0.value=${acpFenceSource}]`,
+      message: acpFenceMessage,
+    },
+    {
+      selector: `TSImportType[source.value=${acpFenceSource}]`,
+      message: acpFenceMessage,
+    },
+  ],
+};
+
+const libraryFences = [codeMirrorFence, reactFlowFence, dagreFence, acpFence];
+const libraryPatterns = libraryFences.map((fence) => fence.pattern);
+const libraryCalls = libraryFences.flatMap((fence) => fence.calls);
+
+/**
+ * The rules of a facade: every ban of the base block, which a block's options
+ * replace, except the fence of the library that this facade is the one file
+ * to import.
+ */
+const buildFacadeRules = (facadeFence) => {
+  const fences = libraryFences.filter((fence) => fence !== facadeFence);
+  return {
+    "no-restricted-imports": [
+      "error",
+      {
+        paths: [...bannedEverywhere, ...bannedChildProcess],
+        patterns: fences.map((fence) => fence.pattern),
+      },
+    ],
+    "no-restricted-syntax": [
+      "error",
+      ...bannedChildProcessCalls,
+      ...inlineSchemaCalls,
+      ...fences.flatMap((fence) => fence.calls),
+    ],
+  };
+};
 
 /** The workflow editor is one module: the rest of the app reaches it through its index only. */
 const workflowEditorFenceMessage =
@@ -188,7 +245,7 @@ const browserImports = ({ allowed, more = [] } = {}) => [
       routeLocalPattern,
       workflowEditorFencePattern,
       yamlPattern,
-      ...editorLibraryFences.filter((fence) => fence !== allowed).map((fence) => fence.pattern),
+      ...libraryFences.filter((fence) => fence !== allowed).map((fence) => fence.pattern),
       ...more,
     ],
   },
@@ -204,7 +261,7 @@ const browserSyntax = ({ allowed, more = [] } = {}) => [
   ...inlineSchemaCalls,
   ...workflowEditorFenceCalls,
   ...yamlCalls,
-  ...editorLibraryFences.filter((fence) => fence !== allowed).flatMap((fence) => fence.calls),
+  ...libraryFences.filter((fence) => fence !== allowed).flatMap((fence) => fence.calls),
   ...more,
 ];
 
@@ -274,6 +331,9 @@ const markupSyntax = [
 ].map((selector) => ({ selector, message: markupMessage }));
 const desktopRendererSyntax = [viteGlobSyntax, viteAssetUrlSyntax, ...specimensCalls];
 
+/** Every file ESLint reads as JavaScript or TypeScript, as opposed to the CSS it also lints. */
+const scriptFiles = ["**/*.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"];
+
 export default tseslint.config(
   {
     // The generated files are build output that happens to be TypeScript.
@@ -296,26 +356,37 @@ export default tseslint.config(
       "apps/web/src/routeTree.gen.ts",
       "apps/desktop/src/renderer/routeTree.gen.ts",
       "apps/desktop/out/**",
-      "apps/runner/src/providers/codex/generated/**",
+      "apps/runner/src/harnesses/codex/generated/**",
+      // Copied unchanged from T3 Code (packages/acp/README.md), so that a sync
+      // is a plain copy. Its own tests run in our suite; its style is not ours.
+      "packages/acp/vendor/**",
       "/hercule",
     ],
   },
-  js.configs.recommended,
-  // The rules that need type information run in oxlint (.oxlintrc.json),
-  // which runs them many times faster than ESLint, so ESLint builds no
-  // TypeScript program.
-  tseslint.configs.recommended,
   {
+    // The script rules below must not reach the stylesheets, which are parsed
+    // as CSS (see the `**/*.css` block near the end).
+    files: scriptFiles,
+    extends: [
+      js.configs.recommended,
+      // The rules that need type information run in oxlint (.oxlintrc.json),
+      // which runs them many times faster than ESLint, so ESLint builds no
+      // TypeScript program.
+      tseslint.configs.recommended,
+    ],
+  },
+  {
+    files: scriptFiles,
     rules: {
       "no-restricted-imports": [
         "error",
-        { paths: [...bannedEverywhere, ...bannedChildProcess], patterns: editorLibraryPatterns },
+        { paths: [...bannedEverywhere, ...bannedChildProcess], patterns: libraryPatterns },
       ],
       "no-restricted-syntax": [
         "error",
         ...bannedChildProcessCalls,
         ...inlineSchemaCalls,
-        ...editorLibraryCalls,
+        ...libraryCalls,
       ],
       // `import { type X } from "./x"` keeps an import of `./x` after the types
       // are removed, because the repository compiles with verbatimModuleSyntax.
@@ -342,10 +413,16 @@ export default tseslint.config(
     },
     extends: [reactHooks.configs.flat["recommended-latest"]],
     rules: {
-      // Spec 14: the compiler-aware react-hooks rules are CI-blocking.
+      // Spec 14: the compiler-aware react-hooks rules are CI-blocking. `todo`,
+      // `invariant` and `syntax` report every function the React Compiler
+      // cannot compile, which `recommended-latest` leaves off; without them a
+      // bailout is silent and the function ships unmemoized.
       "react-hooks/exhaustive-deps": "error",
       "react-hooks/incompatible-library": "error",
       "react-hooks/unsupported-syntax": "error",
+      "react-hooks/todo": "error",
+      "react-hooks/invariant": "error",
+      "react-hooks/syntax": "error",
       "no-restricted-imports": browserImports(),
       "no-restricted-syntax": browserSyntax(),
     },
@@ -430,28 +507,15 @@ export default tseslint.config(
     },
   },
   {
-    // The layout engine's facade. It keeps every ban of the base block above,
-    // because a rule's options here replace the ones there.
+    // The layout engine's facade. It keeps every ban of the base block, because
+    // a rule's options here replace the ones there.
     files: [graphLayout],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [...bannedEverywhere, ...bannedChildProcess],
-          patterns: editorLibraryFences
-            .filter((fence) => fence !== dagreFence)
-            .map((fence) => fence.pattern),
-        },
-      ],
-      "no-restricted-syntax": [
-        "error",
-        ...bannedChildProcessCalls,
-        ...inlineSchemaCalls,
-        ...editorLibraryFences
-          .filter((fence) => fence !== dagreFence)
-          .flatMap((fence) => fence.calls),
-      ],
-    },
+    rules: buildFacadeRules(dagreFence),
+  },
+  {
+    // The one file that imports the copy of T3 Code's ACP client.
+    files: ["packages/acp/src/connection.ts"],
+    rules: buildFacadeRules(acpFence),
   },
   {
     // The desktop app's Node code: main, and the build tooling around it.
@@ -473,7 +537,7 @@ export default tseslint.config(
         "error",
         ...bannedChildProcessCalls,
         ...inlineSchemaCalls,
-        ...editorLibraryCalls,
+        ...libraryCalls,
         viteGlobSyntax,
       ],
     },
@@ -492,10 +556,11 @@ export default tseslint.config(
             {
               regex: "^(?!electron$|\\.\\./ipc(/|$))",
               message:
-                "The preload imports only `electron` and types from ../ipc, because it holds nothing but the bridge (spec 17). Move this code to main or the renderer.",
+                "The preload imports only `electron`, types from ../ipc and the code in ../ipc/platform, because it holds nothing but the bridge (spec 17). Move this code to main or the renderer.",
             },
             {
-              regex: "^\\.\\./ipc(/|$)",
+              // The platform folder imports nothing, so it is the one part of ../ipc the preload may run.
+              regex: "^\\.\\./ipc(?!/platform(/|$))(/|$)",
               allowTypeImports: true,
               message:
                 "The preload uses only the IPC contract's types (spec 17). Write `import type`.",
@@ -511,21 +576,22 @@ export default tseslint.config(
     // the binary. The desktop end-to-end suite runs on Node, never inside the
     // binary, and starts a second copy of the packaged app itself, because
     // Playwright cannot start one that exits at once. The skill folder test
-    // runs `mkfifo`, because Node cannot create a named pipe itself.
+    // runs `mkfifo`, because Node cannot create a named pipe itself. The
+    // HTTPS stand-in runs `openssl`, because Node cannot make a certificate.
+    // The container image's script runs `docker`.
     files: [
       "packages/hercule/src/spawn.ts",
       "scripts/**/*.ts",
       "install.test.ts",
       "packages/client-core/src/skill-folder.test.ts",
       "apps/desktop/scripts/**/*.ts",
+      "apps/desktop/container/*.ts",
       "e2e/desktop/**/*.ts",
+      "e2e/https-stand-in.ts",
     ],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        { paths: bannedEverywhere, patterns: editorLibraryPatterns },
-      ],
-      "no-restricted-syntax": ["error", ...inlineSchemaCalls, ...editorLibraryCalls],
+      "no-restricted-imports": ["error", { paths: bannedEverywhere, patterns: libraryPatterns }],
+      "no-restricted-syntax": ["error", ...inlineSchemaCalls, ...libraryCalls],
     },
   },
   {
@@ -535,11 +601,17 @@ export default tseslint.config(
     // installed Hercule binary, the user's login shell, and git.
     files: ["apps/desktop/src/main/run-program.ts"],
     rules: {
-      "no-restricted-imports": [
-        "error",
-        { paths: bannedEverywhere, patterns: editorLibraryPatterns },
-      ],
+      "no-restricted-imports": ["error", { paths: bannedEverywhere, patterns: libraryPatterns }],
     },
+  },
+  {
+    // The renderer's stylesheets are linted with one rule of our own, which
+    // refuses a transition of a layout property (spec 17 §Performance, rule 2).
+    // `@eslint/css`'s own rules are off: none of them is part of this project.
+    files: ["apps/desktop/src/renderer/**/*.css"],
+    language: "css/css",
+    plugins: { css, desktop: { rules: { "transition-properties": transitionProperties } } },
+    rules: { "desktop/transition-properties": "error" },
   },
   {
     files: ["**/*.js"],

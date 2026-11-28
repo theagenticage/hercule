@@ -56,12 +56,18 @@ export const LIVE_PROTOCOL_VERSION = 1;
  */
 export const MUTABLE_LIVE_TOPICS = [
   "task",
+  // An Initiative is created, changed, closed, reopened or deleted. Only Work
+  // reads the list, so only Work subscribes.
+  "initiative",
   "run",
   "session",
   "workflow",
   "connection",
   "notification",
   "runner",
+  // A push names the runners a new Runner Metrics row was written for, once
+  // a minute per runner. Only screens that draw metrics subscribe.
+  "runnerMetrics",
   "workspace",
   "plugin",
   "provider",
@@ -71,6 +77,10 @@ export const MUTABLE_LIVE_TOPICS = [
   // carry the ids of the sessions whose subagents changed.
   "subagent",
   "signal",
+  // An External Entity changes when a poll reports a new state, and when a
+  // card is taken on, dismissed or restored. It feeds the Inbox, its count and
+  // the marks on Work.
+  "externalEntity",
   // A new Post, a joined participant and a newly shared file announce their
   // Discussion as updated.
   "discussion",
@@ -78,6 +88,9 @@ export const MUTABLE_LIVE_TOPICS = [
   // A Skill is named by its name, so this topic's invalidations carry
   // names, not ids.
   "skill",
+  // An MCP Server changes when the user writes it and when a check ends, a
+  // Connection needs sign-in again, or the daily list of its tools runs.
+  "mcpServer",
 ] as const;
 
 /**
@@ -235,12 +248,24 @@ export type InvalidateKind = Schema.Schema.Type<typeof InvalidateKind>;
  * that shows an assistant's current session then re-reads it only when a
  * session of that assistant's conversation changed, without knowing every
  * session in advance. A push on any other topic leaves it out.
+ *
+ * A `task` push may carry `derived: true`. It then names Tasks whose card
+ * changed only because of their sessions or runs (a session changed status, a
+ * question opened, a run ended), and no field of the Task record changed. A
+ * client reads only what draws such a card, which is the Work board.
+ *
+ * A `workflow` push may carry `derived: true` too. It then names workflows
+ * whose triggers changed only in what the controller computes (the runs a
+ * trigger used, the events it holds, its next fire time, its health), and no
+ * field of the definition changed. A client reads only the workflow screens,
+ * not what draws the workflows' names or the offers made from them.
  */
 export const Invalidate = Schema.Struct({
   _tag: Schema.Literal("invalidate"),
   ids: Schema.Array(Schema.String),
   kind: InvalidateKind,
   conversationIds: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+  derived: Schema.optionalKey(Schema.Literal(true)),
 });
 
 export type Invalidate = Schema.Schema.Type<typeof Invalidate>;

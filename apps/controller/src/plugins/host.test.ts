@@ -17,23 +17,33 @@ import {
   PluginError,
   registerConnectionType,
   registerEventSource,
-  secret,
+  registerMcpServer,
+  type AccountKind,
   type FeedDeclaration,
+  type ParseCatalogBody,
+  type ParseUsageBody,
   type Plugin,
   type PluginCapability,
   type ProviderDefinition,
+  type ProviderRegistrationOptions,
+  type HarnessDefinition,
+  type HarnessProviderSupport,
   type WorkflowActionContribution,
 } from "@hercule/plugin-host";
+import { HarnessHome } from "@hercule/protocol";
 import { withTransaction } from "../db";
 import { PluginHost, Plugins } from "./index";
 import { pluginRepository } from "./repository";
 import {
   asUser,
   buildActionPlugin,
+  buildDeskMcpServer,
+  buildMcpServerPlugin,
   createPluginFixture,
   NOTE_APPEND_ACTION,
   notesPlugin,
   buildPluginStack,
+  buildHarnessDefinition,
   buildProviderDefinition,
   IDLE_FEEDS,
   IDLE_INGEST_OPEN,
@@ -46,15 +56,27 @@ const run = <A, E>(body: Effect.Effect<A, E, Plugins | PluginHost | SqlClient.Sq
 const findDetail = <T extends { readonly id: string }>(details: ReadonlyArray<T>, id: string) =>
   details.find((detail) => detail.id === id);
 
+/** What two fixture harnesses run, so a test can tell their catalog rows apart. */
+const RUNS_ALPHA: HarnessProviderSupport = {
+  providerId: "vendor/vendor",
+  kinds: [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "ALPHA_KEY" }],
+  models: "all",
+};
+const RUNS_BETA: HarnessProviderSupport = {
+  providerId: "vendor/vendor",
+  kinds: [{ kind: "api-key", modelArgument: "beta/{model}", credentialVariable: "BETA_KEY" }],
+  models: "own-list",
+};
+
 describe("PluginHost.boot on an empty database", () => {
   it("lists every registry plugin enabled, unconfigured, with its one contribution", async () => {
     const alpha = createPluginFixture({
       id: "alpha",
-      definitions: [buildProviderDefinition("alpha-provider", { model: "alpha-default" })],
+      definitions: [buildHarnessDefinition("alpha", [RUNS_ALPHA])],
     });
     const beta = createPluginFixture({
       id: "beta",
-      definitions: [buildProviderDefinition("beta-provider", { model: "beta-default" })],
+      definitions: [buildHarnessDefinition("beta", [RUNS_BETA])],
     });
 
     const details = await run(
@@ -66,26 +88,18 @@ describe("PluginHost.boot on an empty database", () => {
 
     expect(details.map((detail) => detail.id)).toEqual(["alpha", "beta"]);
 
-    for (const [id, model] of [
-      ["alpha", "alpha-default"],
-      ["beta", "beta-default"],
+    for (const [id, runs] of [
+      ["alpha", RUNS_ALPHA],
+      ["beta", RUNS_BETA],
     ] as const) {
       const detail = findDetail(details, id);
       expect(detail?.enabled).toBe(true);
       expect(detail?.config).toEqual({});
       expect(detail?.contributions).toHaveLength(1);
       const contribution = detail?.contributions[0];
-      expect(contribution?.extensionPoint).toBe("provider");
-      expect(contribution?.id).toBe(`${id}-provider`);
-      const definition = contribution?.definition as {
-        readonly configSchema: unknown;
-        readonly defaultConfig: unknown;
-      };
-      expect(definition.configSchema).toMatchObject({
-        type: "object",
-        properties: { token: { type: "string" } },
-      });
-      expect(definition.defaultConfig).toEqual({ model });
+      expect(contribution?.extensionPoint).toBe("harness");
+      expect(contribution?.id).toBe(`${id}/${id}`);
+      expect(contribution?.definition).toMatchObject({ id: `${id}/${id}`, runs: [runs] });
     }
   });
 });
@@ -228,8 +242,8 @@ describe("a plugin whose register fails", () => {
 
   it("is errored, naming the path, when a contribution contains a function", async () => {
     const definition = {
-      ...buildProviderDefinition("callback-provider", {}),
-      defaultConfig: { onStart: () => undefined } as unknown as Schema.Json,
+      ...buildHarnessDefinition("callback"),
+      displayName: (() => undefined) as unknown as string,
     };
     const callback = createPluginFixture({ id: "callback", definitions: [definition] });
 
@@ -249,7 +263,7 @@ describe("a plugin whose register fails", () => {
       readonly message: string;
     } | null;
     expect(errored?._tag).toBe("errored");
-    expect(errored?.message).toContain("defaultConfig");
+    expect(errored?.message).toContain("displayName");
     expect(detail.contributions).toEqual([]);
     expect(callback.calls).toEqual([]);
   });
@@ -257,7 +271,7 @@ describe("a plugin whose register fails", () => {
   it("is errored, keeping every other plugin's rows, when it registers one id twice", async () => {
     const twice = createPluginFixture({
       id: "twice",
-      definitions: [buildProviderDefinition("same", {}), buildProviderDefinition("same", {})],
+      definitions: [buildHarnessDefinition("same"), buildHarnessDefinition("same")],
     });
     const other = createPluginFixture({ id: "other" });
 
@@ -277,45 +291,49 @@ describe("a plugin whose register fails", () => {
       readonly message: string;
     } | null;
     expect(errored?._tag).toBe("errored");
-    expect(errored?.message).toContain("provider");
-    expect(errored?.message).toContain("same");
+    expect(errored?.message).toContain("harness");
+    expect(errored?.message).toContain("twice/same");
     expect(findDetail(details, "twice")?.contributions).toEqual([]);
     expect(findDetail(details, "other")?.contributions).toHaveLength(1);
   });
 
-  it("is errored when its provider has a config schema no form can render", async () => {
-    const unrenderable = createPluginFixture({
-      id: "unrenderable",
-      definitions: [
-        {
-          ...buildProviderDefinition("deep-provider", {}),
-          configSchema: Schema.Struct({ server: Schema.Struct({ host: Schema.String }) }),
-        },
-      ],
+  it("loads two plugins that register the same harness word, under distinct qualified ids", async () => {
+    const first = createPluginFixture({
+      id: "first",
+      definitions: [buildHarnessDefinition("claude-code", [RUNS_ALPHA])],
+    });
+    const second = createPluginFixture({
+      id: "second",
+      definitions: [buildHarnessDefinition("claude-code", [RUNS_BETA])],
     });
 
-    const status = await run(
+    const { statuses, catalogIds, live } = await run(
       Effect.gen(function* () {
         const host = yield* PluginHost;
-        yield* host.boot([unrenderable.plugin]);
-        return yield* host.status("unrenderable");
+        yield* host.boot([first.plugin, second.plugin]);
+        const details = yield* Effect.flatMap(Plugins, (plugins) => plugins.query());
+        return {
+          statuses: details.map((detail) => detail.status._tag),
+          catalogIds: details.flatMap((detail) => detail.contributions.map((one) => one.id)),
+          live: yield* host.harnesses(),
+        };
       }),
     );
 
-    const errored = Option.getOrNull(status) as {
-      readonly _tag: string;
-      readonly message: string;
-    } | null;
-    expect(errored?._tag).toBe("errored");
-    expect(errored?.message).toContain("deep-provider");
+    expect(statuses).toEqual(["active", "active"]);
+    expect(catalogIds).toEqual(["first/claude-code", "second/claude-code"]);
+    // The live definitions carry the same ids as the catalog rows, so a stored
+    // account finds its definition by either.
+    expect(live.map((definition) => [definition.id, definition.runs])).toEqual([
+      ["first/claude-code", [RUNS_ALPHA]],
+      ["second/claude-code", [RUNS_BETA]],
+    ]);
   });
 
-  it("is errored when its provider's display name is longer than an instance name allows", async () => {
+  it("is errored when its harness's display name is longer than the catalog allows", async () => {
     const shouty = createPluginFixture({
       id: "shouty",
-      definitions: [
-        { ...buildProviderDefinition("shouty-provider", {}), displayName: "S".repeat(129) },
-      ],
+      definitions: [{ ...buildHarnessDefinition("shouty"), displayName: "S".repeat(129) }],
     });
 
     const detail = await run(
@@ -330,14 +348,94 @@ describe("a plugin whose register fails", () => {
     expect(detail.contributions).toEqual([]);
   });
 
+  it("accepts a qualified harness id of exactly the longest allowed length and refuses one character more", async () => {
+    // A plugin id and a harness word may each be 64 characters, so the
+    // longest qualified id is 129 characters, one more than the 128 the
+    // column that stores it holds.
+    const fits = createPluginFixture({
+      id: "p".repeat(63),
+      definitions: [{ ...buildHarnessDefinition("a".repeat(64)), displayName: "Fits" }],
+    });
+    const tooLong = createPluginFixture({
+      id: "q".repeat(64),
+      definitions: [{ ...buildHarnessDefinition("a".repeat(64)), displayName: "Too long" }],
+    });
+    const other = createPluginFixture({ id: "other" });
+
+    const { statuses, harnessIds, contributions } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([fits.plugin, tooLong.plugin, other.plugin]);
+        const details = yield* Effect.flatMap(Plugins, (plugins) => plugins.query());
+        return {
+          statuses: details.map((detail) => detail.status),
+          harnessIds: (yield* host.harnesses()).map((definition) => definition.id),
+          contributions: details.map((detail) => detail.contributions.length),
+        };
+      }),
+    );
+
+    expect(statuses.map((status) => status._tag)).toEqual(["active", "errored", "active"]);
+    const refusal = statuses[1];
+    expect(refusal?._tag === "errored" ? refusal.message : "").toContain(
+      "129 characters long, and the limit is 128",
+    );
+    expect(harnessIds).toEqual([`${"p".repeat(63)}/${"a".repeat(64)}`, "other/other"]);
+    expect(contributions).toEqual([1, 0, 1]);
+  });
+
+  it.each([
+    ["a space", "my harness"],
+    ["a leading dash", "-harness"],
+    ["a leading dot", ".harness"],
+    ["a path separator", "a/b"],
+    ["an accent", "hârness"],
+    ["65 characters", "a".repeat(65)],
+  ])("is errored when the harness id has %s, because it names a folder", async (_label, word) => {
+    const message = await bootAndReadError(
+      createPluginFixture({ id: "folder", definitions: [buildHarnessDefinition(word)] }).plugin,
+    );
+
+    expect(message).toContain("Harness Home");
+  });
+
+  it("is errored when the plugin id is too long to name a folder, and says so", async () => {
+    const message = await bootAndReadError(
+      createPluginFixture({ id: "p".repeat(65), definitions: [buildHarnessDefinition("pi")] })
+        .plugin,
+    );
+
+    expect(message).toContain("65 characters long");
+    expect(message).toContain("Harness Home");
+  });
+
+  it("gives every accepted harness id a path the runner accepts as a Harness Home", async () => {
+    const dotted = createPluginFixture({
+      id: "my-plugin2",
+      definitions: [buildHarnessDefinition("Claude_Code.v2-x")],
+    });
+
+    const live = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([dotted.plugin]);
+        return yield* host.harnesses();
+      }),
+    );
+
+    expect(live).toHaveLength(1);
+    const home = `providers/homes/account-1/${live[0]!.id}`;
+    expect(Schema.is(HarnessHome)(home)).toBe(true);
+  });
+
   it("is errored when its contribution has a key the host does not know", async () => {
     const extra = createPluginFixture({
       id: "extra",
       definitions: [
         {
-          ...buildProviderDefinition("extra-provider", {}),
+          ...buildHarnessDefinition("extra"),
           onStart: () => undefined,
-        } as ProviderDefinition,
+        } as HarnessDefinition,
       ],
     });
 
@@ -351,6 +449,647 @@ describe("a plugin whose register fails", () => {
 
     expect(detail.status._tag).toBe("errored");
     expect(detail.contributions).toEqual([]);
+  });
+});
+
+/** Boots one plugin and returns its status message when it errored, or `undefined` when it loaded. */
+const bootAndReadError = (plugin: Plugin): Promise<string | undefined> =>
+  run(
+    Effect.gen(function* () {
+      const host = yield* PluginHost;
+      yield* host.boot([plugin]);
+      const status = Option.getOrNull(yield* host.status(plugin.manifest.id));
+      return status?._tag === "errored" ? status.message : undefined;
+    }),
+  );
+
+describe("what a harness declares it runs", () => {
+  const harnessWith = (runs: HarnessDefinition["runs"]) =>
+    createPluginFixture({ id: "runner", definitions: [buildHarnessDefinition("runner", runs)] })
+      .plugin;
+
+  it("is errored when a provider is not named by its qualified id", async () => {
+    const message = await bootAndReadError(harnessWith([{ ...RUNS_ALPHA, providerId: "vendor" }]));
+
+    expect(message).toContain("providerId");
+  });
+
+  it("is errored when a provider is listed twice, naming the harness and the provider", async () => {
+    const message = await bootAndReadError(harnessWith([RUNS_ALPHA, RUNS_BETA]));
+
+    expect(message).toContain("runner/runner");
+    expect(message).toContain("vendor/vendor more than once");
+  });
+
+  it("is errored when an account kind of one provider is listed twice", async () => {
+    const message = await bootAndReadError(
+      harnessWith([{ ...RUNS_ALPHA, kinds: [RUNS_ALPHA.kinds[0]!, RUNS_ALPHA.kinds[0]!] }]),
+    );
+
+    expect(message).toContain("the account kind api-key of vendor/vendor");
+  });
+
+  it("is errored, naming the field, when the model argument does not hold {model} exactly once", async () => {
+    for (const modelArgument of ["vendor/model", "{model}/{model}"]) {
+      const message = await bootAndReadError(
+        harnessWith([{ ...RUNS_ALPHA, kinds: [{ kind: "api-key", modelArgument }] }]),
+      );
+
+      expect(message, modelArgument).toContain("runs.0.kinds.0.modelArgument");
+    }
+  });
+});
+
+describe("a plugin that registers a provider", () => {
+  const providerPlugin = (
+    id: string,
+    providers: ReadonlyArray<ProviderDefinition>,
+    providerOptions?: ProviderRegistrationOptions,
+  ) =>
+    createPluginFixture({
+      id,
+      capabilities: ["providers"],
+      definitions: [],
+      providers,
+      ...(providerOptions === undefined ? {} : { providerOptions }),
+    }).plugin;
+
+  it("is listed in registry order under its qualified id, in the catalog and in the host", async () => {
+    const vendor = providerPlugin("vendor", [
+      buildProviderDefinition("vendor", ["alpha/alpha"]),
+      buildProviderDefinition("second"),
+    ]);
+    const other = providerPlugin("other", [buildProviderDefinition("vendor")]);
+
+    const { details, live } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([vendor, other]);
+        return {
+          details: yield* Effect.flatMap(Plugins, (plugins) => plugins.query()),
+          live: yield* host.providers(),
+        };
+      }),
+    );
+
+    expect(details.map((detail) => detail.status._tag)).toEqual(["active", "active"]);
+    // The catalog lists a plugin's contributions sorted by id; the host keeps registration order.
+    expect(details.flatMap((detail) => detail.contributions.map((one) => one.id))).toEqual([
+      "vendor/second",
+      "vendor/vendor",
+      "other/vendor",
+    ]);
+    expect(details[0]?.contributions[0]?.extensionPoint).toBe("provider");
+    expect(live.map((provider) => provider.id)).toEqual([
+      "vendor/vendor",
+      "vendor/second",
+      "other/vendor",
+    ]);
+    // An account kind keeps the provider's own word, and the harnesses it lists keep their qualified ids.
+    expect(live[0]?.kinds.map((kind) => [kind.id, kind.harnesses])).toEqual([
+      ["api-key", ["alpha/alpha"]],
+    ]);
+  });
+
+  it("is registered even while the plugin is disabled, like a harness", async () => {
+    const vendor = providerPlugin("vendor", [buildProviderDefinition("vendor")]);
+
+    const live = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([vendor]);
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(sql, sql`UPDATE plugins SET enabled = 0 WHERE id = 'vendor'`);
+        yield* host.boot([vendor]);
+        return yield* host.providers();
+      }),
+    );
+
+    expect(live.map((provider) => provider.id)).toEqual(["vendor/vendor"]);
+  });
+
+  it("is errored when a harness of an account kind is not named by its qualified id", async () => {
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [buildProviderDefinition("vendor", ["alpha"])]),
+    );
+
+    expect(message).toContain("harnesses");
+  });
+
+  it("is errored when an account kind is declared twice", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        { ...definition, kinds: [definition.kinds[0], definition.kinds[0]] },
+      ]),
+    );
+
+    expect(message).toContain("vendor/vendor");
+    expect(message).toContain("the account kind api-key more than once");
+  });
+
+  it("is errored, with no contributions kept, when it registers one id twice", async () => {
+    const twice = providerPlugin("twice", [
+      buildProviderDefinition("same"),
+      buildProviderDefinition("same"),
+    ]);
+
+    const { message, live } = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([twice]);
+        const status = Option.getOrNull(yield* host.status("twice"));
+        return {
+          message: status?._tag === "errored" ? status.message : undefined,
+          live: yield* host.providers(),
+        };
+      }),
+    );
+
+    expect(message).toContain("twice/same");
+    expect(live).toEqual([]);
+  });
+
+  it("is errored when the qualified id is longer than the catalog allows", async () => {
+    // "overlong/" is 9 characters, so a 120 character word makes a 129 character id.
+    const message = await bootAndReadError(
+      providerPlugin("overlong", [
+        { ...buildProviderDefinition("a".repeat(120)), displayName: "Too long" },
+      ]),
+    );
+
+    expect(message).toContain("the provider id");
+    expect(message).toContain("129 characters long, and the limit is 128");
+  });
+
+  it("is errored when the definition has a key the host does not know", async () => {
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...buildProviderDefinition("vendor"),
+          favouriteColour: "blue",
+        } as ProviderDefinition,
+      ]),
+    );
+
+    expect(message).toContain("favouriteColour");
+  });
+
+  it("is errored, naming the fields, when a credentials step is not exactly one field named apiKey", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const withFields = (fields: ReadonlyArray<{ name: string; label: string }>) =>
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [{ ...definition.kinds[0], setup: [{ kind: "credentials", fields }] }],
+        },
+      ]);
+
+    for (const fields of [
+      [{ name: "token", label: "Token" }],
+      [
+        { name: "apiKey", label: "API key" },
+        { name: "orgId", label: "Organization" },
+      ],
+    ]) {
+      const message = await bootAndReadError(withFields(fields));
+
+      expect(message).toContain(
+        `the fields ${fields.map((field) => field.name).join(", ")}; a credentials step must have exactly one field, named apiKey`,
+      );
+    }
+  });
+
+  it("is errored when an account kind declares an oauth, device or pairing step, which the core does not run for accounts", async () => {
+    const definition = buildProviderDefinition("vendor");
+    for (const step of ["oauth", "device", "pairing"] as const) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          {
+            ...definition,
+            kinds: [
+              { ...definition.kinds[0], setup: [...definition.kinds[0].setup, { kind: step }] },
+            ],
+          },
+        ]),
+      );
+
+      expect(message, step).toContain("the account kind api-key of the provider vendor/vendor");
+      expect(message, step).toContain(`declares the setup step ${step}`);
+    }
+  });
+
+  it("is errored when a key kind declares no key check, because a key that cannot be checked is never stored", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const { id, title, description, setup, harnesses } = definition.kinds[0];
+    const withoutKeyCheck = { id, title, description, setup, harnesses };
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [{ ...definition, kinds: [withoutKeyCheck] }]),
+    );
+
+    expect(message).toContain("the account kind api-key of the provider vendor/vendor");
+    expect(message).toContain("declares no keyCheck");
+  });
+
+  it("is errored when a key check is not a fixed https URL", async () => {
+    const definition = buildProviderDefinition("vendor");
+    for (const url of [
+      "http://api.example.com/v1/models",
+      "ftp://api.example.com/v1/models",
+      "api.example.com/v1/models",
+      "https://api.example.com/{apiKey}/models",
+      "https://{apiKey}.example.com/models",
+    ]) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          {
+            ...definition,
+            kinds: [{ ...definition.kinds[0], keyCheck: { url, headers: {} } }],
+          },
+        ]),
+      );
+
+      expect(message, url).toContain(`its keyCheck url ${url} is not a fixed https:// URL`);
+    }
+  });
+
+  it("is errored when a key check header holds a placeholder other than {apiKey}", async () => {
+    const definition = buildProviderDefinition("vendor");
+    for (const value of ["{token}", "Bearer {apiKey} {orgId}", "{{apiKey}}", "Bearer {apiKey"]) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          {
+            ...definition,
+            kinds: [
+              {
+                ...definition.kinds[0],
+                keyCheck: {
+                  url: "https://api.example.com/v1/models",
+                  headers: { authorization: value },
+                },
+              },
+            ],
+          },
+        ]),
+      );
+
+      expect(message, value).toContain("its keyCheck header authorization holds a placeholder");
+    }
+  });
+
+  it("is errored when a key check sends no key, because a public endpoint would accept every key", async () => {
+    const definition = buildProviderDefinition("vendor");
+    for (const headers of [{}, { accept: "application/json" }]) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          {
+            ...definition,
+            kinds: [
+              {
+                ...definition.kinds[0],
+                keyCheck: { url: "https://api.example.com/v1/models", headers },
+              },
+            ],
+          },
+        ]),
+      );
+
+      expect(message).toContain("the account kind api-key of the provider vendor/vendor");
+      expect(message).toContain("its keyCheck sends no key");
+      expect(message).toContain("{apiKey}");
+    }
+  });
+
+  it("is errored when a usage read through a harness names a harness the kind does not run in", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [
+            {
+              ...definition.kinds[0],
+              usage: { readBy: "harness", harnessId: "beta/beta" },
+            },
+          ],
+        },
+      ]),
+    );
+
+    expect(message).toContain("the account kind api-key of the provider vendor/vendor");
+    expect(message).toContain("its usage is read through the harness beta/beta");
+  });
+
+  it("is errored when a usage read from an endpoint has no key to send or breaks the key request rules", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const endpoint = {
+      readBy: "endpoint",
+      url: "https://api.example.com/v1/usage",
+      headers: { authorization: "{apiKey}" },
+    } as const;
+    const withUsage = (kind: Record<string, unknown>) =>
+      providerPlugin("vendor", [{ ...definition, kinds: [{ ...definition.kinds[0], ...kind }] }]);
+    const { id, title, description, harnesses } = definition.kinds[0];
+    const tokenKind = {
+      id,
+      title,
+      description,
+      harnesses,
+      setup: [{ kind: "harness-login", method: "create-token" }],
+    } as const;
+
+    expect(
+      await bootAndReadError(
+        providerPlugin("vendor", [{ ...definition, kinds: [{ ...tokenKind, usage: endpoint }] }]),
+      ),
+    ).toContain("the kind has no credentials step");
+    expect(
+      await bootAndReadError(
+        withUsage({ usage: { ...endpoint, url: "http://api.example.com/u" } }),
+      ),
+    ).toContain("its usage url http://api.example.com/u is not a fixed https:// URL");
+    expect(await bootAndReadError(withUsage({ usage: { ...endpoint, headers: {} } }))).toContain(
+      "its usage sends no key",
+    );
+  });
+
+  describe("the parser of a usage endpoint", () => {
+    const endpointKind = (
+      definition: ProviderDefinition,
+      usage: NonNullable<AccountKind["usage"]>,
+    ): ProviderDefinition => ({
+      ...definition,
+      kinds: [{ ...definition.kinds[0], usage }],
+    });
+    const endpoint = {
+      readBy: "endpoint",
+      url: "https://api.example.com/v1/usage",
+      headers: { authorization: "{apiKey}" },
+    } as const;
+    const parseQuota: ParseUsageBody = () => ({ readings: [] });
+
+    it("is errored when a kind reads its usage from an endpoint and registers no parser for it", async () => {
+      const definition = endpointKind(buildProviderDefinition("vendor"), endpoint);
+
+      const message = await bootAndReadError(providerPlugin("vendor", [definition]));
+
+      expect(message).toContain("the account kind api-key of the provider vendor/vendor");
+      expect(message).toContain("registers no parseUsageBody for it");
+    });
+
+    it("is errored when a parser is registered for a kind that does not read its usage from an endpoint", async () => {
+      const definition = buildProviderDefinition("vendor");
+      for (const kindId of ["api-key", "no-such-kind"]) {
+        const message = await bootAndReadError(
+          providerPlugin("vendor", [definition], { parseUsageBody: { [kindId]: parseQuota } }),
+        );
+
+        expect(message, kindId).toContain(`registers a parseUsageBody for ${kindId}`);
+      }
+    });
+  });
+
+  describe("the catalog read through a provider's API", () => {
+    const apiSource = {
+      kind: "provider-api",
+      url: "https://api.example.com/v1/models",
+      headers: { authorization: "Bearer {apiKey}" },
+    } as const;
+    const parseCatalogBody: ParseCatalogBody = () => [];
+    const withSource = (
+      catalogSource: ProviderDefinition["catalogSource"],
+    ): ProviderDefinition => ({
+      ...buildProviderDefinition("vendor"),
+      catalogSource,
+    });
+
+    it("registers a provider that has the source, the parser and a key on every kind", async () => {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [withSource(apiSource)], { parseCatalogBody }),
+      );
+
+      expect(message).toBeUndefined();
+    });
+
+    it("is errored when the source has no parser", async () => {
+      const message = await bootAndReadError(providerPlugin("vendor", [withSource(apiSource)]));
+
+      expect(message).toContain("the provider vendor/vendor reads its Model Catalog from its API");
+      expect(message).toContain("registers no parseCatalogBody");
+    });
+
+    it("is errored when a parser is registered for a catalog read through a harness", async () => {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [buildProviderDefinition("vendor")], { parseCatalogBody }),
+      );
+
+      expect(message).toContain("registers a parseCatalogBody");
+      expect(message).toContain("catalogSource kind provider-api");
+    });
+
+    it("is errored when a kind has no credentials step, because the read needs the account's key", async () => {
+      const definition = withSource(apiSource);
+      const { title, description, harnesses } = definition.kinds[0];
+      const message = await bootAndReadError(
+        providerPlugin(
+          "vendor",
+          [
+            {
+              ...definition,
+              kinds: [
+                ...definition.kinds,
+                { id: "subscription", title, description, harnesses, setup: [] },
+              ],
+            },
+          ],
+          { parseCatalogBody },
+        ),
+      );
+
+      expect(message).toContain("its account kinds subscription have no credentials step");
+    });
+
+    it("is errored when the request breaks the key request rules", async () => {
+      const cases = [
+        {
+          source: { ...apiSource, url: "http://api.example.com/v1/models" },
+          expected:
+            "its catalogSource url http://api.example.com/v1/models is not a fixed https:// URL",
+        },
+        {
+          source: { ...apiSource, headers: { authorization: "Bearer {token}" } },
+          expected: "its catalogSource header authorization holds a placeholder",
+        },
+        { source: { ...apiSource, headers: {} }, expected: "its catalogSource sends no key" },
+      ];
+      for (const { source, expected } of cases) {
+        const message = await bootAndReadError(
+          providerPlugin("vendor", [withSource(source)], { parseCatalogBody }),
+        );
+
+        expect(message).toContain(expected);
+      }
+    });
+  });
+
+  it("is errored when an account kind declares two credential sources", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const credentials = {
+      kind: "credentials",
+      fields: [{ name: "apiKey", label: "API key" }],
+    } as const;
+    const cases = [
+      {
+        setup: [credentials, { kind: "harness-login", method: "create-token" }],
+        expected: "both a credentials step and a harness-login step with the method create-token",
+      },
+      { setup: [credentials, credentials], expected: "more than one credentials step" },
+      {
+        setup: [
+          { kind: "harness-login", method: "create-token" },
+          { kind: "harness-login", method: "sign-in" },
+        ],
+        expected: "more than one harness-login step",
+      },
+    ] as const;
+
+    for (const { setup, expected } of cases) {
+      const message = await bootAndReadError(
+        providerPlugin("vendor", [
+          { ...definition, kinds: [{ ...definition.kinds[0], setup: [...setup] }] },
+        ]),
+      );
+
+      expect(message, expected).toContain("the account kind api-key of the provider vendor/vendor");
+      expect(message, expected).toContain(expected);
+    }
+  });
+
+  it("accepts a key kind that has a checklist beside its credentials step", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const live = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          providerPlugin("vendor", [
+            {
+              ...definition,
+              kinds: [
+                {
+                  ...definition.kinds[0],
+                  setup: [
+                    { kind: "checklist", markdown: "Get a key." },
+                    ...definition.kinds[0].setup,
+                  ],
+                },
+              ],
+            },
+          ]),
+        ]);
+        return yield* host.providers();
+      }),
+    );
+
+    expect(live.map((provider) => provider.id)).toEqual(["vendor/vendor"]);
+  });
+
+  it("accepts a key check that sends the key in several headers", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const live = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([
+          providerPlugin("vendor", [
+            {
+              ...definition,
+              kinds: [
+                {
+                  ...definition.kinds[0],
+                  keyCheck: {
+                    url: "https://api.example.com/v1/models",
+                    headers: { "x-api-key": "{apiKey}", authorization: "Bearer {apiKey}" },
+                  },
+                },
+              ],
+            },
+          ]),
+        ]);
+        return yield* host.providers();
+      }),
+    );
+
+    expect(live.map((provider) => provider.id)).toEqual(["vendor/vendor"]);
+  });
+
+  it("is errored when its default harness is listed by none of its account kinds", async () => {
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        { ...buildProviderDefinition("vendor"), defaultHarnessId: "beta/beta" },
+      ]),
+    );
+
+    expect(message).toContain("the provider vendor/vendor has the default harness beta/beta");
+  });
+
+  it("is errored when an account kind does not list its default harness, though another kind does", async () => {
+    const definition = buildProviderDefinition("vendor", ["alpha/alpha"]);
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [
+            definition.kinds[0],
+            { ...definition.kinds[0], id: "other-key", harnesses: ["beta/beta"] },
+          ],
+        },
+      ]),
+    );
+
+    expect(message).toContain("the provider vendor/vendor has the default harness alpha/alpha");
+    expect(message).toContain("other-key");
+  });
+
+  it("is errored when an account kind does not list the harness its catalog is read from", async () => {
+    const definition = buildProviderDefinition("vendor", ["alpha/alpha"]);
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        { ...definition, catalogSource: { kind: "harness-probe", harnessId: "beta/beta" } },
+      ]),
+    );
+
+    expect(message).toContain("reads its Model Catalog from the harness beta/beta");
+    expect(message).toContain("api-key");
+  });
+
+  it("is errored when it names a maker for the default selection none, which selects no models", async () => {
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...buildProviderDefinition("vendor"),
+          defaultSelection: "none",
+          defaultSelectionMaker: "Google",
+        },
+      ]),
+    );
+
+    expect(message).toContain(
+      "the provider vendor/vendor declares the defaultSelectionMaker Google but its defaultSelection is none",
+    );
+    expect(message).toContain("declare defaultSelection current-models");
+  });
+
+  it("is errored when an account kind has a setup step the core cannot draw", async () => {
+    const definition = buildProviderDefinition("vendor");
+    const message = await bootAndReadError(
+      providerPlugin("vendor", [
+        {
+          ...definition,
+          kinds: [{ ...definition.kinds[0], setup: [{ kind: "ssh" }] }],
+        } as unknown as ProviderDefinition,
+      ]),
+    );
+
+    expect(message).toContain("setup");
   });
 });
 
@@ -459,84 +1198,6 @@ describe("Plugins.read on an unknown plugin id", () => {
 });
 
 /**
- * A secret field is entered per provider instance and stored under that
- * instance as its owner. The two other places a plugin can declare a config
- * schema have nowhere to store one. So both are rejected at registration,
- * where the author sees the reason, rather than showing a form whose value
- * nothing would store.
- */
-describe("a secret field declared outside a provider", () => {
-  it("gives the plugin the refused status when declared in its own config, and says where one belongs", async () => {
-    const keyed = createPluginFixture({
-      id: "keyed-plugin",
-      configSchema: Schema.Struct({
-        apiKey: secret({ title: "API key", description: "The vendor's own." }),
-      }),
-    });
-
-    const status = await run(
-      Effect.gen(function* () {
-        const host = yield* PluginHost;
-        yield* host.boot([keyed.plugin]);
-        return yield* host.status("keyed-plugin");
-      }),
-    );
-
-    const refused = Option.getOrNull(status) as {
-      readonly _tag: string;
-      readonly reason: { readonly kind: string; readonly message: string };
-    } | null;
-    expect(refused?._tag).toBe("refused");
-    expect(refused?.reason.kind).toBe("unsupportedConfigSchema");
-    expect(refused?.reason.message).toContain("provider definition only");
-    expect(keyed.hosts).toEqual([]);
-  });
-
-  it("marks the plugin errored when declared in a connection type, naming the type", async () => {
-    const plugin: Plugin = {
-      manifest: {
-        id: "keyed-connection",
-        displayName: "Plugin keyed-connection",
-        hostApi: HOST_API,
-        capabilities: ["connections"],
-        configSchema: Schema.Struct({}),
-      },
-      register: (host) =>
-        registerConnectionType(host, {
-          type: "vault",
-          displayName: "Vault",
-          setup: [{ kind: "credentials", fields: [{ name: "token", label: "Token" }] }],
-          configSchema: Schema.Struct({
-            apiKey: secret({ title: "API key", description: "The vendor's own." }),
-          }),
-          validate: () => Effect.succeed({ displayName: "Vault", accountId: "vault-1" }),
-        }),
-      activate: () => Effect.succeed(Effect.void),
-    };
-
-    const { status, detail } = await run(
-      Effect.gen(function* () {
-        const host = yield* PluginHost;
-        yield* host.boot([plugin]);
-        return {
-          status: yield* host.status("keyed-connection"),
-          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("keyed-connection")),
-        };
-      }),
-    );
-
-    const errored = Option.getOrNull(status) as {
-      readonly _tag: string;
-      readonly message: string;
-    } | null;
-    expect(errored?._tag).toBe("errored");
-    expect(errored?.message).toContain("keyed-connection/vault");
-    expect(errored?.message).toContain("provider definition only");
-    expect(detail.contributions).toEqual([]);
-  });
-});
-
-/**
  * A config field marked `choices` loads its values from the external account
  * through the connection type's `listChoices`. Registration refuses a mark
  * with no loader behind it, and a mark anywhere a Connection's form is not
@@ -628,34 +1289,6 @@ describe("a config field that loads its choices from the account", () => {
     expect(status?.message).toContain("teams/desk");
     expect(status?.message).toContain('"team"');
     expect(status?.message).toContain("must be optional");
-    expect(detail.contributions).toEqual([]);
-  });
-
-  it("marks the plugin errored when a provider definition marks a field, naming the provider", async () => {
-    const choosy = createPluginFixture({
-      id: "choosy",
-      definitions: [
-        {
-          ...buildProviderDefinition("choosy-provider", {}),
-          configSchema: TEAM_FIELD,
-        },
-      ],
-    });
-
-    const { status, detail } = await run(
-      Effect.gen(function* () {
-        const host = yield* PluginHost;
-        yield* host.boot([choosy.plugin]);
-        return {
-          status: Option.getOrNull(yield* host.status("choosy")),
-          detail: yield* Effect.flatMap(Plugins, (plugins) => plugins.read("choosy")),
-        };
-      }),
-    );
-
-    if (status?._tag !== "errored") throw new Error("the plugin should have failed to start");
-    expect(status.message).toContain("choosy-provider");
-    expect(status.message).toContain("connection type only");
     expect(detail.contributions).toEqual([]);
   });
 
@@ -1062,6 +1695,115 @@ const buildEventSourcePlugin = (
       },
     }),
   activate: () => Effect.succeed(Effect.void),
+});
+
+describe("the MCP server catalog", () => {
+  it("finds the live server whatever its plugin's status, and lists every server the boot registered", async () => {
+    const found = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([buildMcpServerPlugin("acme")]);
+        const active = yield* host.findMcpServer("acme/desk");
+        yield* host.stop("acme");
+        return {
+          active,
+          stopped: yield* host.findMcpServer("acme/desk"),
+          stoppedIsActive: yield* host.isActive("acme"),
+          listed: (yield* host.listMcpServers()).map((server) => server.id),
+          absent: yield* host.findMcpServer("acme/other"),
+        };
+      }),
+    );
+
+    expect(Option.getOrThrow(found.active)).toMatchObject({
+      id: "acme/desk",
+      pluginId: "acme",
+      connectionType: "acme/desk",
+    });
+    expect(Option.isSome(found.stopped)).toBe(true);
+    expect(found.stoppedIsActive).toBe(false);
+    expect(found.listed).toEqual(["acme/desk"]);
+    expect(Option.isNone(found.absent)).toBe(true);
+  });
+
+  it("accepts a server registered before its Connection type", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([buildMcpServerPlugin("acme", { serverFirst: true })]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toBeUndefined();
+    expect(status).toEqual(Option.some({ _tag: "active" }));
+  });
+
+  it.each([
+    [
+      "an id that is not a valid server name",
+      { server: { ...buildDeskMcpServer("acme"), id: "Desk-Tickets" } },
+      "lowercase letters, digits and single _",
+    ],
+    [
+      "the reserved id hercule",
+      { server: { ...buildDeskMcpServer("acme"), id: "hercule" } },
+      "cannot be hercule",
+    ],
+    [
+      "an origin with a path",
+      { server: { ...buildDeskMcpServer("acme"), origin: "https://mcp.desk.example/mcp" } },
+      "exactly the scheme",
+    ],
+    [
+      "a Connection type of another plugin",
+      { server: { ...buildDeskMcpServer("acme"), connectionType: "other/desk" } },
+      "which another plugin owns",
+    ],
+    [
+      "a Connection type the plugin does not register",
+      { registerType: false },
+      "which the plugin acme does not register",
+    ],
+    [
+      "no mcp-servers capability",
+      { capabilities: ["connections"] as const },
+      "the mcp-servers capability was not granted",
+    ],
+  ])("marks a plugin errored for %s", async (_name, options, message) => {
+    const outcome = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* host.boot([buildMcpServerPlugin("acme", options)]);
+        return { status: yield* host.status("acme"), servers: yield* host.listMcpServers() };
+      }),
+    );
+
+    expect(readErroredMessage(outcome.status)).toContain(message);
+    expect(outcome.servers).toEqual([]);
+  });
+
+  it("marks a plugin errored when it registers the same server twice", async () => {
+    const status = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        const once = buildMcpServerPlugin("acme");
+        yield* host.boot([
+          {
+            ...once,
+            register: (registration) =>
+              Effect.andThen(
+                once.register(registration),
+                registerMcpServer(registration, buildDeskMcpServer("acme")),
+              ),
+          },
+        ]);
+        return yield* host.status("acme");
+      }),
+    );
+
+    expect(readErroredMessage(status)).toContain("acme/desk is registered twice");
+  });
 });
 
 describe("the event source catalog", () => {

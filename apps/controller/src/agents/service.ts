@@ -11,14 +11,14 @@
  * operations read that row, so every session's `agentId` resolves, but they
  * do not list it and refuse to change it: the assistant operations own it.
  *
- * An agent names a provider instance and a permission profile, which are rows
+ * An agent names a Provider Account and a permission profile, which are rows
  * in other domains. Both are checked at create and at update, because an
  * agent that names a row that does not exist would spawn nothing, and the user
  * would learn that at the first spawn instead of when making the mistake.
  * A session is also refused a profile that holds a grant only the user gives,
  * because a workflow's agent step runs with its Agent's profile.
  *
- * `unenforced` is not stored. It is computed from the provider's declaration
+ * `unenforced` is not stored. It is computed from the harness's declaration
  * on every read, so it reflects this binary, not the older binary that may
  * have written the row.
  *
@@ -114,8 +114,7 @@ const ASSISTANT_CHANGE_REFUSED =
 
 /**
  * The errors every operation can fail with. `SchemaError` comes from the
- * provider catalog: reading what a provider declares decodes that provider's
- * stored config, and every operation here reads it to report `unenforced`.
+ * account check, which decodes the account's stored snapshots.
  */
 type ReadError = Unauthenticated | Forbidden | Validation | SqlError | Schema.SchemaError;
 
@@ -129,7 +128,7 @@ const make = Effect.gen(function* () {
   // enforces `session.query` on the caller, and deleting an agent is not a
   // read of anybody's sessions.
   const sessions = yield* sessionRepository;
-  const { buildAgentRecordComposer, readProviderIdOrFail, validateAgentProfile } =
+  const { buildAgentRecordComposer, validateAgentProviderAccountHarness, validateAgentProfile } =
     yield* buildAgentFieldChecks;
   const audit = yield* AuditLog;
   const observer = yield* AgentObserver;
@@ -193,8 +192,8 @@ const make = Effect.gen(function* () {
 
     /**
      * Creates an agent that sessions can be spawned from, and returns it. Fails
-     * with `Validation` if the instance or the permission profile does not
-     * exist, and with `Forbidden` when a session names a profile that holds a
+     * with `Validation` if the account or the permission profile does not
+     * exist or the account cannot run in the harness, and with `Forbidden` when a session names a profile that holds a
      * grant only the user gives.
      */
     create: (input: AgentCreateInput): Effect.Effect<Agent, WriteError> =>
@@ -206,11 +205,14 @@ const make = Effect.gen(function* () {
         const stored = yield* withTransaction(
           sql,
           Effect.gen(function* () {
-            // Both reads are inside the write set. An instance or a profile
+            // Both reads are inside the write set. An account or a profile
             // read before the transaction can be deleted between that read and
             // the insert, which would store an agent that names a row that is
             // gone.
-            const providerId = yield* readProviderIdOrFail(decoded.instanceId);
+            yield* validateAgentProviderAccountHarness(
+              decoded.providerAccountId,
+              decoded.harnessId,
+            );
             yield* validateAgentProfile(actor, decoded.permissionProfileId);
             // One clock read, inside the transaction. The row and the event
             // that records the row carry the same instant, so a new agent's
@@ -218,10 +220,10 @@ const make = Effect.gen(function* () {
             const at = yield* nowIso;
             const agent = yield* agents.insert({
               kind: "agent",
-              providerId,
               name: decoded.name,
               systemPrompt: decoded.systemPrompt,
-              instanceId: decoded.instanceId,
+              providerAccountId: decoded.providerAccountId,
+              harnessId: decoded.harnessId ?? null,
               permissionProfileId: decoded.permissionProfileId,
               accessMode: decoded.accessMode ?? DEFAULT_ACCESS_MODE,
               model: selection ?? null,
@@ -236,7 +238,7 @@ const make = Effect.gen(function* () {
               payload: {
                 agentId: agent.id,
                 name: agent.name,
-                instanceId: agent.instanceId,
+                providerAccountId: agent.providerAccountId,
                 permissionProfileId: agent.permissionProfileId,
               },
               at,
@@ -251,12 +253,18 @@ const make = Effect.gen(function* () {
      * Updates an agent and returns it. Only sessions spawned afterwards use the
      * new values. Fails with:
      *
-     * - `Validation` if no field is set or a named instance or profile does
-     *   not exist;
+     * - `Validation` if no field is set or a named account or profile does
+     *   not exist, or the account cannot run in the harness;
      * - `NotFound` if the agent does not exist;
      * - `InvalidState` if the agent belongs to an assistant;
      * - `Forbidden` when a session names a profile that holds a grant only the
      *   user gives.
+     *
+     * When the harness the agent runs in really changes, whether by naming a
+     * harness or by moving to an account with another default, it tells
+     * `AgentObserver` once the update commits, so the stored workflows are
+     * validated again: the new harness may not give a structured result that
+     * a workflow's step asks for, or may give one that the old harness did not.
      */
     update: (input: UpdateInput): Effect.Effect<Agent, WriteError | NotFound | InvalidState> =>
       Effect.gen(function* () {
@@ -276,22 +284,39 @@ const make = Effect.gen(function* () {
           );
         }
         const composeRecord = yield* buildAgentRecordComposer;
-        const stored = yield* withTransaction(
+        const { stored, harnessChanged } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             // Read first, so that an unknown id fails with `not_found` instead
             // of an update that changes no rows and reports success, and an
             // assistant is refused before its fields are checked.
-            yield* readPlainAgentOrFail(id);
-            // Inside the write set. A profile or an instance that is deleted
+            const current = yield* readPlainAgentOrFail(id);
+            // Moving the agent to another account without naming a harness
+            // puts it on that account's default harness. Keeping the old
+            // harness would refuse most moves, since a harness usually runs
+            // only the providers of the account it was chosen for.
+            const written =
+              edit.providerAccountId !== undefined &&
+              edit.providerAccountId !== current.providerAccountId &&
+              edit.harnessId === undefined
+                ? { ...edit, harnessId: null }
+                : edit;
+            // Inside the write set. A profile or an account that is deleted
             // between the check and the update would leave the agent naming a
-            // row that is gone.
-            if (edit.instanceId !== undefined) yield* readProviderIdOrFail(edit.instanceId);
+            // row that is gone. Changing either the account or the harness
+            // checks the pair the agent will have afterwards, so a harness
+            // the new account cannot run is refused instead of being kept.
+            if (written.providerAccountId !== undefined || written.harnessId !== undefined) {
+              yield* validateAgentProviderAccountHarness(
+                written.providerAccountId ?? current.providerAccountId,
+                written.harnessId === undefined ? current.harnessId : written.harnessId,
+              );
+            }
             if (edit.permissionProfileId !== undefined) {
               yield* validateAgentProfile(actor, edit.permissionProfileId);
             }
             const at = yield* nowIso;
-            yield* agents.update(id, edit, at);
+            yield* agents.update(id, written, at);
             yield* audit.append({
               kind: "agent.updated",
               actor: yield* currentStamp,
@@ -300,9 +325,14 @@ const make = Effect.gen(function* () {
               payload: { agentId: id, changed: Object.keys(edit).sort() },
               at,
             });
-            return yield* readAgentOrFail(id);
+            const updated = yield* readAgentOrFail(id);
+            return {
+              stored: updated,
+              harnessChanged: updated.effectiveHarnessId !== current.effectiveHarnessId,
+            };
           }),
         );
+        if (harnessChanged) yield* observer.agentHarnessChanged();
         return composeRecord(stored);
       }),
 
@@ -336,9 +366,12 @@ const make = Effect.gen(function* () {
                 permissionProfileId: undefined,
                 conversationId: undefined,
                 runId: undefined,
+                taskId: undefined,
                 kind: undefined,
                 done: undefined,
+                archived: undefined,
                 activeSince: undefined,
+                workspaceId: undefined,
                 doneSince: undefined,
               }),
             );

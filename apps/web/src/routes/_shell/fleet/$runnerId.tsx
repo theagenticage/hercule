@@ -11,7 +11,7 @@ import {
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   controllerQuery,
-  providersQuery,
+  ensureProviderAccountReads,
   runnerQuery,
   runnerSessionsQuery,
   settingsQuery,
@@ -29,7 +29,7 @@ export const Route = createFileRoute("/_shell/fleet/$runnerId")({
     await Promise.all([
       context.queryClient.ensureQueryData(runnerQuery(context.client, params.runnerId)),
       context.queryClient.ensureQueryData(controllerQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
+      ensureProviderAccountReads(context.queryClient, context.client),
       context.queryClient.ensureQueryData(runnerSessionsQuery(context.client, params.runnerId)),
     ]);
   },
@@ -50,7 +50,6 @@ function RunnerPage(): JSX.Element {
   const { runnerId } = Route.useParams();
 
   useLiveInvalidation(live, queryClient, "runner");
-  useLiveInvalidation(live, queryClient, "provider");
   useLiveInvalidation(live, queryClient, "session");
 
   const runner = useSuspenseQuery(runnerQuery(client, runnerId)).data;
@@ -95,7 +94,7 @@ function RunnerPage(): JSX.Element {
         )}
       </FormCard>
 
-      <Providers client={client} live={live} runner={runner} />
+      <Providers client={client} runner={runner} />
     </div>
   );
 }

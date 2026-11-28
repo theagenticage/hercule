@@ -6,28 +6,31 @@
  * the machine is passed in: `locate` stands in for the PATH, and `version` for
  * running a binary. That lets one test file cover a machine with no `gh`, a
  * machine whose `git --version` prints something unexpected, and a machine
- * with every provider installed.
+ * with every harness installed.
  *
  * The refresh runs every hour, so it runs on a `TestClock`, like the reconnect
  * loop's tests. The tests check that a report is sent only when a value
  * differs from the one already reported, so the fleet's rows are not rewritten
  * every hour for nothing.
  */
-import { describe, expect, it } from "vitest";
-import { Duration, Effect, Fiber, Schema } from "effect";
+import { afterAll, describe, expect, it } from "vitest";
+import { Cause, Duration, Effect, Fiber, Schema } from "effect";
 import { TestClock } from "effect/testing";
-import { arch, platform, totalmem } from "node:os";
-import { IDENTITY_PORT, MAX_FACT_LENGTH, RunnerFacts } from "@hercule/protocol";
+import { chmodSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { arch, platform, tmpdir, totalmem } from "node:os";
+import { join } from "node:path";
+import { IDENTITY_PORT, MAX_FACT_LENGTH, PROBED_TOOLCHAINS, RunnerFacts } from "@hercule/protocol";
 import {
+  DISK_SIZE_DEADLINE,
   FACTS_REFRESH,
   VERSION_DEADLINE,
   probeFacts,
   refreshFacts,
-  thisMachine,
+  buildThisMachine,
   type Machine,
 } from "./probe";
 
-/** What each installed binary prints for `--version`, by binary name. */
+/** What each installed binary prints when asked for its version, by binary name. */
 type Printed = Record<string, string>;
 
 /**
@@ -38,21 +41,52 @@ type Printed = Record<string, string>;
 const buildMachine = (printed: Printed): Machine => ({
   locate: (binary) => (binary in printed ? `/usr/local/bin/${binary}` : undefined),
   version: (path) => Effect.succeed(printed[path.slice("/usr/local/bin/".length)]),
+  diskTotalBytes: Effect.succeed(DISK),
 });
 
-/** Real `--version` output, captured from the pinned toolchain. */
-const GIT = "git version 2.50.1";
-const GH = "gh version 2.99.0 (2025-01-01)";
+/** The size of the stub machine's disk: 1 TiB. */
+const DISK = 1024 ** 4;
+
+/**
+ * Real version output of every probed tool, with the version the probe must
+ * report for it. The rows are in the order the probe reports the tools.
+ */
+const TOOLS = [
+  { name: "git", printed: "git version 2.50.1", version: "2.50.1" },
+  {
+    name: "gh",
+    printed: "gh version 2.103.3 (2025-10-01)\nhttps://github.com/cli/cli",
+    version: "2.103.3",
+  },
+  { name: "node", printed: "v22.11.0", version: "22.11.0" },
+  { name: "pnpm", printed: "9.12.3", version: "9.12.3" },
+  { name: "bun", printed: "1.4.4", version: "1.4.4" },
+  { name: "go", printed: "go version go1.25.1 darwin/arm64", version: "1.25.1" },
+  { name: "rustc", printed: "rustc 1.82.0 (f6e511eec 2024-10-15)", version: "1.82.0" },
+  { name: "python3", printed: "Python 3.12.4", version: "3.12.4" },
+  { name: "uv", printed: "uv 0.4.18 (7b55e9790 2024-10-01)", version: "0.4.18" },
+  // The comma after the version must not end up in it.
+  { name: "docker", printed: "Docker version 27.3.1, build ce12230", version: "27.3.1" },
+  { name: "terraform", printed: "Terraform v1.9.5\non darwin_arm64", version: "1.9.5" },
+  { name: "dotnet", printed: "9.0.100", version: "9.0.100" },
+] as const;
+
+const TOOL_NAMES = TOOLS.map((tool) => tool.name);
+
+const GIT = TOOLS[0].printed;
 
 /** A machine with every binary installed. Tests remove binaries from it. */
 const FULL: Printed = {
-  git: GIT,
-  gh: GH,
-  docker: "Docker version 27.0.0, build abc",
+  ...Object.fromEntries(TOOLS.map((tool) => [tool.name, tool.printed])),
   claude: "1.0.0",
   codex: "1.0.0",
   pi: "1.0.0",
+  agy: "1.0.0",
 };
+
+/** Returns `printed` without the binary `name`. */
+const without = (printed: Printed, name: string): Printed =>
+  Object.fromEntries(Object.entries(printed).filter(([binary]) => binary !== name));
 
 const probePrinted = (printed: Printed, port = IDENTITY_PORT): Promise<RunnerFacts> =>
   Effect.runPromise(probeFacts(buildMachine(printed), port));
@@ -75,6 +109,45 @@ describe("probeFacts", () => {
     expect(facts.totalMemoryBytes).toBeGreaterThan(0);
   });
 
+  it("reports the size of the disk", async () => {
+    expect((await probePrinted(FULL)).diskTotalBytes).toBe(DISK);
+  });
+
+  it("leaves the disk size out when the disk cannot be read", async () => {
+    const unreadable = await Effect.runPromise(
+      probeFacts(
+        {
+          ...buildMachine(FULL),
+          diskTotalBytes: Effect.fail(new Cause.UnknownError(new Error("statfs failed"))),
+        },
+        IDENTITY_PORT,
+      ),
+    );
+    // Absent, not null or zero: the schema allows the key to be missing, and a
+    // missing disk must not fail the whole probe.
+    expect("diskTotalBytes" in unreadable).toBe(false);
+    expect(unreadable.toolchains).toHaveLength(TOOLS.length);
+    expect(Schema.is(RunnerFacts)(unreadable)).toBe(true);
+  });
+
+  it("gives up on a disk read that never completes, and leaves the size out", async () => {
+    // A `statfs` on a dead mount. Waiting for ever would stop the runner from
+    // connecting because of a display fact.
+    const probed = await run(
+      Effect.gen(function* () {
+        const running = yield* Effect.forkChild(
+          probeFacts({ ...buildMachine(FULL), diskTotalBytes: Effect.never }, IDENTITY_PORT),
+        );
+        yield* TestClock.adjust(DISK_SIZE_DEADLINE);
+        return yield* Fiber.join(running);
+      }),
+    );
+
+    expect("diskTotalBytes" in probed).toBe(false);
+    expect(probed.toolchains).toHaveLength(TOOLS.length);
+    expect(Schema.is(RunnerFacts)(probed)).toBe(true);
+  });
+
   it("reports the identity port it was given, defaulting to 4939", async () => {
     expect(IDENTITY_PORT).toBe(4939);
     expect((await probePrinted(FULL)).identityPort).toBe(IDENTITY_PORT);
@@ -86,52 +159,86 @@ describe("probeFacts", () => {
   it("reports docker as present when it is on the PATH, without running it", async () => {
     expect((await probePrinted(FULL)).docker).toBe(true);
 
-    const { docker, ...rest } = FULL;
-    expect(docker).toBeDefined();
-    expect((await probePrinted(rest)).docker).toBe(false);
+    expect((await probePrinted(without(FULL, "docker"))).docker).toBe(false);
+  });
+
+  it("reports docker as present even when its version cannot be read", async () => {
+    // Placement filters on the boolean fact, so a docker that is installed but
+    // prints nothing must still count as present.
+    const facts = await Effect.runPromise(
+      probeFacts(
+        {
+          ...buildMachine(FULL),
+          version: (path) => Effect.succeed(path.endsWith("/docker") ? undefined : "1.0.0"),
+        },
+        IDENTITY_PORT,
+      ),
+    );
+
+    expect(facts.docker).toBe(true);
+    expect(facts.toolchains.map((one) => one.name)).not.toContain("docker");
   });
 });
 
 describe("toolchains", () => {
-  it("lists git and gh with their versions and paths", async () => {
+  it("reports every tool with its parsed version and path, in the fixed order", async () => {
     const facts = await probePrinted(FULL);
 
-    expect(facts.toolchains).toEqual([
-      { name: "git", version: "2.50.1", path: "/usr/local/bin/git" },
-      { name: "gh", version: "2.99.0", path: "/usr/local/bin/gh" },
-    ]);
+    expect(facts.toolchains).toEqual(
+      TOOLS.map((tool) => ({
+        name: tool.name,
+        version: tool.version,
+        path: `/usr/local/bin/${tool.name}`,
+      })),
+    );
   });
 
-  it("leaves out a missing binary, without failing the probe", async () => {
-    const { gh, ...withoutGh } = FULL;
-    expect(gh).toBeDefined();
+  it.each(TOOL_NAMES)(
+    "leaves out %s when it is missing, without failing the probe",
+    async (name) => {
+      const facts = await probePrinted(without(FULL, name));
 
-    const facts = await probePrinted(withoutGh);
-    expect(facts.toolchains.map((one) => one.name)).toEqual(["git"]);
-    // The rest of the probe is unaffected: a machine without `gh` is normal,
-    // not broken.
-    expect(facts.os).toBe(platform());
-  });
+      expect(facts.toolchains.map((one) => one.name)).toEqual(
+        TOOL_NAMES.filter((other) => other !== name),
+      );
+      // The rest of the probe is unaffected: a machine without one tool is
+      // normal, not broken.
+      expect(facts.os).toBe(platform());
+    },
+  );
 
-  it("reports an empty list on a machine with neither", async () => {
-    const facts = await probePrinted({ docker: "Docker version 27.0.0, build abc" });
+  it("reports an empty list on a machine with none of the tools", async () => {
+    const facts = await probePrinted({ claude: "1.0.0" });
     expect(facts.toolchains).toEqual([]);
   });
 
-  it("keeps the raw output when it holds no recognisable version", async () => {
-    const facts = await probePrinted({
-      ...FULL,
-      git: "git: this build prints something else entirely",
-    });
+  it("names the tools it looked for, found or not", async () => {
+    expect((await probePrinted(FULL)).probedToolchains).toEqual(PROBED_TOOLCHAINS);
+    expect((await probePrinted({ claude: "1.0.0" })).probedToolchains).toEqual(PROBED_TOOLCHAINS);
+  });
 
-    expect(facts.toolchains).toEqual([
-      {
-        name: "git",
-        version: "git: this build prints something else entirely",
-        path: "/usr/local/bin/git",
-      },
-      { name: "gh", version: "2.99.0", path: "/usr/local/bin/gh" },
-    ]);
+  it.each(TOOL_NAMES)("keeps the raw output of %s when it holds no version", async (name) => {
+    const facts = await probePrinted({ ...FULL, [name]: `  ${name}: something else entirely\n` });
+
+    expect(facts.toolchains.find((one) => one.name === name)?.version).toBe(
+      `${name}: something else entirely`,
+    );
+  });
+
+  it("keeps the raw output of a version with no patch number", async () => {
+    const facts = await probePrinted({ ...FULL, go: "go version go1.25 darwin/arm64" });
+
+    expect(facts.toolchains.find((one) => one.name === "go")?.version).toBe(
+      "go version go1.25 darwin/arm64",
+    );
+  });
+
+  it("keeps a prerelease and a build suffix in the version", async () => {
+    const facts = await probePrinted({ ...FULL, node: "v23.0.0-rc.1+build.5, extra" });
+
+    expect(facts.toolchains.find((one) => one.name === "node")?.version).toBe(
+      "23.0.0-rc.1+build.5",
+    );
   });
 
   it("leaves out a tool that printed nothing at all", async () => {
@@ -140,7 +247,54 @@ describe("toolchains", () => {
     // report fail to encode.
     const facts = await probePrinted({ ...FULL, git: "   \n" });
 
-    expect(facts.toolchains.map((one) => one.name)).toEqual(["gh"]);
+    expect(facts.toolchains.map((one) => one.name)).toEqual(TOOL_NAMES.slice(1));
+  });
+
+  it("asks go for `version` and every other tool for `--version`", async () => {
+    const asked = new Map<string, ReadonlyArray<string>>();
+    await Effect.runPromise(
+      probeFacts(
+        {
+          ...buildMachine(FULL),
+          version: (path, args) => {
+            asked.set(path.slice("/usr/local/bin/".length), args);
+            return Effect.succeed("1.0.0");
+          },
+        },
+        IDENTITY_PORT,
+      ),
+    );
+
+    expect(Object.fromEntries(asked)).toMatchObject(
+      Object.fromEntries(
+        TOOL_NAMES.map((name) => [name, name === "go" ? ["version"] : ["--version"]]),
+      ),
+    );
+  });
+
+  it("keeps the fixed order when a later tool answers first", async () => {
+    // `git` answers last. Tools are probed at the same time, but the report
+    // must not depend on which probe finishes first.
+    const probed = await run(
+      Effect.gen(function* () {
+        const running = yield* Effect.forkChild(
+          probeFacts(
+            {
+              ...buildMachine(FULL),
+              version: (path) =>
+                path.endsWith("/git")
+                  ? Effect.delay(Effect.succeed("git version 2.50.1"), Duration.seconds(3))
+                  : Effect.succeed("1.0.0"),
+            },
+            IDENTITY_PORT,
+          ),
+        );
+        yield* TestClock.adjust(Duration.seconds(3));
+        return yield* Fiber.join(running);
+      }),
+    );
+
+    expect(probed.toolchains.map((one) => one.name)).toEqual(TOOL_NAMES);
   });
 
   it("gives up on a binary whose --version never returns", async () => {
@@ -153,6 +307,7 @@ describe("toolchains", () => {
             {
               locate: (binary) => (binary === "git" ? "/usr/local/bin/git" : undefined),
               version: () => Effect.never,
+              diskTotalBytes: Effect.succeed(DISK),
             },
             IDENTITY_PORT,
           ),
@@ -178,6 +333,7 @@ describe("toolchains", () => {
         {
           locate: (binary) => (binary === "git" ? "/usr/local/bin/git" : undefined),
           version: () => Effect.succeed(undefined),
+          diskTotalBytes: Effect.succeed(DISK),
         },
         IDENTITY_PORT,
       ),
@@ -193,6 +349,7 @@ describe("toolchains", () => {
         {
           locate: (binary) => (binary === "git" ? `${deep}git` : undefined),
           version: () => Effect.succeed("x".repeat(900)),
+          diskTotalBytes: Effect.succeed(DISK),
         },
         IDENTITY_PORT,
       ),
@@ -206,40 +363,138 @@ describe("toolchains", () => {
   });
 });
 
-describe("provider binaries", () => {
-  it("lists every known provider, present or not", async () => {
+describe("harness binaries", () => {
+  it("lists every known harness, present or not", async () => {
     const { codex, ...withoutCodex } = FULL;
     expect(codex).toBeDefined();
 
     const facts = await probePrinted(withoutCodex);
-    // Unlike a toolchain, a missing provider is still listed, because the fleet
-    // needs to know which machines can host a provider's sessions.
-    expect(facts.providers).toEqual([
+    // Unlike a toolchain, a missing harness is still listed, because the fleet
+    // needs to know which machines can host a harness's sessions.
+    expect(facts.harnesses).toEqual([
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: true, path: "/usr/local/bin/pi" },
+      { name: "agy", present: true, path: "/usr/local/bin/agy" },
     ]);
   });
 
-  it("lists every provider as absent on a machine with none installed", async () => {
+  it("lists every harness as absent on a machine with none installed", async () => {
     const facts = await probePrinted({ git: GIT });
-    expect(facts.providers).toEqual([
+    expect(facts.harnesses).toEqual([
       { name: "claude", present: false },
       { name: "codex", present: false },
       { name: "pi", present: false },
+      { name: "agy", present: false },
     ]);
   });
 });
 
-describe("thisMachine", () => {
+/** Returns whether a process with this id exists. */
+const isRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Waits up to two seconds for the process to end. Returns whether it did. */
+const waitUntilGone = async (pid: number): Promise<boolean> => {
+  for (let attempt = 0; attempt < 40; attempt++) {
+    if (!isRunning(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+};
+
+describe("buildThisMachine", () => {
   it("does not find a binary that is not installed, and probes the machine the test runs on", async () => {
+    const thisMachine = buildThisMachine(tmpdir());
     expect(thisMachine.locate("a-binary-no-machine-has-installed")).toBeUndefined();
 
     const facts = await Effect.runPromise(probeFacts(thisMachine, IDENTITY_PORT));
+    expect(facts.diskTotalBytes).toBeGreaterThan(0);
     expect(facts.os).toBe(platform());
     expect(facts.arch).toBe(arch());
     expect(facts.totalMemoryBytes).toBe(totalmem());
-    expect(facts.providers.map((one) => one.name)).toEqual(["claude", "codex", "pi"]);
+    expect(facts.harnesses.map((one) => one.name)).toEqual(["claude", "codex", "pi", "agy"]);
+  });
+
+  describe("running a version command", () => {
+    const scratch = mkdtempSync(join(tmpdir(), "probe-version-"));
+
+    afterAll(() => {
+      rmSync(scratch, { recursive: true, force: true });
+    });
+
+    /** Writes an executable shell script into the scratch directory and returns its path. */
+    const writeScript = (name: string, body: string): string => {
+      const path = join(scratch, name);
+      writeFileSync(path, `#!/bin/sh\n${body}\n`);
+      chmodSync(path, 0o755);
+      return path;
+    };
+
+    it("runs it in the storage directory, with the tools' network calls switched off", async () => {
+      const storage = mkdtempSync(join(scratch, "storage-"));
+      const script = writeScript(
+        "report",
+        'echo "$PWD|$CHECKPOINT_DISABLE|$RUSTUP_AUTO_INSTALL|$COREPACK_ENABLE_NETWORK"',
+      );
+
+      const printed = await Effect.runPromise(buildThisMachine(storage).version(script, []));
+
+      expect(printed?.trim()).toBe(`${realpathSync(storage)}|1|0|0`);
+    });
+
+    it("stops reading a tool that floods its output, and stops the tool", async () => {
+      const script = writeScript("flood", "exec yes 0123456789");
+
+      const printed = await Effect.runPromise(buildThisMachine(scratch).version(script, []));
+
+      expect(printed).toBeDefined();
+      expect(printed!.length).toBeLessThanOrEqual(4096);
+      expect(printed!.length).toBeGreaterThan(0);
+    });
+
+    it("kills a tool that ignores SIGTERM when the caller stops waiting", async () => {
+      const pidFile = join(scratch, "stubborn.pid");
+      // `exec` keeps the shell's process id, and a signal ignored before `exec` stays ignored.
+      const script = writeScript("stubborn", `trap '' TERM\necho $$ > "${pidFile}"\nexec sleep 30`);
+
+      const printed = await Effect.runPromise(
+        Effect.timeoutOption(buildThisMachine(scratch).version(script, []), Duration.seconds(1)),
+      );
+      const pid = Number(readFileSync(pidFile, "utf8"));
+
+      try {
+        expect(printed._tag, "the tool never prints, so the caller gave up").toBe("None");
+        expect(await waitUntilGone(pid), `process ${pid} is still running`).toBe(true);
+      } finally {
+        // Only needed when an assertion above failed: do not leave the sleeper behind.
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // No such process: it already ended.
+        }
+      }
+    });
+
+    it("returns nothing when the tool exits with an error", async () => {
+      const script = writeScript("fail", "echo 1.2.3; exit 1");
+
+      expect(
+        await Effect.runPromise(buildThisMachine(scratch).version(script, [])),
+      ).toBeUndefined();
+    });
+  });
+
+  it("fails the disk size read when the storage directory cannot be read", async () => {
+    const machine = buildThisMachine("/no/such/directory/on/this/machine");
+
+    expect((await Effect.runPromise(Effect.result(machine.diskTotalBytes)))._tag).toBe("Failure");
   });
 });
 
@@ -295,16 +550,14 @@ describe("refreshFacts", () => {
         expect(sent).toEqual([]);
 
         // Somebody uninstalled `gh` from the machine.
-        const { gh, ...withoutGh } = FULL;
-        expect(gh).toBeDefined();
-        installed = withoutGh;
+        installed = without(FULL, "gh");
         yield* TestClock.adjust(FACTS_REFRESH);
 
         expect(sent).toHaveLength(1);
-        expect(sent[0]?.toolchains.map((one) => one.name)).toEqual(["git"]);
+        expect(sent[0]?.toolchains.map((one) => one.name)).not.toContain("gh");
         // A report holds all the facts, not only the ones that changed.
         expect(sent[0]?.os).toBe(platform());
-        expect(sent[0]?.providers).toHaveLength(3);
+        expect(sent[0]?.harnesses).toHaveLength(4);
 
         // Once the machine stops changing, nothing more is sent. So the probe is
         // compared with the last report sent, not with the hello.
@@ -315,7 +568,7 @@ describe("refreshFacts", () => {
         installed = FULL;
         yield* TestClock.adjust(FACTS_REFRESH);
         expect(sent).toHaveLength(2);
-        expect(sent[1]?.toolchains.map((one) => one.name)).toEqual(["git", "gh"]);
+        expect(sent[1]?.toolchains.map((one) => one.name)).toEqual(TOOL_NAMES);
 
         yield* Fiber.interrupt(loop);
       }),
@@ -351,25 +604,41 @@ describe("refreshFacts", () => {
 });
 
 describe("adapters", () => {
-  it("lists the providers this build has an adapter for", async () => {
+  it("lists the harnesses this build has an adapter for", async () => {
     // A fact about the build, not the machine: the list is the same whether
     // the harnesses are installed or not.
-    expect((await probePrinted(FULL)).adapters).toEqual(["claude-code", "codex", "pi"]);
-    expect((await probePrinted({ git: GIT })).adapters).toEqual(["claude-code", "codex", "pi"]);
+    expect((await probePrinted(FULL)).adapters).toEqual([
+      "claude-code/claude-code",
+      "codex/codex",
+      "pi/pi",
+      "antigravity/antigravity",
+    ]);
+    expect((await probePrinted({ git: GIT })).adapters).toEqual([
+      "claude-code/claude-code",
+      "codex/codex",
+      "pi/pi",
+      "antigravity/antigravity",
+    ]);
   });
 
-  it("still reports every provider binary and whether it is installed", async () => {
+  it("still reports every harness binary and whether it is installed", async () => {
     const { codex, ...withoutCodex } = FULL;
     expect(codex).toBeDefined();
 
     const facts = await probePrinted(withoutCodex);
-    expect(facts.adapters).toEqual(["claude-code", "codex", "pi"]);
+    expect(facts.adapters).toEqual([
+      "claude-code/claude-code",
+      "codex/codex",
+      "pi/pi",
+      "antigravity/antigravity",
+    ]);
     // Adapters do not replace the binaries: the fleet has to show both that
     // this build can drive Codex and that the machine has no `codex` binary.
-    expect(facts.providers).toEqual([
+    expect(facts.harnesses).toEqual([
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: true, path: "/usr/local/bin/pi" },
+      { name: "agy", present: true, path: "/usr/local/bin/agy" },
     ]);
   });
 });

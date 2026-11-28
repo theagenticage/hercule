@@ -23,6 +23,18 @@ export const markShorthand = <S extends Schema.Top>(
 ): S => schema.annotate({ [SHORTHAND]: shorthand }) as S;
 
 /**
+ * Annotates a list field's schema with the codec that parses one word into one
+ * item of the list. The command line takes a list one word per use of its
+ * flag, so the codec is the item's, not the list's.
+ */
+export const markRepeatedShorthand = <
+  S extends Schema.Top & { readonly Type: ReadonlyArray<unknown> },
+>(
+  schema: S,
+  shorthand: Schema.Codec<S["Type"][number], string>,
+): S => schema.annotate({ [SHORTHAND]: shorthand }) as S;
+
+/**
  * Annotates a schema that is already the codec for the word with itself. Used
  * for fields whose wire form is the typed word, such as query string fields,
  * so a caller finds the codec in the same place as for every other shorthand.

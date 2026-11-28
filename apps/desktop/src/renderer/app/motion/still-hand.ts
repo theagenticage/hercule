@@ -1,0 +1,162 @@
+/**
+ * Waiting for a still hand: a change the user did not cause must not move
+ * what they are reading or about to reach for. `waitForStillHand` holds a
+ * change back until the pointer has left the place it would change, and for
+ * as long as the user carries a card.
+ *
+ * Nothing runs while nothing waits. The first waiter adds one pointer
+ * listener and one polling timer, and the last one to finish removes both.
+ */
+
+/** How close the pointer may rest to the target before someone counts as reading it, in pixels. */
+const READING_DISTANCE = 120;
+
+/** How close a pointer on the move may come to the target before someone counts as about to reach it, in pixels. */
+const REACHING_DISTANCE = 280;
+
+/** How long after its last movement a pointer still counts as on the move, in milliseconds. */
+const MOVING_FOR = 900;
+
+/** The longest a change waits for a hand that is not dragging, in milliseconds. A drag does not count towards it. */
+const LONGEST_WAIT = 8_000;
+
+/** How often a waiting change looks again, in milliseconds. */
+const CHECK_EVERY = 240;
+
+/** What a change waits for. */
+export interface StillHandOptions {
+  /**
+   * Returns every element the change would happen at: a change can show in
+   * more than one place, such as a card drawn in two lanes. The hand is busy
+   * when it is near any of them. A change with no place on the page returns
+   * none, and waits only for a drag to end.
+   */
+  readonly targets: () => readonly Element[];
+  /** Returns whether the user is dragging something right now. */
+  readonly isDragging: () => boolean;
+  /** Stops the wait: the returned promise then resolves with `false`. */
+  readonly signal?: AbortSignal;
+  /**
+   * The longest the wait lasts for a hand that is not dragging, in
+   * milliseconds. It defaults to eight seconds, which is right for a change
+   * that must not be held back for long. A change that must never happen under
+   * a hand sets a longer one, and it then happens after that time at the
+   * latest.
+   */
+  readonly longestWait?: number;
+}
+
+interface Waiter {
+  readonly options: StillHandOptions;
+  /** When the wait began, or when the last drag it saw ended. The longest wait counts from here. */
+  startedAt: number;
+  readonly finish: (isStill: boolean) => void;
+}
+
+const waiters = new Set<Waiter>();
+let timer: ReturnType<typeof setTimeout> | null = null;
+
+/** The last place the pointer was seen while someone waited, and when it last moved. `null` until it moves. */
+let pointer: { readonly x: number; readonly y: number; readonly movedAt: number } | null = null;
+
+const rememberPointer = (event: PointerEvent): void => {
+  pointer = { x: event.clientX, y: event.clientY, movedAt: performance.now() };
+};
+
+/** Returns how far the point `x`, `y` is from the rectangle, in pixels. It is 0 inside it. */
+const distanceFrom = (rect: DOMRect, x: number, y: number): number =>
+  Math.hypot(
+    Math.max(rect.left - x, 0, x - rect.right),
+    Math.max(rect.top - y, 0, y - rect.bottom),
+  );
+
+/**
+ * Returns whether the user's hand is busy near `target`. The pointer's place
+ * is known only from its first move after the wait began, so a pointer that
+ * has rested over the target since before counts through `:hover`.
+ */
+const isHandNearElement = (target: Element, now: number): boolean => {
+  if (target.matches(":hover")) return true;
+  if (pointer === null) return false;
+  const distance = distanceFrom(target.getBoundingClientRect(), pointer.x, pointer.y);
+  if (distance < READING_DISTANCE) return true;
+  return now - pointer.movedAt < MOVING_FOR && distance < REACHING_DISTANCE;
+};
+
+/** Returns whether the user is dragging, or the hand is busy near any target of the change. */
+const isHandNear = (options: StillHandOptions, now: number): boolean =>
+  options.isDragging() || options.targets().some((target) => isHandNearElement(target, now));
+
+const stopWatching = (): void => {
+  if (timer !== null) clearTimeout(timer);
+  timer = null;
+  pointer = null;
+  window.removeEventListener("pointermove", rememberPointer);
+};
+
+const check = (): void => {
+  timer = null;
+  const now = performance.now();
+  for (const waiter of [...waiters]) {
+    // A drag vetoes every change, however long it lasts, and the longest wait
+    // starts again when it ends: the hand is only still after the drop.
+    if (waiter.options.isDragging()) {
+      waiter.startedAt = now;
+      continue;
+    }
+    if (
+      now - waiter.startedAt >= (waiter.options.longestWait ?? LONGEST_WAIT) ||
+      !isHandNear(waiter.options, now)
+    ) {
+      waiter.finish(true);
+    }
+  }
+  if (waiters.size > 0) timer = setTimeout(check, CHECK_EVERY);
+};
+
+/**
+ * Waits until the user's hand is still, and resolves with `true`. The hand is
+ * not still while:
+ *
+ * - the user is dragging;
+ * - the pointer rests within 120px of a target, however long it has rested,
+ *   because a parked pointer means someone is reading;
+ * - the pointer moved in the last 900ms within 280px of a target.
+ *
+ * It resolves at once when the hand is already still. A pointer that stays
+ * near a target holds it for 8 seconds at most. A drag holds it for as long
+ * as it lasts, and the 8 seconds count from the drop: they cover a hand that
+ * rests, not a card in the hand. When `signal` aborts first, it resolves with
+ * `false` and the change should not happen.
+ */
+export const waitForStillHand = (options: StillHandOptions): Promise<boolean> =>
+  new Promise((resolve) => {
+    if (options.signal?.aborted === true) {
+      resolve(false);
+      return;
+    }
+    const now = performance.now();
+    if (!isHandNear(options, now)) {
+      resolve(true);
+      return;
+    }
+    const waiter: Waiter = {
+      options,
+      startedAt: now,
+      finish: (isStill) => {
+        waiters.delete(waiter);
+        options.signal?.removeEventListener("abort", cancel);
+        if (waiters.size === 0) stopWatching();
+        resolve(isStill);
+      },
+    };
+    const cancel = (): void => {
+      waiter.finish(false);
+    };
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    if (waiters.size === 0) {
+      window.addEventListener("pointermove", rememberPointer, { passive: true });
+      timer = setTimeout(check, CHECK_EVERY);
+    }
+    waiters.add(waiter);
+  });

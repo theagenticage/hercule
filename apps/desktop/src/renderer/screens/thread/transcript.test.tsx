@@ -310,7 +310,7 @@ describe("Transcript", () => {
 
   it("draws the command a runtime error ends with as inline code", () => {
     const command =
-      "hercule runner install-harness 01a1f00d-0000-7000-8000-000000000001 --provider claude-code";
+      "hercule runner install-harness 01a1f00d-0000-7000-8000-000000000001 --harness claude-code/claude-code";
     const { container } = renderWithRuntimeError(
       `Claude Code is not installed on this runner. Install it with: \`${command}\``,
       "HarnessNotInstalled",

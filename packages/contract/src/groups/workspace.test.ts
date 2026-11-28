@@ -7,10 +7,14 @@
  * rules here, with one error a caller can act on, rather than by a command that
  * fails halfway through on a runner. What comes back is different: a fact the
  * machine reported, which the record holds exactly as reported.
+ *
+ * Also tests that `workspace.disposeMany` refuses a key it does not declare, so
+ * a misspelled `expectedLastUsedAt` cannot turn a guarded removal into an
+ * unguarded one.
  */
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
-import { Branch, Checkout, StartingRevision } from "./workspace";
+import { Branch, Checkout, StartingRevision, WorkspaceDisposeManyInput } from "./workspace";
 
 const isAccepted = (schema: Schema.Codec<string>, value: string): boolean =>
   Schema.decodeUnknownExit(schema)(value)._tag === "Success";
@@ -130,5 +134,41 @@ describe("a starting revision", () => {
     ]) {
       expect(Schema.decodeUnknownExit(StartingRevision)(revision)._tag).toBe("Failure");
     }
+  });
+});
+
+describe("the payload of workspace.disposeMany", () => {
+  const WORKSPACE_ID = "0199e0e7-0000-7000-8000-000000000010";
+  const decode = (input: unknown) =>
+    Schema.decodeUnknownExit(WorkspaceDisposeManyInput)(input)._tag;
+
+  it("accepts items with and without expectedLastUsedAt", () => {
+    expect(
+      decode({
+        items: [
+          { workspaceId: WORKSPACE_ID },
+          { workspaceId: WORKSPACE_ID, expectedLastUsedAt: "2026-11-03T10:00:00.000Z" },
+        ],
+      }),
+    ).toBe("Success");
+  });
+
+  it("refuses an unknown key in an item", () => {
+    expect(
+      decode({
+        items: [{ workspaceId: WORKSPACE_ID, expectedLastUsed: "2026-11-03T10:00:00.000Z" }],
+      }),
+    ).toBe("Failure");
+  });
+
+  it("refuses an unknown key beside items", () => {
+    expect(decode({ items: [{ workspaceId: WORKSPACE_ID }], force: true })).toBe("Failure");
+  });
+
+  it("refuses no items and more than 200 items", () => {
+    expect(decode({ items: [] })).toBe("Failure");
+    expect(
+      decode({ items: Array.from({ length: 201 }, () => ({ workspaceId: WORKSPACE_ID })) }),
+    ).toBe("Failure");
   });
 });

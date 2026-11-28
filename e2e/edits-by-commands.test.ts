@@ -32,7 +32,7 @@ import {
   isLoginAvailable,
   LOGIN_DEADLINE_MS,
   parseJsonOutputOrFail,
-  prepareLoggedInInstance,
+  prepareLoggedInAccount,
   readApiKey,
   waitForTranscriptTag,
   type Page,
@@ -177,7 +177,7 @@ beforeAll(async () => {
   );
   expect(login.code, `${login.stdout}\n${login.stderr}`).toBe(0);
 
-  ({ runnerId } = await prepareLoggedInInstance({
+  ({ runnerId } = await prepareLoggedInAccount({
     home: state.home,
     binary,
     url: controller.url,
@@ -201,7 +201,7 @@ describe.skipIf(!wanted)("two sessions that change one file only through shell c
     async (ctx) => {
       if (runnerId === undefined) {
         ctx.skip(
-          "no login for the claude-code instance: name a credentials file in " +
+          "no login for the claude-code account: name a credentials file in " +
             "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
         );
         return;

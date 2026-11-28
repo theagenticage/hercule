@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { EventId } from "@hercule/contract";
-import { announce } from "../db";
+import { announce, uuidFromString } from "../db";
 
 /** One event as it goes into the log. */
 export interface EventToAppend {
@@ -31,6 +31,11 @@ export interface EventToAppend {
   readonly raw: Readonly<Record<string, unknown>> | null;
   /** The actor stamp of the mutation behind the event, or null when there is none. */
   readonly actor: string | null;
+  /**
+   * The runner the event is about, as an id, for the audit entries that show a
+   * machine's activity. Left out, the event is stored with no runner.
+   */
+  readonly runnerId?: string;
 }
 
 /**
@@ -50,13 +55,14 @@ export const appendEvent = (
     const written = yield* sql<{ readonly id: number }>`
       INSERT INTO events
         (source, connection_id, system, kind, occurred_at, received_at,
-         dedup_key, refs, url, title, author, payload, raw, actor)
+         dedup_key, refs, url, title, author, payload, raw, actor, runner_id)
       VALUES
         (${event.source}, ${event.connectionId}, ${event.system}, ${event.kind},
          ${event.occurredAt}, ${event.receivedAt}, ${event.dedupKey},
          ${JSON.stringify(event.refs)}, ${event.url}, ${event.title}, ${event.author},
          ${JSON.stringify(event.payload)},
-         ${event.raw === null ? null : JSON.stringify(event.raw)}, ${event.actor})
+         ${event.raw === null ? null : JSON.stringify(event.raw)}, ${event.actor},
+         ${event.runnerId === undefined ? null : uuidFromString(event.runnerId)})
       ON CONFLICT (source, ifnull(connection_id, x''), dedup_key) DO NOTHING
       RETURNING id
     `;

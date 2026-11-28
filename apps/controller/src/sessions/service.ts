@@ -25,15 +25,20 @@ import {
   buildAgentStepResultRequest,
   SessionSpec,
   type AccessMode,
+  type AccountUsageReported,
   type AgentStepResultRequest,
   type ApprovalDecision,
   type ContinuedSubagent,
   type Delivery,
   type FilesEdited,
   type GitIdentity,
+  type HarnessAccount,
   SubagentId,
   type ModelSelection,
-  type ProviderEvent,
+  type ModelDeclaration,
+  type HarnessEvent,
+  type McpServerLeftOutReason,
+  type McpServerWarningReason,
   type QuestionAnswers,
   type SessionBinding,
   type SessionInput,
@@ -44,7 +49,11 @@ import {
   type SessionStart,
   type SessionStop,
   type WorkspaceStepKey,
+  MAX_MESSAGE_LENGTH,
+  MCP_GATEWAY_ENTRY_NAME,
+  readMcpServersHarnessIds,
   SKILLS_CAPABILITY,
+  type HarnessMcpServer,
 } from "@hercule/protocol";
 import {
   createDecodeValidationError,
@@ -74,6 +83,7 @@ import {
   type Passage,
   type Session,
   type SessionIdsInput,
+  type SessionMoveToTaskInput,
   type SessionKind,
   type SessionRequest,
   type SessionStatus,
@@ -82,13 +92,32 @@ import {
   type TranscriptRow,
   type Unauthenticated,
   type Validation,
+  WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
-import { buildSessionStamp, currentStamp, requireGrant, SYSTEM_ACTOR, type Actor } from "../actor";
+import {
+  buildSessionStamp,
+  currentStamp,
+  requireGrant,
+  requireUserActor,
+  SYSTEM_ACTOR,
+  type Actor,
+} from "../actor";
 import { excludeDigest, claimAttachments, readClaimableAttachments } from "../attachments";
-import { PluginHost } from "../plugins";
+import {
+  buildLeftOutWarning,
+  decideLeftOutReason,
+  decideNoGatewayReason,
+  mcpServerCatalogue,
+  type NoGatewayReason,
+  type LeftOutServer,
+  type StartDelivery,
+} from "../mcp-servers";
+import { findAccountKind, PluginHost } from "../plugins";
+import { providerAccountRepository } from "../provider-accounts";
 import {
   afterCommit,
   announce,
+  announceTaskCardChange,
   buildMatchExpression,
   nowIso,
   buildPageInputFields,
@@ -107,20 +136,23 @@ import {
   permissionRequestRepository,
   SessionTokens,
 } from "../permissions";
-import type { SecretDecryptError } from "../secrets";
-import type { SendOutcome } from "../runners";
+import { runnerRepository, type SendOutcome } from "../runners";
 import { decideSessionSkills, type SessionLibrarySkill } from "../skills";
-import { permissionRequestSubscriptions } from "../subscriptions";
-import { WorkspaceService, type GithubAccount } from "../workspaces";
+import { permissionRequestSubscriptions, subscriptionRepository } from "../subscriptions";
+import { TaskService } from "../tasks";
+import { AccountUsage } from "../usage";
+import { WorkspaceService, type GithubAccount, type Retention } from "../workspaces";
 import {
   APPROVAL_ANSWER_IDS,
   buildApprovalNotification,
   buildRequestSubject,
   buildWaitEndedWithdrawReason,
   buildWithdrawReason,
+  WITHDRAW_REASON_SESSION_ARCHIVED,
   WITHDRAW_REASON_SESSION_ENDED,
   type WaitEndedBy,
 } from "./approval-notification";
+import { refuseArchived } from "./archived";
 import {
   findAttachmentRefusal,
   refuseUnacceptedAttachments,
@@ -156,6 +188,8 @@ import {
   type Tracked,
 } from "./stream";
 import { subagentRepository } from "./subagent-repository";
+import { sessionTaint } from "../taint";
+import { cutText } from "../text";
 import {
   collectSubagentTree,
   computeSubagentsAfter,
@@ -165,7 +199,7 @@ import {
   type StoredSubagent,
   type SubagentEventFacts,
 } from "./subagents";
-import { hasOtherTurn, readAssistantTexts, readOpenTurnId } from "./transcript-log";
+import { hasOtherTurn, omitRawPayload, readAssistantTexts, readOpenTurnId } from "./transcript-log";
 import { buildStepKey, buildTurnInput } from "./turn-input";
 import { addUsageReport, clearProcessShare } from "./usage";
 
@@ -180,6 +214,7 @@ const TranscriptInput = Schema.Struct({
   id: Id,
   subagentId: Schema.optionalKey(SubagentId),
   after: Schema.optionalKey(TranscriptPosition),
+  includeRaw: Schema.optionalKey(Schema.Boolean),
   ...buildPageInputFields(TRANSCRIPT_SORT_FIELDS),
 });
 
@@ -235,10 +270,42 @@ export interface InputPage {
 }
 
 /**
+ * How a new session gets its Task:
+ *
+ * - `fixed`: the session takes `taskId` as it is and goes through no rule. An
+ *   assistant's session has none. A workflow run's step session has its run's
+ *   Task, even a finished one, and the run may have none.
+ * - `joining`: the session joins a Task by the join rule
+ *   (`TaskService.joinSession`). `requestedTaskId` is the Task the spawn
+ *   named, and `callerTaskId` is the Task of the session that spawned this
+ *   one, or of the parent of a fork.
+ */
+export type TaskSource =
+  | { readonly _tag: "fixed"; readonly taskId: string | undefined }
+  | {
+      readonly _tag: "joining";
+      readonly requestedTaskId: string | undefined;
+      readonly callerTaskId: string | undefined;
+    };
+
+/**
+ * The parts of a prompt that has a context block after the user's words, as
+ * the caller knows them, so the title never has to be read back out of the
+ * prompt text.
+ */
+export interface TitleParts {
+  /** The user's own words in the prompt, without the context block. May be empty. */
+  readonly words: string;
+  /** The title of the first thing in the context block that has one. */
+  readonly firstThingTitle: string | undefined;
+}
+
+/**
  * Everything needed to store one new session, whether it starts a
  * conversation or continues another session. Every value is already decided:
  * the controller daemon chose the runner and opened the workspace before this
- * row is written.
+ * row is written. The one exception is the session's Task, which `create`
+ * decides from `taskSource`.
  */
 export interface CreateRequest {
   /**
@@ -259,6 +326,11 @@ export interface CreateRequest {
    */
   readonly step: WorkspaceStepKey | undefined;
   readonly runnerId: string;
+  /**
+   * The qualified id of the harness the session runs in. The caller resolves
+   * it when it places the session, and the session keeps it for good.
+   */
+  readonly harnessId: string;
   readonly requestedAccessMode: AccessMode;
   readonly parentSessionId: string | undefined;
   /** The spec sent to the runner. The row's stored fields are taken from it. */
@@ -271,12 +343,24 @@ export interface CreateRequest {
    * from the prompt (`buildTitle`).
    */
   readonly title: string | undefined;
+  /**
+   * The words and the first thing's title of a prompt that holds a context
+   * block, or `undefined` when the whole prompt is the user's words.
+   */
+  readonly titleParts?: TitleParts | undefined;
   /** The role the caller chose; `undefined` for a session that starts without one. */
   readonly role: string | undefined;
+  /**
+   * The ids of the servers in the session's own list, already checked or
+   * copied from a list that was, by the caller (`mcpServerListRule`). Absent
+   * for a session that has none.
+   */
+  readonly mcpServerIds?: ReadonlyArray<string> | undefined;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, apart from the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
   readonly projectId: string | undefined;
+  readonly taskSource: TaskSource;
   /** The branch the main workspace is switched to before the harness starts. */
   readonly checkoutBranch: string | undefined;
   /** The GitHub account this session pushes as. */
@@ -299,6 +383,21 @@ export interface StartRequest {
   /** The session's oldest waiting input, claimed (`sentAt` set) in the same transaction. */
   readonly input: StoredInput;
 }
+
+/** The two facts of a start that decide whether the harness can be given the MCP Gateway's entry. */
+type GatewayDelivery = Pick<StartDelivery, "runnerReachesMcpServers" | "harnessPassthrough">;
+
+/**
+ * The one entry a start gives the harness: the MCP Gateway, which the runner
+ * resolves against the controller's address and the session's token
+ * (`SessionSpec.mcpServers`, spec 06 section 4).
+ */
+const MCP_GATEWAY_ENTRY: HarnessMcpServer = {
+  name: MCP_GATEWAY_ENTRY_NAME,
+  type: "http",
+  url: "/mcp",
+  bearer: "session-token",
+};
 
 /**
  * What a start frame needs from outside this domain, passed in by the caller:
@@ -326,15 +425,37 @@ export interface StartNeeds {
     connectionId: string,
   ) => Effect.Effect<GitIdentity | undefined, SqlError>;
   /**
-   * Returns the provider instance's credentials, decrypted for this frame and
-   * stored nowhere. Fails when they cannot be decrypted, which skips the
-   * session: a session started without its key would report that it is not
-   * logged in.
+   * Checks that the account can run in the harness on the runner the sessions
+   * start on, as it can now rather than when the session was queued. Fails
+   * with `InvalidState` and the reason when it cannot, such as a sign-in that
+   * has since ended or a harness that was removed from the runner. That ends
+   * the session like a failed `prepareHarnessAccount`.
    */
-  readonly readSecrets: (
-    instanceId: string,
-    providerId: string,
-  ) => Effect.Effect<Record<string, string>, SqlError | SecretDecryptError>;
+  readonly requireAccountRunnable: (
+    providerAccountId: string,
+    harnessId: string,
+  ) => Effect.Effect<void, InvalidState | SqlError>;
+  /**
+   * Returns what the runner needs to run the harness for the account: its
+   * home, model argument and credential, the credential decrypted for this
+   * frame and stored nowhere (`prepareHarnessAccount`). Fails when the account
+   * is gone or the pair cannot run, or when the key cannot be decrypted. That
+   * skips the session: a session started without its key would report that it
+   * is not signed in.
+   */
+  readonly prepareHarnessAccount: (
+    providerAccountId: string,
+    harnessId: string,
+  ) => Effect.Effect<HarnessAccount, NotFound | InvalidState | SqlError>;
+  /**
+   * Returns the account's whole Model Catalog for the frame's `catalogModels`
+   * (`ModelCatalogs.findModelDeclarations`), or `undefined` when the frame
+   * carries none. A database read only.
+   */
+  readonly findModelDeclarations: (
+    providerAccountId: string,
+    harnessId: string,
+  ) => Effect.Effect<ReadonlyArray<ModelDeclaration> | undefined, SqlError>;
   /**
    * Builds the session's coordination paragraph (spec 19 section 7.1), or
    * returns `undefined` when the session gets none.
@@ -515,6 +636,12 @@ const INPUT_DIRECTION: SortDirection = "asc";
 const NO_SUCH_INPUT = "no such input on that session";
 
 /**
+ * The error message for a session whose Provider Account was deleted. The
+ * session is kept as history, but nothing can run it any more.
+ */
+export const ACCOUNT_DELETED = "The account this thread ran on was deleted.";
+
+/**
  * Returns the refusal of `markDone` for the session `id`, which is not a
  * Thread. The whole call changed nothing, so the message says which id to
  * remove.
@@ -529,6 +656,47 @@ const describeMarkDoneRefusal = (id: string, kind: SessionKind): string =>
  */
 const describeReopenRefusal = (id: string, kind: SessionKind): string =>
   `${id} is not a Thread (its kind is ${kind}), so it is never Done and there is nothing to reopen. Nothing was reopened, so remove that id and try again`;
+
+/** The refusal of `session.moveToTask` for a caller who is not the user. */
+const ONLY_THE_USER_MOVES_A_THREAD =
+  "only the user may move a Thread to another Task: it is the user's decision about what belongs together, so a session may not; ask the user instead";
+
+/** Returns the refusal of `session.moveToTask` for the session `id`, which is not a Thread. */
+const describeMoveToTaskRefusal = (id: string, kind: SessionKind): string =>
+  `${id} is not a Thread (its kind is ${kind}), and only a Thread belongs to a Task that can be changed; leave this session where it is`;
+
+/** The refusal of `session.archive` for a session that is not a Thread. */
+const ONLY_A_THREAD_CAN_BE_ARCHIVED =
+  "Only a Thread can be archived. Stop an Agent's session with `session.stop`.";
+
+/** The reason stored on the Queued Input an archive cancels. */
+const ARCHIVED_INPUT_REASON = "The session was archived, so it takes no more input.";
+
+/**
+ * Returns the end reason of a subscription whose holding session was
+ * archived. The session is named because a reader of the row may have several
+ * sessions and needs to know which one held this subscription.
+ */
+const buildArchivedHolderReason = (sessionId: string): string =>
+  `session ${sessionId}, which held this subscription, was archived and takes no more input`;
+
+/**
+ * Returns the refusal of `session.archive` while sessions are working. It
+ * names each one by its title, or by its id when it has none, and says what
+ * to do. Nothing was archived when it is returned.
+ */
+const describeWorkingRefusal = (
+  working: ReadonlyArray<Pick<StoredSession, "id" | "title">>,
+): string => {
+  const names = working.map((session) => (session.title === "" ? session.id : session.title));
+  const list =
+    names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return names.length === 1
+    ? `${list} is working. Stop it first, or wait for its turn to end.`
+    : `${list} are working. Stop them first, or wait for their turns to end.`;
+};
 
 const NO_SUCH_SUBAGENT =
   "no such subagent on that session; list the session's subagents to find their ids";
@@ -630,13 +798,13 @@ const describeExited = (reason: string): string =>
   `that session's harness exited (${reason}) before this input was sent`;
 
 /**
- * Returns the provider-native session id from a `session.started` event, if
+ * Returns the harness-native session id from a `session.started` event, if
  * it has one. The key is the same as `SessionBinding`'s field, because it is
  * the same value. When the event has none, the id stays null until the next
  * sessions report.
  */
-const findNativeId = (event: ProviderEvent): string | undefined =>
-  event._tag === "session.started" ? event.providerRefs?.nativeSessionId : undefined;
+const findNativeId = (event: HarnessEvent): string | undefined =>
+  event._tag === "session.started" ? event.harnessRefs?.nativeSessionId : undefined;
 
 /** The maximum length of a session title, as shown in a sidebar row. */
 const MAX_TITLE_LENGTH = 80;
@@ -670,20 +838,29 @@ const cleanGeneratedText = (text: string): string =>
 const isAcceptableRole = Schema.is(SessionRole);
 
 /**
- * Builds a session's short title, trimmed and cut by `cutTitle`:
- * `chosen` when the caller chose a title, otherwise the first non-blank line
- * of the session's first prompt, otherwise the name of the prompt's first
- * image. That way a sidebar row has something to show without reading the
+ * Builds a session's short title, trimmed and cut by `cutTitle`. The title is
+ * the first of these that exists:
+ *
+ * 1. `chosen`, when the caller chose a title;
+ * 2. the first non-blank line of the user's words, which are `titleParts.words`
+ *    when the prompt holds a context block and the whole `prompt` otherwise;
+ * 3. the title of the first thing in the context block that has one;
+ * 4. the name of the prompt's first image.
+ *
+ * The context block never supplies a line of the title when the prompt has
+ * words. That way a sidebar row has something to show without reading the
  * transcript.
  */
 const buildTitle = (
   chosen: string | undefined,
   prompt: string,
+  titleParts: TitleParts | undefined,
   firstAttachmentName: string | undefined,
 ): string => {
   const title =
     chosen ??
-    prompt.split("\n").find((line) => line.trim().length > 0) ??
+    (titleParts?.words ?? prompt).split("\n").find((line) => line.trim().length > 0) ??
+    titleParts?.firstThingTitle ??
     firstAttachmentName ??
     "";
   return cutTitle(title);
@@ -703,6 +880,17 @@ type InputError = ReadError | NotFound | InvalidState | Schema.SchemaError;
 const keepsInputsOnExit = (
   session: Pick<StoredSession, "conversationId" | "conversationDeleted">,
 ): boolean => session.conversationId !== null && !session.conversationDeleted;
+
+/**
+ * Returns the retention an exited session's workspace lease is released with.
+ * An archived session never comes back, so it wins over the other two: an
+ * archived session is `archived`, a session that can still be resumed is
+ * `idle`, and any other is `orphan`.
+ */
+const decideExitRetention = (exited: Pick<StoredSession, "archived" | "resumable">): Retention => {
+  if (exited.archived !== null) return "archived";
+  return exited.resumable ? "idle" : "orphan";
+};
 
 /**
  * Checks whether an agent step's session keeps its waiting step prompt
@@ -734,13 +922,30 @@ const keepsStepPromptOnExit = (
   exited.resumable &&
   !exited.crashGuardArmed;
 
+/**
+ * Returns the event a runner reported without the fields only the controller
+ * may write. Today that is `mcpServers` on a `runtime.warning`: the controller
+ * writes it for the servers a start left out, and a client draws a fix button
+ * from it, so a runner must not be able to name servers there. Returns any
+ * other event as it is.
+ */
+const removeControllerFields = (event: HarnessEvent): HarnessEvent => {
+  if (event._tag !== "runtime.warning" || event.mcpServers === undefined) return event;
+  const copy = { ...event };
+  delete copy.mcpServers;
+  return copy;
+};
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const sessions = yield* sessionRepository;
+  const taint = yield* sessionTaint;
   const permissionRequests = yield* permissionRequestRepository;
   const requestSubscriptions = yield* permissionRequestSubscriptions;
+  const subscriptions = yield* subscriptionRepository;
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
+  const providerAccounts = yield* providerAccountRepository;
   const subagents = yield* subagentRepository;
   const readSession = readSessionOrFail(sessions);
   const tokens = yield* SessionTokens;
@@ -748,10 +953,20 @@ const make = Effect.gen(function* () {
   const observer = yield* SessionObserver;
   const editObserver = yield* SessionEditObserver;
   const workspaces = yield* WorkspaceService;
+  const tasks = yield* TaskService;
   const notifier = yield* Notifier;
+  const accountUsage = yield* AccountUsage;
+  const host = yield* PluginHost;
+  const catalogue = yield* mcpServerCatalogue;
+  const runners = yield* runnerRepository;
   // The attachment claim, the image check and the skills decision read
   // through this service's client.
   const provideSql = Effect.provideService(SqlClient.SqlClient, sql);
+  // The attachment check also reads the plugin host, to tell which models a
+  // harness runs from the account's Model Catalog.
+  const provideAttachmentCheck = <A, E>(
+    check: Effect.Effect<A, E, SqlClient.SqlClient | PluginHost>,
+  ): Effect.Effect<A, E> => check.pipe(provideSql, Effect.provideService(PluginHost, host));
 
   /**
    * Each session's ingest state: its last sequence number and the delta text
@@ -794,9 +1009,18 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Takes the Done mark off a session, in the caller's transaction, and
-   * writes the `session.reopened` audit entry, whose record announces the
-   * change. Writes nothing when the session is not Done.
+   * Takes the Done mark off a session, in the caller's transaction, makes sure
+   * the Thread has a joinable Task, and writes the `session.reopened` audit
+   * entry, whose record announces the change. Writes nothing when the session
+   * is not Done.
+   *
+   * The Thread keeps its Task while that is joinable (neither deleted nor
+   * finished). Otherwise (it has none, or its Task is deleted or finished) it
+   * joins the joinable Task of its workspace or gets a new one, stamped with
+   * `actor` (`TaskService.rejoinThread`), because coming back after the user
+   * closed a Task is new work. This is the only place a resume is told apart
+   * from a reopen: a harness resume of an exited Thread that was never Done
+   * changes nothing and never reaches this function.
    *
    * `inputId` names the input that reopened it, and is left out for an
    * explicit reopen, so a reader of the audit entry can tell the two apart.
@@ -814,6 +1038,16 @@ const make = Effect.gen(function* () {
       // unless it has exited. `rejoinOverlaps` checks that itself, and the
       // resume that brings an exited Thread back runs the steps then.
       yield* editObserver.becameUnfinishedAgain(sessionId);
+      // Read after the reopen wrote its row, so the Thread certainly exists.
+      const thread = Option.getOrThrow(yield* sessions.one(sessionId));
+      const taskId = yield* tasks.rejoinThread({
+        currentTaskId: thread.taskId ?? undefined,
+        workspaceId: thread.workspaceId,
+        title: thread.title,
+        projectId: thread.projectId ?? undefined,
+        actor,
+      });
+      if (taskId !== thread.taskId) yield* sessions.setTaskId(sessionId, taskId);
       yield* audit.append({
         kind: "session.reopened",
         actor,
@@ -826,22 +1060,154 @@ const make = Effect.gen(function* () {
 
   /**
    * Writes a `runtime.warning` event stamped `at` to the session's stream, in the caller's
-   * transaction, and announces the session's transcript. The write moves the
-   * session's sequence offset (`sessions.appendRuntimeWarning`), so the session's
-   * cached ingest state is dropped once the transaction commits, and ingest
-   * reads the new offset.
+   * transaction, and announces the session's transcript. The row takes a
+   * sequence number of its own (`sessions.appendRuntimeWarning`), so it is safe
+   * while a runner's turn runs: it moves neither the runner's sequence nor the
+   * text held for the session's open items. `mcpServers` is given when the
+   * warning is about MCP Servers.
    */
   const appendRuntimeWarning = (
     sessionId: string,
     message: string,
     at: string,
+    mcpServersWarned?: ReadonlyArray<{
+      readonly mcpServerId: string;
+      readonly reason: McpServerWarningReason;
+    }>,
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
-      yield* sessions.appendRuntimeWarning(sessionId, message, at);
-      yield* afterCommit(() => {
-        tracking.delete(sessionId);
-      });
+      yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersWarned);
       yield* announce({ _tag: "transcript", sessionId });
+    });
+
+  /**
+   * Reads the two facts that decide whether a start can give the harness the
+   * MCP Gateway's entry: whether the runner negotiated the MCP Servers
+   * capability of this harness (`readMcpServersHarnessIds`), and whether the harness declares
+   * `mcpPassthrough: "native"`. The entry on the start frame and the servers
+   * a start leaves out (`recordMcpServersLeftOut`) both follow from these
+   * two, so they are read once per start and used for both.
+   */
+  const readMcpGatewayDelivery = (
+    harnessId: string,
+    runner: StartNeeds["runner"],
+  ): Effect.Effect<GatewayDelivery> =>
+    Effect.gen(function* () {
+      const harness = (yield* host.harnesses()).find((one) => one.id === harnessId);
+      return {
+        runnerReachesMcpServers: readMcpServersHarnessIds(
+          runner.negotiatedCapabilities ?? [],
+        ).includes(harnessId),
+        // A harness this build no longer carries cannot be given the entry.
+        harnessPassthrough: harness?.declared.mcpPassthrough ?? "unsupported",
+      };
+    });
+
+  /**
+   * Records which MCP Servers of the session's list can be called at this
+   * start, and why each other one cannot (`decideLeftOutReason`), and writes
+   * one `runtime.warning` naming the servers left out. `gateway` is what
+   * `readMcpGatewayDelivery` returned for this start. Does nothing for a
+   * session whose list is empty. Joins the caller's transaction, and the
+   * caller announces the session. It reads the profile grants and the
+   * servers' status from the database, never from outside. A server's status
+   * is judged against its Connection and plugin as they are now, so a change
+   * the follower has not yet written is not missed.
+   */
+  const recordMcpServersLeftOut = (
+    sessionId: string,
+    gateway: GatewayDelivery,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const listedIds = yield* sessions.readMcpServerIds(sessionId);
+      if (listedIds.length === 0) return;
+      const delivery: StartDelivery = {
+        ...gateway,
+        profileGrantsMcpUse: (yield* permissionRequests.listProfileGrants(sessionId)).includes(
+          "mcp.use",
+        ),
+      };
+      const views = yield* catalogue.readViews(listedIds, "without-tools");
+      const reasons = new Map<string, McpServerLeftOutReason>();
+      const leftOut: Array<LeftOutServer> = [];
+      for (const mcpServerId of listedIds) {
+        const view = views.get(mcpServerId);
+        // A list entry references its server, and a delete removes the entry first.
+        if (view === undefined) {
+          return yield* Effect.die(
+            `session ${sessionId} lists the missing MCP server ${mcpServerId}`,
+          );
+        }
+        const reason = decideLeftOutReason(delivery, view);
+        if (reason === null) continue;
+        reasons.set(mcpServerId, reason);
+        leftOut.push({
+          mcpServerId,
+          name: view.server.name,
+          sourceKind: view.server.source.kind,
+          reason,
+        });
+      }
+      yield* sessions.recordLeftOut(sessionId, reasons);
+      if (leftOut.length === 0) return;
+      const warning = buildLeftOutWarning(leftOut);
+      yield* appendRuntimeWarning(sessionId, warning.message, at, warning.mcpServers);
+    });
+
+  /**
+   * Writes one `runtime.warning` for the MCP Servers that were just added to
+   * the list of a session that is running, when the session was started with
+   * no gateway: its runner is too old for MCP servers, or its harness cannot
+   * be given any. Nothing reaches such a session before its next start, so
+   * the warning names each added server with the reason, as a start does for
+   * the servers it leaves out. Writes nothing when the session has a gateway.
+   * Joins the caller's transaction.
+   *
+   * It follows what the session's last start decided (`recordMcpGateway`),
+   * not what the runner and harness offer now. A session keeps running when
+   * the controller restarts, and a new controller build can offer a runner
+   * capability or declare a harness differently, so the capabilities read now
+   * can differ from the ones the start used. The runner's own capabilities
+   * change only with its binary, and a runner restart ends its sessions.
+   *
+   * A session whose start was never recorded (it started before the record
+   * existed) is judged by the runner's capabilities now. A runner whose row is
+   * gone cannot reach MCP servers, so such a session counts as having no
+   * gateway.
+   */
+  const warnWhenAddedServersAreUnreachable = (
+    session: StoredSession,
+    addedIds: ReadonlyArray<string>,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const recorded = yield* sessions.readMcpGateway(session.id);
+      let reason: NoGatewayReason | null;
+      if (Option.isSome(recorded)) {
+        reason = recorded.value;
+      } else {
+        const runner = yield* runners.read(session.runnerId);
+        reason = Option.isNone(runner)
+          ? "runner-too-old"
+          : decideNoGatewayReason(yield* readMcpGatewayDelivery(session.harnessId, runner.value));
+      }
+      if (reason === null) return;
+      const views = yield* catalogue.readViews(addedIds, "without-tools");
+      const unreachable: Array<LeftOutServer> = [];
+      for (const mcpServerId of addedIds) {
+        const view = views.get(mcpServerId);
+        // The caller checked the list, so every added id is a server.
+        if (view === undefined) return yield* Effect.die(`MCP server ${mcpServerId} is missing`);
+        unreachable.push({
+          mcpServerId,
+          name: view.server.name,
+          sourceKind: view.server.source.kind,
+          reason,
+        });
+      }
+      const warning = buildLeftOutWarning(unreachable);
+      yield* appendRuntimeWarning(session.id, warning.message, at, warning.mcpServers);
     });
 
   /**
@@ -871,7 +1237,7 @@ const make = Effect.gen(function* () {
     turn: Omit<AttachmentTurn, "attachments">,
   ): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
-      const refusal = yield* provideSql(
+      const refusal = yield* provideAttachmentCheck(
         findAttachmentRefusal({ ...turn, attachments: input.attachments }),
       );
       if (refusal === undefined) return false;
@@ -923,6 +1289,13 @@ const make = Effect.gen(function* () {
         if (!session.inputWaiting) return false;
         if (yield* inputs.holdsInputOnTheWire(sessionId)) return false;
         if (isResumeHeld(session)) return false;
+        // Checked here, in the transaction that queues the session, and not
+        // before it: an account deleted in between would leave a queued
+        // session that dispatch can never prepare. The account delete runs
+        // in a transaction too, so one of the two sees the other.
+        if (Option.isNone(yield* providerAccounts.one(session.providerAccountId))) {
+          return yield* Effect.fail(createInvalidStateError(ACCOUNT_DELETED));
+        }
         // Whether a resume makes the session unfinished again depends on its
         // kind (a step's session by its Run, a Done Thread not at all). So
         // the one rule for "unfinished" is asked before and after the change.
@@ -981,18 +1354,18 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Checks that the queued inputs of a session may be changed or cancelled.
-   * Fails with `NotFound` when there is no such session, and with
-   * `InvalidState` when the session answers an assistant's conversation:
-   * input to an assistant goes only through `conversation.send`, and the
-   * conversation keeps what was sent.
+   * Checks that the queued inputs of a session may be changed or cancelled,
+   * and returns the session. Fails with `NotFound` when there is no such
+   * session, and with `InvalidState` when the session answers an assistant's
+   * conversation: input to an assistant goes only through `conversation.send`,
+   * and the conversation keeps what was sent.
    */
   const requireChangeableInputs = (
     sessionId: string,
-  ): Effect.Effect<void, NotFound | InvalidState | SqlError> =>
+  ): Effect.Effect<StoredSession, NotFound | InvalidState | SqlError> =>
     Effect.flatMap(readSession(sessionId), (session) =>
       session.conversationId === null
-        ? Effect.void
+        ? Effect.succeed(session)
         : Effect.fail(createInvalidStateError(CONVERSATION_INPUT_FIXED)),
     );
 
@@ -1032,6 +1405,9 @@ const make = Effect.gen(function* () {
           reason,
         );
 
+  /** Returns true if the Request is a question, as opposed to an approval. */
+  const isQuestion = (request: SessionRequest): boolean => request.kind === "question";
+
   /**
    * Stores the Requests a session waits on after one reported event, and
    * keeps the approval notifications in step with them, in the caller's
@@ -1056,6 +1432,22 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       yield* sessions.setOpenRequests(session.id, after);
       const { closed, opened } = compareOpenRequests(session.openRequests, after);
+      // Only a question in a Thread shows on its Task's card. An approval
+      // does not, and neither does a question in another kind of session.
+      if (
+        session.taskId !== null &&
+        session.kind === "thread" &&
+        [...closed, ...opened].some(isQuestion)
+      ) {
+        yield* announceTaskCardChange(session.taskId);
+        // The Task's summary says what a Thread waits on, so it is out of
+        // date when the Thread's first question opens or its last one closes.
+        // A session parked on a question ends no turn, so this is the only
+        // place that sees it. A change among several open questions is not.
+        if (session.openRequests.some(isQuestion) !== after.some(isQuestion)) {
+          yield* tasks.markSummaryDirty(session.taskId);
+        }
+      }
       // A new Request never closes an older one, so only the other events
       // can have closed any.
       if (closed.length > 0 && event._tag !== "request.opened") {
@@ -1092,7 +1484,7 @@ const make = Effect.gen(function* () {
    */
   const applySubagentEvent = (
     session: StoredSession,
-    event: ProviderEvent,
+    event: HarnessEvent,
   ): Effect.Effect<ReadonlyMap<SubagentId, StoredSubagent>, SqlError> =>
     Effect.gen(function* () {
       const sessionId = session.id;
@@ -1137,7 +1529,7 @@ const make = Effect.gen(function* () {
    */
   const readSubagentEventFacts = (
     sessionId: string,
-    event: ProviderEvent,
+    event: HarnessEvent,
     records: ReadonlyMap<SubagentId, StoredSubagent>,
   ): Effect.Effect<SubagentEventFacts, SqlError> =>
     Effect.gen(function* () {
@@ -1178,7 +1570,7 @@ const make = Effect.gen(function* () {
    */
   const applySessionUsage = (
     session: StoredSession,
-    event: ProviderEvent,
+    event: HarnessEvent,
   ): Effect.Effect<boolean, SqlError> =>
     Effect.gen(function* () {
       if (event._tag === "session.started") {
@@ -1260,6 +1652,24 @@ const make = Effect.gen(function* () {
     );
 
   /**
+   * Withdraws the open Permission Requests of these sessions, with one query
+   * for all of them, because no decision can reach a session that ended or
+   * was archived. Withdraws their approval notifications with `reason` and
+   * ends the subscriptions waiting on their decisions. Does nothing when no
+   * request is open.
+   */
+  const withdrawOpenPermissionRequests = (
+    sessionIds: ReadonlyArray<string>,
+    reason: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const withdrawn = yield* permissionRequests.withdrawOpen(sessionIds);
+      if (withdrawn.length === 0) return;
+      yield* notifier.withdrawDecisionsAbout(withdrawn.map(buildPermissionRequestSubject), reason);
+      yield* requestSubscriptions.endWithdrawn(sessionIds, withdrawn);
+    });
+
+  /**
    * Does the cleanup after sessions move to `exited`, whatever ended them.
    * Every path that ends a session calls this, in the transaction that ended
    * it. For each session, it:
@@ -1320,7 +1730,7 @@ const make = Effect.gen(function* () {
         if (session.workspaceId !== null && Option.isSome(after)) {
           yield* workspaces.release(
             { kind: "session", id: session.id },
-            after.value.resumable ? "idle" : "orphan",
+            decideExitRetention(after.value),
             after.value.exitedAt ?? (yield* nowIso),
           );
         }
@@ -1335,16 +1745,53 @@ const make = Effect.gen(function* () {
       }
       // No decision can reach an ended session, so its open requests are
       // withdrawn rather than left for the user to answer.
-      const endedIds = ended.map((session) => session.id);
-      const withdrawn = yield* permissionRequests.withdrawOpen(endedIds);
-      if (withdrawn.length > 0) {
-        yield* notifier.withdrawDecisionsAbout(
-          withdrawn.map(buildPermissionRequestSubject),
-          WITHDRAW_REASON_SESSION_ENDED,
-        );
-        yield* requestSubscriptions.endWithdrawn(endedIds, withdrawn);
-      }
+      yield* withdrawOpenPermissionRequests(
+        ended.map((session) => session.id),
+        WITHDRAW_REASON_SESSION_ENDED,
+      );
       yield* forgetSessions(ended);
+    });
+
+  /**
+   * Ends a queued session whose start can never be sent, such as one whose
+   * Provider Account is gone, and stores `message` as a `session.exited` row
+   * on its stream, where the user reads why. Does nothing when the session is
+   * no longer queued. Joins the caller's transaction.
+   *
+   * The exit reason is `crash`, which spec 06 section 4.1 gives to a failed
+   * start (`session.exited` with reason `crash`). No process ever ran here,
+   * but the start failed before it could be sent, and it was not a person's
+   * stop. The protocol has no more specific reason, and adding one would
+   * change the wire format for the same outcome.
+   */
+  const endUnstartable = (
+    sessionId: string,
+    message: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      const ended = yield* sessions.endQueued(sessionId, at);
+      if (Option.isNone(ended)) return;
+      yield* sessions.append(sessionId, {
+        seq: 0,
+        at,
+        event: {
+          _tag: "session.exited",
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          reason: "crash",
+          message,
+        },
+      });
+      yield* audit.append({
+        kind: "session.stopped",
+        actor: SYSTEM_ACTOR,
+        payload: { sessionId, runnerId: ended.value.runnerId, reason: "crash", message },
+        at,
+      });
+      yield* announce({ _tag: "transcript", sessionId });
+      yield* endSessions([ended.value], "crash", message);
     });
 
   /**
@@ -1363,7 +1810,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const at = yield* nowIso;
         const ended = yield* sessions.endInWorkspace(workspaceId, at);
-        for (const { id } of ended) {
+        for (const { id, runnerId } of ended) {
           yield* sessions.append(id, {
             seq: 0,
             at,
@@ -1379,7 +1826,7 @@ const make = Effect.gen(function* () {
           yield* audit.append({
             kind: "session.stopped",
             actor: SYSTEM_ACTOR,
-            payload: { sessionId: id, workspaceId, reason: "workspace_failed" },
+            payload: { sessionId: id, runnerId, workspaceId, reason: "workspace_failed" },
             at,
           });
           // The exit is a row on this session's stream, so clients watching
@@ -1492,6 +1939,9 @@ const make = Effect.gen(function* () {
    *   through that exit. The rule is the same as for the inputs not yet sent
    *   when the session exited (`keepsInputsOnExit`, `keepsStepPromptOnExit`).
    *   `SessionObserver` is told (`cancelUndeliveredInput`).
+   * - The session was archived in the meantime. The archive cancelled only
+   *   the inputs still waiting, and an archived session takes no input, so
+   *   this one is cancelled too, whether or not the session has exited.
    * - The input is a Discussion Input. It is always cancelled with `reason`,
    *   never put back to waiting: the session is told again at the end of its
    *   next turn.
@@ -1516,9 +1966,10 @@ const make = Effect.gen(function* () {
         const now = yield* sessions.one(row.sessionId);
         const dropped =
           Option.isSome(now) &&
-          now.value.status === "exited" &&
-          !keepsInputsOnExit(now.value) &&
-          !keepsStepPromptOnExit(now.value);
+          (now.value.archived !== null ||
+            (now.value.status === "exited" &&
+              !keepsInputsOnExit(now.value) &&
+              !keepsStepPromptOnExit(now.value)));
         let waiting = false;
         if (row.source === "discussion") {
           // Nothing was marked told for a Discussion Input that was not
@@ -1605,7 +2056,7 @@ const make = Effect.gen(function* () {
       if (Option.isSome(after) && after.value.workspaceId !== null) {
         yield* workspaces.release(
           { kind: "session", id: sessionId },
-          after.value.resumable ? "idle" : "orphan",
+          decideExitRetention(after.value),
           after.value.exitedAt ?? (yield* nowIso),
         );
       }
@@ -1627,8 +2078,11 @@ const make = Effect.gen(function* () {
           permissionProfileId,
           conversationId,
           runId,
+          taskId,
           kind,
+          workspaceId,
           done,
+          archived,
           activeSince,
           doneSince,
         } = yield* Effect.mapError(decodeQuery(input), createDecodeValidationError);
@@ -1684,8 +2138,11 @@ const make = Effect.gen(function* () {
             permissionProfileId,
             conversationId,
             runId,
+            taskId,
             kind,
+            workspaceId,
             done,
+            archived,
             activeSince,
             doneSince,
           }),
@@ -1766,6 +2223,61 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Moves one Thread to another Task, or to a new Task made from it, as the
+     * user, and returns the Thread. Only the user moves a Thread: a session is
+     * refused with `Forbidden`. It writes a `session.movedToTask` audit entry
+     * and marks both Tasks' summaries out of date.
+     *
+     * Only this Thread moves. Its runs stay where they are, and so does the
+     * workspace's link to its Task, so the next Thread started in that folder
+     * still joins the old Task. Moving to a new Task records no workspace link.
+     *
+     * Fails with `NotFound` when the session or the Task named by `taskId`
+     * does not exist or is deleted, and with `InvalidState` when the session is
+     * not a Thread or the Task is at `done` or `dropped`.
+     */
+    moveToTask: (
+      id: Id,
+      input: SessionMoveToTaskInput,
+    ): Effect.Effect<Session, Unauthenticated | Forbidden | NotFound | InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireUserActor("session.moveToTask", ONLY_THE_USER_MOVES_A_THREAD);
+        const stamp = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const thread = yield* readThread(id, describeMoveToTaskRefusal);
+            const toTaskId = yield* tasks.chooseTaskForMovedThread({
+              requestedTaskId: input.taskId,
+              title: thread.title,
+              projectId: thread.projectId ?? undefined,
+              actor: stamp,
+            });
+            const fromTaskId = thread.taskId ?? undefined;
+            if (toTaskId !== fromTaskId) {
+              // `setTaskId` announces the cards of both Tasks.
+              yield* sessions.setTaskId(id, toTaskId);
+              if (fromTaskId !== undefined) yield* tasks.markSummaryDirty(fromTaskId);
+              yield* tasks.markSummaryDirty(toTaskId);
+              yield* audit.append({
+                kind: "session.movedToTask",
+                actor: stamp,
+                record: { topic: "session", id, conversationId: thread.conversationId },
+                payload: {
+                  sessionId: id,
+                  ...(fromTaskId === undefined ? {} : { fromTaskId }),
+                  toTaskId,
+                },
+                at: yield* nowIso,
+              });
+            }
+            const composeRecord = yield* recordComposer;
+            return yield* Effect.map(readSession(id), composeRecord);
+          }),
+        );
+      }),
+
+    /**
      * Takes the Done mark off Threads, as the caller, all at one time, and
      * returns the Threads in the order given. A Thread that is not Done is
      * returned as it is, and nothing is written for it, so its `reopenedAt`
@@ -1775,7 +2287,7 @@ const make = Effect.gen(function* () {
      * fails, no Thread is reopened.
      *
      * Fails with `NotFound` when an id is not a session, and with
-     * `InvalidState` when a session is not a Thread.
+     * `InvalidState` when a session is not a Thread or is archived.
      */
     reopen: (
       input: SessionIdsInput,
@@ -1791,13 +2303,163 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const at = yield* nowIso;
             for (const id of input.sessionIds) {
-              yield* readThread(id, describeReopenRefusal);
+              yield* refuseArchived(yield* readThread(id, describeReopenRefusal));
               yield* reopenThread(id, actor, at, undefined);
             }
             const composeRecord = yield* recordComposer;
             return yield* Effect.forEach(input.sessionIds, (id) =>
               Effect.map(readSession(id), composeRecord),
             );
+          }),
+        );
+      }),
+
+    /**
+     * Archives Threads for good, stamped with the caller, all at one time
+     * (spec 11 section 2, `session.archive`). Joins the caller's transaction.
+     * It checks no grant: the caller, `Live.archive`, has checked that only
+     * the user archives.
+     *
+     * For each Thread that is not archived yet, it marks the Thread Done if
+     * it is not, and archives it. When that leaves the Thread's workspace
+     * with no Thread that is not archived, it archives the workspace's Agent
+     * sessions too, so a sidebar row is archived whole, and gives the
+     * workspace back to automatic cleanup. For every session it archives, it
+     * cancels the Queued Input still waiting, ends the subscriptions it
+     * holds, and withdraws its open Permission Requests. A Thread that is
+     * already archived is left as it is.
+     *
+     * Returns the Threads after the move, in the order given, and the
+     * archived sessions that are `idle`. Each of those still has a harness on
+     * its runner, and the caller must stop it.
+     *
+     * The list is applied all or nothing: when it fails, nothing is written.
+     * Fails with `NotFound` when an id is not a session, and with
+     * `InvalidState` when a session is not a Thread, or when a Thread it
+     * archives, or an Agent session that follows it, is `queued`, `starting`
+     * or `busy`.
+     */
+    archiveThreads: (
+      input: SessionIdsInput,
+    ): Effect.Effect<
+      {
+        readonly threads: ReadonlyArray<Session>;
+        readonly sessionsToStop: ReadonlyArray<StoredSession>;
+      },
+      Exclude<ReadError | NotFound | InvalidState, Validation | Forbidden | Unauthenticated>
+    > =>
+      Effect.gen(function* () {
+        const actor = yield* currentStamp;
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const at = yield* nowIso;
+            const named = yield* Effect.forEach(input.sessionIds, (id) =>
+              readThread(id, () => ONLY_A_THREAD_CAN_BE_ARCHIVED),
+            );
+            const moving = [
+              ...new Map(
+                named.filter((thread) => thread.archived === null).map((t) => [t.id, t]),
+              ).values(),
+            ];
+            // The Thread an Agent session's audit entry names: the first
+            // Thread the call named in its workspace.
+            const firstNamedThreadByWorkspace = new Map<string, string>();
+            for (const thread of moving) {
+              if (
+                thread.workspaceId !== null &&
+                !firstNamedThreadByWorkspace.has(thread.workspaceId)
+              ) {
+                firstNamedThreadByWorkspace.set(thread.workspaceId, thread.id);
+              }
+            }
+            const archiveSession = (session: StoredSession, threadId: string) =>
+              Effect.gen(function* () {
+                yield* sessions.archive(session.id, actor, at);
+                yield* audit.append({
+                  kind: "session.archived",
+                  actor,
+                  record: {
+                    topic: "session",
+                    id: session.id,
+                    conversationId: session.conversationId,
+                  },
+                  payload: { sessionId: session.id, runnerId: session.runnerId, threadId },
+                  at,
+                });
+              });
+            for (const thread of moving) {
+              if (yield* sessions.markDone(thread.id, actor, at)) {
+                yield* audit.append({
+                  kind: "session.markedDone",
+                  actor,
+                  record: {
+                    topic: "session",
+                    id: thread.id,
+                    conversationId: thread.conversationId,
+                  },
+                  payload: { sessionId: thread.id },
+                  at,
+                });
+              }
+              yield* archiveSession(thread, thread.id);
+            }
+
+            // With the Threads marked, the workspaces domain tells which of
+            // their workspaces are now archived. Their Agent sessions follow
+            // the Threads, so a sidebar row is archived whole. A working
+            // session, named Thread or following Agent session, fails the
+            // call once, naming each; the transaction takes the marks back.
+            const archivedWorkspaceIds = yield* workspaces.listArchivedWorkspaces([
+              ...firstNamedThreadByWorkspace.keys(),
+            ]);
+            const following = (yield* sessions.listThreadsAndAgentSessionsInWorkspaces(
+              archivedWorkspaceIds,
+            )).filter((session) => session.kind === "agent" && session.archived === null);
+            const sessionsToArchive = [...moving, ...following];
+            const working = sessionsToArchive.filter((session) =>
+              WORKING_SESSION_STATUSES.includes(session.status),
+            );
+            if (working.length > 0) {
+              return yield* Effect.fail(createInvalidStateError(describeWorkingRefusal(working)));
+            }
+            for (const session of following) {
+              yield* archiveSession(
+                session,
+                firstNamedThreadByWorkspace.get(session.workspaceId!)!,
+              );
+            }
+
+            for (const session of sessionsToArchive) {
+              // The stop that follows withdraws these too, but only when the
+              // runner is connected, and a notification nobody can answer
+              // must not outlive the archive.
+              yield* withdrawRequestNotifications(
+                session.id,
+                session.openRequests,
+                WITHDRAW_REASON_SESSION_ARCHIVED,
+              );
+              yield* inputs.cancelQueued(session.id, ARCHIVED_INPUT_REASON);
+              yield* subscriptions.endHeldBy(
+                { kind: "session", id: session.id },
+                { at, reason: buildArchivedHolderReason(session.id), actor },
+              );
+            }
+            yield* withdrawOpenPermissionRequests(
+              sessionsToArchive.map((session) => session.id),
+              WITHDRAW_REASON_SESSION_ARCHIVED,
+            );
+            for (const workspaceId of archivedWorkspaceIds) {
+              yield* workspaces.returnToAutomaticCleanup(workspaceId);
+            }
+
+            const composeRecord = yield* recordComposer;
+            return {
+              threads: yield* Effect.forEach(input.sessionIds, (id) =>
+                Effect.map(readSession(id), composeRecord),
+              ),
+              sessionsToStop: sessionsToArchive.filter((session) => session.status === "idle"),
+            };
           }),
         );
       }),
@@ -1811,12 +2473,13 @@ const make = Effect.gen(function* () {
      * `NotFound`. With `after`, only the rows past that position are read;
      * a position beyond the newest row returns an empty page. A cursor from
      * one agent's transcript, or from a listing with another `after`, is
-     * refused.
+     * refused. Each event comes without its `raw` unless `includeRaw` is
+     * true (see `omitRawPayload`).
      */
     transcript: (input: TranscriptInput): Effect.Effect<TranscriptPage, ReadError | NotFound> =>
       Effect.gen(function* () {
         yield* requireGrant("transcript.read");
-        const { id, subagentId, after, limit, cursor, sort } = yield* Effect.mapError(
+        const { id, subagentId, after, includeRaw, limit, cursor, sort } = yield* Effect.mapError(
           decodeTranscript(input),
           createDecodeValidationError,
         );
@@ -1832,7 +2495,14 @@ const make = Effect.gen(function* () {
             direction: resolveSortDirection(sort, TRANSCRIPT_DIRECTION),
           }),
         );
-        return toPageOutput(listing);
+        return toPageOutput(
+          includeRaw === true
+            ? listing
+            : {
+                ...listing,
+                items: listing.items.map((row) => ({ ...row, event: omitRawPayload(row.event) })),
+              },
+        );
       }),
 
     /**
@@ -1921,7 +2591,7 @@ const make = Effect.gen(function* () {
      * the adapter puts a subagent it continues back on the record the
      * controller already has. Each entry names the subagent that started
      * it, so the adapter knows the tree a stop cascades down. Each saved
-     * provider usage report goes back unchanged, so the adapter can restore
+     * harness usage report goes back unchanged, so the adapter can restore
      * native counters without reading the transcript. Checks no grant: the
      * controller daemon calls it while it builds a resume spec.
      */
@@ -1948,34 +2618,79 @@ const make = Effect.gen(function* () {
      * stored as `queued`: whether the runner has room for it right now is
      * decided by dispatch, the same way for a new session as for any other.
      *
+     * The session's Task is decided here, because the session and its Task
+     * are written together. A `fixed` task source stores its Task, or the Task
+     * it was merged into. A
+     * `joining` one runs the join rule of the tasks domain
+     * (`TaskService.joinSession`) with the session's title, workspace and
+     * project, before the session is stored. A retried call that the caller
+     * stops with a dedup key therefore makes no second Task.
+     *
+     * Returns `madeTaskId`, the id of the Task the join made for this Thread,
+     * or `undefined` when the session joined an existing Task or has none.
+     * The title generation needs it to rename that Task and no other.
+     *
      * Fails with `Validation` when an image is gone or was uploaded by
      * someone else, or when the session's runner or model cannot take images
-     * (`refuseUnacceptedAttachments`).
+     * (`refuseUnacceptedAttachments`). Fails with `NotFound` or `InvalidState`
+     * when the spawn named a Task that is missing, deleted or finished.
      */
-    create: (open: CreateRequest): Effect.Effect<void, Validation | SqlError> =>
+    create: (
+      open: CreateRequest,
+    ): Effect.Effect<
+      { readonly madeTaskId: string | undefined },
+      Validation | NotFound | InvalidState | SqlError
+    > =>
       Effect.gen(function* () {
         const actor = yield* currentStamp;
         const references = yield* provideSql(readClaimableAttachments(open.attachments));
-        yield* provideSql(
+        yield* provideAttachmentCheck(
           refuseUnacceptedAttachments({
             runnerId: open.runnerId,
-            instanceId: open.spec.instanceId,
+            providerAccountId: open.spec.providerAccountId,
+            harnessId: open.harnessId,
             model: open.spec.modelSelection.model,
             attachments: references,
           }),
         );
+        const title = buildTitle(open.title, open.prompt, open.titleParts, references[0]?.name);
+        const joined =
+          open.taskSource._tag === "fixed"
+            ? undefined
+            : yield* tasks.joinSession({
+                requestedTaskId: open.taskSource.requestedTaskId,
+                callerTaskId: open.taskSource.callerTaskId,
+                workspaceId: open.spec.workspaceId,
+                // A session with no Agent is a Thread. This matches the
+                // `kind` column the database derives, because a session
+                // placed here answers no conversation and runs no step.
+                sessionKind: open.agentId === undefined ? "thread" : "agent",
+                title,
+                projectId: open.projectId,
+              });
+        // A `fixed` Task is followed to its survivor here, in the transaction
+        // that stores the session, so a run that read its Task before a merge
+        // cannot store the merged id. A joined Task is already resolved.
+        const taskId =
+          open.taskSource._tag === "fixed"
+            ? open.taskSource.taskId === undefined
+              ? undefined
+              : yield* tasks.resolveTaskId(open.taskSource.taskId)
+            : joined?.taskId;
         yield* sessions.insert({
           id: open.id,
-          title: buildTitle(open.title, open.prompt, references[0]?.name),
+          title,
           role: open.role,
           permissionProfileId: open.permissionProfileId,
           agentId: open.agentId,
           conversationId: open.conversationId,
           step: open.step,
-          instanceId: open.spec.instanceId,
+          providerAccountId: open.spec.providerAccountId,
+          harnessId: open.harnessId,
           runnerId: open.runnerId,
           workspaceId: open.spec.workspaceId,
           projectId: open.projectId,
+          taskId,
           checkoutBranch: open.checkoutBranch,
           githubConnectionId: open.githubConnectionId,
           requestedAccessMode: open.requestedAccessMode,
@@ -1990,6 +2705,12 @@ const make = Effect.gen(function* () {
           createdBy: actor,
           at: open.at,
         });
+        if (open.mcpServerIds !== undefined && open.mcpServerIds.length > 0) {
+          yield* sessions.replaceMcpServers(open.id, open.mcpServerIds);
+        }
+        // A session a tainted session starts, or a fork of a tainted one,
+        // starts tainted (spec 13 section 10).
+        yield* taint.passOn(open.id, open.parentSessionId);
         if (open.spec.workspaceId !== null)
           yield* workspaces.retainForThread(open.id, open.spec.workspaceId);
         // The prompt is stored as an ordinary input, waiting with the
@@ -2010,11 +2731,16 @@ const make = Effect.gen(function* () {
           record: { topic: "session", id: open.id, conversationId: open.conversationId ?? null },
           payload: {
             ...open.payload,
+            ...(open.mcpServerIds === undefined || open.mcpServerIds.length === 0
+              ? {}
+              : { mcpServerIds: open.mcpServerIds }),
             sessionId: open.id,
+            runnerId: open.runnerId,
             ...(open.spec.workspaceId === null ? {} : { workspaceId: open.spec.workspaceId }),
           },
           at: open.at,
         });
+        return { madeTaskId: joined?.created === true ? joined.taskId : undefined };
       }),
 
     /**
@@ -2065,8 +2791,16 @@ const make = Effect.gen(function* () {
         const decidedSkills = new Map<string | null, ReadonlyArray<SessionLibrarySkill>>();
         const claimed: Array<StartRequest> = [];
         const skipped: Array<string> = [];
-        const keyless: Array<string> = [];
         const inputless: Array<string> = [];
+        // One answer per account and harness, because every queued session of
+        // a pair gets the same one and the check reads the whole fleet.
+        const runnableRefusals = new Map<string, string | null>();
+        // Likewise one catalog per account and harness: it is large, and every
+        // queued session of a pair gets the same one.
+        const modelDeclarationsByPair = new Map<
+          string,
+          ReadonlyArray<ModelDeclaration> | undefined
+        >();
         // The loop moves past every row it reads, including rows that fail to
         // decode, so each candidate is fetched and decoded once. A runner's
         // room is for sessions that can start, not for specs that cannot.
@@ -2086,18 +2820,57 @@ const make = Effect.gen(function* () {
               skipped.push(row.id);
               continue;
             }
-            // Read per row, before the row leaves the queue: a credential that
-            // fails to decrypt is one session's problem, and failing here
-            // would roll back every other session claimed in this batch. It is
-            // read now rather than stored, like the account's token: the frame
-            // is the only place it is written down.
-            const secrets = yield* Effect.option(
-              needs.readSecrets(spec.value.instanceId, row.providerId),
-            );
-            if (Option.isNone(secrets)) {
-              keyless.push(row.id);
+            // Read per row, before the row leaves the queue: an account that
+            // cannot be prepared is one session's problem, and failing here
+            // would roll back every other session claimed in this batch. The
+            // key is read now rather than stored, like the GitHub account's
+            // token: the frame is the only place it is written down. Start,
+            // resume and fork all queue the session and come through here, so
+            // each of them sends the same home.
+            //
+            // A refusal (`NotFound`, `InvalidState`) ends the session with
+            // the reason. Retrying could never mend it without a person
+            // acting, and meanwhile the session would be logged on every pass
+            // and would block deleting its account. The one error that can
+            // pass by itself, a database failure, is not caught: it rolls
+            // this claim back and the next pass tries again.
+            //
+            // The account must also still be able to run here: the session
+            // was queued under the rule of that moment, and a sign-in or a
+            // harness may have gone since.
+            const pair = `${row.providerAccountId}/${row.harnessId}`;
+            if (!runnableRefusals.has(pair)) {
+              runnableRefusals.set(
+                pair,
+                yield* needs.requireAccountRunnable(row.providerAccountId, row.harnessId).pipe(
+                  Effect.as(null),
+                  Effect.catchIf(
+                    (error): error is InvalidState => error instanceof InvalidState,
+                    (refused) => Effect.succeed(refused.error.message),
+                  ),
+                ),
+              );
+            }
+            const notRunnable = runnableRefusals.get(pair) ?? null;
+            if (notRunnable !== null) {
+              yield* endUnstartable(row.id, notRunnable, at);
               continue;
             }
+            const prepared = yield* needs
+              .prepareHarnessAccount(row.providerAccountId, row.harnessId)
+              .pipe(
+                Effect.map((harnessAccount) => ({ harnessAccount })),
+                Effect.catchIf(
+                  (error): error is NotFound | InvalidState =>
+                    error instanceof NotFound || error instanceof InvalidState,
+                  (refused) => Effect.succeed({ refusal: refused.error.message }),
+                ),
+              );
+            if ("refusal" in prepared) {
+              yield* endUnstartable(row.id, prepared.refusal, at);
+              continue;
+            }
+            const { harnessAccount } = prepared;
             // A start always carries an input. Every path that queues a
             // session stores its input first, and the input a queued session
             // starts with cannot be cancelled, so only data stored by an
@@ -2121,7 +2894,8 @@ const make = Effect.gen(function* () {
             if (
               yield* holdInputWithRefusedAttachments(waiting.value, {
                 runnerId,
-                instanceId: spec.value.instanceId,
+                providerAccountId: row.providerAccountId,
+                harnessId: row.harnessId,
                 model: row.modelSelection.model,
               })
             )
@@ -2169,6 +2943,20 @@ const make = Effect.gen(function* () {
                 at,
               );
             }
+            // Decided at every start, like the skills, so a resume records the
+            // servers again.
+            const gateway = yield* readMcpGatewayDelivery(row.harnessId, needs.runner);
+            yield* sessions.recordMcpGateway(row.id, decideNoGatewayReason(gateway));
+            yield* recordMcpServersLeftOut(row.id, gateway, at);
+            // Decided at every start, so a resume or a fork sees the catalog as
+            // it is now.
+            if (!modelDeclarationsByPair.has(pair)) {
+              modelDeclarationsByPair.set(
+                pair,
+                yield* needs.findModelDeclarations(row.providerAccountId, row.harnessId),
+              );
+            }
+            const catalogModels = modelDeclarationsByPair.get(pair);
             // Saved so a client can read exactly the library skills this
             // session got. A runner that cannot load skills gets none, so
             // none is recorded.
@@ -2186,10 +2974,20 @@ const make = Effect.gen(function* () {
                 // while the session was queued changes it, and the spec does
                 // not.
                 input: buildTurnInput(row, input),
-                providerId: row.providerId,
-                config: row.config as Schema.Json,
-                secrets: secrets.value,
-                spec: coordination === undefined ? spec.value : { ...spec.value, coordination },
+                harnessId: row.harnessId,
+                harnessAccount,
+                // The coordination paragraph and the gateway entry are added
+                // to the frame only, never to the stored spec. The entry goes
+                // to every session whose runner and harness can take it, also
+                // one with an empty list, so a server added later works
+                // without a restart (spec 21 section 4.4).
+                spec: {
+                  ...spec.value,
+                  ...(coordination === undefined ? {} : { coordination }),
+                  ...(decideNoGatewayReason(gateway) === null
+                    ? { mcpServers: [MCP_GATEWAY_ENTRY] }
+                    : {}),
+                },
                 token,
                 ...(connectionId === null ? {} : { githubConnectionId: connectionId }),
                 ...(gitIdentity === undefined ? {} : { gitIdentity }),
@@ -2214,6 +3012,9 @@ const make = Effect.gen(function* () {
                 ...(runnerLoadsSkills && skills.length > 0
                   ? { skills: skills.map(({ name, revisionHash }) => ({ name, revisionHash })) }
                   : {}),
+                // Absent means the harness lists its models itself; an empty list
+                // is sent, because it tells the runner to clear its declarations.
+                ...(catalogModels === undefined ? {} : { catalogModels }),
               },
             });
           }
@@ -2224,13 +3025,6 @@ const make = Effect.gen(function* () {
           yield* Effect.logError(
             "skipped queued sessions whose stored spec no longer decodes; they stay queued",
             skipped,
-          );
-        }
-        if (keyless.length > 0) {
-          yield* Effect.logError(
-            "skipped queued sessions whose provider instance's stored credential could not be " +
-              "decrypted; they stay queued",
-            keyless,
           );
         }
         // Logged once per session, not on every pass, because such a row
@@ -2554,6 +3348,91 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Replaces the session's own list of MCP Servers with the server ids given,
+     * joining the caller's transaction. A server that was already in
+     * the list keeps what the last start recorded for it. The caller has
+     * checked the list (`mcpServerListRule`).
+     *
+     * When the set of servers changes, it writes a `session.mcpServersChanged`
+     * audit entry stamped with the caller, holding the ids added and the ids
+     * removed. A list the session had, in another order, is not a change of
+     * what the session can reach, so it writes no entry. The session is
+     * announced either way, by the entry's record or directly.
+     *
+     * When servers are added to a running session that has no gateway (its
+     * runner is too old or its harness cannot take MCP servers), it also
+     * writes one `runtime.warning` that names them and why they do not work.
+     */
+    setMcpServers: (
+      sessionId: string,
+      after: ReadonlyArray<string>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const before = yield* sessions.readMcpServerIds(sessionId);
+        yield* sessions.replaceMcpServers(sessionId, after);
+        const added = after.filter((id) => !before.includes(id));
+        const removed = before.filter((id) => !after.includes(id));
+        const session = Option.getOrThrow(yield* sessions.one(sessionId));
+        if (added.length === 0 && removed.length === 0) {
+          return yield* announceSessionChange(session);
+        }
+        const at = yield* nowIso;
+        yield* audit.append({
+          kind: "session.mcpServersChanged",
+          actor: yield* currentStamp,
+          record: { topic: "session", id: sessionId, conversationId: session.conversationId },
+          payload: { sessionId, added, removed },
+          at,
+        });
+        // A queued session is judged when it is claimed, and an
+        // exited one at its resume.
+        if (
+          added.length > 0 &&
+          (session.status === "starting" || session.status === "idle" || session.status === "busy")
+        ) {
+          yield* warnWhenAddedServersAreUnreachable(session, added, at);
+        }
+      }),
+
+    /**
+     * Returns the id of the session's own open turn: the turn of its newest
+     * `turn.started` row when no `turn.completed` comes after it. Returns
+     * `undefined` between turns. A subagent's turn is never meant.
+     */
+    readOpenTurnId: (sessionId: string): Effect.Effect<string | undefined, SqlError> =>
+      readOpenTurnId(sql, sessionId, undefined),
+
+    /**
+     * Writes a `runtime.warning` to the session's stream at the current time,
+     * in a transaction of its own, and announces the session's transcript.
+     * `mcpServers` is given when the warning is about MCP Servers, so a client
+     * can draw a button for each. For a write made by the controller itself
+     * while a request runs, such as the MCP Gateway's refused call. The
+     * message is cut to `MAX_MESSAGE_LENGTH`, because a caller composes it
+     * from names it does not control, and a longer one cannot be sent to
+     * clients.
+     */
+    writeRuntimeWarning: (
+      sessionId: string,
+      message: string,
+      mcpServersRefused?: ReadonlyArray<{
+        readonly mcpServerId: string;
+        readonly reason: McpServerWarningReason;
+      }>,
+    ): Effect.Effect<void, SqlError> =>
+      withTransaction(
+        sql,
+        Effect.flatMap(nowIso, (at) =>
+          appendRuntimeWarning(
+            sessionId,
+            cutText(message, MAX_MESSAGE_LENGTH),
+            at,
+            mcpServersRefused,
+          ),
+        ),
+      ),
+
+    /**
      * Stores what the title generation answered for a Thread's first message:
      * a title, `needsRefinement` (the model's own judgement that the message
      * was too vague for a good title), and a role. Announces the session, so
@@ -2573,6 +3452,17 @@ const make = Effect.gen(function* () {
      *
      * When both are dropped, nothing is written or announced.
      *
+     * `madeTaskId` is the Task that was made for this Thread when it started
+     * (`create` returns it), or `undefined` when the Thread joined an existing
+     * Task. In the same transaction as the title write, the Task takes the
+     * stored title (`TaskService.adoptGeneratedTitle`), but only when a title
+     * is stored and the Thread is still in `madeTaskId`. A Thread that has
+     * joined or moved to another Task since must leave that Task alone, even
+     * one with the same title. The title the Task was made with is the
+     * session's own title as it was before this write, because this method is
+     * the only thing that changes a session's title. A failed rename of the
+     * Task also rolls back the Thread's title.
+     *
      * No user can rename a session today, so there is no user-chosen title to
      * protect. A system write like this one carries no actor, as with
      * `setSelection`.
@@ -2580,7 +3470,8 @@ const make = Effect.gen(function* () {
     setGeneratedTitleAndRole: (
       sessionId: string,
       answer: { readonly title: string; readonly needsRefinement: boolean; readonly role: string },
-    ): Effect.Effect<void, SqlError> =>
+      madeTaskId: string | undefined,
+    ): Effect.Effect<void, NotFound | Validation | SqlError> =>
       Effect.gen(function* () {
         const title = cutTitle(cleanGeneratedText(answer.title));
         const cleanedRole = cleanGeneratedText(answer.role).trim();
@@ -2589,9 +3480,22 @@ const make = Effect.gen(function* () {
         yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            const before = yield* sessions.one(sessionId);
             if (title !== "")
               yield* sessions.setGeneratedTitle(sessionId, title, answer.needsRefinement);
             if (validRole !== undefined) yield* sessions.setGeneratedRole(sessionId, validRole);
+            if (
+              title !== "" &&
+              madeTaskId !== undefined &&
+              Option.isSome(before) &&
+              before.value.taskId === madeTaskId
+            ) {
+              yield* tasks.adoptGeneratedTitle({
+                taskId: madeTaskId,
+                from: before.value.title,
+                to: title,
+              });
+            }
             yield* announceSessionChangeById(sessionId);
           }),
         );
@@ -2622,19 +3526,24 @@ const make = Effect.gen(function* () {
      *
      * Fails with `Validation` when an image is gone or was uploaded by
      * someone else, or when the session's runner or the input's model cannot
-     * take images (`refuseUnacceptedAttachments`).
+     * take images (`refuseUnacceptedAttachments`), and with `InvalidState`
+     * when the session is archived.
      */
     takeInput: <E = never>(
       taking: TakeInputRequest<E>,
     ): Effect.Effect<StoredInput, E | Validation | SqlError | InvalidState> =>
       Effect.gen(function* () {
+        // Every caller stores input for a session it has read, whatever the
+        // route; an archived session takes none, from anyone.
+        yield* refuseArchived(Option.getOrThrow(yield* sessions.one(taking.sessionId)));
         const references = yield* provideSql(readClaimableAttachments(taking.attachments));
         if (references.length > 0) {
           const session = Option.getOrThrow(yield* sessions.one(taking.sessionId));
-          yield* provideSql(
+          yield* provideAttachmentCheck(
             refuseUnacceptedAttachments({
               runnerId: session.runnerId,
-              instanceId: session.instanceId,
+              providerAccountId: session.providerAccountId,
+              harnessId: session.harnessId,
               model: taking.modelSelection.model,
               attachments: references,
             }),
@@ -2654,6 +3563,8 @@ const make = Effect.gen(function* () {
           ...(claimed ? { sentAt: taking.at } : {}),
           ...(taking.stepIteration === undefined ? {} : { stepIteration: taking.stepIteration }),
         });
+        // Text from a tainted session taints its reader (spec 13 section 10).
+        yield* taint.passOn(taking.sessionId);
         yield* provideSql(claimAttachments(created.id, references));
         // New work for a Thread the user marked Done means it is not done
         // any more, so the input takes it off the Done shelf.
@@ -2765,7 +3676,8 @@ const make = Effect.gen(function* () {
      * - releases the workspace lease of every exited session in it again, as
      *   `orphan`. Such a session released its lease as `idle` when it could
      *   still be resumed, but once its conversation is gone nothing can
-     *   resume it, so its workspace is kept only for the short window.
+     *   resume it, so its workspace is kept only for the short window. An
+     *   archived session is left alone: its lease stays `archived`.
      *
      * A session that has not exited yet is left to its own exit, which
      * releases its lease as `orphan` because its conversation is gone by then.
@@ -2776,7 +3688,7 @@ const make = Effect.gen(function* () {
           yield* announceSessionChange({ id: sessionId, conversationId });
         }
         const at = yield* nowIso;
-        for (const sessionId of yield* sessions.listExitedWithWorkspaceInConversation(
+        for (const sessionId of yield* sessions.listExitedUnarchivedWithWorkspaceInConversation(
           conversationId,
         )) {
           yield* workspaces.release({ kind: "session", id: sessionId }, "orphan", at);
@@ -2790,7 +3702,7 @@ const make = Effect.gen(function* () {
      * claimed for one send, and returns it. Returns `none`, storing nothing,
      * when:
      *
-     * - the session's status is not `status`;
+     * - the session is archived, or its status is not `status`;
      * - another input of the session is sent and not yet answered: the
      *   runner takes one input per turn boundary (`holdsInputOnTheWire`);
      * - for `idle`, another input of the session waits to be sent. Every
@@ -2818,7 +3730,11 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           // The caller passes the id of a stored session, and sessions are never deleted.
           const session = Option.getOrThrow(yield* sessions.one(sessionId));
-          if (session.status !== status || (yield* inputs.holdsInputOnTheWire(sessionId))) {
+          if (
+            session.archived !== null ||
+            session.status !== status ||
+            (yield* inputs.holdsInputOnTheWire(sessionId))
+          ) {
             return Option.none();
           }
           if (status === "idle" && Option.isSome(yield* inputs.oldestWaiting(sessionId))) {
@@ -2853,7 +3769,7 @@ const make = Effect.gen(function* () {
      * Claims the oldest input still waiting on an idle session, for a
      * delivery pass that finds the session idle. Returns `none` when:
      *
-     * - no input is waiting, or the session is not `idle`;
+     * - no input is waiting, or the session is not `idle`, or it is archived;
      * - another input of the session is sent and not yet answered: that
      *   input's turn may not have started yet, and the runner takes one input
      *   per turn;
@@ -2867,13 +3783,15 @@ const make = Effect.gen(function* () {
       withTransaction(
         sql,
         Effect.gen(function* () {
+          const session = Option.getOrThrow(yield* sessions.one(sessionId));
+          if (session.archived !== null) return Option.none();
           const waiting = yield* inputs.oldestWaiting(sessionId);
           if (Option.isNone(waiting)) return Option.none();
           if (waiting.value.attachments.length > 0) {
-            const session = Option.getOrThrow(yield* sessions.one(sessionId));
             const held = yield* holdInputWithRefusedAttachments(waiting.value, {
               runnerId: session.runnerId,
-              instanceId: session.instanceId,
+              providerAccountId: session.providerAccountId,
+              harnessId: session.harnessId,
               model: session.modelSelection.model,
             });
             if (held) return Option.none();
@@ -2967,7 +3885,7 @@ const make = Effect.gen(function* () {
         // An input fails, instead of going back to waiting, in two cases:
         //
         // - The failure is about the session's setup (the harness is not
-        //   installed or not logged in, the transcript to resume is
+        //   installed or not signed in, the transcript to resume is
         //   missing). Sending the input again would fail the same way, and
         //   the runner ends the session.
         // - The failure leaves it unknown whether the harness took the input
@@ -3076,6 +3994,48 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Records the usage a running session's harness reported for the
+     * session's Provider Account (spec 06 section 18). Drops the report, and
+     * logs why, when the session is unknown, is held by another runner (a
+     * runner may report only on sessions placed on it), has exited, or its
+     * account's kind declares no `usage`, because then there is no gauge to
+     * fill. `AccountUsage.record` also drops it when the session's process
+     * started before the account's key or token was replaced, because that
+     * process still holds the old credential.
+     */
+    applyAccountUsageReported: (
+      runnerId: string,
+      report: AccountUsageReported,
+    ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
+      Effect.gen(function* () {
+        const session = yield* sessions.one(report.sessionId);
+        if (Option.isNone(session) || session.value.runnerId !== runnerId) {
+          return yield* Effect.logInfo(
+            "Dropped a runner's usage report, because the session is unknown or not on that runner",
+          ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId }));
+        }
+        if (session.value.status === "exited") {
+          return yield* Effect.logDebug(
+            "Dropped a runner's usage report, because the session has exited",
+          ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId }));
+        }
+        const { providerAccountId } = session.value;
+        const account = yield* providerAccounts.one(providerAccountId);
+        const kind = Option.isSome(account)
+          ? findAccountKind(yield* host.providers(), account.value)
+          : undefined;
+        if (kind?.usage === undefined) {
+          return yield* Effect.logDebug(
+            "Dropped a runner's usage report, because the account's kind declares no usage",
+          ).pipe(Effect.annotateLogs({ runnerId, sessionId: report.sessionId, providerAccountId }));
+        }
+        yield* accountUsage.record(providerAccountId, report.readings, {
+          source: "session",
+          credentialSince: session.value.processStartedAt,
+        });
+      }),
+
+    /**
      * Applies a runner's report of the sessions it holds. Stores the native id
      * from each binding, then ends every session the controller thinks runs on
      * this runner but the report leaves out. A runner restart shows up only in
@@ -3084,8 +4044,10 @@ const make = Effect.gen(function* () {
      * always sees the final result.
      *
      * The mismatch can also go the other way: the report lists a session the
-     * controller already ended while the runner was unreachable. Returns the
-     * ids of those sessions, so the caller can tell the runner to stop each.
+     * controller already ended while the runner was unreachable, or an
+     * archived session whose stop never arrived. Returns the ids of those
+     * sessions, so the caller can tell the runner to stop each. An archived
+     * session stays as it is, and keeps its lease until it exits.
      */
     bound: (
       runnerId: string,
@@ -3100,7 +4062,7 @@ const make = Effect.gen(function* () {
               sessions.bind(
                 binding.sessionId,
                 runnerId,
-                binding.instanceId,
+                binding.providerAccountId,
                 binding.nativeSessionId,
               ),
             { discard: true },
@@ -3128,7 +4090,7 @@ const make = Effect.gen(function* () {
               }),
             { discard: true },
           );
-          return yield* sessions.listExitedAmong(
+          return yield* sessions.listToStopAmong(
             runnerId,
             bindings.map((binding) => binding.sessionId),
           );
@@ -3142,6 +4104,9 @@ const make = Effect.gen(function* () {
      * is nothing to write: the session does not exist, is not on this runner,
      * or has already seen the event.
      *
+     * The fields only the controller writes are dropped from the event first
+     * (`removeControllerFields`), so a runner cannot store them.
+     *
      * A delta's tap is announced here, before the transaction and never inside
      * it. A delta is not stored until it is flushed, but a client watching the
      * session must see it as soon as it is reported. So the tap is sent
@@ -3150,9 +4115,10 @@ const make = Effect.gen(function* () {
     foldReport: (
       runnerId: string,
       seq: number,
-      event: ProviderEvent,
+      reported: HarnessEvent,
     ): Effect.Effect<Folded | undefined, SqlError> =>
       Effect.gen(function* () {
+        const event = removeControllerFields(reported);
         const id = event.sessionId;
         const found = yield* sessions.one(id);
         // A runner may report only on sessions placed on it. An event for any
@@ -3195,7 +4161,7 @@ const make = Effect.gen(function* () {
      */
     applyReport: (
       runnerId: string,
-      event: ProviderEvent,
+      event: HarnessEvent,
       folded: Folded,
     ): Effect.Effect<AppliedReport, SqlError> =>
       Effect.gen(function* () {
@@ -3206,6 +4172,11 @@ const make = Effect.gen(function* () {
         // An event for a session that has already exited is still recorded,
         // but changes nothing else: no Request, no subagent, no usage.
         const sessionAcceptsChanges = before !== "exited";
+        // An archived session may still run until its stop arrives. A Request
+        // it opens in that time would wait for an answer that is refused, so
+        // it is recorded in the stream and opens nothing. Events that close
+        // Requests (resolved, turn end, exit) apply as for any session.
+        const opensNothing = event._tag === "request.opened" && session.archived !== null;
         const at = yield* nowIso;
         let toolCallsChanged = false;
         for (const row of folded.rows) {
@@ -3231,11 +4202,21 @@ const make = Effect.gen(function* () {
         if (event._tag === "item.completed" && event.editedFiles !== undefined) {
           yield* editObserver.filesEdited(id, event.editedFiles);
         }
+        // Only the session's own agent's turn counts, not a subagent's, and
+        // only while the session accepts changes. The time is the one the
+        // board shows as the end of the turn.
+        if (
+          sessionAcceptsChanges &&
+          event._tag === "turn.completed" &&
+          attributeEvent(event) === undefined
+        ) {
+          yield* sessions.turnEnded(id, at);
+        }
         // Written together with the status change from the same event, so a
-        // session that reads `idle` already has its provider-native id.
+        // session that reads `idle` already has its harness-native id.
         const native = findNativeId(event);
         if (native !== undefined) {
-          yield* sessions.bind(id, runnerId, session.instanceId, native);
+          yield* sessions.bind(id, runnerId, session.providerAccountId, native);
         }
         // Before the Requests, so a Request a subagent opens can name it by
         // the description this same event may have filled in.
@@ -3243,7 +4224,7 @@ const make = Effect.gen(function* () {
           ? yield* applySubagentEvent(session, event)
           : new Map<SubagentId, StoredSubagent>();
         let requestsChanged = false;
-        if (sessionAcceptsChanges && isRequestEvent(event)) {
+        if (sessionAcceptsChanges && !opensNothing && isRequestEvent(event)) {
           const openRequests = computeOpenRequestsAfter(event, session.openRequests);
           requestsChanged = openRequests !== session.openRequests;
           if (requestsChanged) yield* replaceOpenRequests(session, openRequests, event, askers);
@@ -3305,10 +4286,12 @@ const make = Effect.gen(function* () {
           if (moved === "idle" && event._tag === "turn.completed") {
             const next = yield* inputs.oldestWaiting(id);
             if (
+              session.archived === null &&
               Option.isSome(next) &&
               !(yield* holdInputWithRefusedAttachments(next.value, {
                 runnerId: session.runnerId,
-                instanceId: session.instanceId,
+                providerAccountId: session.providerAccountId,
+                harnessId: session.harnessId,
                 model: session.modelSelection.model,
               }))
             ) {
@@ -3410,13 +4393,14 @@ const make = Effect.gen(function* () {
           decodeInputUpdate(input),
           createDecodeValidationError,
         );
-        yield* requireChangeableInputs(id);
+        yield* refuseArchived(yield* requireChangeableInputs(id));
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const row = yield* queuedInput(id, inputId);
             const actor = yield* currentStamp;
             yield* inputs.rewrite(inputId, text, actor);
+            yield* taint.passOn(id);
             if (attachments === undefined) {
               // The payload cannot see the stored images, so an empty text
               // that leaves the input with nothing is refused here.
@@ -3431,10 +4415,11 @@ const make = Effect.gen(function* () {
               readClaimableAttachments(attachments, row.attachments),
             );
             const session = yield* readSession(id);
-            yield* provideSql(
+            yield* provideAttachmentCheck(
               refuseUnacceptedAttachments({
                 runnerId: session.runnerId,
-                instanceId: session.instanceId,
+                providerAccountId: session.providerAccountId,
+                harnessId: session.harnessId,
                 model: session.modelSelection.model,
                 attachments: references,
               }),
@@ -3530,7 +4515,9 @@ export const SessionServiceLayer: Layer.Layer<
   | SessionObserver
   | SessionEditObserver
   | WorkspaceService
+  | TaskService
   | Notifier
+  | AccountUsage
 > = Layer.effect(SessionService)(make);
 
 /**

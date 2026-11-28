@@ -1,9 +1,9 @@
 /**
  * Tests `buildTurns(rows, agent)`, which groups an agent's transcript rows
- * into turns, and `readUserSender`, which reads who sent a user message.
+ * into turns.
  *
  * The fixtures use the Claude adapter's real shapes (spec 06 §6.3, and
- * `apps/runner/src/providers/claude-code.ts` / `claude-code-normalize.ts`):
+ * `apps/runner/src/harnesses/claude-code.ts` / `claude-code-normalize.ts`):
  *
  * - a `user_message` item has `detail: { text }` on both `item.started` and
  *   `item.completed`;
@@ -12,9 +12,9 @@
  *   `assistant_message` item events.
  */
 import { describe, expect, it } from "vitest";
-import type { SessionRequest, TranscriptRow } from "@hercule/contract";
+import { appendPromptContext, type SessionRequest, type TranscriptRow } from "@hercule/contract";
 import type { AgentState } from "./agent-state";
-import { buildTurns, readUserSender } from "./turns";
+import { buildTurns } from "./turns";
 
 const SESSION_ID = "session-1";
 
@@ -30,6 +30,7 @@ const buildAgentAskingAbout = (...itemIds: readonly string[]): AgentState => ({
     detail: { command: "ls -la" },
   })),
   model: "claude-sonnet-5",
+  isSubagent: false,
 });
 
 const AGENT_ASKING_NOTHING = buildAgentAskingAbout();
@@ -1088,7 +1089,7 @@ describe("buildTurns: the skills of a message", () => {
 });
 
 describe("buildTurns runtime notes", () => {
-  const INSTALL_COMMAND = "hercule runner install-harness r1 --provider claude-code";
+  const INSTALL_COMMAND = "hercule runner install-harness r1 --harness claude-code/claude-code";
   const base = (position: number, at: string) => ({
     eventId: `n${position}`,
     sessionId: SESSION_ID,
@@ -1269,16 +1270,28 @@ describe("buildTurns runtime notes", () => {
       ["error", "HarnessNotInstalled"],
     ]);
   });
-});
 
-describe("readUserSender", () => {
-  it("returns the sending session's id, and undefined when the message has no sender", () => {
-    expect(readUserSender({ text: "Rebase on main", senderSessionId: "s-sender" })).toBe(
-      "s-sender",
+  it("keeps the MCP Servers a warning names on its note, and gives other warnings none", () => {
+    const mcpServers = [{ mcpServerId: "s-work", reason: "needs-sign-in" as const }];
+    const at = "2026-09-08T10:00:01.000Z";
+
+    const { turns } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        row(2, {
+          _tag: "runtime.warning",
+          ...base(2, at),
+          turnId: "t1",
+          message: "Sentry (work) needs sign-in",
+          mcpServers,
+        }),
+        row(3, { _tag: "runtime.warning", ...base(3, at), turnId: "t1", message: "Retrying." }),
+      ],
+      AGENT_ASKING_NOTHING,
     );
-    expect(readUserSender({ text: "Fix the login bug" })).toBeUndefined();
-    expect(readUserSender({ text: "Fix the login bug", senderSessionId: "" })).toBeUndefined();
-    expect(readUserSender(undefined)).toBeUndefined();
+
+    expect(turns[0]?.runtimeNotes[0]?.mcpServers).toEqual(mcpServers);
+    expect(turns[0]?.runtimeNotes[1]).not.toHaveProperty("mcpServers");
   });
 });
 
@@ -1675,5 +1688,100 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     });
 
     expect(readItems(rows)[0]).toMatchObject({ verb: "tool", target: "github/create_issue" });
+  });
+});
+
+describe("buildTurns: the context block in a user message", () => {
+  const THING_ID = "01a1317e-d8d3-7402-8971-cfcc37f653ca";
+  const BLOCK = appendPromptContext("", {
+    origin: { kind: "one" },
+    things: [
+      {
+        entityId: THING_ID,
+        ref: "linear:issue:northwind/SHOP-142",
+        title: "Show the delivery cost",
+        fields: [],
+      },
+    ],
+  });
+
+  /**
+   * Returns the message built from the user message sent with `text` (by
+   * `senderSessionId`, when set), which comes after `earlier` other user
+   * messages in the transcript.
+   */
+  const readSentMessage = (text: string, senderSessionId?: string, earlier = 0) => {
+    const row = (itemId: string, itemText: string, detail: object = {}) =>
+      buildRow({
+        _tag: "item.started",
+        eventId: nextId(),
+        sessionId: SESSION_ID,
+        at: "2026-09-08T10:00:00.000Z",
+        turnId: "t1",
+        itemId,
+        kind: "user_message",
+        detail: { text: itemText, ...detail },
+      });
+    const rows = [
+      ...Array.from({ length: earlier }, (_, index) => row(`earlier-${String(index)}`, "Hello")),
+      row("u1", text, senderSessionId === undefined ? {} : { senderSessionId }),
+    ];
+    return buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]?.userMessages[earlier];
+  };
+
+  it("reads the words and the block apart", () => {
+    const message = readSentMessage(`Look into this.\n\n${BLOCK}`);
+    expect(message?.text).toBe("Look into this.");
+    expect(message?.context).toMatchObject({
+      text: BLOCK,
+      lineCount: 3,
+      things: [{ entityId: THING_ID, title: "Show the delivery cost" }],
+    });
+  });
+
+  it("reads a text that is only a block as no words", () => {
+    const message = readSentMessage(BLOCK);
+    expect(message?.text).toBe("");
+    expect(message?.context?.text).toBe(BLOCK);
+  });
+
+  it("reads the block of the first message when another session's agent sent it", () => {
+    const message = readSentMessage(`Look into this.\n\n${BLOCK}`, "s-spawner");
+    expect(message).toMatchObject({ text: "Look into this.", senderSessionId: "s-spawner" });
+    expect(message?.context?.text).toBe(BLOCK);
+  });
+
+  it("keeps the whole text of a later message, even when it ends in a block", () => {
+    const text = `Look into this.\n\n${BLOCK}`;
+    for (const sender of [undefined, "s-sender"]) {
+      const message = readSentMessage(text, sender, 1);
+      expect(message).toMatchObject({ text });
+      expect(message).not.toHaveProperty("context");
+    }
+  });
+
+  it("keeps the whole brief of a subagent, even when it ends in a block", () => {
+    const text = `Investigate this.\n\n${BLOCK}`;
+    const row = buildRow({
+      _tag: "item.started",
+      eventId: nextId(),
+      sessionId: SESSION_ID,
+      at: "2026-09-08T10:00:00.000Z",
+      turnId: "t1",
+      itemId: "u1",
+      kind: "user_message",
+      detail: { text },
+    });
+    const message = buildTurns([row], { ...AGENT_ASKING_NOTHING, isSubagent: true }).turns[0]
+      ?.userMessages[0];
+    expect(message).toMatchObject({ text });
+    expect(message).not.toHaveProperty("context");
+  });
+
+  it("keeps a text with no block, or a near miss, whole as words", () => {
+    const nearMiss = `Look.\n\n${BLOCK.replace("hercule entity read", "hercule entity show")}`;
+    expect(readSentMessage("Fix the login bug")).not.toHaveProperty("context");
+    expect(readSentMessage(nearMiss)).toMatchObject({ text: nearMiss });
+    expect(readSentMessage(nearMiss)).not.toHaveProperty("context");
   });
 });

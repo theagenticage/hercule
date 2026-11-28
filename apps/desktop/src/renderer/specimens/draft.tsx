@@ -4,7 +4,8 @@
  * `ui:metrics` measures it.
  *
  * The page takes its theme from `?theme=whitehaven` or `?theme=orient-express`,
- * and the state from `?state=first` or `?state=first-no-repo`, see
+ * and the state from `?state=first`, `?state=first-no-repo` or
+ * `?state=signed-out`, see
  * `chooseDraftFixture`.
  */
 // The fixed clock comes first: the app's age clock reads the time as soon as

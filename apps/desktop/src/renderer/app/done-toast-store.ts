@@ -1,7 +1,8 @@
 /**
- * The state behind the toast that follows a Done move ("Marked done" or
- * "Reopened" with Undo, or the error of a move that failed), kept outside
- * React so that the move queue can write it and the sidebar can draw it.
+ * The state behind the toast that follows a move on threads ("Marked done" or
+ * "Reopened" with Undo, "Archived" with none, or the error of a move that
+ * failed), kept outside React so that the move queue can write it and the
+ * sidebar can draw it.
  */
 
 /** A move on the Done state of threads: mark them Done, or reopen them. */
@@ -33,6 +34,11 @@ export interface DoneToast {
 export interface DoneToastStore {
   /** Shows a new toast with `undo`, replacing the one shown. Returns the new toast's `serial`. */
   readonly show: (text: string, undo: DoneUndo) => number;
+  /**
+   * Shows `text` as a toast with no Undo, such as "Archived", which nothing
+   * reverses. It replaces the toast shown, as `show` does.
+   */
+  readonly showNotice: (text: string) => void;
   /**
    * Shows the error `text` of a Done move that failed, as a toast without
    * Undo. `own` is the `serial` of the toast that move showed, or `null` when
@@ -69,6 +75,9 @@ export const createDoneToastStore = (): DoneToastStore => {
   };
   return {
     show: (text, undo) => display(text, false, undo),
+    showNotice: (text) => {
+      display(text, false, null);
+    },
     showFailure: (text, own) => {
       if (toast !== null && toast.undo !== null && toast.serial !== own) heldErrors.push(text);
       else display(text, true, null);

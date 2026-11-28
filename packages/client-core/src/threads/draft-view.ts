@@ -8,6 +8,7 @@ import { buildBranchField, type BranchField } from "./branch-menu";
 import { buildComposerFields, type ComposerFields } from "./composer-fields";
 import type { ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { decideDraftPlaceForPick, type DraftPlace } from "./groups";
+import type { RecentModel } from "./recent";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { resolveThreadConfig, type ResolvedDraft } from "./resolve-thread";
 import { buildDraftConfig } from "./thread-defaults";
@@ -19,14 +20,23 @@ import {
   type WorkspaceLabel,
 } from "./workspaces";
 
+/** The catalogs of a draft: every optional read of `ThreadCatalogs` is present. */
+type DraftCatalogs = Required<ThreadCatalogs>;
+
 /**
  * The records a Draft Thread is built from, as the app's queries return them:
  * every catalog a thread's configuration is checked against, the settings
  * that hold the user's defaults, and the permission profiles.
  */
-export interface DraftReads extends Required<ThreadCatalogs> {
+export interface DraftReads extends DraftCatalogs {
   readonly settings: SettingsState;
   readonly profiles: readonly Profile[];
+  /**
+   * The entries the user picked, newest first, which the client keeps per
+   * device. A draft in a project that names a Model Profile starts on the
+   * newest one the profile holds.
+   */
+  readonly recent: readonly RecentModel[];
 }
 
 /** Where a Draft Thread is: its project, and the workspace it joins. Either can be `null`. */
@@ -37,7 +47,7 @@ export interface DraftAddress {
 
 /** What a Draft Thread shows and starts with. */
 export interface DraftView {
-  readonly catalogs: Required<ThreadCatalogs>;
+  readonly catalogs: DraftCatalogs;
   /** What the draft runs with before the user picks anything. Each pick is compared with it. */
   readonly base: ThreadConfig;
   /**
@@ -52,8 +62,6 @@ export interface DraftView {
   readonly joinedWorkspace: Workspace | undefined;
   /** The words the lip shows for the workspace: "Main workspace", "New workspace", or a branch. */
   readonly workspaceLabel: string;
-  /** The words the lip shows for the machine: its name, and why it is dimmed when it is. */
-  readonly machineLabel: string;
   /** The branch menu, or `null` when the draft joins a workspace or has no checkout. */
   readonly branch: BranchField | null;
   /** The selected source workspaces to inspect when a decision menu opens. */
@@ -85,13 +93,16 @@ export const buildDraftView = (
   address: DraftAddress,
   picks: ThreadPicks,
 ): DraftView => {
-  const { instances, runners, thisMacRunnerId, resources, workspaces, sessions } = reads;
+  const { accounts, runners, thisMacRunnerId, resources, workspaces, sessions } = reads;
   const base = buildDraftConfig({
     settingsUser: reads.settings.user,
-    instances,
+    accounts,
     runners,
     profiles: reads.profiles,
     thisMacRunnerId,
+    modelProfiles: reads.modelProfiles,
+    projects: reads.projects,
+    recent: reads.recent,
     ...address,
   });
   const resolved = resolveThreadConfig(reads, { kind: "draft", config: base }, picks);
@@ -115,7 +126,6 @@ export const buildDraftView = (
   // right, so it names the workspace as a started thread's lip does.
   const workspaceLabel = joined?.kind === "primary" ? "Main workspace" : workspaceMenu.label;
   const machineName = runners.find((each) => each.id === runnerId)?.name ?? null;
-  const machine = machineName ?? "no machine";
   // A main workspace picked by its repo is joined as well, so the row names
   // it as a started thread's row would.
   const rowWorkspace =
@@ -131,11 +141,6 @@ export const buildDraftView = (
     workspaceMenu,
     joinedWorkspace: joined,
     workspaceLabel,
-    // A joined workspace's machine is labelled "set by the workspace …",
-    // for a machine menu that stands apart from the workspace's. The lip
-    // shows the two side by side, so it names the machine, and its tooltip
-    // says why it cannot change.
-    machineLabel: joined === undefined ? fields.machine.label : machine,
     branch: buildBranchField(pick, { workspaces, runnerId }),
     workspaceInspectionIds: findWorkspaceInspectionIds(pick, workspaces, runnerId),
     // The group follows the workspace the lip shows, so a pick moves the row.

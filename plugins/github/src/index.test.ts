@@ -14,6 +14,7 @@ import type {
   ConnectionTypeContribution,
   EventSourceContribution,
   ExternalAccount,
+  McpServerContribution,
   Plugin,
   RegistrationHost,
   WorkflowActionContribution,
@@ -29,10 +30,12 @@ const collectContributions = async (
   readonly types: ReadonlyArray<ConnectionTypeContribution>;
   readonly sources: ReadonlyArray<EventSourceContribution>;
   readonly actions: ReadonlyArray<WorkflowActionContribution>;
+  readonly mcpServers: ReadonlyArray<McpServerContribution>;
 }> => {
   const types: Array<ConnectionTypeContribution> = [];
   const sources: Array<EventSourceContribution> = [];
   const actions: Array<WorkflowActionContribution> = [];
+  const mcpServers: Array<McpServerContribution> = [];
   const host: RegistrationHost = {
     connections: {
       registerType: (contribution) =>
@@ -52,9 +55,12 @@ const collectContributions = async (
           actions.push(contribution);
         }),
     },
+    mcpServers: {
+      register: (contribution) => Effect.sync(() => void mcpServers.push(contribution)),
+    },
   };
   await Effect.runPromise(plugin.register(host));
-  return { types, sources, actions };
+  return { types, sources, actions, mcpServers };
 };
 
 const PAT = "ghp_a-real-looking-token";
@@ -124,11 +130,42 @@ const ACTIONS = [
 ];
 
 describe("what the github plugin registers", () => {
-  it("requests the capabilities its connection type, ingest and actions use", () => {
+  it("requests the capabilities its connection type, ingest, actions and MCP server use", () => {
     expect(github.manifest).toMatchObject({
       id: "github",
-      capabilities: ["connections", "event-sources", "events", "resources", "workflow-actions"],
+      capabilities: [
+        "connections",
+        "event-sources",
+        "events",
+        "resources",
+        "entities",
+        "workflow-actions",
+        "mcp-servers",
+      ],
     });
+  });
+
+  it("contributes one MCP server", async () => {
+    const { mcpServers } = await collectContributions(github);
+
+    expect(mcpServers.map((server) => server.id)).toEqual(["github"]);
+  });
+
+  it("declares the entity kinds it reports and an entities feed to poll them", async () => {
+    const source = (await collectContributions(github)).sources[0]!;
+
+    expect(
+      (source.entityKinds ?? []).map((kind) => [kind.word, kind.refPrefix, kind.pace]),
+    ).toEqual([
+      ["pull-request", "github:pr:", "fast"],
+      ["issue", "github:issue:", "slow"],
+      ["repository", "github:repo:", "context"],
+    ]);
+    expect(source.feeds?.["entities"]).toEqual({
+      defaultIntervalSeconds: 120,
+      minIntervalSeconds: 60,
+    });
+    expect(source.entityLookup).toBeDefined();
   });
 
   it("contributes one type that offers a device flow and a pasted token", async () => {
@@ -201,6 +238,37 @@ describe("what the github plugin registers", () => {
         expect(source.kinds[eventKind], `${kind.word} reads ${eventKind}`).toBeDefined();
       }
     }
+  });
+
+  it("declares the review requests saved query on both review-request signal kinds, one asked of the user and one of a team", async () => {
+    const source = (await collectContributions(github)).sources[0]!;
+
+    expect(source.savedQueries).toEqual([
+      {
+        word: "review-requests",
+        name: "Review requests",
+        order: "waiting",
+        clauses: [
+          { key: "signal", op: "is", value: ["review-requested", "team-review-requested"] },
+        ],
+      },
+    ]);
+    const words = source.signalKinds?.map((kind) => kind.word);
+    expect(words).toContain("review-requested");
+    expect(words).toContain("team-review-requested");
+  });
+
+  it("says in every signal kind what one is called and whether it asks something of the user", async () => {
+    const signalKinds = (await collectContributions(github)).sources[0]!.signalKinds ?? [];
+
+    expect(signalKinds.map((kind) => [kind.word, kind.noun, kind.asks])).toEqual([
+      ["review-requested", "review request", true],
+      ["team-review-requested", "team review request", true],
+      ["mentioned", "mention", true],
+      ["assigned", "assignment", false],
+      ["changes-requested", "requested changes", true],
+      ["checks-failed", "failing checks", true],
+    ]);
   });
 
   it("lets a Signal's answer run the five actions spec 05 lists, and no other", async () => {

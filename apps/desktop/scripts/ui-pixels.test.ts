@@ -78,6 +78,7 @@ function buildFragment(overrides: Partial<TextFragment>): TextFragment {
     opacityGroups: [],
     isProse: false,
     partlyCovered: false,
+    element: "span",
     ...overrides,
   };
 }

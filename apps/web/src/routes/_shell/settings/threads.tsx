@@ -3,7 +3,6 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildIdOptions,
-  computeInstanceDefaults,
   computeThreadDefaults,
   buildThreadModelField,
   resolveThreadRowsMode,
@@ -11,8 +10,12 @@ import {
 import type { ThreadRows, ThreadWorkspace } from "@hercule/contract";
 import { FormCard, Row, SegmentedControl, SegmentedControlItem, Select } from "@hercule/ui";
 import {
+  ensureProviderAccountReads,
   localRunnerQuery,
+  harnessesQuery,
+  modelProfilesQuery,
   profilesQuery,
+  providerAccountsQuery,
   providersQuery,
   runnersQuery,
   settingsQuery,
@@ -37,7 +40,7 @@ export const Route = createFileRoute("/_shell/settings/threads")({
   loader: async ({ context }) => {
     const [runners] = await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
+      ensureProviderAccountReads(context.queryClient, context.client),
       context.queryClient.ensureQueryData(profilesQuery(context.client)),
     ]);
     await context.queryClient.ensureQueryData(
@@ -56,7 +59,10 @@ export const Route = createFileRoute("/_shell/settings/threads")({
 function Threads(): JSX.Element {
   const { client, detectLocalRunner } = Route.useRouteContext();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const profiles = useSuspenseQuery(profilesQuery(client)).data.items;
   const runners = useSuspenseQuery(runnersQuery(client)).data.items;
   const localId = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
@@ -66,15 +72,21 @@ function Threads(): JSX.Element {
 
   // Every default below comes from `computeThreadDefaults`, the same function
   // the composer uses to prefill a new thread:
-  // - a stored id of an instance that no longer exists falls back to another;
-  // - the model is read from the runner the instance would be placed on;
+  // - a stored id of an account that no longer exists falls back to the open
+  //   profile's default entry;
   // - "nothing picked" is null.
-  const defaults = computeThreadDefaults(settings.user, instances, runners, profiles, localId);
-  const instance = instances.find((each) => each.id === defaults.instanceId);
-  const modelField =
-    instance === undefined
-      ? { dimmed: null, options: [] }
-      : buildThreadModelField(instance, defaults.runnerId, settings.user["thread.model"]);
+  const defaults = computeThreadDefaults({
+    settingsUser: settings.user,
+    accounts,
+    runners,
+    profiles,
+    thisMacRunnerId: localId,
+    modelProfiles,
+  });
+  const modelField = buildThreadModelField(
+    { accounts, providers, harnesses, modelProfiles, runners, thisMacRunnerId: localId },
+    defaults,
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -82,58 +94,63 @@ function Threads(): JSX.Element {
         label="Threads · defaults"
         fine="What a new thread starts with, prefilled on the composer."
       >
-        {instances.length === 0 ? (
-          <p className="text-fine text-faint">No provider instance yet.</p>
+        {accounts.length === 0 ? (
+          <p className="text-fine text-faint">No account yet.</p>
         ) : (
-          <>
-            <Row label="Provider instance" htmlFor="thread-instance">
-              <Select
-                id="thread-instance"
-                value={defaults.instanceId ?? ""}
-                onChange={(event) => {
-                  const next = instances.find((each) => each.id === event.target.value);
-                  // The model follows the instance, and is read from the runner
-                  // that instance would be placed on, using the same rule
-                  // (`computeInstanceDefaults`) as the composer.
-                  const nextModel =
-                    next === undefined
-                      ? null
-                      : computeInstanceDefaults(next, runners, localId).model;
-                  save({
-                    user: {
-                      "thread.instanceId": event.target.value,
-                      ...(nextModel === null ? {} : { "thread.model": nextModel }),
-                    },
-                  });
-                }}
-              >
-                {instances.map((each) => (
-                  <option key={each.id} value={each.id}>
-                    {each.displayName}
-                  </option>
-                ))}
-              </Select>
-            </Row>
-            <Row label="Model" htmlFor="thread-model">
+          <Row label="Model" htmlFor="thread-model">
+            <div className="flex flex-col gap-1">
               {modelField.dimmed !== null ? (
                 <p className="py-1.5 text-fine text-faint">{modelField.dimmed}</p>
               ) : (
                 <Select
                   id="thread-model"
-                  value={defaults.model ?? ""}
+                  value={modelField.selectedKey ?? ""}
                   onChange={(event) => {
-                    save({ user: { "thread.model": event.target.value } });
+                    const option = modelField.options.find(
+                      (each) => each.key === event.target.value,
+                    );
+                    if (option === undefined) return;
+                    // The account, the harness and the model are one entry of
+                    // the profile, so they are saved together.
+                    save({
+                      user: {
+                        "thread.providerAccountId": option.providerAccountId,
+                        "thread.harnessId": option.harnessId,
+                        "thread.model": option.model,
+                      },
+                    });
                   }}
                 >
-                  {modelField.options.map((option) => (
-                    <option key={option.slug} value={option.slug}>
-                      {option.missing ? `${option.name} (not offered)` : option.name}
+                  {modelField.selectedKey === null ? (
+                    <option value="" disabled>
+                      No model chosen
                     </option>
-                  ))}
+                  ) : null}
+                  {modelField.groups.map((group) => {
+                    const options = group.options.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.missing
+                          ? `${option.label} (not offered)`
+                          : option.problem === null
+                            ? option.label
+                            : `${option.label} (${option.problem})`}
+                      </option>
+                    ));
+                    return group.label === null ? (
+                      options
+                    ) : (
+                      <optgroup key={group.label} label={group.label}>
+                        {options}
+                      </optgroup>
+                    );
+                  })}
                 </Select>
               )}
-            </Row>
-          </>
+              <p className="text-fine text-faint">
+                A project with its own model profile starts there.
+              </p>
+            </div>
+          </Row>
         )}
         <Row label="Access mode">
           <AccessModeControl

@@ -1,0 +1,309 @@
+/**
+ * The source of the extension pi loads for a Hercule session. The adapter
+ * writes a copy of it for each agent, the session's own and each subagent,
+ * and deletes the copy when that agent's pi exits. It is a string constant,
+ * not a file read from disk, because the runner ships as a compiled binary
+ * with no source tree beside it. Writing it at every start keeps the file in
+ * step with the runner build that starts pi.
+ *
+ * The extension imports nothing from the runner. pi loads a `-e` file itself,
+ * so anything the file imported would have to exist on the machine the session
+ * runs on. The exceptions are pi's own package and its typebox, which pi's
+ * loader resolves for the file. The extension does not have its own copy of the
+ * approval rules either: the source of `requiresApproval` is pasted in, so the
+ * function that runs inside pi is the same function the adapter uses and the
+ * tests cover.
+ */
+import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
+import { SESSION_TOKEN_VARIABLE } from "../../credentials/helper";
+import { SESSION_MARKS_DIR_VARIABLE, formatStartMark } from "../../edit-marks";
+import { requiresApproval } from "./policy";
+
+/**
+ * The environment variable that tells the approval hook the session's access
+ * mode. The adapter sets it and the extension source below reads it, both
+ * through this one constant. If the two spellings drifted apart, the hook would
+ * fall back to asking about everything.
+ */
+export const ACCESS_MODE_VARIABLE = "HERCULE_ACCESS_MODE";
+
+/**
+ * The environment variable that carries the session's output schema, as JSON,
+ * to the `submit_result` tool below. Like the access mode variable, both sides
+ * use this one constant. If the two spellings drifted apart, the session would
+ * be asked for an answer and have no tool to give it with.
+ */
+export const OUTPUT_SCHEMA_VARIABLE = "HERCULE_OUTPUT_SCHEMA";
+
+/**
+ * The name of the tool a session with an output schema calls to give its
+ * answer. The adapter reads the turn's answer from the call to this tool, so
+ * the name is defined here and nowhere else.
+ */
+export const SUBMIT_RESULT_TOOL = "submit_result";
+
+/**
+ * The name of the tool an agent calls to hand a task to a subagent. pi has no
+ * subagents of its own, so the extension adds this tool, and the runner starts
+ * each subagent as a pi process of its own (spec 06 section 13.6).
+ */
+export const SUBAGENT_TOOL = "subagent";
+
+/**
+ * The environment variable that gives an agent the `subagent` tool. The
+ * adapter sets it to "1" for every agent that may start subagents, and leaves
+ * it out for an agent at the deepest level, so a subagent there cannot start
+ * another.
+ */
+export const SUBAGENTS_VARIABLE = "HERCULE_SUBAGENTS";
+
+/**
+ * The environment variable that turns off pi's automatic compaction. The
+ * adapter sets it to "1" for an assistant's session, which the controller
+ * rotates to a fresh session instead (spec 06 section 9.2), and leaves it out
+ * otherwise.
+ *
+ * The extension cancels the compaction instead of the adapter sending pi's
+ * `set_auto_compaction` command, because that command saves the choice in the
+ * Harness Home's `settings.json`, and every later session of the account would
+ * start with compaction off.
+ */
+export const NO_AUTO_COMPACTION_VARIABLE = "HERCULE_NO_AUTO_COMPACTION";
+
+/**
+ * The environment variable that holds the MCP Gateway's URL. The adapter sets
+ * it for an agent whose session has the gateway, and the extension registers
+ * the gateway with pi from it. Without it the extension registers nothing.
+ * Both sides use this one constant, so a drifted spelling cannot leave pi
+ * without the gateway and with no message.
+ */
+export const MCP_GATEWAY_URL_VARIABLE = "HERCULE_MCP_GATEWAY_URL";
+
+/**
+ * The title of the dialog the `subagent` tool opens to ask the runner for a
+ * subagent. The dialog's placeholder is the request as JSON:
+ * `{ toolCallId, description, prompt }`. The runner recognises the dialog by
+ * this title, so it never reaches the user.
+ */
+export const SUBAGENT_DIALOG = "Start a subagent";
+
+/**
+ * The runner's answer to the `subagent` dialog, sent back as JSON: the
+ * subagent's final message, or why there is none. The extension turns an
+ * error into a failed tool result, so the agent sees what went wrong.
+ */
+export type SubagentReply = { readonly text: string } | { readonly error: string };
+
+/**
+ * The environment variable that names the agent's own copy of the extension.
+ * Every bash call opens that file first, as file descriptor 9, so every
+ * process the call starts holds it open, a background one included. When the
+ * agent's pi exits, the runner kills every process that still holds the file.
+ * pi itself ends only the calls still running, and a process left in the
+ * background by a finished call would outlive a stopped agent.
+ */
+export const AGENT_FILE_VARIABLE = "HERCULE_AGENT_FILE";
+
+/**
+ * pi's tools that can write files: its shells and its file edits. Before each
+ * call to one of them, the extension writes a mark file into the directory in
+ * `SESSION_MARKS_DIR_VARIABLE` (spec 19 section 4.1). A test checks that the
+ * list matches the tools the normalizer reports as commands and file changes.
+ */
+export const FILE_WRITING_TOOLS: ReadonlyArray<string> = ["bash", "powershell", "edit", "write"];
+
+export const EXTENSION_SOURCE = `import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+
+/**
+ * Hercule's tool approval hook. Written by the Hercule runner at session start; edits here
+ * are overwritten the next time a session starts.
+ */
+const requiresApproval = ${requiresApproval.toString()};
+
+const MODE = process.env.${ACCESS_MODE_VARIABLE} ?? "approval-required";
+
+const DENIED = "The user did not approve this in Hercule.";
+
+const LOST = "Hercule could not ask the user for approval because its connection to pi failed.";
+
+const FILE_WRITING_TOOLS = ${JSON.stringify(FILE_WRITING_TOOLS)};
+
+const SESSION_MARKS_DIR = process.env.${SESSION_MARKS_DIR_VARIABLE};
+
+const formatStartMark = ${formatStartMark.toString()};
+
+/**
+ * Writes the mark file of one tool call, which tells the Hercule runner when
+ * the call started: the file's ctime is the start. A shell's command text goes
+ * in the mark too. The format is the runner's own (edit-marks/marks.ts).
+ * When the file cannot be written, the call still runs: watching edits is
+ * best effort and never blocks a session. The runner then logs the call's
+ * unknown start.
+ */
+const markToolStart = (toolCallId, shellCommand) => {
+  try {
+    const name = process.hrtime.bigint().toString() + "-" + Math.random().toString(36).slice(2);
+    writeFileSync(join(SESSION_MARKS_DIR, name), formatStartMark(toolCallId, shellCommand), {
+      flag: "wx",
+      mode: 0o600,
+    });
+  } catch {}
+};
+
+export default function (pi) {
+  // pi's own bash tool, registered again under the same name, with one line
+  // run before each command: it opens the agent's file, which every process
+  // the command starts inherits. The runner finds those processes by that
+  // open file. Excluding bash still removes this tool, because pi applies
+  // --exclude-tools to every tool by name.
+  pi.registerTool(
+    createBashToolDefinition(process.cwd(), {
+      commandPrefix: 'exec 9<"$${AGENT_FILE_VARIABLE}"',
+    }),
+  );
+  // A session with an output schema gives its answer by calling a tool, not in
+  // prose. The schema constrains what the model can send, and the runner reads
+  // the answer from the call. The tool is registered before the mode check,
+  // because a full-access session gives its answer the same way.
+  if (process.env.${OUTPUT_SCHEMA_VARIABLE}) {
+    pi.registerTool({
+      name: "${SUBMIT_RESULT_TOOL}",
+      label: "Submit result",
+      description:
+        "Record your answer to the task. Call this exactly once, with the answer as its arguments, and say nothing after it: the call ends your work on this task.",
+      // The schema is passed through unchanged, because the runner validates
+      // the answer against the schema it sent. A schema changed here could
+      // accept answers the runner then rejects.
+      parameters: Type.Unsafe(JSON.parse(process.env.${OUTPUT_SCHEMA_VARIABLE})),
+      // Preferred, not required: a model whose provider cannot constrain its
+      // output can still answer, and the runner still validates the answer.
+      constrainedSampling: { type: "json_schema", strict: "prefer" },
+      execute: async () => ({
+        content: [{ type: "text", text: "Recorded." }],
+        // pi uses a tool result's details for its own logs and display. This
+        // tool has nothing to add beyond recording the answer.
+        details: {},
+        // Without this, the agent keeps working after it answers, and the
+        // turn's result has to wait until the agent stops on its own.
+        terminate: true,
+      }),
+    });
+  }
+  // The runner, not this extension, runs the subagent: the tool asks for one
+  // through a dialog and waits for the reply. Registered before the mode check,
+  // because a full-access agent delegates the same way.
+  if (process.env.${SUBAGENTS_VARIABLE} === "1") {
+    pi.registerTool({
+      name: "${SUBAGENT_TOOL}",
+      label: "Subagent",
+      description:
+        "Hand a self-contained task to a subagent: a new agent with your tools and your working directory, but none of this conversation. It works on its own, and its final message is this call's result. Several calls in one message run at the same time.",
+      parameters: Type.Object({
+        description: Type.String({
+          description: "A short name for the task, three to six words. The user sees it.",
+        }),
+        prompt: Type.String({
+          description: "The whole task. The subagent sees nothing else, so include everything it needs.",
+        }),
+      }),
+      execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+        const request = JSON.stringify({
+          toolCallId,
+          description: params.description,
+          prompt: params.prompt,
+        });
+        const answer = await ctx.ui.input("${SUBAGENT_DIALOG}", request, { signal });
+        // pi gives no answer when the turn was aborted or the dialog cancelled.
+        if (answer === undefined) throw new Error("The subagent was stopped.");
+        const reply = JSON.parse(answer);
+        if (typeof reply.error === "string") throw new Error(reply.error);
+        return { content: [{ type: "text", text: reply.text }], details: {} };
+      },
+    });
+  }
+  // pi asks before every compaction. Only the automatic ones are cancelled: a
+  // compaction the user asked for with /compact still runs. Registered before
+  // the mode check, because a full-access session is rotated the same way.
+  if (process.env.${NO_AUTO_COMPACTION_VARIABLE} === "1") {
+    pi.on("session_before_compact", async (event) =>
+      event.reason === "manual" ? undefined : { cancel: true },
+    );
+  }
+  // The MCP Gateway is registered with pi's built-in MCP client, which the
+  // adapter loads with \`-e builtin:mcp\`. The header holds the name of the
+  // token variable, not the token: pi reads the variable when it connects, so
+  // the token is in no file and in no argument. The tools are \`deferred\`, so
+  // the model finds them with pi's \`tool_search\`. pi's default,
+  // \`codemode\`, would make them callable only from scripts the model writes,
+  // and needs a third built-in that Hercule does not load.
+  //
+  // A failed registration must not end the extension: this file also holds the
+  // approval hook below, and a factory that throws makes pi drop all of it. So
+  // the failure is kept and shown to the user once the session has started,
+  // because the UI cannot show anything while the extension loads.
+  let mcpFailure;
+  const mcpGatewayUrl = process.env.${MCP_GATEWAY_URL_VARIABLE};
+  if (mcpGatewayUrl) {
+    try {
+      pi.registerMcpServer("${MCP_GATEWAY_ENTRY_NAME}", {
+        url: mcpGatewayUrl,
+        headers: { Authorization: "Bearer \${${SESSION_TOKEN_VARIABLE}}" },
+        exposure: "deferred",
+      });
+    } catch (error) {
+      mcpFailure = error instanceof Error ? error.message : String(error);
+    }
+  }
+  if (mcpFailure !== undefined) {
+    pi.on("session_start", async (_event, ctx) => {
+      ctx.ui.notify(
+        "pi could not register Hercule's MCP Gateway, so this thread has no MCP tools: " + mcpFailure,
+        "warning",
+      );
+    });
+  }
+  // With no marks to write, full access needs no handler: it asks about
+  // nothing, so no tool call can wait for an answer that will never come.
+  if (MODE === "full-access" && !SESSION_MARKS_DIR) return;
+  pi.on("tool_call", async (event, ctx) => {
+    // The mark is written before anything is awaited, and pi runs the tool
+    // only after this handler returns, so the mark is always older than the
+    // tool's first write.
+    if (SESSION_MARKS_DIR && event.toolCallId && FILE_WRITING_TOOLS.includes(event.toolName)) {
+      const command = event.input?.command;
+      const isShell = event.toolName === "bash" || event.toolName === "powershell";
+      markToolStart(event.toolCallId, isShell && typeof command === "string" ? command : undefined);
+    }
+    if (!requiresApproval(MODE, event.toolName)) return undefined;
+    try {
+      // The message is JSON, not prose: the call's id, which Hercule uses to
+      // find the call, its tool name, and the command and path the approval
+      // card shows. pi has validated and converted the input by now, so the
+      // card shows what will run: a path the model sent as the number 42 runs
+      // as "42". The rest of the input stays out, because one message is one
+      // RPC frame and a write's content can be megabytes.
+      const input = event.input ?? {};
+      const heldCall = JSON.stringify({
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        ...(typeof input.command === "string" ? { command: input.command } : {}),
+        ...(typeof input.path === "string" ? { path: input.path } : {}),
+      });
+      const allowed = await ctx.ui.confirm(\`Approve \${event.toolName}?\`, heldCall, {
+        // Without the signal, an aborted turn leaves this dialog waiting
+        // forever, and the session stuck with it.
+        signal: ctx.signal,
+      });
+      return allowed ? undefined : { block: true, reason: DENIED };
+    } catch {
+      // pi returns false for an abort or a timeout, so an error here means the
+      // connection to Hercule failed. Block the call: running it would run a
+      // tool nobody approved.
+      return { block: true, reason: LOST };
+    }
+  });
+}
+`;

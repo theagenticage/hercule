@@ -19,10 +19,12 @@ import {
 import {
   connectionsQuery,
   localRunnerQuery,
+  modelProfilesQuery,
   runnersQuery,
   workspacesQuery,
 } from "../../app/queries";
 import { FormField } from "../step";
+import { ModelProfileField } from "./model-profile-field";
 import {
   ChooseFolder,
   FolderCard,
@@ -61,6 +63,8 @@ export function NewProjectForm({
   const identity = useQuery(localRunnerQuery(bridge, runnerRead.data ?? []));
   const workspaceRead = useQuery(workspacesQuery(client));
   const workspaces = workspaceRead.data;
+  const modelProfiles = useQuery(modelProfilesQuery(client)).data ?? [];
+  const showModelProfile = modelProfiles.length >= 2;
   const gitHubConnections = filterGitHubConnections(connections);
   const gitHub = gitHubConnections[0];
 
@@ -69,6 +73,12 @@ export function NewProjectForm({
   const [remote, setRemote] = useState("");
   const [setupCommand, setSetupCommand] = useState("");
   const [mode, setMode] = useState<ProjectWorkspaceSelection["mode"] | null>(null);
+  // The id of the Model Profile the user chose, or "" for None. It may name a
+  // profile that was deleted since, so `modelProfileId` below is what counts.
+  const [pickedModelProfileId, setPickedModelProfileId] = useState("");
+  const modelProfileId = modelProfiles.some((profile) => profile.id === pickedModelProfileId)
+    ? pickedModelProfileId
+    : "";
   // What the last submission left: what exists, and why the rest does not.
   const [lastSubmission, setLastSubmission] = useState<NewProjectSubmission | null>(null);
 
@@ -141,6 +151,8 @@ export function NewProjectForm({
     create.mutate({
       name,
       projectId,
+      // The select is hidden with fewer than two profiles, and then nothing is sent.
+      ...(showModelProfile && modelProfileId !== "" ? { modelProfileId } : {}),
       repositories:
         withRepository && gitHub !== undefined
           ? [
@@ -168,6 +180,16 @@ export function NewProjectForm({
           : [],
     });
   };
+
+  const modelProfileField = showModelProfile ? (
+    <ModelProfileField
+      profiles={modelProfiles}
+      value={modelProfileId}
+      disabled={projectId !== null}
+      error={submission?.modelProfileFailure ?? null}
+      onChange={setPickedModelProfileId}
+    />
+  ) : null;
 
   const nameField = (
     <FormField label="Project name" error={submission?.failure ?? null}>
@@ -199,6 +221,7 @@ export function NewProjectForm({
         </p>
         <div className="st-form">
           {nameField}
+          {modelProfileField}
           {gitHub === undefined ? null : (
             <FormField label="Remote URL" error={repository?.message ?? null}>
               <input
@@ -274,7 +297,10 @@ export function NewProjectForm({
       <>
         {card}
         <NoGitHubWarning projectName={projectName} onConnectGitHub={onConnectGitHub} />
-        <div className="st-form">{nameField}</div>
+        <div className="st-form">
+          {nameField}
+          {modelProfileField}
+        </div>
         <div className="st-actions">
           <button
             type="button"
@@ -351,6 +377,7 @@ export function NewProjectForm({
           </FormField>
         ) : null}
         {nameField}
+        {modelProfileField}
         <FormField
           label="Setup command"
           aside={<span className="fine new-project-optional">optional</span>}

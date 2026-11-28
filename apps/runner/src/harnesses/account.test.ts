@@ -1,0 +1,161 @@
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { applyCredential, createHarnessHome, formatModelArgument } from "./account";
+
+const scratch: Array<string> = [];
+afterEach(() => {
+  for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+describe("the Harness Home on this machine", () => {
+  it("is the folder the controller named under the storage directory, private to the user", () => {
+    const storage = mkdtempSync(join(tmpdir(), "hercule-home-"));
+    scratch.push(storage);
+    const home = createHarnessHome(storage, "providers/homes/acct-1/pi/pi");
+    expect(home).toBe(join(storage, "providers", "homes", "acct-1", "pi", "pi"));
+    expect(statSync(home).mode & 0o777).toBe(0o700);
+    // A second call finds the folder and keeps it.
+    expect(createHarnessHome(storage, "providers/homes/acct-1/pi/pi")).toBe(home);
+  });
+});
+
+describe("a Harness Home that is a link or sits below one", () => {
+  const HOME = "providers/homes/acct-1/pi/pi";
+  const makeStorage = (): string => {
+    const storage = mkdtempSync(join(tmpdir(), "hercule-home-"));
+    scratch.push(storage);
+    return storage;
+  };
+
+  it("is refused when the Home itself is a link to another account's Home", () => {
+    const storage = makeStorage();
+    mkdirSync(join(storage, "providers/homes/acct-2/pi/pi"), { recursive: true });
+    mkdirSync(join(storage, "providers/homes/acct-1/pi"), { recursive: true });
+    symlinkSync(join(storage, "providers/homes/acct-2/pi/pi"), join(storage, HOME));
+    expect(() => createHarnessHome(storage, HOME)).toThrow(
+      `The Harness Home folder ${join(storage, HOME)} is a link, not a real folder`,
+    );
+  });
+
+  it.each([
+    ["providers", "providers"],
+    ["homes", "providers/homes"],
+    ["the account folder", "providers/homes/acct-1"],
+    ["the harness plugin folder", "providers/homes/acct-1/pi"],
+  ])("is refused when %s is a link, and nothing is created below it", (_name, linkPath) => {
+    const storage = makeStorage();
+    const elsewhere = mkdtempSync(join(tmpdir(), "hercule-elsewhere-"));
+    scratch.push(elsewhere);
+    const parent = join(storage, linkPath, "..");
+    mkdirSync(parent, { recursive: true });
+    symlinkSync(elsewhere, join(storage, linkPath));
+    expect(() => createHarnessHome(storage, HOME)).toThrow(
+      `folder ${join(storage, linkPath)} is a link`,
+    );
+    expect(readdirSync(elsewhere)).toEqual([]);
+  });
+
+  it("is refused when the link points back inside the storage directory", () => {
+    const storage = makeStorage();
+    mkdirSync(join(storage, "providers/other/pi/pi"), { recursive: true });
+    symlinkSync(join(storage, "providers/other"), join(storage, "providers/homes"));
+    expect(() => createHarnessHome(storage, HOME)).toThrow("is a link");
+  });
+
+  it("is refused when the link is dangling, and its target is not created", () => {
+    const storage = makeStorage();
+    mkdirSync(join(storage, "providers"), { recursive: true });
+    const target = join(storage, "gone");
+    symlinkSync(target, join(storage, "providers/homes"));
+    expect(() => createHarnessHome(storage, HOME)).toThrow("is a link");
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it("is refused when a component is a file", () => {
+    const storage = makeStorage();
+    mkdirSync(join(storage, "providers/homes"), { recursive: true });
+    writeFileSync(join(storage, "providers/homes/acct-1"), "");
+    expect(() => createHarnessHome(storage, HOME)).toThrow(
+      `${join(storage, "providers/homes/acct-1")} is not a folder`,
+    );
+  });
+
+  it("accepts a storage directory that is itself behind a link", () => {
+    const real = makeStorage();
+    const holder = mkdtempSync(join(tmpdir(), "hercule-link-"));
+    scratch.push(holder);
+    const linked = join(holder, "storage");
+    symlinkSync(real, linked);
+    expect(createHarnessHome(linked, HOME)).toBe(join(linked, HOME));
+    expect(statSync(join(real, HOME)).isDirectory()).toBe(true);
+  });
+});
+
+describe("the model argument", () => {
+  it("puts the model id where the placeholder is", () => {
+    expect(formatModelArgument("{model}", "haiku")).toBe("haiku");
+    expect(formatModelArgument("zai/{model}", "glm-5.3")).toBe("zai/glm-5.3");
+  });
+
+  it("keeps a model id that looks like a replacement pattern as it is", () => {
+    expect(formatModelArgument("zai/{model}", "a$&b")).toBe("zai/a$&b");
+  });
+});
+
+describe("the credential in the environment", () => {
+  const credentialVariables = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"];
+
+  it("sets the variable the account names, over the same variable of the runner", () => {
+    const env = applyCredential(
+      { PATH: "/bin", ANTHROPIC_API_KEY: "the-runners-own" },
+      {
+        credentialVariables,
+        credential: { variable: "ANTHROPIC_API_KEY", value: "the-accounts" },
+      },
+    );
+    expect(env).toEqual({ PATH: "/bin", ANTHROPIC_API_KEY: "the-accounts" });
+  });
+
+  it("removes every credential variable of the harness, so none of the runner's own stands in", () => {
+    const env = applyCredential(
+      {
+        PATH: "/bin",
+        ANTHROPIC_API_KEY: "the-runners-own",
+        CLAUDE_CODE_OAUTH_TOKEN: "the-runners-token",
+      },
+      { credentialVariables },
+    );
+    expect(env).toEqual({ PATH: "/bin" });
+  });
+
+  it("removes the variables the credential does not use when it sets the one it does", () => {
+    const env = applyCredential(
+      { ANTHROPIC_API_KEY: "the-runners-own", CLAUDE_CODE_OAUTH_TOKEN: "the-runners-token" },
+      {
+        credentialVariables,
+        credential: { variable: "CLAUDE_CODE_OAUTH_TOKEN", value: "the-accounts-token" },
+      },
+    );
+    expect(env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: "the-accounts-token" });
+  });
+
+  it("leaves the environment as it is when the harness has no credential variables, and never changes the given object", () => {
+    const original = { PATH: "/bin", ANTHROPIC_API_KEY: "kept" };
+    const env = applyCredential(original, { credentialVariables: [] });
+    expect(env).toEqual(original);
+    expect(env).not.toBe(original);
+    applyCredential(original, { credentialVariables });
+    expect(original).toEqual({ PATH: "/bin", ANTHROPIC_API_KEY: "kept" });
+  });
+});

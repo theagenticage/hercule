@@ -29,10 +29,6 @@
   line-height: 1.5;
   white-space: pre-line;
 }
-.setup-fields {
-  display: grid;
-  gap: 16px;
-}
 /* The redirect URI to register: one long value with no space, so it wraps
    anywhere, on the sunken fill the first run gives a code to copy. */
 .setup-uri {

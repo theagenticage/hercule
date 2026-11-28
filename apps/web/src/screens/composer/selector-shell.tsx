@@ -74,7 +74,12 @@ export function SelectorShell({
     return (
       <span
         title={locked}
-        className="inline-flex items-center gap-[5px] px-[7px] py-[3px] text-meta text-muted"
+        className={cn(
+          "min-w-0 px-[7px] py-[3px] text-meta text-muted",
+          // A value alone is cut with an ellipsis when the row is too narrow,
+          // and never wraps to two lines.
+          key === null ? "block truncate" : "inline-flex items-center gap-[5px]",
+        )}
       >
         {key === null ? (
           label
@@ -96,7 +101,10 @@ export function SelectorShell({
           disabled={disabled}
           className={cn(
             "disabled:cursor-default disabled:text-faint disabled:hover:bg-transparent",
-            "inline-flex cursor-pointer items-center gap-[5px] whitespace-nowrap",
+            // `min-w-0` lets the trigger shrink below its text, and the value
+            // is cut with an ellipsis instead of the trigger running into
+            // its neighbours.
+            "inline-flex min-w-0 cursor-pointer items-center gap-[5px] whitespace-nowrap",
             "after:text-[10px] after:text-faint after:content-['▾']",
             "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
             "rounded-[5px] px-[7px] py-[3px] text-meta text-muted",
@@ -109,7 +117,7 @@ export function SelectorShell({
               text does not also match the trigger. `min-w-0` lets the value
               be truncated rather than widen the trigger past the space the
               card has for it. */}
-          <span className="min-w-0">{label}</span>
+          <span className="min-w-0 truncate">{label}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent

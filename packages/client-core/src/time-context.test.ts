@@ -7,12 +7,11 @@ import {
   computeZonedInstant,
   chooseStamps,
   formatClock,
-  formatRelativeDay,
-  formatRelativeMoment,
   formatShortMoment,
   readWallClock,
   formatDay,
   formatDayStamp,
+  formatDayStampWithWeekday,
   formatPreciseStamp,
   formatSince,
   formatStamp,
@@ -277,6 +276,45 @@ describe("formatDayStamp", () => {
   });
 });
 
+describe("formatDayStampWithWeekday", () => {
+  const NOW = new Date("2026-11-03T10:00:00Z");
+
+  it('returns "Today" and "Yesterday" like formatDayStamp', () => {
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2026-11-03T06:00:00Z"), "UTC", NOW),
+      "Today",
+    );
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2026-11-02T23:59:00Z"), "UTC", NOW),
+      "Yesterday",
+    );
+  });
+
+  it("names the weekday of any other date, and the year when it is not this year", () => {
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2026-11-01T12:00:00Z"), "UTC", NOW),
+      "Sun 1 Nov",
+    );
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2025-12-29T12:00:00Z"), "UTC", NOW),
+      "Mon 29 Dec 2025",
+    );
+  });
+
+  it("reads the date in the given zone", () => {
+    // 03:30 UTC on 3 November is 19:30 on 2 November in Los Angeles.
+    assert.strictEqual(
+      formatDayStampWithWeekday(new Date("2026-11-03T03:30:00Z"), "America/Los_Angeles", NOW),
+      "Yesterday",
+    );
+  });
+
+  it("returns undefined for an invalid date or a zone this runtime cannot format", () => {
+    assert.isUndefined(formatDayStampWithWeekday(new Date("not a date"), "UTC", NOW));
+    assert.isUndefined(formatDayStampWithWeekday(NOW, "Not/A_Zone", NOW));
+  });
+});
+
 describe("computeMinutesOfDay", () => {
   const AT = new Date("2026-10-07T21:10:00Z");
 
@@ -316,43 +354,6 @@ describe("formatClock", () => {
 
   it("returns undefined for a zone this runtime cannot format", () => {
     assert.isUndefined(formatClock(SUNDAY_TEN, "Not/AZone"));
-  });
-});
-
-describe("formatRelativeDay and formatRelativeMoment", () => {
-  const at = (iso: string) => formatRelativeMoment(new Date(iso), SUNDAY_TEN, AMSTERDAM);
-
-  it("names today, tomorrow and yesterday in lower case", () => {
-    assert.strictEqual(at("2026-10-11T12:00:00Z"), "today 14:00");
-    assert.strictEqual(at("2026-10-12T07:00:00Z"), "tomorrow 09:00");
-    assert.strictEqual(at("2026-10-10T08:42:00Z"), "yesterday 10:42");
-  });
-
-  it("names the weekday up to a week ahead and six days back", () => {
-    assert.strictEqual(at("2026-10-13T07:00:00Z"), "Tuesday 09:00");
-    assert.strictEqual(at("2026-10-18T07:00:00Z"), "Sunday 09:00");
-    assert.strictEqual(at("2026-10-05T07:00:00Z"), "Monday 09:00");
-  });
-
-  it("names the date further off", () => {
-    assert.strictEqual(at("2026-11-04T08:00:00Z"), "4 Nov 09:00");
-    assert.strictEqual(at("2026-10-04T07:00:00Z"), "4 Oct 09:00");
-  });
-
-  it("counts calendar days in the zone, not 24 hours", () => {
-    // 23:30 tonight in Amsterdam is already tomorrow in UTC, and the reverse.
-    assert.strictEqual(
-      formatRelativeDay(new Date("2026-10-11T21:30:00Z"), SUNDAY_TEN, AMSTERDAM),
-      "today",
-    );
-    assert.strictEqual(
-      formatRelativeDay(new Date("2026-10-11T22:30:00Z"), SUNDAY_TEN, AMSTERDAM),
-      "tomorrow",
-    );
-  });
-
-  it("returns undefined for a zone this runtime cannot format", () => {
-    assert.isUndefined(formatRelativeMoment(SUNDAY_TEN, SUNDAY_TEN, "Not/AZone"));
   });
 });
 

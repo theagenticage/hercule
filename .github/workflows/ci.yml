@@ -50,9 +50,46 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm lint
 
+  # Hands every sharded test job the same recorded run times, so that their
+  # shards split the files the same way. `--shard` splits the files by these
+  # times (see `scripts/test-shards.ts`), so the shards take about as long as
+  # each other. Each shard of `test-node`, `test-react` and
+  # `desktop-e2e-linux` records the time of each of its files, and after a run
+  # on `main`, `test-shard-weights` saves them to the Actions cache. This job
+  # restores the newest save once. The shards must not restore it themselves:
+  # a save that lands between two shards' restores would give them different
+  # times, and a file could then run in two shards or in none, with no error.
+  # A file with no recorded time weighs the median of the others. With no
+  # save at all (GitHub deletes a cache entry that nothing restores for 7
+  # days), the shards get about the same number of files each, and this job
+  # warns.
+  test-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - id: restore
+        uses: actions/cache/restore@v6
+        with:
+          path: test-shard-weights.json
+          key: test-shard-weights-${{ github.run_id }}
+          restore-keys: test-shard-weights-
+      - if: steps.restore.outputs.cache-matched-key == ''
+        run: |
+          echo "::warning::No recorded test run times in the Actions cache: the test shards get about the same number of files each, not the same run time."
+          echo '{}' > test-shard-weights.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-shard-weights
+          path: test-shard-weights.json
+          retention-days: 3
+
   # The two halves of `pnpm test`. Each needs its own runtime (see
-  # `vitest.config.ts`), so each is its own job, split into shards.
+  # `vitest.config.ts`), so each is its own job, split into shards. Add a
+  # shard when the slowest one grows. The longest file sets a floor: the
+  # shard that holds it can never be shorter.
   test-node:
+    name: test-node (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -64,19 +101,50 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: bun --bun run vitest run --project node --project node-isolated --shard=${{ matrix.shard }}/3
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - run: >-
+          pnpm test:node --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      # The run times of this shard's files, for `test-shard-weights`. The
+      # repository keeps artifacts for 3 days.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-node-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
 
   test-react:
+    name: test-react (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # The React files take about 2,900 s on a runner's 3 workers, measured
+      # on 2026-11-12: with 4 shards a shard took about 4.5 minutes, with 6
+      # about 3. The longest file takes about 95 s, so more shards still help.
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm exec vitest run --project react --project desktop-main --project desktop-renderer --shard=${{ matrix.shard }}/3
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - run: >-
+          pnpm test:react --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-react-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
 
   check:
     runs-on: ubuntu-latest
@@ -131,20 +199,37 @@ jobs:
       - run: pnpm build:binary
       - run: bun --bun run vitest run --project binary e2e/upgrade.test.ts
 
-  # The desktop app is macOS only (spec 17), so it is packaged and compared
-  # with the Bureau book on a macOS runner.
+  # The desktop app is packaged on a macOS runner, compared with the Bureau
+  # book, and the part of the end-to-end suite that does not depend on the
+  # machine runs against it. Its Linux package is built and tried by
+  # `desktop-linux`, and the whole suite runs on Linux in `desktop-e2e-linux`.
+  # Together they let a developer check a desktop change on one platform, a
+  # Mac or Linux, and leave the other to CI.
   #
-  # The end-to-end suite, `pnpm test:desktop`, does not run here. It checks
-  # windows, pixels and timing, and CI's virtual Macs differ from a user's
-  # Mac in all three: a 1024 by 768 screen at 1x with the Dock showing,
-  # Reduce motion and Reduce transparency on, and a slow machine. Run it on
-  # a Mac before a pull request that changes the desktop app.
+  # What runs here is what a Mac behaves differently on from Linux, and what a
+  # virtual Mac can check reliably: the packaged app's start, its second
+  # launch and its quit (package.test.ts, refused-arguments.test.ts), its
+  # security (security.test.ts: the page's policy, navigation, permissions and
+  # IPC), the connect screen with its CORS check (connect.test.ts), signing
+  # in and out with the token (sign-in.test.ts, sign-out.test.ts), the menu
+  # bar (menu.test.ts), and the window with what closing it and activating the
+  # app do (window.test.ts).
+  #
+  # The rest does not run here, because it checks pixels, timing or the
+  # keyboard focus, and CI's virtual Macs differ from a user's Mac in all
+  # three: a 1024 by 768 screen at 1x with the Dock showing, Reduce motion and
+  # Reduce transparency on, a slow machine, and no one to give a window the
+  # focus. In the files that do run, the tests that depend on those carry
+  # `skipIf(ON_HOSTED_MAC)` with the reason beside them. A change that can
+  # break the rest is checked by its author on a Mac or on Linux, and Linux
+  # CI runs all of it.
   desktop:
     runs-on: macos-latest
     # A fresh runner spends a few minutes on the install and Electron's
-    # 100 MB download. The bound stops a capture that hangs, such as on a
-    # macOS alert, from holding the runner for GitHub's default of six hours.
-    timeout-minutes: 10
+    # 100 MB download, and the binary build and the end-to-end tests add a few
+    # more. The bound stops a capture or a test that hangs, such as on a macOS
+    # alert, from holding the runner for GitHub's default of six hours.
+    timeout-minutes: 25
     env:
       # No signing identity exists in this job. Without this, electron-builder
       # looks for one in the keychain; the packages are signed ad hoc instead.
@@ -159,7 +244,7 @@ jobs:
       # also matches the runner's tests of the harness installers, which run
       # here too. They run on Bun, like every backend test: the projects'
       # global setup migrates the test database with `bun:sqlite`.
-      - run: bun --bun run vitest run --project node --project node-isolated install.test.ts
+      - run: pnpm test:node install.test.ts
 
       # Builds the release package and the test package, and checks the
       # renderer's bundle budget and main's startup file.
@@ -178,6 +263,21 @@ jobs:
           name: bureau-compare
           path: apps/desktop/out/bureau-compare
           retention-days: 7
+
+      # The end-to-end tests sign in to a real controller, the compiled binary,
+      # and run the test package that `pnpm build:desktop` built.
+      - run: pnpm build:binary
+      - name: Run the end-to-end tests that do not depend on the machine
+        run: >-
+          pnpm test:desktop
+          e2e/desktop/package.test.ts
+          e2e/desktop/refused-arguments.test.ts
+          e2e/desktop/security.test.ts
+          e2e/desktop/connect.test.ts
+          e2e/desktop/sign-in.test.ts
+          e2e/desktop/sign-out.test.ts
+          e2e/desktop/menu.test.ts
+          e2e/desktop/window.test.ts
 
   # The ratchet of the desktop UI hill climb (docs/research/ui-hill-climb.md,
   # section 4.1): `ui:metrics` measures contrast, edges, discipline, targets,
@@ -199,7 +299,7 @@ jobs:
   # It runs on Linux in Playwright's Chromium, with no Electron and no
   # controller, so it needs no macOS runner. Its budget is 3 minutes of
   # wall-clock time per shard: it must add nothing to the longest job of this
-  # workflow. The themes are split over two shards that run in parallel, each
+  # workflow. The themes are split over three shards that run in parallel, each
   # a runner of its own, and each shard compares only the baseline keys of its
   # themes. The first shard holds the first theme, which also measures the
   # metrics of the whole run (`run/...`), so every key is checked on every
@@ -218,15 +318,18 @@ jobs:
     strategy:
       # A failure in one shard must not hide the numbers of the other.
       fail-fast: false
-      # Three themes each. The first shard also measures the run-wide
-      # metrics, and on 2026-10-26 a split of three and two took 99 s and
-      # 50 s to measure. With six themes, run on one machine on 2026-10-28,
-      # each shard took 36 s. A test (scripts/ui-screens.test.ts) fails
-      # unless every theme is in exactly one shard.
+      # Two themes each. The first shard also measures the run-wide metrics.
+      # With two shards of three themes, the measuring step took about 400 s
+      # on 2026-11-22, once the app had 38 screens, and a shard on `main`
+      # reached this job's 10 minutes and was cancelled. Two themes take
+      # about two thirds of that. A test
+      # (apps/desktop/scripts/ui-screens.test.ts) fails unless every theme is
+      # in exactly one shard.
       matrix:
         themes:
-          - whitehaven,styles,blue-train
-          - orient-express,nile,end-house
+          - whitehaven,styles
+          - blue-train,orient-express
+          - nile,end-house
     steps:
       - uses: actions/checkout@v7
         with:
@@ -289,6 +392,124 @@ jobs:
         with:
           name: ui-metrics-${{ matrix.themes }}
           path: apps/desktop/out/ui-metrics
+          retention-days: 7
+
+  # The desktop counts check (spec 17 §Performance › The counts check):
+  # `perf:counts` builds the desktop bundle, runs the Work board's and the
+  # Inbox's speed tests in their counts mode, and drives the Inbox and Work in
+  # Chromium on a fake controller, all at once. It took 23 s on 2026-11-12 in
+  # the container; its budget is 5 minutes.
+  #
+  # It informs and never fails on a count (#1146). On `main` it saves the
+  # counts to the Actions cache. On a pull request it restores main's latest
+  # counts, compares, and posts the report as one comment, which each push
+  # updates. A pull request from a fork gets no comment, because its token
+  # cannot write one; its report is in the job's log. The job fails only when
+  # it cannot measure, such as a request the fake controller does not answer.
+  #
+  # It runs only when something it counts can have changed: the desktop app,
+  # the controller (whose reads the speed tests count), the shared packages,
+  # the bundle measure and the toolchain. On `main` it always runs.
+  desktop-counts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the counts check applies
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/|apps/controller/src/|packages/|scripts/(check-bundle-budget|compare-bundle)\.ts$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
+          if [ -n "$touched" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "The counts check applies, because of:"
+            echo "$touched"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No file the counts check reads changed, so it is skipped."
+          fi
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: ./.github/actions/setup
+
+      - name: Read the Playwright version
+        if: steps.changes.outputs.run == 'true'
+        id: playwright
+        run: echo "version=$(grep -m1 -oE '^  playwright@[0-9.]+' pnpm-lock.yaml | cut -d@ -f2)" >> "$GITHUB_OUTPUT"
+      - if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - if: steps.changes.outputs.run == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      # main's latest counts, which the report compares with. The first pull
+      # request after the cache lost them gets a report with nothing to compare.
+      - name: Restore main's counts
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@v6
+        with:
+          path: apps/desktop/out/perf-counts.baseline.json
+          key: desktop-counts-${{ github.run_id }}
+          restore-keys: desktop-counts-
+
+      # On `main` the run writes the counts the next pull requests compare with.
+      - name: Count
+        if: steps.changes.outputs.run == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            pnpm --filter @hercule/desktop perf:counts --write-baseline
+          else
+            pnpm --filter @hercule/desktop perf:counts
+          fi
+
+      - name: Save main's counts
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: apps/desktop/out/perf-counts.baseline.json
+          key: desktop-counts-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # One comment per pull request, found by its first line and replaced on
+      # each push, so the conversation holds the latest report only.
+      - name: Post the report on the pull request
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          marker='<!-- desktop-counts -->'
+          { echo "$marker"; cat apps/desktop/out/perf-counts/report.md; } > "$RUNNER_TEMP/comment.md"
+          id=$(gh api "repos/$REPOSITORY/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/$REPOSITORY/issues/comments/$id" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+          else
+            gh api --method POST "repos/$REPOSITORY/issues/$PR/comments" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+          fi
+
+      # The build's and the speed tests' logs, and what the run counted.
+      - if: failure() && steps.changes.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-counts
+          path: apps/desktop/out/perf-counts
           retention-days: 7
 
   # The Android app's check (spec 18, Testing). It runs on every change, like
@@ -429,18 +650,472 @@ jobs:
         run: |
           HERCULE_RELEASE_URL="file://$PWD/test-release" sh install.sh
           ~/.local/bin/hercule --version
-          # Verify no app was installed (Linux has no app).
+          # The installer needs no root, so it installs no app on Linux. It
+          # only prints how to install the `.deb`.
           [ ! -d /Applications ]
+          [ ! -e /opt/Hercule ]
+
+  # The desktop app's whole end-to-end suite, `pnpm test:desktop`, on Linux in
+  # the container of `apps/desktop/container`: Ubuntu 24.04 with a virtual
+  # screen, a window manager and a D-Bus session. It builds the compiled binary
+  # and the desktop app in the container, then runs the tests. A developer
+  # runs the same command on any Linux machine with Docker, so a failure here
+  # can be reproduced there.
+  #
+  # `desktop-linux` installs the `.deb` on a real host and starts it, which a
+  # container cannot show. This job runs the app's behaviour. Together with the
+  # `desktop` job on macOS, which runs the part of the suite that does not
+  # depend on the machine, they let a pull request be checked on one platform.
+  #
+  # It runs on every change, like `desktop`: the path filter at the top
+  # applies to the whole workflow. The tests start the real controller, so
+  # almost any file can change their result.
+  #
+  # The suite is CPU-bound: its tests take about 9 minutes on one runner. So
+  # it is split over several runners, one per entry of `shard`, and the job
+  # finishes with its slowest shard. `--shard` splits the files by their
+  # recorded run times, as in `test-node` (see `test-plan`). The target is a
+  # job of under 5 minutes; the spec's Testing section records what was
+  # measured. More shards finish sooner, but queue for runners and use more
+  # of them. Add a shard when the slowest one grows.
+  #
+  # Each shard prepares itself: it installs the dependencies on the host,
+  # which the container mounts, gets the container image, builds the compiled
+  # binary and the unpacked desktop app in the container, and runs its files.
+  # The image comes from the Actions cache when it has it (see
+  # `.github/actions/desktop-e2e-image`), with Playwright's headless Chromium inside.
+  # Electron's zip is downloaded into a Docker volume that lives only as long
+  # as the runner, about 100 MB, which takes seconds.
+  desktop-e2e-linux:
+    name: desktop-e2e-linux (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      # A failed shard must not hide what the others show.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - uses: ./.github/actions/desktop-e2e-image
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      # The container mounts the checkout, so it reads the weights and
+      # writes the run times at the checkout's root.
+      - run: >-
+          pnpm test:desktop:container
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-desktop-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
+
+  # Merges the run times that the shards of `test-node`, `test-react` and
+  # `desktop-e2e-linux` recorded into the weights `test-plan` handed out, and
+  # saves them to the Actions cache for the runs after this one. Only a push
+  # to `main` saves, as for the container image: every later run restores
+  # what is saved, and a pull request's save would be visible to that pull
+  # request alone. A suite with a failed or missing shard keeps the times it
+  # had (see `scripts/update-test-shard-weights.ts`). Runs on `main` take
+  # turns (see `concurrency`), so the saves land in push order.
+  test-shard-weights:
+    if: ${{ always() && github.event_name == 'push' && needs.test-plan.result == 'success' }}
+    needs: [test-plan, test-node, test-react, desktop-e2e-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: test-durations-*
+          path: test-durations
+      - run: bun run scripts/update-test-shard-weights.ts test-durations
+      - uses: actions/cache/save@v6
+        with:
+          path: test-shard-weights.json
+          key: test-shard-weights-${{ github.run_id }}-${{ github.run_attempt }}
+
+  # Saves the container image of the end-to-end shards to the Actions cache,
+  # so that the shards load it and do not build it. Only a push to `main` runs
+  # it: a pull request, from a fork or not, never saves, because every later
+  # run restores what is saved. A pull request can still restore what `main`
+  # saved, a fork's too. After a change to the image's inputs (see
+  # `apps/desktop/container/image.ts`), pull requests build the image in each
+  # shard until the change is on `main` and this job has saved it, and the
+  # first run on `main` builds it in each shard too, since it runs beside this
+  # job. It does nothing when the cache has the image already. GitHub deletes
+  # a cache entry that nothing has restored for 7 days, and the next run then
+  # builds the image again.
+  desktop-e2e-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: ./.github/actions/desktop-e2e-image
+        with:
+          publish: "true"
+
+  # Builds the desktop app's Linux packages, a `.deb` and an Arch Linux
+  # package, installs each the way a user would, and starts the app. The `.deb`
+  # goes on a real Ubuntu 24.04 host, the Arch package in an `archlinux`
+  # container. The `edge` release publishes these very files
+  # (`edge-build.needs`), so a package that does not install or start blocks
+  # the release.
+  #
+  # The `.deb` needs a real host, not a container. Ubuntu 24.04 sets
+  # `kernel.apparmor_restrict_unprivileged_userns=1`, which stops Chromium's
+  # sandbox from starting unless an AppArmor profile allows it. The `.deb`
+  # installs that profile, and only a host that enforces the sysctl shows
+  # whether it works. The app refuses `--no-sandbox`, so a broken profile
+  # shows as an app that aborts at start.
+  #
+  # Arch has no AppArmor, so a container tells what a real Arch host would:
+  # whether pacman installs the package with only its dependencies, whether
+  # every library is found, and whether the app starts with its sandbox.
+  # `apps/desktop/container/arch-install-check.sh` does that.
+  #
+  # It runs only when something the build reads can have changed, and always on
+  # `main`. The first step decides, as in `ui-metrics`, and the later steps
+  # skip when it says no, so the job still succeeds and `edge-build` can wait
+  # for it.
+  desktop-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The first step diffs against the pull request's base. A shallow
+          # clone does not have that history.
+          fetch-depth: 0
+
+      - name: Decide whether the Linux package applies
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # What the build reads: the app, the packages it links, the bundle
+          # budget check, and the toolchain.
+          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/|packages/client-core/|packages/contract/|scripts/check-bundle-budget\.ts$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
+          if [ -n "$touched" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "The Linux package applies, because of:"
+            echo "$touched"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No file the Linux package reads changed, so it is skipped."
+          fi
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: ./.github/actions/setup
+
+      # An update replaces an installed package only when the new one has a
+      # higher version, and `package.json` holds a constant one. So the
+      # version carries the run number, which only grows. electron-builder
+      # turns `0.1.0-edge.9` into the Debian version `0.1.0~edge.9`, which
+      # sorts below `0.1.0~edge.10` and below a plain `0.1.0`. Every build
+      # of the `.deb` needs the suffix: a plain `0.1.0` would sort above all
+      # edge builds, and no later edge build could replace it. For the Arch
+      # package the version is `0.1.0_edge.9`, which pacman sorts above a
+      # plain `0.1.0`: Arch has no `~`. The change stays in this runner's
+      # checkout.
+      - name: Give the package a version that grows with every run
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          base=$(node -p 'require("./apps/desktop/package.json").version')
+          (cd apps/desktop && npm pkg set "version=$base-edge.${{ github.run_number }}")
+
+      # fpm builds the Arch package with `bsdtar` and compresses it with
+      # `zstd`; the runner image has neither guaranteed.
+      - name: Install the tools that build the Arch Linux package
+        if: steps.changes.outputs.run == 'true'
+        run: sudo apt-get update && sudo apt-get install -y libarchive-tools zstd
+
+      # Builds the release `.deb` and Arch package and the test package, and
+      # checks the renderer's bundle budget and main's startup file.
+      - name: Build the packages
+        if: steps.changes.outputs.run == 'true'
+        run: pnpm build:desktop
+
+      # The gate. The app is installed with apt, started as the normal user
+      # with a scratch HOME and no sandbox switch, and must show a window and
+      # stay up. Then a second build with a higher version is installed over
+      # it, and the same check runs again, so the upgrade path of the package
+      # is tested too. The second build is the first one repacked with a
+      # higher version number: the files are the same, but the install
+      # scripts, the AppArmor profile and dpkg's version order all run.
+      - name: Install the package, start the app, upgrade the package, start it again
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          first=$PWD/apps/desktop/dist/release/Hercule-linux-amd64.deb
+          debug_dir=$RUNNER_TEMP/desktop-linux-debug
+          mkdir -p "$debug_dir"
+
+          sudo apt-get update
+          sudo apt-get install -y xvfb x11-utils dbus-x11 imagemagick
+
+          # The check means something only on a host that enforces AppArmor
+          # and restricts unprivileged user namespaces, as Ubuntu 24.04 does by
+          # default. A runner image may change that, so the job turns the
+          # restriction on and fails when it cannot, rather than passing
+          # without testing the profile.
+          apparmor_enabled=$(cat /sys/module/apparmor/parameters/enabled 2> /dev/null || echo missing)
+          echo "AppArmor enabled: $apparmor_enabled"
+          if [ "$apparmor_enabled" != Y ]; then
+            echo "::error::AppArmor is not enabled on this runner, so the package's AppArmor profile cannot be tested."
+            exit 1
+          fi
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=1
+          restrict=$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)
+          echo "kernel.apparmor_restrict_unprivileged_userns = $restrict"
+          if [ "$restrict" != 1 ]; then
+            echo "::error::kernel.apparmor_restrict_unprivileged_userns is $restrict, not 1, so the sandbox check would not need the package's AppArmor profile."
+            exit 1
+          fi
+
+          first_version=$(dpkg-deb -f "$first" Version)
+          echo "Package version: $first_version"
+          case "$first_version" in
+            *"~edge."*) ;;
+            *)
+              echo "::error::The package version is $first_version. An edge package must carry the ~edge.<run> suffix, or a later edge build cannot replace it."
+              exit 1
+              ;;
+          esac
+
+          # The screen and the D-Bus session the app needs. Both are stopped
+          # by the process ids kept here when the step ends.
+          export DISPLAY=:99
+          Xvfb "$DISPLAY" -screen 0 1920x1080x24 -nolisten tcp > "$debug_dir/xvfb.log" 2>&1 &
+          xvfb_pid=$!
+          eval "$(dbus-launch --sh-syntax)"
+          trap 'kill "$xvfb_pid" "$DBUS_SESSION_BUS_PID" 2> /dev/null || true' EXIT
+          for _ in $(seq 100); do
+            xprop -root > /dev/null 2>&1 && break
+            sleep 0.1
+          done
+          xprop -root > /dev/null || { echo "::error::Xvfb did not start."; cat "$debug_dir/xvfb.log"; exit 1; }
+
+          # Saves what a person would look at, then stops the job.
+          fail() {
+            echo "::error::$*"
+            import -window root "$debug_dir/screen.png" 2> /dev/null || true
+            xwininfo -root -tree > "$debug_dir/windows.txt" 2>&1 || true
+            pgrep -af '^/opt/Hercule/' | cut -c1-200 || true
+            exit 1
+          }
+
+          # Prints the AppArmor status and fails unless the package installed a
+          # profile for the app and the kernel has loaded it. Without it the
+          # restriction above stops the app's sandbox from starting.
+          require_apparmor_profile() {
+            echo "--- AppArmor profile files"
+            find /etc/apparmor.d -maxdepth 1 -iname '*hercule*' -ls | grep . || fail "The package installed no AppArmor profile in /etc/apparmor.d."
+            echo "--- AppArmor profiles loaded for the app"
+            sudo grep -i hercule /sys/kernel/security/apparmor/profiles || fail "The kernel has no loaded AppArmor profile for the app."
+            sudo aa-status 2>&1 | grep -E 'profiles are loaded|profiles are in enforce mode' || true
+          }
+
+          # Checks that the app has a window on the screen: one whose
+          # class instance is hercule-desktop, that is mapped and viewable
+          # (IsViewable), and at least 200 by 200 pixels. A hidden window, or
+          # one of the small helper windows Chromium makes, does not count.
+          # There is no window manager in this job, so the check reads X
+          # itself.
+          has_viewable_window() {
+            for id in $(xwininfo -root -tree | awk '/\("hercule-desktop" / { print $1 }'); do
+              info=$(xwininfo -id "$id" 2> /dev/null) || continue
+              width=$(echo "$info" | awk '/^ *Width:/ { print $2 }')
+              height=$(echo "$info" | awk '/^ *Height:/ { print $2 }')
+              if echo "$info" | grep -q 'Map State: IsViewable' && [ "${width:-0}" -ge 200 ] && [ "${height:-0}" -ge 200 ]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+
+          # Starts the installed app, waits for a window, checks that it stays
+          # up without the sandbox switched off, and quits it.
+          start_and_check() {
+            label=$1
+            log=$debug_dir/app-$label.log
+            home=$(mktemp -d)
+            # `env` replaces itself with the app, so $! is the app's own pid.
+            # The app is not given the switches that turn the sandbox off. The
+            # runner sets XDG_CONFIG_HOME, which Chromium reads before HOME, so
+            # without these the app would keep its state in the runner's own
+            # folders and the second start would reuse the first one's.
+            env -u ELECTRON_DISABLE_SANDBOX HOME="$home" XDG_CONFIG_HOME="$home/.config" \
+              XDG_CACHE_HOME="$home/.cache" XDG_DATA_HOME="$home/.local/share" \
+              /opt/Hercule/hercule-desktop > "$log" 2>&1 &
+            app_pid=$!
+
+            # The pid kept here is what the rest of the check reads and
+            # signals, so it must be the app itself and not a wrapper.
+            for _ in $(seq 50); do
+              [ "$(readlink "/proc/$app_pid/exe" 2> /dev/null)" = /opt/Hercule/hercule-desktop ] && break
+              sleep 0.1
+            done
+            [ "$(readlink "/proc/$app_pid/exe" 2> /dev/null)" = /opt/Hercule/hercule-desktop ] ||
+              fail "Process $app_pid is not /opt/Hercule/hercule-desktop but $(readlink "/proc/$app_pid/exe" 2> /dev/null || echo 'a process that is gone')."
+
+            window_found=false
+            for _ in $(seq 60); do
+              kill -0 "$app_pid" 2> /dev/null || { cat "$log"; fail "The app ($label) exited before it showed a window. Its log is above."; }
+              if has_viewable_window; then
+                window_found=true
+                break
+              fi
+              sleep 1
+            done
+            $window_found || { cat "$log"; fail "The app ($label) showed no window within 60 seconds."; }
+
+            # The window can be a splash that is followed by a crash.
+            sleep 10
+            kill -0 "$app_pid" 2> /dev/null || { cat "$log"; fail "The app ($label) showed a window and then exited."; }
+            has_viewable_window || fail "The app ($label) is running, but its window is gone."
+
+            if tr '\0' '\n' < "/proc/$app_pid/environ" | grep -q '^ELECTRON_DISABLE_SANDBOX='; then
+              fail "The app ($label) runs with ELECTRON_DISABLE_SANDBOX set."
+            fi
+            pgrep -af '^/opt/Hercule/hercule-desktop' | cut -c1-160
+            if pgrep -f '^/opt/Hercule/hercule-desktop .*--no-sandbox' > /dev/null; then
+              fail "A process of the app ($label) runs with --no-sandbox."
+            fi
+            echo "The app ($label) shows a window, has been up for 10 seconds, and runs with its sandbox."
+
+            kill -TERM "$app_pid"
+            for _ in $(seq 30); do
+              kill -0 "$app_pid" 2> /dev/null || break
+              sleep 1
+            done
+            if kill -0 "$app_pid" 2> /dev/null; then
+              kill -KILL "$app_pid"
+              fail "The app ($label) did not quit within 30 seconds of SIGTERM."
+            fi
+            # Its other processes end with it. A window left over from this
+            # run would let the next check pass on the old app.
+            for _ in $(seq 30); do
+              pgrep -f '^/opt/Hercule/hercule-desktop' > /dev/null || break
+              sleep 1
+            done
+            if pgrep -f '^/opt/Hercule/hercule-desktop' > /dev/null; then
+              fail "Processes of the app ($label) are still running 30 seconds after it quit."
+            fi
+            has_viewable_window && fail "A window of the app ($label) is still on the screen after it quit."
+            rm -rf "$home"
+          }
+
+          sudo apt-get install -y "$first"
+          echo "Installed: $(dpkg-query -W -f='${Version}' hercule-desktop)"
+          require_apparmor_profile
+          start_and_check first
+
+          second_version="$first_version.1"
+          dpkg --compare-versions "$second_version" gt "$first_version"
+          work=$(mktemp -d)
+          sudo dpkg-deb -R "$first" "$work/package"
+          sudo sed -i "s/^Version: .*/Version: $second_version/" "$work/package/DEBIAN/control"
+          sudo dpkg-deb --root-owner-group -b "$work/package" "$work/Hercule-upgrade.deb"
+          sudo apt-get install -y "$work/Hercule-upgrade.deb"
+          installed=$(dpkg-query -W -f='${Version}' hercule-desktop)
+          if [ "$installed" != "$second_version" ]; then
+            fail "After the upgrade the installed version is $installed, not $second_version."
+          fi
+          echo "Upgraded: $first_version -> $installed"
+          require_apparmor_profile
+          start_and_check upgraded
+
+      # The same check for the Arch package, in a bare `archlinux` container:
+      # pacman installs it with only its dependencies, ldd finds every
+      # library, and the app starts without a sandbox switch. The second
+      # package is the same files built again with a higher version, from the
+      # unpacked app (`--prepackaged`), so pacman's version order and the
+      # install script's upgrade run too.
+      #
+      # An Arch host has no AppArmor, so the restriction the Ubuntu check set
+      # is lifted: the container shares the host's kernel, and with the
+      # restriction on, the app's sandbox in the container would depend on how
+      # Docker confines it, which no Arch user has. Docker's default seccomp
+      # profile blocks the user namespaces the sandbox needs, which a real
+      # Arch kernel allows, so the profile is switched off for this container.
+      # SYS_PTRACE lets the check, which runs as root, read what the app
+      # process runs and with which environment; Docker drops it by default.
+      - name: Install the Arch package in a bare Arch container, start the app, upgrade it, start it again
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          packages=$RUNNER_TEMP/arch-packages
+          mkdir -p "$packages" "$RUNNER_TEMP/arch-upgrade" "$RUNNER_TEMP/arch-debug"
+          cp apps/desktop/dist/release/Hercule-linux-x86_64.pkg.tar.zst "$packages/first.pkg.tar.zst"
+          version=$(node -p 'require("./apps/desktop/package.json").version')
+          (cd apps/desktop && pnpm exec electron-builder --linux pacman \
+            --prepackaged dist/release/linux-unpacked \
+            --config.directories.output="$RUNNER_TEMP/arch-upgrade" \
+            --config.extraMetadata.version="$version.1")
+          cp "$RUNNER_TEMP/arch-upgrade/Hercule-linux-x86_64.pkg.tar.zst" "$packages/second.pkg.tar.zst"
+          docker run --rm --security-opt seccomp=unconfined --cap-add SYS_PTRACE --shm-size=1g \
+            -v "$PWD/apps/desktop/container":/check:ro \
+            -v "$packages":/packages:ro \
+            -v "$RUNNER_TEMP/arch-debug":/debug \
+            archlinux:latest \
+            bash /check/arch-install-check.sh /packages/first.pkg.tar.zst /packages/second.pkg.tar.zst /debug
+
+      # The screen, the window list and the app's logs, which show why the
+      # check failed where the log cannot. They are kept for a week.
+      - if: failure() && steps.changes.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-linux-debug
+          path: |
+            ${{ runner.temp }}/desktop-linux-debug
+            ${{ runner.temp }}/arch-debug
+          retention-days: 7
+          if-no-files-found: ignore
+
+      # Only the two packages. The build publishes nothing and writes no update
+      # file (`publish: null` in electron-builder.yml). One day is enough for
+      # `edge-build`.
+      - if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: hercule-desktop-linux
+          path: |
+            apps/desktop/dist/release/Hercule-linux-amd64.deb
+            apps/desktop/dist/release/Hercule-linux-x86_64.pkg.tar.zst
+          retention-days: 1
+          if-no-files-found: error
 
   # Builds the rolling `edge` prerelease: the binary and the desktop app for
-  # macOS on Apple silicon, from the commit that just passed the jobs above
+  # macOS on Apple silicon, and the Linux binaries and the desktop app's
+  # `.deb` and Arch package, from the commit that just passed the jobs above
   # (spec 15 section 1). `edge-publish` then publishes what it built.
   #
   # The asset names and the format of SHA256SUMS are what `install.sh` reads;
   # change them together.
   edge-build:
-    # Edge publishes only a commit that passed every check, the upgrade test
-    # and the Linux install test.
+    # Edge publishes only a commit that passed every check, the upgrade test,
+    # the Linux install test, the Linux package's install and start, and the
+    # desktop app's end-to-end suite on Linux.
     needs:
       - typecheck
       - lint
@@ -451,6 +1126,8 @@ jobs:
       - android
       - edge-linux
       - edge-linux-install
+      - desktop-linux
+      - desktop-e2e-linux
       - upgrade
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: macos-latest
@@ -555,15 +1232,20 @@ jobs:
           fi
 
       # The release package's fuses, its app.asar, its signature, and that it
-      # starts and quits. The rest of the desktop suite checks pixels and
-      # timing, which a CI runner cannot match (see the desktop job).
+      # starts and quits, on the signed package. The rest of the desktop suite
+      # runs in the `desktop` and `desktop-e2e-linux` jobs, on the unsigned one.
       - run: pnpm exec vitest run --project desktop e2e/desktop/package.test.ts
 
-      # Download the Linux binaries that edge-linux built (same workflow run).
+      # Download the Linux binaries that edge-linux built, and the `.deb` that
+      # desktop-linux built and installed (same workflow run).
       - uses: actions/download-artifact@v8
         with:
           name: hercule-linux
           path: linux-binaries
+      - uses: actions/download-artifact@v8
+        with:
+          name: hercule-desktop-linux
+          path: linux-desktop
 
       # `ditto --keepParent` keeps the bundle's symlinks and signature intact,
       # which a plain `zip` does not. SHA256SUMS lists bare file names, so
@@ -574,9 +1256,11 @@ jobs:
           cp hercule edge-assets/hercule-darwin-arm64
           cp linux-binaries/hercule-linux-x64 edge-assets/
           cp linux-binaries/hercule-linux-arm64 edge-assets/
+          cp linux-desktop/Hercule-linux-amd64.deb edge-assets/
+          cp linux-desktop/Hercule-linux-x86_64.pkg.tar.zst edge-assets/
           ditto -c -k --keepParent "$APP" edge-assets/Hercule-darwin-arm64.zip
           cd edge-assets
-          shasum -a 256 hercule-darwin-arm64 hercule-linux-x64 hercule-linux-arm64 Hercule-darwin-arm64.zip > SHA256SUMS
+          shasum -a 256 hercule-darwin-arm64 hercule-linux-x64 hercule-linux-arm64 Hercule-darwin-arm64.zip Hercule-linux-amd64.deb Hercule-linux-x86_64.pkg.tar.zst > SHA256SUMS
           cat SHA256SUMS
 
       # Installs what is about to be published, the way a user would, with a
@@ -684,6 +1368,8 @@ jobs:
           \`\`\`
           curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$TAG/install.sh | sh
           \`\`\`
+
+          On macOS this installs the desktop app too. On Linux it prints the commands that install the desktop app's \`.deb\` or Arch package, which need root.
           EOF
           # The release or the tag may be gone already, after a run that
           # stopped halfway. A tag that is still there is caught below.

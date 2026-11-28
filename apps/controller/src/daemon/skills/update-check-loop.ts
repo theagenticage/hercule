@@ -12,7 +12,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import { PromotionState } from "../../promotion";
 import { SkillService } from "../../skills";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /** How often the update check runs, and how old a Skill's last check must be for it to run again. */
 const SKILL_UPDATE_CHECK_INTERVAL: Duration.Duration = Duration.hours(3);

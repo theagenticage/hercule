@@ -1,0 +1,231 @@
+/**
+ * Tests where each card of the board stands once Initiatives exist: on an
+ * Initiative row or lane, or in its Project lane. A card stands in exactly one
+ * place.
+ */
+import { describe, expect, it } from "vitest";
+import { buildBoard, buildCard, listIds } from "./cards.testing";
+import {
+  groupBoardByInitiative,
+  groupBoardByProject,
+  NO_INITIATIVE_LANE_ID,
+} from "./initiative-lanes";
+import { buildLanes, NO_PROJECT_LANE_ID, type GroupedLanes, type WorkLane } from "./lanes";
+
+const PROJECTS = [
+  { id: "storefront", name: "Storefront" },
+  { id: "checkout", name: "Checkout" },
+];
+
+const PLATFORM = { id: "platform", name: "Platform", hue: 245 as const, projectId: "storefront" };
+const LAUNCH = { id: "launch", name: "Spring launch", hue: 150 as const };
+const ORPHAN = { id: "orphan", name: "Old plans", hue: 300 as const, projectId: "deleted" };
+
+const BOARD = {
+  ...buildBoard(
+    buildCard("loose-store", { projectId: "storefront" }),
+    buildCard("loose-none"),
+    buildCard("platform-store", { projectId: "storefront", initiativeId: "platform" }),
+    buildCard("platform-check", {
+      projectId: "checkout",
+      initiativeId: "platform",
+      stage: "building",
+    }),
+    buildCard("launch-1", { initiativeId: "launch" }),
+    buildCard("closed", { projectId: "checkout", initiativeId: "closed-one" }),
+  ),
+  initiativeDoneCounts: { platform: 2, launch: 1 },
+};
+
+const TOP = { place: "top", isFiltering: false } as const;
+const IN_LANES = { place: "lanes", isFiltering: false } as const;
+
+/** Returns `lane id: card ids` for every lane, in the order drawn and the order of the stages. */
+const describeLanes = (lanes: readonly WorkLane[]): Record<string, readonly string[]> =>
+  Object.fromEntries(lanes.map((lane) => [lane.id, listIds(lane.cells.flatMap((c) => c.cards))]));
+
+/** Returns every lane of `grouped` in the order drawn: the rows On top, then each lane followed by its rows. */
+const listLanes = (grouped: GroupedLanes): readonly WorkLane[] => [
+  ...grouped.topRows,
+  ...grouped.groups.flatMap(({ lane, rows }) => [lane, ...rows]),
+];
+
+describe("groupBoardByProject", () => {
+  it("returns the lanes buildLanes returns, with no row, when there is no Initiative", () => {
+    for (const view of [TOP, IN_LANES]) {
+      const grouped = groupBoardByProject(BOARD, PROJECTS, [], view);
+      expect(grouped.topRows).toEqual([]);
+      expect(grouped.groups.map(({ lane }) => lane)).toEqual(buildLanes(BOARD, PROJECTS));
+      expect(grouped.groups.flatMap(({ rows }) => rows)).toEqual([]);
+    }
+  });
+
+  it("draws the rows on top of the lanes, in the order of the list, and leaves their cards out of the lanes", () => {
+    const grouped = groupBoardByProject(BOARD, PROJECTS, [LAUNCH, PLATFORM], TOP);
+    const lanes = listLanes(grouped);
+    expect(grouped.topRows.map((row) => row.id)).toEqual([
+      "initiative-row:launch",
+      "initiative-row:platform",
+    ]);
+    expect(grouped.groups.flatMap(({ rows }) => rows)).toEqual([]);
+    expect(describeLanes(lanes)).toEqual({
+      "initiative-row:launch": ["launch-1"],
+      "initiative-row:platform": ["platform-store", "platform-check"],
+      checkout: ["closed"],
+      storefront: ["loose-store"],
+      [NO_PROJECT_LANE_ID]: ["loose-none"],
+    });
+    expect(Object.keys(describeLanes(lanes)).slice(0, 2)).toEqual([
+      "initiative-row:launch",
+      "initiative-row:platform",
+    ]);
+  });
+
+  it("describes a row on top with its Project's name, its hue and its Done rings", () => {
+    const [launch, platform] = groupBoardByProject(
+      BOARD,
+      PROJECTS,
+      [LAUNCH, PLATFORM],
+      TOP,
+    ).topRows;
+    expect(platform).toMatchObject({
+      name: "Platform",
+      projectId: null,
+      initiative: {
+        initiativeId: "platform",
+        hue: 245,
+        isRow: true,
+        projectName: "Storefront",
+        doneRingCount: 2,
+      },
+    });
+    expect(launch?.initiative).toEqual({
+      initiativeId: "launch",
+      hue: 150,
+      isRow: true,
+      doneRingCount: 1,
+    });
+  });
+
+  it("draws a card whose Initiative is not listed, because it is closed, in its lane", () => {
+    const lanes = listLanes(groupBoardByProject(BOARD, PROJECTS, [PLATFORM], TOP));
+    expect(describeLanes(lanes)["checkout"]).toEqual(["closed"]);
+    expect(describeLanes(lanes)["initiative-row:launch"]).toBeUndefined();
+  });
+
+  it("draws every card in exactly one place", () => {
+    for (const view of [TOP, IN_LANES]) {
+      const lanes = listLanes(
+        groupBoardByProject(BOARD, PROJECTS, [LAUNCH, PLATFORM, ORPHAN], view),
+      );
+      expect(
+        lanes.flatMap((lane) => listIds(lane.cells.flatMap((c) => c.cards))).toSorted(),
+      ).toEqual(listIds(BOARD.cards).toSorted());
+    }
+  });
+
+  describe("in lanes", () => {
+    it("puts each row in the group of the lane of its Project, and No project for an Initiative with none or with an unlisted one", () => {
+      const grouped = groupBoardByProject(BOARD, PROJECTS, [LAUNCH, PLATFORM, ORPHAN], IN_LANES);
+      expect(grouped.topRows).toEqual([]);
+      expect(grouped.groups.map(({ lane, rows }) => [lane.id, rows.map((row) => row.id)])).toEqual([
+        ["checkout", []],
+        ["storefront", ["initiative-row:platform"]],
+        [NO_PROJECT_LANE_ID, ["initiative-row:launch", "initiative-row:orphan"]],
+      ]);
+      expect(grouped.groups[1]?.rows[0]?.initiative).toEqual({
+        initiativeId: "platform",
+        hue: 245,
+        isRow: true,
+        doneRingCount: 2,
+      });
+    });
+
+    it("still draws a Project lane that holds only a row, and a row with no Task", () => {
+      const board = buildBoard(
+        buildCard("p", { projectId: "storefront", initiativeId: "platform" }),
+      );
+      const lanes = listLanes(groupBoardByProject(board, PROJECTS, [PLATFORM, LAUNCH], IN_LANES));
+      expect(describeLanes(lanes)).toEqual({
+        storefront: [],
+        "initiative-row:platform": ["p"],
+        [NO_PROJECT_LANE_ID]: [],
+        "initiative-row:launch": [],
+      });
+    });
+  });
+
+  describe("while filtering", () => {
+    it("drops a row and a lane that nothing matches, and draws no Done ring", () => {
+      const filtered = { ...BOARD, cards: BOARD.cards.filter((c) => c.id === "platform-check") };
+      const view = { place: "lanes", isFiltering: true } as const;
+      const lanes = listLanes(groupBoardByProject(filtered, PROJECTS, [LAUNCH, PLATFORM], view));
+      expect(lanes.map((lane) => lane.id)).toEqual(["storefront", "initiative-row:platform"]);
+      expect(lanes[1]?.initiative).toMatchObject({ doneRingCount: 0 });
+    });
+
+    it("drops the rows on top that nothing matches", () => {
+      const filtered = { ...BOARD, cards: BOARD.cards.filter((c) => c.id === "launch-1") };
+      const view = { place: "top", isFiltering: true } as const;
+      const grouped = groupBoardByProject(filtered, PROJECTS, [PLATFORM, LAUNCH], view);
+      expect(grouped.topRows.map((lane) => lane.id)).toEqual(["initiative-row:launch"]);
+    });
+  });
+});
+
+describe("groupBoardByInitiative", () => {
+  const view = { isFiltering: false };
+
+  it("draws a lane for each Initiative in list order, then Not in an initiative with the rest", () => {
+    const lanes = groupBoardByInitiative(BOARD, [LAUNCH, PLATFORM], view);
+    expect(describeLanes(lanes)).toEqual({
+      "initiative:launch": ["launch-1"],
+      "initiative:platform": ["platform-store", "platform-check"],
+      [NO_INITIATIVE_LANE_ID]: ["loose-store", "loose-none", "closed"],
+    });
+    expect(lanes.map((lane) => lane.name)).toEqual([
+      "Spring launch",
+      "Platform",
+      "Not in an initiative",
+    ]);
+  });
+
+  it("draws lanes that are not rows, with the Initiative's hue and no Project", () => {
+    const [launch, , rest] = groupBoardByInitiative(BOARD, [LAUNCH, PLATFORM], view);
+    expect(launch).toMatchObject({
+      projectId: null,
+      initiative: { initiativeId: "launch", hue: 150, isRow: false },
+    });
+    expect(rest?.initiative).toBeUndefined();
+  });
+
+  it("draws every Initiative's lane and the last lane even when empty, so a drop can land there", () => {
+    const board = buildBoard(buildCard("p", { initiativeId: "platform" }));
+    expect(groupBoardByInitiative(board, [PLATFORM, LAUNCH], view).map((lane) => lane.id)).toEqual([
+      "initiative:platform",
+      "initiative:launch",
+      NO_INITIATIVE_LANE_ID,
+    ]);
+  });
+
+  it("draws all cards in the last lane when no Initiative exists", () => {
+    const lanes = groupBoardByInitiative(BOARD, [], view);
+    expect(lanes.map((lane) => lane.id)).toEqual([NO_INITIATIVE_LANE_ID]);
+    expect(listIds(lanes[0]!.cells.flatMap((cell) => cell.cards)).toSorted()).toEqual(
+      listIds(BOARD.cards).toSorted(),
+    );
+  });
+
+  it("draws nothing for an empty board with no Initiative", () => {
+    expect(groupBoardByInitiative(buildBoard(), [], view)).toEqual([]);
+  });
+
+  it("drops the lanes that nothing matches while filtering", () => {
+    const filtered = { cards: BOARD.cards.filter((c) => c.id === "launch-1") };
+    expect(
+      groupBoardByInitiative(filtered, [LAUNCH, PLATFORM], { isFiltering: true }).map(
+        (lane) => lane.id,
+      ),
+    ).toEqual(["initiative:launch"]);
+  });
+});

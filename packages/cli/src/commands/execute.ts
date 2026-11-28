@@ -12,9 +12,10 @@
  * - **`--image <path>`** names an image file. The API takes an image's id,
  *   which nobody has before the upload, so the CLI uploads each file with
  *   `attachment.create` and sends the returned ids.
- * - **`<folder>`** names a skill folder, or a folder of skills. A skill's
- *   files travel as one tar archive per request, so the CLI reads the folder
- *   and sends one request per skill.
+ * - **`<folder>`** names a skill folder, or a folder of skills (only one
+ *   skill folder when the row says `oneSkillOnly`). A skill's files travel as
+ *   one tar archive per request, so the CLI reads the folder and sends one
+ *   request per skill.
  * - **`skill apply-updates`** takes no arguments. The CLI reads the Skill
  *   Library and sends every Skill's available revision, so the updates sent
  *   are exactly the ones it prints.
@@ -37,10 +38,17 @@ import {
   MAX_ATTACHMENTS_PER_INPUT,
   OWN_AGENT_ALIAS,
   type SkillImportResult,
+  type SkillProposeResult,
 } from "@hercule/contract";
 import { Effect, Result } from "effect";
 import { UsageError } from "../exit";
-import { coerceFieldValue, formatFieldName, type Arguments } from "./args";
+import {
+  coerceFieldValue,
+  formatFieldName,
+  readGivenValue,
+  setGivenValue,
+  type Arguments,
+} from "./args";
 import { findCommandById, type Command, type Field } from "./tree";
 
 /** The client's operations, as the command tree calls them: `client[entity][verb](request)`. */
@@ -64,8 +72,8 @@ interface Page {
 }
 
 /**
- * Converts a list response into a page. Small fixed lists (plugins, provider
- * instances) return the whole array, which becomes a single, last page.
+ * Converts a list response into a page. Small fixed lists (plugins, Provider
+ * Accounts) return the whole array, which becomes a single, last page.
  */
 const toPage = (answer: unknown): Page =>
   Array.isArray(answer)
@@ -115,8 +123,8 @@ const readAll = async (
 const nameListedThing = (listing: Command): string => listing.words.at(-2)!;
 
 /**
- * Returns every id in the list that resolves the tails of `field`, read in
- * full with the field's `resolvesQuery`.
+ * Returns every id in the lists that resolve the tails of `field`, read in
+ * full with each of the field's `resolvesQueries`.
  *
  * A list addressed by path parameters (a session's subagents) is read with
  * the command's own path parameters of the same names, `scope`, so a tail is
@@ -143,9 +151,14 @@ const readListedIds = async (
   const stable = listing.sortFields.includes("createdAt")
     ? { sort: [{ field: "createdAt", direction: "asc" }] }
     : {};
-  return (await readAll(client, listing, { ...field.resolvesQuery, ...stable }, params))
+  const answers = await Promise.all(
+    field.resolvesQueries.map((query) => readAll(client, listing, { ...query, ...stable }, params)),
+  );
+  const ids = answers
+    .flat()
     .map((item) => item["id"])
     .filter((id): id is string => typeof id === "string");
+  return [...new Set(ids)];
 };
 
 /**
@@ -245,7 +258,7 @@ const validateWrittenId = (command: Command, field: Field, text: string): string
  * (see `validateWrittenId`). `scope` holds the command's resolved path
  * parameters, for a list that is read within one record.
  */
-const resolveTails = async (
+export const resolveTails = async (
   client: HerculeClient,
   command: Command,
   fields: ReadonlyArray<Field>,
@@ -254,7 +267,7 @@ const resolveTails = async (
 ): Promise<Record<string, unknown>> => {
   const resolved = { ...values };
   for (const field of fields) {
-    const given = resolved[field.name];
+    const given = readGivenValue(resolved, field);
     if (given === undefined) continue;
     // The list is read at most once per field, however many tails it was given.
     let listed: Promise<ReadonlyArray<string>> | undefined;
@@ -267,11 +280,32 @@ const resolveTails = async (
           ? validateWrittenId(command, field, text)
           : resolveTail(command, field, text, readIds);
     // Each id of a repeated field resolves the way a single one does.
-    resolved[field.name] = Array.isArray(given)
-      ? await Promise.all(given.map(resolveText))
-      : await resolveText(given);
+    setGivenValue(
+      resolved,
+      field,
+      Array.isArray(given) ? await Promise.all(given.map(resolveText)) : await resolveText(given),
+    );
   }
   return resolved;
+};
+
+/**
+ * Returns the values with each list field that has an `itemKey` rewritten from
+ * its words to objects: `["a", "b"]` becomes `[{ workspaceId: "a" }, { workspaceId: "b" }]`.
+ * It runs after the words are resolved, so each holds a full id.
+ */
+const wrapListItems = (
+  fields: ReadonlyArray<Field>,
+  values: Record<string, unknown>,
+): Record<string, unknown> => {
+  const wrapped = { ...values };
+  for (const field of fields) {
+    const words = wrapped[field.name];
+    const key = field.itemKey;
+    if (key === undefined || !Array.isArray(words)) continue;
+    wrapped[field.name] = (words as ReadonlyArray<unknown>).map((word) => ({ [key]: word }));
+  }
+  return wrapped;
 };
 
 /** One `--image` argument: the path as written, and the file it names, not yet read. */
@@ -363,7 +397,7 @@ const uploadImages = async (
  * sentence when the CLI refused the skill before sending it.
  */
 export type SentSkill =
-  | { readonly name: string; readonly answer: SkillImportResult }
+  | { readonly name: string; readonly answer: SkillImportResult | SkillProposeResult }
   | { readonly name: string; readonly refusal: ApiError | string };
 
 /**
@@ -389,9 +423,14 @@ export type Outcome =
 /**
  * Reads the skill folder the command line names and sends one request per
  * skill in it, one at a time, in name order. Each request carries the
- * query `buildSkillImportQuery` builds (the skill's folder name, and its
- * GitHub source from the lock file when there is one), the command's other
- * query fields, and the skill's tar archive as the body.
+ * skill's folder name, the command's other query fields, and the skill's tar
+ * archive as the body. When the operation's query has the source fields
+ * (`sourceRepo`), it also carries the skill's GitHub source from the lock
+ * file, as `buildSkillImportQuery` builds it, and a lock file that cannot be
+ * read is reported. An operation without them never reads a source, so a lock
+ * file problem is of no concern to it.
+ *
+ * When the row says `oneSkillOnly`, the folder must be one skill.
  *
  * Each archive is built just before its request and dropped after it, so a
  * folder of many skills never sits in memory at once. A skill whose folder
@@ -421,10 +460,18 @@ const sendSkillFolder = async (
   if (Result.isFailure(found)) {
     throw new UsageError(`${formatFieldName(field)}: ${found.failure.reason}`, command.spelling);
   }
-  const { displayPath, lockFileProblem, skills } = found.success;
+  const { displayPath, isSkill, skills } = found.success;
+  const takesSource = command.queryFieldNames.includes("sourceRepo");
+  const lockFileProblem = takesSource ? found.success.lockFileProblem : null;
   if (skills.length === 0) {
     throw new UsageError(
       `${formatFieldName(field)}: \`${displayPath}\` holds no skill: neither it nor any folder in it holds a SKILL.md`,
+      command.spelling,
+    );
+  }
+  if (field.readsOneSkillOnly && !isSkill) {
+    throw new UsageError(
+      `${formatFieldName(field)}: \`${displayPath}\` is a folder of skills, and ${command.spelling} takes one skill folder only. Pass the skill's own folder, the one that holds its SKILL.md.`,
       command.spelling,
     );
   }
@@ -445,9 +492,11 @@ const sendSkillFolder = async (
     }
     try {
       const answer = (await call({
-        query: { ...query, ...buildSkillImportQuery(skill, query["replace"] === true) },
+        query: takesSource
+          ? { ...query, ...buildSkillImportQuery(skill, query["replace"] === true) }
+          : { ...query, name: skill.name },
         payload: archive.success,
-      })) as SkillImportResult;
+      })) as SkillImportResult | SkillProposeResult;
       sent.push({ name: skill.name, answer });
     } catch (error) {
       if (!isSkillImportRefusal(error)) {
@@ -500,7 +549,10 @@ export const execute = async (
   const inPath = command.positionals.filter((field) => field.carriedIn === "path");
   const writtenParams: Record<string, unknown> = {};
   const writtenPayload: Record<string, unknown> = { ...args.payload };
+  const writtenQuery: Record<string, unknown> = { ...args.query };
   for (const [index, field] of command.positionals.entries()) {
+    // An optional positional the command line left out sends nothing.
+    if (args.positionals[index] === undefined) continue;
     // Check every positional against its field here, while a failure is still
     // a usage error and nothing has been sent. A numeric path parameter is the
     // value itself, never a tail of a longer id: the event log numbers its
@@ -508,10 +560,11 @@ export const execute = async (
     // A list positional is the last one and takes every word left.
     const value = field.repeated
       ? args.positionals.slice(index).map((text) => coerceFieldValue(field, text, command.spelling))
-      : coerceFieldValue(field, args.positionals[index]!, command.spelling);
-    // A positional is a route parameter or a payload field, and is sent in
-    // the part of the request its field declares.
+      : coerceFieldValue(field, args.positionals[index], command.spelling);
+    // A positional is a route parameter, a payload field or an optional query
+    // parameter, and is sent in the part of the request its field declares.
     if (field.carriedIn === "payload") writtenPayload[field.name] = value;
+    else if (field.carriedIn === "query") writtenQuery[field.name] = value;
     else writtenParams[field.name] = value;
   }
   // A path parameter is resolved through a list of its own, never one read
@@ -524,15 +577,26 @@ export const execute = async (
     ...command.payload,
     ...command.positionals.filter((field) => field.carriedIn === "payload"),
   ];
-  const payload = await resolveTails(client, command, payloadFields, writtenPayload, params);
+  const resolvedPayload = await resolveTails(
+    client,
+    command,
+    payloadFields,
+    writtenPayload,
+    params,
+  );
+  const payload = wrapListItems(payloadFields, resolvedPayload);
   // Upload only once every id tail has resolved, so a mistyped session id
   // fails before any image is sent.
   await uploadImages(client, images, payload);
+  const queryFields = [
+    ...command.query,
+    ...command.positionals.filter((field) => field.carriedIn === "query"),
+  ];
   const query: Record<string, unknown> = await resolveTails(
     client,
     command,
-    command.query,
-    { ...args.query },
+    queryFields,
+    writtenQuery,
     params,
   );
 
@@ -560,7 +624,7 @@ export const execute = async (
 
   const request: Record<string, unknown> = {};
   if (inPath.length > 0) request["params"] = params;
-  if (command.paged || command.query.length > 0) request["query"] = query;
+  if (command.paged || queryFields.length > 0) request["query"] = query;
   if (payloadFields.length > 0) request["payload"] = payload;
 
   const call = findOperationFunction(client, command);

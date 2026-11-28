@@ -51,7 +51,7 @@ describe("the Disallowed tools row", () => {
     expect(screen.getByText("Tools Ada’s sessions may never use.")).toBeTruthy();
   });
 
-  it("says so when the provider does not enforce the list", () => {
+  it("says so when the harness does not enforce the list", () => {
     renderRow(["edit"], true);
     expect(screen.getByText(/does not enforce this list/)).toBeTruthy();
   });

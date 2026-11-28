@@ -6,7 +6,12 @@
  * does not survive a restart; `enabled` and `config` do.
  */
 import { Schema } from "effect";
-import { PluginCapability, PluginId, PluginMark } from "@hercule/plugin-host";
+import {
+  PluginCapability,
+  PluginId,
+  PluginMark,
+  QualifiedEntityKindDeclaration,
+} from "@hercule/plugin-host";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
@@ -24,7 +29,7 @@ export const MAX_PLUGIN_MESSAGE_LENGTH = 2048;
 const PluginMessage = Schema.String.check(Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH));
 
 /** Re-exported from the package plugins are written against, so both use the same list. */
-export { PluginCapability, PluginMark } from "@hercule/plugin-host";
+export { ExactColor, PluginCapability, PluginMark } from "@hercule/plugin-host";
 
 /**
  * Why the controller refused to load a plugin. Each reason is decided from the
@@ -91,6 +96,11 @@ export type PluginContribution = Schema.Schema.Type<typeof PluginContribution>;
  * `intake` is the value in effect at the plugin's level for every event kind
  * and signal kind it declares: its own default, or the user's choice for all
  * its Connections.
+ *
+ * `entityKinds` are the kinds of External Entity the plugin declares, with
+ * qualified words (`github/pull-request`). They are returned whatever the
+ * status of the plugin, and are empty for a plugin that declares none or was
+ * not loaded.
  */
 export const PluginDetail = Schema.Struct({
   id: PluginId,
@@ -105,6 +115,7 @@ export const PluginDetail = Schema.Struct({
   config: Schema.Json,
   contributions: Schema.Array(PluginContribution),
   intake: IntakeSettings,
+  entityKinds: Schema.Array(QualifiedEntityKindDeclaration),
 });
 
 export type PluginDetail = Schema.Schema.Type<typeof PluginDetail>;

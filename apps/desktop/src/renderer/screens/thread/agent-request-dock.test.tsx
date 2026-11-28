@@ -36,7 +36,13 @@ const withRequests = (openRequests: readonly SessionRequest[]): ThreadRecords =>
 /** Renders the dock of the page of `pageSubagentId` on `thread`. */
 const renderDock = (thread: ThreadRecords, pageSubagentId?: string) =>
   renderThreadPart(
-    ({ sessionId }) => <AgentRequestDock sessionId={sessionId} pageSubagentId={pageSubagentId} />,
+    ({ sessionId }) => (
+      <AgentRequestDock
+        sessionId={sessionId}
+        pageSubagentId={pageSubagentId}
+        composerBelow={pageSubagentId === undefined}
+      />
+    ),
     { thread },
   );
 

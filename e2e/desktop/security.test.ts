@@ -16,7 +16,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 import type { ElectronApplication, Page } from "playwright";
 import { describe, expect, it } from "vitest";
-import { findPackagedApp, readSettings } from "../../apps/desktop/scripts/packaged-app";
+import { findAppArchive, readSettings } from "../../apps/desktop/scripts/packaged-app";
 import {
   answerWithEmptyPage,
   launchForTest,
@@ -126,7 +126,7 @@ describe("the page's policy", () => {
     // only the kinds of file it knows, and answers any other with 404, so a
     // build that gains a new kind of file (an .svg, say) fails here, not in
     // front of a user.
-    const archive = join(findPackagedApp("test"), "Contents/Resources/app.asar");
+    const archive = findAppArchive("test");
     const files = listPackage(archive, { isPack: false })
       .filter((path) => path.startsWith("/out/renderer/") && extname(path) !== "")
       .map((path) => path.slice("/out/renderer".length));

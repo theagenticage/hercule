@@ -1,0 +1,59 @@
+name: Get the desktop end-to-end image
+description: >-
+  Makes the container image of apps/desktop/container available to Docker on
+  this runner: loads it from the Actions cache when the cache has it, and
+  builds it otherwise. Runs after the setup action, because the image's name
+  is computed by a Node script of the repository. With `publish`, it also saves
+  a built image to the cache.
+
+inputs:
+  publish:
+    description: >-
+      Saves the image to the cache when the cache did not have it. Only a
+      trusted run may set it, one that is a push to `main`: pull requests,
+      forks' included, restore what `main` saved, so one built from a pull
+      request's files must never be saved under a name that `main` restores.
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    # The image's name holds a hash of everything it is built from (see
+    # `apps/desktop/container/image.ts`), so a cache that has the name has the
+    # right image: a change to the Dockerfile, Bun, pnpm or Playwright makes a
+    # new name, which the cache does not have yet.
+    - id: image
+      shell: bash
+      run: echo "name=$(node apps/desktop/container/image.ts name)" >> "$GITHUB_OUTPUT"
+
+    - id: restore
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ runner.temp }}/desktop-e2e-image.tar
+        key: desktop-e2e-image-${{ steps.image.outputs.name }}
+
+    # `ensure` builds the image unless Docker has it, so on a cache miss this
+    # step is the build.
+    - name: Load the image from the cache, or build it
+      shell: bash
+      env:
+        CACHE_HIT: ${{ steps.restore.outputs.cache-hit }}
+        TAR: ${{ runner.temp }}/desktop-e2e-image.tar
+      run: |
+        if [ "$CACHE_HIT" = true ]; then
+          docker load --input "$TAR"
+          rm "$TAR"
+        else
+          echo "::notice::The cache has no ${{ steps.image.outputs.name }}, so the image is built here."
+        fi
+        node apps/desktop/container/image.ts ensure > /dev/null
+
+    - name: Save the image to the cache
+      if: inputs.publish == 'true' && steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      run: docker save "${{ steps.image.outputs.name }}" --output "${{ runner.temp }}/desktop-e2e-image.tar"
+    - if: inputs.publish == 'true' && steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ runner.temp }}/desktop-e2e-image.tar
+        key: desktop-e2e-image-${{ steps.image.outputs.name }}

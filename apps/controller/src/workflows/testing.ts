@@ -1,5 +1,5 @@
 /**
- * Shared helpers for the workflow tests: a set-up controller with a provider
+ * Shared helpers for the workflow tests: a set-up controller with a harness
  * for Agents and a local GitHub plugin for triggers, HTTP helpers that create,
  * update and list workflows and triggers, a reader for validation errors, and
  * sample workflow sources. The suites share them so that they all run against
@@ -26,6 +26,8 @@ import {
   type ServerOptions,
 } from "../http/testing";
 import {
+  buildHarnessDefinition,
+  buildPluginWithProviderPerHarness,
   buildProviderDefinition,
   createPluginFixture,
   IDLE_FEEDS,
@@ -41,8 +43,77 @@ export const ABSENT_ID = "0192f0a1-0000-7000-8000-00000000dead";
 /** The token the local GitHub connection type accepts. */
 export const ACCEPTED_GITHUB_TOKEN = "ghp_a-token";
 
-/** The provider an agent step's Agent runs on. */
-export const AGENT_PROVIDER = buildProviderDefinition("test-provider", { token: "t" });
+/** The harness an agent step's Agent runs on. */
+export const AGENT_HARNESS = buildHarnessDefinition("test");
+
+/** The qualified id of `AGENT_HARNESS`: the plugin that registers it is `harnesses`. */
+const AGENT_HARNESS_ID = "harnesses/test";
+
+/** The qualified id of the harness of `STRUCTURED_OUTPUT_PLUGIN` that cannot give a structured result. */
+export const WITHOUT_RESULTS_HARNESS_ID = "structured/without-results";
+
+/** The qualified id of the harness of `STRUCTURED_OUTPUT_PLUGIN` that can give a structured result. */
+export const WITH_RESULTS_HARNESS_ID = "structured/with-results";
+
+/**
+ * A plugin with two harnesses that run the same provider: one that cannot give
+ * a structured result and one that can. The provider's default harness is the
+ * one that cannot, so an Agent on an account of this provider with no harness
+ * of its own runs in it. `createStructuredOutputAccount` makes such an account.
+ */
+export const STRUCTURED_OUTPUT_PLUGIN: Plugin = (() => {
+  const runs = [
+    {
+      providerId: "structured/structured",
+      kinds: [{ kind: "subscription", modelArgument: "{model}" }],
+      models: "all" as const,
+    },
+  ];
+  const provider = buildProviderDefinition("structured", [
+    WITHOUT_RESULTS_HARNESS_ID,
+    WITH_RESULTS_HARNESS_ID,
+  ]);
+  return createPluginFixture({
+    id: "structured",
+    capabilities: ["harnesses", "providers"],
+    definitions: [
+      buildHarnessDefinition("without-results", runs, { structuredOutput: "unsupported" }),
+      buildHarnessDefinition("with-results", runs),
+    ],
+    providers: [
+      {
+        ...provider,
+        kinds: [
+          {
+            id: "subscription",
+            title: "Subscription",
+            description: "A plan signed in on each machine.",
+            setup: [{ kind: "harness-login", method: "sign-in" }],
+            harnesses: [WITHOUT_RESULTS_HARNESS_ID, WITH_RESULTS_HARNESS_ID],
+          },
+        ],
+      },
+    ],
+  }).plugin;
+})();
+
+/**
+ * Creates a Provider Account of the provider of `STRUCTURED_OUTPUT_PLUGIN`
+ * and returns its id. Fails the test if the controller refuses it.
+ */
+export const createStructuredOutputAccount = async (
+  base: string,
+  token: string,
+): Promise<string> => {
+  const response = await post(
+    base,
+    "/api/v1/provider-accounts",
+    { providerId: "structured/structured", kind: "subscription" },
+    token,
+  );
+  expect(response.status, await response.clone().text()).toBe(200);
+  return ((await response.json()) as { id: string }).id;
+};
 
 /**
  * A local stand-in for the GitHub plugin, with its Connection type and the one
@@ -126,7 +197,7 @@ export interface SetUpController {
 
 /**
  * Starts a controller, completes first-run setup, and runs `body` against it.
- * The controller has a provider for Agents and the local GitHub plugin for
+ * The controller has a harness for Agents and the local GitHub plugin for
  * triggers. `additionalPlugins` are installed too, for tests that need a
  * Connection type or a workflow action that GitHub does not declare.
  * `timings` shortens the intervals of the event router, the scheduler and the
@@ -138,7 +209,11 @@ export const withSetUpController = (
   additionalPlugins: ReadonlyArray<Plugin> = [],
   timings: Pick<
     ServerOptions,
-    "eventRoutingInterval" | "schedulerInterval" | "ingestReconcileInterval"
+    | "eventRoutingInterval"
+    | "schedulerInterval"
+    | "ingestReconcileInterval"
+    | "mcpServerCheckInterval"
+    | "mcpServerCheckDeadline"
   > = {},
 ): Promise<void> =>
   withServer(
@@ -149,7 +224,7 @@ export const withSetUpController = (
     {
       ...timings,
       plugins: [
-        createPluginFixture({ id: "providers", definitions: [AGENT_PROVIDER] }).plugin,
+        buildPluginWithProviderPerHarness("harnesses", [AGENT_HARNESS]),
         localGithubPlugin,
         ...additionalPlugins,
       ],
@@ -322,14 +397,14 @@ export const expectNothingStored = async (base: string, token: string): Promise<
   expect(await queryTriggers(base, token)).toEqual([]);
 };
 
-/** Creates an Agent on the test provider and returns its id, for use in an agent step. */
+/** Creates an Agent on the test harness and returns its id, for use in an agent step. */
 export const createAgent = async (base: string, token: string): Promise<string> => {
-  const providers = await get(base, "/api/v1/providers", token);
-  expect(providers.status, await providers.clone().text()).toBe(200);
-  const instance = (
-    (await providers.json()) as ReadonlyArray<{ id: string; providerId: string }>
-  ).find((provider) => provider.providerId === AGENT_PROVIDER.id);
-  expect(instance, AGENT_PROVIDER.id).toBeDefined();
+  const accounts = await get(base, "/api/v1/provider-accounts", token);
+  expect(accounts.status, await accounts.clone().text()).toBe(200);
+  const account = (
+    (await accounts.json()) as ReadonlyArray<{ id: string; defaultHarnessId: string }>
+  ).find((listed) => listed.defaultHarnessId === AGENT_HARNESS_ID);
+  expect(account, AGENT_HARNESS_ID).toBeDefined();
   const profiles = await get(base, "/api/v1/profiles", token);
   expect(profiles.status, await profiles.clone().text()).toBe(200);
   const profile = (
@@ -342,7 +417,7 @@ export const createAgent = async (base: string, token: string): Promise<string> 
     {
       name: "reviewer",
       systemPrompt: "You review pull requests.",
-      instanceId: instance!.id,
+      providerAccountId: account!.id,
       permissionProfileId: profile!.id,
     },
     token,

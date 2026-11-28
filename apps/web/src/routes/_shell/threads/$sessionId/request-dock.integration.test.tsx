@@ -292,48 +292,149 @@ describe("Request dock: an answer on its way", () => {
 });
 
 describe("Request dock: a half-answered question", () => {
-  it("keeps the typed answer and the shown question when the user pages away and back", async () => {
+  const twoQuestions: SessionRequest = {
+    ...PLAN_QUESTION,
+    detail: {
+      questions: [
+        ...PLAN_QUESTION.detail.questions,
+        {
+          question: "Which day should it roll out?",
+          header: "Day",
+          options: [{ label: "Monday", description: "start of the week" }],
+          multiSelect: false,
+        },
+      ],
+    },
+  };
+  const RESPOND_TO_QUESTION = `POST /api/v1/sessions/${SESSION_ID}/respond-to-question`;
+
+  /** Returns the composer's text field, which holds the answer while a question is answered. */
+  const readComposerField = (): HTMLTextAreaElement =>
+    screen.getByRole<HTMLTextAreaElement>("textbox");
+
+  it("keeps the typed answer and the shown question in the composer when the user pages away and back", async () => {
     const user = userEvent.setup();
-    const twoQuestions: SessionRequest = {
-      ...PLAN_QUESTION,
-      detail: {
-        questions: [
-          ...PLAN_QUESTION.detail.questions,
-          {
-            question: "Which day should it roll out?",
-            header: "Day",
-            options: [{ label: "Monday", description: "start of the week" }],
-            multiSelect: false,
-          },
-        ],
-      },
-    };
     const state: ControllerState = {
       session: buildSession({ status: "busy", openRequests: [twoQuestions, MAIN_REQUEST] }),
       subagents: [PLAN],
     };
     const { api } = await openApp(state, undefined, {
-      [`POST /api/v1/sessions/${SESSION_ID}/respond-to-question`]: () => ({ body: state.session }),
+      [RESPOND_TO_QUESTION]: () => ({ body: state.session }),
     });
 
-    await user.type(await screen.findByLabelText("Your own answer"), "An hour at night");
-    await user.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByText("How much downtime is acceptable?");
+    await user.type(readComposerField(), "An hour at night{Enter}");
     await screen.findByText("Which day should it roll out?");
-    await user.type(screen.getByLabelText("Your own answer"), "Sun");
+    await user.type(readComposerField(), "Sun");
     await user.click(screen.getByRole("button", { name: "Next Request" }));
+
+    // The approval is not a question, so the composer is the user's again.
     await screen.findByText("stripe listen");
+    expect(readComposerField().value).toBe("");
+    expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "Previous Request" }));
 
     await screen.findByText("Which day should it roll out?");
     expect(screen.getByText("Question 2 of 2")).toBeDefined();
-    expect(screen.getByLabelText("Your own answer")).toHaveProperty("value", "Sun");
+    expect(readComposerField().value).toBe("Sun");
     // The first question's answer was kept too.
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(readComposerField().value).toBe("An hour at night");
+    await user.click(screen.getByRole("button", { name: "Next" }));
     await user.click(screen.getByRole("button", { name: "Send answers" }));
     await waitFor(() => {
       expect(
         api.calls.find((call) => call.path.endsWith("/respond-to-question"))?.body,
       ).toMatchObject({ answers: { Downtime: "An hour at night", Day: "Sun" } });
     });
+  });
+
+  it("keeps the answer when the user goes to the asking subagent's page, where the dock answers, and back", async () => {
+    const user = userEvent.setup();
+    const state: ControllerState = {
+      session: buildSession({ status: "busy", openRequests: [twoQuestions] }),
+      subagents: [PLAN],
+    };
+    const { api } = await openApp(state, undefined, {
+      [RESPOND_TO_QUESTION]: () => ({ body: state.session }),
+    });
+
+    await screen.findByText("How much downtime is acceptable?");
+    await user.type(readComposerField(), "An hour at night{Enter}");
+    await screen.findByText("Which day should it roll out?");
+    await user.type(readComposerField(), "Sun");
+    await user.click(screen.getByRole("link", { name: "Open subagent" }));
+
+    // A subagent's page has no composer, so the dock keeps its own field,
+    // which holds the same answer, and its own Previous.
+    await screen.findByText("Waiting on you");
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    expect(screen.getByLabelText("Your own answer")).toHaveProperty("value", "Sun");
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByLabelText("Your own answer")).toHaveProperty("value", "An hour at night");
+    await user.type(screen.getByLabelText("Your own answer"), " each night");
+    await user.click(screen.getByRole("link", { name: "Open parent" }));
+
+    await screen.findByText("How much downtime is acceptable?");
+    expect(screen.getByText("Question 1 of 2")).toBeDefined();
+    expect(readComposerField().value).toBe("An hour at night each night");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    expect(readComposerField().value).toBe("Sun");
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+    await waitFor(() => {
+      expect(
+        api.calls.find((call) => call.path.endsWith("/respond-to-question"))?.body,
+      ).toMatchObject({ answers: { Downtime: "An hour at night each night", Day: "Sun" } });
+    });
+  });
+
+  it("moves text displaced by a pick on a subagent's page to the end of the thread's message", async () => {
+    const user = userEvent.setup();
+    const state: ControllerState = {
+      session: buildSession({ status: "busy", openRequests: [MAIN_REQUEST, PLAN_QUESTION] }),
+      subagents: [PLAN],
+    };
+    await openApp(state);
+
+    // The approval is shown first, so the composer is the user's.
+    await screen.findByText("stripe listen");
+    await user.type(readComposerField(), "Also check the logs");
+    await user.click(screen.getByRole("button", { name: "Next Request" }));
+    await user.click(screen.getByRole("link", { name: "Open subagent" }));
+    await screen.findByText("Waiting on you");
+    await user.type(screen.getByLabelText("Your own answer"), "a few minutes");
+    await user.click(screen.getByRole("radio", { name: (name) => name.startsWith("None") }));
+    expect(screen.getByLabelText("Your own answer")).toHaveProperty("value", "");
+    await user.click(screen.getByRole("link", { name: "Open parent" }));
+
+    await screen.findByText("How much downtime is acceptable?");
+    await user.click(screen.getByRole("button", { name: "Previous Request" }));
+    await screen.findByText("stripe listen");
+    expect(readComposerField().value).toBe("Also check the logs\n\na few minutes");
+  });
+
+  it("folds an async question on a subagent's page into one row, and Answer opens the dock's own field", async () => {
+    const user = userEvent.setup();
+    const asyncQuestion: SessionRequest = { ...PLAN_QUESTION, async: true };
+    await openApp(
+      {
+        session: buildSession({ status: "idle", openRequests: [asyncQuestion] }),
+        subagents: [PLAN],
+      },
+      `/threads/${SESSION_ID}/subagents/${PLAN.id}`,
+    );
+
+    await screen.findByText("The agent asked a question. It keeps working.");
+    expect(screen.queryByText("How much downtime is acceptable?")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Answer" }));
+    await user.type(await screen.findByLabelText("Your own answer"), "An hour");
+    await user.click(screen.getByRole("button", { name: "Later" }));
+    await screen.findByText("The agent asked a question. It keeps working.");
+    await user.click(screen.getByRole("button", { name: "Answer" }));
+
+    // Later kept what was typed.
+    expect(await screen.findByLabelText("Your own answer")).toHaveProperty("value", "An hour");
   });
 });
 

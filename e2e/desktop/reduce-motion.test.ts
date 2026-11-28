@@ -9,13 +9,16 @@
  * `pnpm build:desktop` first.
  */
 import { expect, it } from "vitest";
-import { launchForTest } from "./harness";
+import { keepWindowOnTop, launchForTest } from "./harness";
 
 /** The page's global, with the list of the properties whose transition has started. */
 type TransitionLog = typeof globalThis & { transitionsRun?: string[] };
 
 it("starts no transition when a control is hovered with Reduce motion on, and one with it off", async () => {
-  const { page } = await launchForTest();
+  const { app, page } = await launchForTest();
+  // The hover below comes from the pointer, which another app of the suite
+  // can take away by covering or unfocusing this window.
+  await keepWindowOnTop(app);
   // The button is off while the welcome looks for Hercule on this Mac, and a
   // button that is off does not change on hover.
   const button = page.getByRole("button", { name: "Open the office", disabled: false });
@@ -37,15 +40,26 @@ it("starts no transition when a control is hovered with Reduce motion on, and on
     "0s, 0s",
   );
   const restingBackground = await readBackground();
-  await button.hover();
+  // The page handles the hover some time after it is sent, so the test waits
+  // until the button has changed. Without that wait, a page that has not
+  // handled the hover yet has no transition either, and the check below would
+  // mean nothing. Reading the style also applies the change. A hover can also
+  // be lost: a window event from another app of the suite clears it before
+  // the page has used it. So the hover and the check are one step that is
+  // retried: each try moves the pointer onto the button again.
+  await expect
+    .poll(async () => {
+      await button.hover();
+      return readBackground();
+    })
+    .not.toBe(restingBackground);
   // `getAnimations` recalculates the page's style first, so a transition the
   // hover started would be in the list.
   expect(await page.evaluate(() => document.getAnimations().length)).toBe(0);
-  expect(await readBackground()).not.toBe(restingBackground);
   // Reading the style applies the change while Reduce motion is still on, so
   // the button's return to rest cannot start a transition below.
   await page.mouse.move(0, 0);
-  expect(await readBackground()).toBe(restingBackground);
+  await expect.poll(readBackground).toBe(restingBackground);
 
   // With Reduce motion off, the same hover starts the button's transition.
   // That proves the hover changes a property that transitions, so the empty
@@ -54,9 +68,11 @@ it("starts no transition when a control is hovered with Reduce motion on, and on
   expect(await button.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe(
     "0.12s, 0.12s",
   );
-  await button.hover();
   await expect
-    .poll(() => page.evaluate(() => (globalThis as TransitionLog).transitionsRun))
+    .poll(async () => {
+      await button.hover();
+      return page.evaluate(() => (globalThis as TransitionLog).transitionsRun);
+    })
     .toContain("background-color");
   // Events arrive in the order their transitions started, so a transition
   // started under Reduce motion would be in the list before this one.

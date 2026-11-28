@@ -14,7 +14,13 @@
 import { Context, Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { Actor, InvalidateKind, MutableLiveTopic } from "@hercule/contract";
+import {
+  RUNNER_ACTIVITY_KINDS,
+  type Actor,
+  type InvalidateKind,
+  type MutableLiveTopic,
+  type RunnerActivityKind,
+} from "@hercule/contract";
 import { announce, nowIso } from "../db";
 import { appendPlatformSourceEvent } from "./platform-source-event";
 
@@ -41,6 +47,9 @@ export const AUDIT_KINDS = [
   "secret.deleted",
   "event.enriched",
   "task.deleted",
+  "task.summarized",
+  "task.merged",
+  "task.failureRestored",
   "project.created",
   "project.updated",
   "project.deleted",
@@ -81,10 +90,13 @@ export const AUDIT_KINDS = [
   "connection.updated",
   "connection.credentialsSet",
   "connection.deleted",
-  "provider.created",
-  "provider.updated",
-  "provider.deleted",
-  "provider.loggedIn",
+  "providerAccount.created",
+  "providerAccount.updated",
+  "providerAccount.deleted",
+  "providerAccount.signedIn",
+  "modelProfile.created",
+  "modelProfile.updated",
+  "modelProfile.deleted",
   "agent.created",
   "agent.updated",
   "agent.deleted",
@@ -95,9 +107,19 @@ export const AUDIT_KINDS = [
   "memory.appended",
   "memory.deleted",
   "wikiPage.written",
+  "wikiPage.archived",
+  "wikiPage.restored",
   "skill.imported",
+  "skill.proposed",
   "skill.applied",
+  "skill.rejected",
   "skill.deleted",
+  "mcpServer.created",
+  "mcpServer.updated",
+  "mcpServer.deleted",
+  // One per tool call a session sends through the MCP Gateway. It names no
+  // record, so it announces no live topic.
+  "mcpTool.called",
   "workflow.created",
   "workflow.updated",
   "workflow.deleted",
@@ -114,6 +136,9 @@ export const AUDIT_KINDS = [
   "session.reconciled",
   "session.markedDone",
   "session.reopened",
+  "session.archived",
+  "session.movedToTask",
+  "session.mcpServersChanged",
   "notification.created",
   "notification.decided",
   "notification.withdrawn",
@@ -121,6 +146,9 @@ export const AUDIT_KINDS = [
   "signal.decided",
   "signal.withdrawn",
   "signal.markedDone",
+  // Nothing writes these three any more: snoozing and Not urgent are gone.
+  // They stay because the log still holds entries of them, and the log reads
+  // this list to tell an audit entry from an event it routes.
   "signal.snoozed",
   "signal.unsnoozed",
   "signal.priorityLowered",
@@ -134,6 +162,10 @@ export const AUDIT_KINDS = [
 ] as const;
 
 export type AuditKind = (typeof AUDIT_KINDS)[number];
+
+// Typing the set as `AuditKind` makes the compiler check that every
+// runner-activity kind the contract lists is a kind this build emits.
+const RUNNER_ACTIVITY_KIND_SET: ReadonlySet<AuditKind> = new Set<AuditKind>(RUNNER_ACTIVITY_KINDS);
 
 /**
  * The kind prefixes whose entries are about a credential, a secret or the
@@ -162,6 +194,12 @@ export const SECURITY_KINDS: ReadonlyArray<AuditKind> = AUDIT_KINDS.filter((kind
  */
 const RECORD_KINDS = {
   "task.deleted": "deleted",
+  // The entry names both Tasks: the survivor, which gained the source's work,
+  // and the source, which is gone from every read. `task.summarized` is not
+  // here: a summary write announces the Task itself, as a derived change that
+  // rides the slow window, so a burst of summaries does not re-read the board
+  // once each.
+  "task.merged": "updated",
   "runner.joined": "created",
   "runner.updated": "updated",
   "runner.stateChanged": "updated",
@@ -180,10 +218,13 @@ const RECORD_KINDS = {
   "connection.updated": "updated",
   "connection.credentialsSet": "updated",
   "connection.deleted": "deleted",
-  "provider.created": "created",
-  "provider.updated": "updated",
-  "provider.deleted": "deleted",
-  "provider.loggedIn": "updated",
+  "providerAccount.created": "created",
+  "providerAccount.updated": "updated",
+  "providerAccount.deleted": "deleted",
+  "providerAccount.signedIn": "updated",
+  "modelProfile.created": "created",
+  "modelProfile.updated": "updated",
+  "modelProfile.deleted": "deleted",
   "workflow.created": "created",
   "workflow.updated": "updated",
   "workflow.deleted": "deleted",
@@ -201,6 +242,9 @@ const RECORD_KINDS = {
   "session.reconciled": "updated",
   "session.markedDone": "updated",
   "session.reopened": "updated",
+  "session.archived": "updated",
+  "session.movedToTask": "updated",
+  "session.mcpServersChanged": "updated",
   "notification.created": "created",
   "notification.decided": "updated",
   "notification.withdrawn": "updated",
@@ -208,7 +252,7 @@ const RECORD_KINDS = {
   "signal.decided": "updated",
   "signal.withdrawn": "updated",
   // One entry of these four kinds records one move on several signals, so it
-  // names every signal the move changed.
+  // names every signal the move changed. Only the first is still written.
   "signal.markedDone": "updated",
   "signal.snoozed": "updated",
   "signal.unsnoozed": "updated",
@@ -225,11 +269,22 @@ const RECORD_KINDS = {
   // One kind for a create and an update: either way the page's newest
   // revision is new, and a client reads the page again.
   "wikiPage.written": "updated",
+  // An archived or restored page is a changed page: a client reads the
+  // listing again and finds the page gone from it, or back in it.
+  "wikiPage.archived": "updated",
+  "wikiPage.restored": "updated",
   // A Skill is named by its name. An import that creates a Skill is recorded
   // as updated too: either way a client reads the Skill again.
   "skill.imported": "updated",
+  "skill.proposed": "updated",
   "skill.applied": "updated",
+  // Rejecting the last proposal of a proposal-only Skill deletes the Skill;
+  // a client reading it again finds it gone, as after a delete.
+  "skill.rejected": "updated",
   "skill.deleted": "deleted",
+  "mcpServer.created": "created",
+  "mcpServer.updated": "updated",
+  "mcpServer.deleted": "deleted",
 } as const satisfies Partial<Record<AuditKind, InvalidateKind>>;
 
 type RecordAuditKind = keyof typeof RECORD_KINDS;
@@ -257,12 +312,6 @@ interface AuditFields {
    */
   readonly actor: Actor | null;
   /**
-   * References only - an id, a name, an owner, a reason. Never a secret value,
-   * a token, a password or a password hash: the event log is read by the
-   * Intake views and kept for at least 90 days.
-   */
-  readonly payload: Readonly<Record<string, unknown>>;
-  /**
    * When the recorded change happened: the timestamp the change wrote on its
    * own rows. An operation that stamps rows passes it, so the entry is never
    * dated before the row it describes. Without it there would be two clock
@@ -274,13 +323,60 @@ interface AuditFields {
   readonly at?: string;
 }
 
-/** One audit entry: what happened, who caused it, and what it was about. */
-export type AuditEntry =
-  | (AuditFields & { readonly kind: RecordAuditKind; readonly record: AuditRecord })
-  | (AuditFields & {
-      readonly kind: Exclude<AuditKind, RecordAuditKind>;
-      readonly record?: undefined;
-    });
+/**
+ * References only - an id, a name, an owner, a reason. Never a secret value,
+ * a token, a password or a password hash: the event log is read by the
+ * Intake views and kept for at least 90 days.
+ */
+type AuditPayload = Readonly<Record<string, unknown>>;
+
+/**
+ * The payload of a runner-activity entry. `runnerId` is the runner the entry is
+ * about, which is the runner of the session or workspace it records, and not
+ * the runner of the actor that caused it.
+ *
+ * The key is required, so a call site cannot forget it. It is `undefined` only
+ * for `runner.crashLooping`: the local runner's crash loop can be reported
+ * before the runner has announced its id. Such an entry is stored with no
+ * runner. Every other runner-activity kind names a runner that exists.
+ */
+type RunnerAuditPayload = AuditPayload & { readonly runnerId: string };
+
+/** The payload of a `runner.crashLooping` entry, whose runner may not be known yet. */
+type CrashLoopAuditPayload = AuditPayload & { readonly runnerId: string | undefined };
+
+/**
+ * One audit entry: what happened, who caused it, and what it was about. The
+ * type splits on two questions about the kind:
+ *
+ * - Does the entry name a Live Topic record (`record`)? Only the kinds in
+ *   `RECORD_KINDS` do, and they must.
+ * - Does the entry name a runner (`payload.runnerId`)? Only the kinds in
+ *   `RUNNER_ACTIVITY_KINDS` do, and they must.
+ *
+ * A call site that leaves either out does not compile.
+ */
+export type AuditEntry = AuditFields & RecordPart & RunnerPart;
+
+/** The first question: a record-kind entry must name its record, any other must not. */
+type RecordPart =
+  | { readonly kind: RecordAuditKind; readonly record: AuditRecord }
+  | { readonly kind: Exclude<AuditKind, RecordAuditKind>; readonly record?: undefined };
+
+/** The second question: a runner-activity entry must name its runner, any other has any payload. */
+type RunnerPart =
+  | {
+      readonly kind: Exclude<RunnerActivityKind, "runner.crashLooping">;
+      readonly payload: RunnerAuditPayload;
+    }
+  | { readonly kind: "runner.crashLooping"; readonly payload: CrashLoopAuditPayload }
+  | { readonly kind: Exclude<AuditKind, RunnerActivityKind>; readonly payload: AuditPayload };
+
+/** Returns true if the entry is of a runner-activity kind, so its payload names its runner. */
+const hasRunnerPayload = (
+  entry: AuditEntry,
+): entry is Extract<AuditEntry, { readonly kind: RunnerActivityKind }> =>
+  RUNNER_ACTIVITY_KIND_SET.has(entry.kind);
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -298,6 +394,9 @@ const make = Effect.gen(function* () {
           actor: entry.actor,
           payload: entry.payload,
           at: entry.at ?? (yield* nowIso),
+          ...(hasRunnerPayload(entry) && entry.payload.runnerId !== undefined
+            ? { runnerId: entry.payload.runnerId }
+            : {}),
         });
         // A row about records is also announced as a change to each of them.
         if (entry.record === undefined) return;

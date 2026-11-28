@@ -56,7 +56,10 @@ export type ListedEventRow = Omit<EventRow, "raw">;
 const parseJsonObject = (text: string): Record<string, unknown> =>
   JSON.parse(text) as Record<string, unknown>;
 
-/** Parses a row read without `raw` into the event a page of `event.query` returns. */
+/**
+ * Parses a row read without `raw` into an event without `raw`. A page of
+ * `event.query` adds the event's facts to it.
+ */
 export const parseListedEventRow = (row: ListedEventRow): Omit<Event, "raw"> => ({
   id: row.id,
   source: row.source,

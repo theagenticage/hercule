@@ -1,0 +1,176 @@
+/**
+ * The virtual list that the Inbox's list, a machine's activity and the model
+ * browser draw their lines in: only the lines in view and a few past each edge are
+ * drawn, each at its estimated place, with an empty spacer before each run of
+ * lines that are not drawn (spec 17 §Rules, rule 1).
+ */
+import { useCallback, useMemo, type RefObject } from "react";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
+import { useItemKeyOfSizes, useKeepTopItem } from "./use-keep-top-item";
+
+/** How many lines past each edge of the visible part stay drawn, so a fast scroll shows no gap. */
+export const VIRTUAL_OVERSCAN = 8;
+
+/** One line to draw: an item, or the empty spacer that stands in for a run of lines not drawn. */
+export type VirtualLine<Item> =
+  | { readonly kind: "item"; readonly item: Item; readonly onScreen: boolean }
+  | { readonly kind: "gap"; readonly key: string; readonly height: number };
+
+/** What `useVirtualLines` returns. */
+export interface VirtualLines<Item> {
+  /** The lines to draw, in order: the items in view and near it, and the spacers between them. */
+  readonly lines: ReadonlyArray<VirtualLine<Item>>;
+  /** The height of all the lines, drawn or not, in pixels. The lines' container is at least this tall. */
+  readonly totalSize: number;
+  /**
+   * The index in `items` of the first item drawn in or near the view, or
+   * `undefined` when none is. Like `lastDrawnIndex`, an item drawn only
+   * because it is selected or holds the focus does not count.
+   */
+  readonly firstDrawnIndex: number | undefined;
+  /**
+   * The index in `items` of the last item drawn in or near the view, or
+   * `undefined` when none is. An item drawn only because it is selected or
+   * holds the focus does not count: it says nothing about how far the scroll
+   * has reached.
+   */
+  readonly lastDrawnIndex: number | undefined;
+  /** The index in `items` of the selected item, or -1 when `selectedKey` names none. */
+  readonly selectedIndex: number;
+  /** Scrolls the selected item into view, if it is not in view. Does nothing when none is selected. */
+  readonly scrollToSelected: () => void;
+  /** Scrolls the item with the key `key` to the top of the view. Does nothing when no item has it. */
+  readonly scrollToKey: (key: string) => void;
+}
+
+/** What `useVirtualLines` draws and how. */
+export interface VirtualLinesOptions<Item> {
+  /** The items to draw, in order. */
+  readonly items: ReadonlyArray<Item>;
+  /** The scroll area the lines scroll inside. */
+  readonly scrollRef: RefObject<HTMLElement | null>;
+  /** Gives the height of an item in pixels. See `useVirtualLines`. */
+  readonly estimateSize: (item: Item) => number;
+  /** The key of the selected item, which is always drawn. Defaults to none. */
+  readonly selectedKey?: string | null;
+  /** The key of the item that holds the focus, which is always drawn. Defaults to none. */
+  readonly focusedKey?: string | null;
+  /**
+   * How far below the top of the scrolled content the first line starts, in
+   * pixels, for a list that has something else above it in the same scroll,
+   * such as a heading. Without it, the list takes its first line to be at the
+   * top.
+   */
+  readonly scrollMargin?: number;
+}
+
+/**
+ * Returns the lines to draw for `items`, which scroll inside `scrollRef`.
+ * `estimateSize` gives the height of an item in pixels: the list never
+ * measures a line, so the heights must be fixed by the lines' styles. The
+ * heights follow the Text size, so `estimateSize` keeps its identity across
+ * renders, and a new one makes the list place every line again.
+ *
+ * The item with the key `selectedKey` is always drawn, so it keeps its place
+ * in the tab order while it is scrolled out of view, and so is the item with
+ * `focusedKey`, the one that holds the focus: a focused element that is
+ * removed drops the focus to the page's body. The caller scrolls the selected
+ * item into view with `scrollToSelected`, when it decides to.
+ */
+export const useVirtualLines = <Item extends { readonly key: string }>({
+  items,
+  scrollRef,
+  estimateSize,
+  selectedKey = null,
+  focusedKey = null,
+  scrollMargin = 0,
+}: VirtualLinesOptions<Item>): VirtualLines<Item> => {
+  const selectedIndex = useMemo(
+    () => items.findIndex((item) => item.key === selectedKey),
+    [items, selectedKey],
+  );
+  const focusedIndex = useMemo(
+    () => (focusedKey === null ? -1 : items.findIndex((item) => item.key === focusedKey)),
+    [items, focusedKey],
+  );
+  // The React Compiler leaves this component alone, because it cannot see
+  // into the virtualizer, so these callbacks are memoized by hand: the
+  // virtualizer measures again whenever `getItemKey` changes.
+  const rangeExtractor = useCallback(
+    (range: Range): number[] => {
+      const indexes = defaultRangeExtractor(range);
+      const pinned = [...new Set([selectedIndex, focusedIndex])].filter(
+        (index) => index >= 0 && !indexes.includes(index),
+      );
+      return pinned.length === 0 ? indexes : [...indexes, ...pinned].sort((a, b) => a - b);
+    },
+    [selectedIndex, focusedIndex],
+  );
+  const readItemKey = useCallback((index: number) => items[index]!.key, [items]);
+  const getItemKey = useItemKeyOfSizes(readItemKey, estimateSize);
+  const estimateIndexSize = useCallback(
+    (index: number) => estimateSize(items[index]!),
+    [items, estimateSize],
+  );
+
+  // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this hook's caller alone. The callbacks above keep the renders cheap instead.
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: estimateIndexSize,
+    getItemKey,
+    rangeExtractor,
+    overscan: VIRTUAL_OVERSCAN,
+    scrollMargin,
+    // Before the scroll element is measured, the list is taken to be as tall as the window. The
+    // first render then draws the rows, which the motion that opens Tracking's sheet needs to find.
+    initialRect: { width: 0, height: window.innerHeight },
+  });
+
+  // The heights themselves change with the Text size, with the same items.
+  useKeepTopItem(virtualizer, estimateSize);
+
+  const scrollToSelected = useCallback((): void => {
+    if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
+  }, [virtualizer, selectedIndex]);
+
+  const scrollToKey = useCallback(
+    (key: string): void => {
+      const index = items.findIndex((item) => item.key === key);
+      if (index >= 0) virtualizer.scrollToIndex(index, { align: "start" });
+    },
+    [virtualizer, items],
+  );
+
+  const lines: VirtualLine<Item>[] = [];
+  const visible = virtualizer.range;
+  let end = scrollMargin;
+  let firstDrawnIndex: number | undefined;
+  let lastDrawnIndex: number | undefined;
+  for (const { index, key, start, size } of virtualizer.getVirtualItems()) {
+    if (start > end) lines.push({ kind: "gap", key: `gap:${key}`, height: start - end });
+    const onScreen = visible !== null && index >= visible.startIndex && index <= visible.endIndex;
+    lines.push({ kind: "item", item: items[index]!, onScreen });
+    end = start + size;
+    // An item kept only for the selection or the focus can lie far past the view. It must not
+    // count as the end of what has scrolled by.
+    if (visible === null || index <= visible.endIndex + VIRTUAL_OVERSCAN) {
+      lastDrawnIndex = index;
+      if (
+        firstDrawnIndex === undefined &&
+        (visible === null || index >= visible.startIndex - VIRTUAL_OVERSCAN)
+      ) {
+        firstDrawnIndex = index;
+      }
+    }
+  }
+  return {
+    lines,
+    totalSize: virtualizer.getTotalSize(),
+    firstDrawnIndex,
+    lastDrawnIndex,
+    selectedIndex,
+    scrollToSelected,
+    scrollToKey,
+  };
+};

@@ -15,12 +15,14 @@
  * returning the response would end it with the request scope, and the server
  * would receive nothing.
  */
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import * as Option from "effect/Option";
@@ -30,9 +32,12 @@ import * as Socket from "effect/socket/Socket";
 import { createInternalError, createUnauthenticatedError } from "@hercule/contract";
 import {
   AGENT_STEPS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
   ATTACHMENTS_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
   FILES_EDITED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
+  MCP_SERVERS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
@@ -44,6 +49,7 @@ import {
   RunnerFactsRequest,
   RunnerToController,
   LOGIN_ENDED_CAPABILITY,
+  buildMcpServersCapability,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
@@ -52,7 +58,7 @@ import {
 import { readBearerToken } from "../http/bearer";
 import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
-import { WORKSPACE_ACTION_IDS } from "../plugins";
+import { PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { buildForwardingPointer, PromotionState } from "../promotion";
 import { mintConnection, RunnerConnections, type Connection, type Departure } from "./connections";
 
@@ -120,8 +126,23 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   says why.
  * - `REPOSITORY_SKILLS_CAPABILITY`: this controller asks a runner to list the
  *   skills in a workspace's checkouts, and only a runner that negotiated it.
+ * - `ARCHIVED_SESSION_FILES_CAPABILITY`: this controller lists the archived
+ *   sessions of a workspace it asks a runner to remove, so the runner deletes
+ *   their harness files too. A runner that did not negotiate it gets the
+ *   removal without the list, and the workspace gets a warning saying so.
+ * - `DISK_USAGE_CAPABILITY`: this controller reads the `diskUsageReport` frame.
+ *   A runner sends it only to a controller that lists this.
+ * - one MCP Servers capability for each harness a plugin registered
+ *   (`buildMcpServersCapability`): this controller adds the MCP Gateway entry
+ *   to the start frame's `SessionSpec.mcpServers` of a session of that
+ *   harness, and only for a runner that negotiated it. A runner that did not
+ *   gets the start without the entry, and every MCP Server in the session's
+ *   list is left out with the reason `runner-too-old`. These are built per
+ *   connection, from the harnesses registered at that time.
+ * - `MCP_SERVERS_CAPABILITY`, the retired plain form, which a runner of the
+ *   first MCP Gateway build negotiates (see `readMcpServersHarnessIds`).
  */
-const CAPABILITIES: ReadonlyArray<string> = [
+const FIXED_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
   AGENT_STEPS_CAPABILITY,
@@ -132,6 +153,8 @@ const CAPABILITIES: ReadonlyArray<string> = [
   GITHUB_TOKEN_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
 ];
 
 const UNREADABLE = "that is not a message this controller can read";
@@ -155,9 +178,54 @@ const encodeFrameText = (message: typeof ControllerToRunner.Type): string =>
 
 const FACTS_REQUEST = encodeFrameText({ _tag: "factsRequest" } satisfies RunnerFactsRequest);
 
+/**
+ * The close codes that mean the runner, or the network under it, ended the
+ * connection: 1000 (normal), 1005 (closed with no status) and 1006 (dropped
+ * with no close frame). The frames received before such a close are still
+ * valid and are handled. Any other code is one the controller itself sent, or
+ * a violation (1002, 1008, 1009), and the frames still queued are dropped.
+ */
+const RUNNER_ENDED_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005, 1006]);
+
+/**
+ * How long the controller handles the frames still queued when a greeted
+ * runner's connection closes, before it gives the rest up. The frames are
+ * small writes and queue offers, and none waits for a promotion thaw, so a
+ * drain takes milliseconds. Five seconds is far more than that, and short
+ * enough that a stuck write does not keep a dead connection looking online.
+ */
+const QUEUED_FRAMES_DEADLINE = Duration.seconds(5);
+
+/**
+ * The close codes of a connection that ended on purpose, so it is not an
+ * error: 1000 (normal), 1001 (going away) and 1005 (closed with no status
+ * code). A runner that stops sends 1000. A client that closes without naming a
+ * code, as a browser's `close()` does, arrives as 1005. 1001 is what an end
+ * sends when it is leaving, and the controller itself sends it when it closes
+ * a connection that a newer one displaced or that went silent. Every other code
+ * is a fault: 1006 means the connection dropped with no close frame, and the
+ * rest are refusals.
+ */
+const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1001, 1005]);
+
+/**
+ * Checks whether the connection ended with a close that is not an error. Takes
+ * any error, because the receive loop can also fail with a database error.
+ */
+const endedNormally = (error: unknown): boolean =>
+  Socket.isSocketError(error) &&
+  error.reason._tag === "SocketCloseError" &&
+  NORMAL_CLOSE_CODES.has(error.reason.code);
+
+/** Checks whether the runner or the network ended the connection, as opposed to the controller. */
+const endedByRunnerOrNetwork = (error: Socket.SocketError): boolean =>
+  error.reason._tag === "SocketCloseError" && RUNNER_ENDED_CLOSE_CODES.has(error.reason.code);
+
 /** Returns the capabilities both sides offer, which are the only ones either may use. */
-const negotiateCapabilities = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
-  CAPABILITIES.filter((capability) => theirs.includes(capability));
+const negotiateCapabilities = (
+  mine: ReadonlyArray<string>,
+  theirs: ReadonlyArray<string>,
+): ReadonlyArray<string> => mine.filter((capability) => theirs.includes(capability));
 
 /**
  * Serves one runner connection until it closes: answers the hello, handles
@@ -173,6 +241,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     const identity = yield* ControllerIdentity;
     const promotion = yield* PromotionState;
     const pings = yield* RunnerPingSchedule;
+    const host = yield* PluginHost;
     const { write } = yield* socket.writer;
 
     const mine: Connection = mintConnection();
@@ -208,11 +277,16 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
       promotion.whenServingOr(
         Effect.gen(function* () {
           const controller = yield* identity.readOrDie;
+          const capabilities = [
+            ...FIXED_CAPABILITIES,
+            MCP_SERVERS_CAPABILITY,
+            ...(yield* host.harnesses()).map((harness) => buildMcpServersCapability(harness.id)),
+          ];
           const signature = yield* identity.sign(encodeChallengeBytes(runnerId, hello.nonce));
           const answer: ControllerHello = {
             _tag: "controllerHello",
             protocolVersion: PROTOCOL_VERSION,
-            capabilities: CAPABILITIES,
+            capabilities,
             identityId: controller.id,
             publicKey: Buffer.from(controller.publicKey).toString("base64"),
             nonce: hello.nonce,
@@ -235,7 +309,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             {
               binaryVersion: hello.binaryVersion,
               protocolVersion: hello.protocolVersion,
-              negotiatedCapabilities: negotiateCapabilities(hello.capabilities),
+              negotiatedCapabilities: negotiateCapabilities(capabilities, hello.capabilities),
               facts: hello.facts,
             },
           );
@@ -291,7 +365,10 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             return yield* connections.reportedFacts(runnerId, mine, message.facts);
           case "watermarkReport":
             if (!greeted) return;
-            return yield* connections.reportedWatermark(runnerId, mine, message.watermark);
+            return yield* connections.reportedMetrics(runnerId, mine, message.metrics);
+          case "diskUsageReport":
+            if (!greeted) return;
+            return yield* connections.reportedDiskUsage(runnerId, mine, message.diskUsage);
           case "workspaceInspection":
           case "repositorySkillsInspection":
           case "probeReport":
@@ -324,6 +401,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
           case "sessionEvent":
           case "sessionsReport":
           case "filesEdited":
+          case "accountUsageReported":
             // Passed on rather than handled: the sessions domain interprets
             // what a runner reports about its sessions, and this file only
             // deals with the socket.
@@ -357,20 +435,55 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     // only to the next read, so a loop that reads again after each handler
     // would not notice a close while a handler is still waiting (for example
     // a hello held by a promotion's freeze), and the handler would go on to
-    // greet a runner that is gone. Here the read failing on the close
-    // interrupts the handler in progress.
+    // greet a runner that is gone.
+    //
+    // What happens to the frames still queued when the read ends:
+    //
+    // - Before the hello is answered, the handler is interrupted at once. It
+    //   may be the hello itself, waiting for a freeze to end.
+    // - After it, and when the runner or the network ended the connection,
+    //   the queued frames are handled in order before the connection is
+    //   recorded as ended. A leaving runner sends its last session events
+    //   and its goodbye, then closes, so they are often read together with
+    //   the close. Dropping them would leave those sessions looking live and
+    //   record a planned shutdown as `unreachable`. Every handler after the
+    //   hello only writes to the database, offers to an unbounded queue, or
+    //   skips its work during a freeze, so none waits for a thaw. The wait
+    //   is still bounded by `QUEUED_FRAMES_DEADLINE`, because a write to a
+    //   closed socket can wait without end.
+    // - After a close the controller sent, or a violation, the handler is
+    //   interrupted at once.
     //
     // The queue is unbounded on purpose: only an authenticated runner can
     // send frames, and Bun's server socket cannot pause a sender, so a bound
     // here would only move the backlog into the socket's own read buffer.
     const receiveFrames = Effect.gen(function* () {
       const pull = yield* Socket.readerString(socket);
-      const frames = yield* Queue.unbounded<string>();
+      const frames = yield* Queue.unbounded<string, Cause.Done>();
       const readFrames = Effect.forever(
         Effect.flatMap(pull, (batch) => Queue.offerAll(frames, batch)),
       );
-      const handleFramesInOrder = Effect.forever(Effect.flatMap(Queue.take(frames), handleFrame));
-      return yield* Effect.raceFirst(readFrames, handleFramesInOrder);
+      const handleFramesInOrder = Effect.forever(
+        Effect.flatMap(Queue.take(frames), handleFrame),
+      ).pipe(Effect.catchIf(Cause.isDone, () => Effect.void));
+      const handling = yield* Effect.forkChild(handleFramesInOrder);
+
+      const ending = yield* Effect.raceFirst(
+        Effect.flip(readFrames),
+        Effect.andThen(Fiber.join(handling), Effect.never),
+      );
+
+      if (greeted && endedByRunnerOrNetwork(ending)) {
+        yield* Queue.end(frames);
+        const drained = yield* Effect.timeoutOption(Fiber.join(handling), QUEUED_FRAMES_DEADLINE);
+        if (Option.isNone(drained)) {
+          yield* Effect.logWarning(
+            `Runner ${runnerId}: its connection closed, and the frames it had sent were not all handled within ${Duration.format(QUEUED_FRAMES_DEADLINE)}. The rest were dropped.`,
+          );
+        }
+      }
+      yield* Fiber.interrupt(handling);
+      return yield* Effect.fail(ending);
     });
 
     /**
@@ -404,9 +517,13 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
 
     yield* Effect.ensuring(
       Effect.race(
-        Effect.tapCause(receiveFrames, (cause) =>
-          Effect.logError("A runner's connection ended in an error", cause),
-        ).pipe(Effect.ignore),
+        receiveFrames.pipe(
+          Effect.catchIf(endedNormally, () => Effect.void),
+          Effect.tapCause((cause) =>
+            Effect.logError("A runner's connection ended in an error", cause),
+          ),
+          Effect.ignore,
+        ),
         Effect.race(ask, closeWhenAsked),
       ),
       Effect.tapCause(leave, (cause) =>

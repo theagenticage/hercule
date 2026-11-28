@@ -24,7 +24,8 @@ import {
   buildSidebarHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
+  FIXTURE_MODEL_PROFILE,
   holdAnswer,
   neverAnswer,
   type Answer,
@@ -104,7 +105,7 @@ const storeAssistants = (): Readonly<Record<string, (call: Call) => Answer>> => 
 
 /**
  * Opens Settings > Assistants at `path` with Ada and Milo, the fixture
- * provider instance and two permission profiles, and `handlers` on top.
+ * Provider Account and two permission profiles, and `handlers` on top.
  */
 const openAssistants = async (
   handlers: Readonly<Record<string, Handler>> = {},
@@ -113,7 +114,8 @@ const openAssistants = async (
   const calls = stubApi({
     ...buildSidebarHandlers({
       ...SIDEBAR_FIXTURE,
-      providers: [FIXTURE_INSTANCE],
+      accounts: [FIXTURE_ACCOUNT],
+      modelProfiles: [FIXTURE_MODEL_PROFILE],
       assistants: [
         { assistant: ADA, session: null },
         { assistant: MILO, session: null },
@@ -283,7 +285,7 @@ describe("Settings > Assistants", () => {
     );
     await userEvent.selectOptions(
       screen.getByRole("combobox", { name: "Provider" }),
-      "Claude Code · Claude Opus 5",
+      "Anthropic · Claude Opus 5",
     );
     const persona = screen.getByRole("textbox", { name: "Persona" });
     await userEvent.clear(persona);

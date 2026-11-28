@@ -17,8 +17,9 @@ import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
+import { isExpired, parseTokens } from "../oauth";
 import { Secrets } from "../secrets";
-import { isExpired, OAUTH_TOKENS, parseTokens } from "./oauth";
+import { OAUTH_TOKENS } from "./oauth";
 import { connectionRepository, isGithubConnection, type StoredConnection } from "./repository";
 import { ConnectionTypes } from "./runtime";
 

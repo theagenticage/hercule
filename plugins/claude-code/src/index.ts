@@ -1,23 +1,21 @@
 import { Effect, Schema } from "effect";
 import {
   HOST_API,
-  registerProvider,
+  registerHarness,
   type Plugin,
-  type ProviderDefinition,
+  type HarnessDefinition,
 } from "@hercule/plugin-host";
 
 /**
  * What the Agent SDK behind Claude Code can do, at the version Hercule pins.
  * Every value is a fact, so the controller and the UI decide what to offer from
- * these values rather than from the provider's name.
+ * these values rather than from the harness's name.
  */
-const definition: ProviderDefinition = {
+const definition: HarnessDefinition = {
   id: "claude-code",
   displayName: "Claude Code",
   binaryName: "claude",
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({}),
-  defaultConfig: {},
+  releaseSource: { kind: "npm", package: "@anthropic-ai/claude-code" },
   declared: {
     steering: "native",
     fork: "native",
@@ -31,9 +29,27 @@ const definition: ProviderDefinition = {
     mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
-  // The CLI's model list reports this alias, and it follows the newest Haiku.
-  suggestedTextGenerationModel: "haiku",
+  // The login of a per-machine Claude subscription lives in the Harness Home,
+  // so that kind has no credential variable. A subscription token and an API
+  // key are each handed over in a variable of their own. Claude Code accepts
+  // every model the account lists under its own id.
+  runs: [
+    {
+      providerId: "anthropic/anthropic",
+      kinds: [
+        { kind: "subscription-per-machine", modelArgument: "{model}" },
+        {
+          kind: "subscription-token",
+          modelArgument: "{model}",
+          credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN",
+        },
+        { kind: "api-key", modelArgument: "{model}", credentialVariable: "ANTHROPIC_API_KEY" },
+      ],
+      models: "all",
+    },
+  ],
 };
 
 export const claudeCode: Plugin = {
@@ -41,11 +57,11 @@ export const claudeCode: Plugin = {
     id: "claude-code",
     displayName: "Claude Code",
     hostApi: HOST_API,
-    capabilities: ["providers"],
+    capabilities: ["harnesses"],
     configSchema: Schema.Struct({}),
   },
-  register: (host) => registerProvider(host, definition),
-  // Nothing runs on the controller for a provider: the runner runs sessions,
+  register: (host) => registerHarness(host, definition),
+  // Nothing runs on the controller for a harness: the runner runs sessions,
   // based on the definition above.
   activate: () => Effect.succeed(Effect.void),
 };

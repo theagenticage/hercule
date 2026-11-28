@@ -25,9 +25,9 @@ import {
   type MemoryDocument,
   type MemoryEntry,
   type Profile,
-  type ProviderInstance,
+  type ProviderAccount,
 } from "@hercule/contract";
-import { CLAUDE_SONNET, SPECIMEN_INSTANCES, SPECIMEN_RECORDS } from "./sidebar-fixture";
+import { CLAUDE_SONNET, SPECIMEN_ACCOUNTS, SPECIMEN_RECORDS } from "./sidebar-fixture";
 import type { AssistantsSettingsRecords, SidebarRecords } from "./shell-page";
 import { ADA, buildAssistantSession, JUNO, MILO } from "./assistant-states-fixture";
 
@@ -54,29 +54,23 @@ const SETTINGS_ADA: Assistant = {
   reply: "turn-end",
 };
 
-/** The account the book's Provider row names, which the Claude Code instance is logged in as. */
+/** The identity the book's Provider row names, which the Anthropic account is signed in as. */
 export const PROVIDER_ACCOUNT = "rogier@personal";
 
 /**
- * The sidebar specimen's provider instances, with the Claude Code instance
- * logged in as `PROVIDER_ACCOUNT`, so the Provider row's hint is the book's.
+ * The sidebar specimen's Provider Accounts, with the Anthropic account signed
+ * in as `PROVIDER_ACCOUNT`, so the Provider row's hint is the book's.
  */
-const INSTANCES: ReadonlyArray<ProviderInstance> = SPECIMEN_INSTANCES.map((instance) =>
-  instance.id === CLAUDE_SONNET.instanceId
-    ? {
-        ...instance,
-        snapshots: instance.snapshots.map((snapshot) => ({
-          ...snapshot,
-          auth: { ...snapshot.auth, identity: PROVIDER_ACCOUNT },
-        })),
-      }
-    : instance,
+const ACCOUNTS: ReadonlyArray<ProviderAccount> = SPECIMEN_ACCOUNTS.map((account) =>
+  account.id === CLAUDE_SONNET.providerAccountId
+    ? { ...account, identity: PROVIDER_ACCOUNT }
+    : account,
 );
 
 /** The records the specimen draws: the sidebar specimen's threads, and the three assistants. */
 export const SETTINGS_ASSISTANTS_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
-  instances: INSTANCES,
+  accounts: ACCOUNTS,
   assistants: [
     {
       assistant: SETTINGS_ADA,

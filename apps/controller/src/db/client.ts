@@ -522,3 +522,37 @@ export const withTransaction = <A, E, R>(
       ),
     );
   });
+
+/** One-permit gates that keep two read snapshots from overlapping on the one reader connection. */
+const snapshotGates = new WeakMap<SqlClient.SqlClient, Semaphore.Semaphore>();
+
+/**
+ * Runs `effect`, which only reads, so that every statement in it sees the same
+ * committed state of the database, and returns its result.
+ *
+ * Reads outside a transaction run on the reader, one statement at a time, and
+ * a writer can commit between two of them. Here the reader begins a read
+ * transaction first, which in WAL mode fixes the state it sees until it ends.
+ * Inside a transaction, such as a test's, the transaction already is that
+ * snapshot, so `effect` just runs.
+ *
+ * The reader is one connection, so snapshots run one at a time, and other
+ * reads that happen while one is open see its state too. Keep `effect` short
+ * and read-only: a write in it fails, as every write outside a transaction does.
+ */
+export const withReadSnapshot = <A, E, R>(
+  sql: SqlClient.SqlClient,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E | SqlError, R> =>
+  Effect.flatMap(Effect.serviceOption(sql.transactionService), (transaction) => {
+    if (Option.isSome(transaction)) return effect;
+    const gate = snapshotGates.get(sql) ?? Semaphore.makeUnsafe(1);
+    snapshotGates.set(sql, gate);
+    return gate.withPermit(
+      Effect.acquireUseRelease(
+        sql.unsafe("BEGIN"),
+        () => effect,
+        () => Effect.orDie(sql.unsafe("COMMIT")),
+      ),
+    );
+  });

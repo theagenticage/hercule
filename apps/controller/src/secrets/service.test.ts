@@ -163,6 +163,50 @@ describe("secret.set", () => {
     expect(JSON.stringify(failure)).toContain("`connection.setCredentials`");
   });
 
+  it("rejects the provider-account owner, pointing at providerAccount.update's CLI command", async () => {
+    const failure = await run((secret) =>
+      Effect.flip(
+        secret.set({
+          ownerKind: "provider-account",
+          ownerId: CONNECTION_ID,
+          name: "apiKey",
+          value: VALUE,
+        }),
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(Validation);
+    expect(failure).toMatchObject({
+      error: {
+        code: "validation",
+        message: expect.stringContaining("hercule provider-account update") as unknown,
+        details: { issues: [{ path: ["ownerKind"] }] },
+      },
+    });
+  });
+
+  it("rejects the mcp-server owner, pointing at the server's own set-token command", async () => {
+    const failure = await run((secret) =>
+      Effect.flip(
+        secret.set({
+          ownerKind: "mcp-server",
+          ownerId: CONNECTION_ID,
+          name: "token",
+          value: VALUE,
+        }),
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(Validation);
+    expect(failure).toMatchObject({
+      error: {
+        code: "validation",
+        message: expect.stringContaining("hercule mcp-server set-token") as unknown,
+        details: { issues: [{ path: ["ownerKind"] }] },
+      },
+    });
+  });
+
   it("rejects an owner id containing the | separator used in the encryption's associated data", async () => {
     const failure = await run((secret) =>
       Effect.flip(secret.set({ ownerKind: "plugin", ownerId: "a|b", name: "k", value: VALUE })),
@@ -298,6 +342,44 @@ describe("secret.delete", () => {
       error: {
         code: "validation",
         message: expect.stringContaining("deleting the Connection") as unknown,
+        details: { issues: [{ path: ["ownerKind"] }] },
+      },
+    });
+  });
+});
+
+describe("secret.delete of an MCP Server's secret", () => {
+  it("is rejected, pointing at deleting the server instead", async () => {
+    const failure = await run((secret) =>
+      Effect.flip(
+        secret.delete({ ownerKind: "mcp-server", ownerId: CONNECTION_ID, name: "token" }),
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(Validation);
+    expect(failure).toMatchObject({
+      error: {
+        code: "validation",
+        message: expect.stringContaining("deleting the server") as unknown,
+        details: { issues: [{ path: ["ownerKind"] }] },
+      },
+    });
+  });
+});
+
+describe("secret.delete of a provider account's secret", () => {
+  it("is rejected, pointing at deleting the account instead", async () => {
+    const failure = await run((secret) =>
+      Effect.flip(
+        secret.delete({ ownerKind: "provider-account", ownerId: CONNECTION_ID, name: "apiKey" }),
+      ),
+    );
+
+    expect(failure).toBeInstanceOf(Validation);
+    expect(failure).toMatchObject({
+      error: {
+        code: "validation",
+        message: expect.stringContaining("deleting the account") as unknown,
         details: { issues: [{ path: ["ownerKind"] }] },
       },
     });

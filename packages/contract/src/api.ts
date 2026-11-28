@@ -7,7 +7,7 @@
  * second naming scheme.
  */
 import * as HttpApi from "effect/http-api/HttpApi";
-import { API_PREFIX } from "./operations";
+import { API_PREFIX } from "./api-prefix";
 import { agent } from "./groups/agent";
 import { apiKey } from "./groups/api-key";
 import { assistant } from "./groups/assistant";
@@ -18,23 +18,30 @@ import { controller } from "./groups/controller";
 import { conversation } from "./groups/conversation";
 import { event } from "./groups/event";
 import { eventKind } from "./groups/event-kind";
+import { externalEntity } from "./groups/external-entity";
 import { input } from "./groups/input";
 import { plugin } from "./groups/plugin";
 import { profile } from "./groups/profile";
+import { harness } from "./groups/harness";
 import { provider } from "./groups/provider";
+import { modelProfile } from "./groups/model-profile";
+import { providerAccount } from "./groups/provider-account";
 import { notification } from "./groups/notification";
 import { permission } from "./groups/permission";
 import { signal } from "./groups/signal";
 import { discussion } from "./groups/discussion";
 import { ignoreRule } from "./groups/ignore-rule";
+import { initiative } from "./groups/initiative";
 import { project } from "./groups/project";
 import { resource } from "./groups/resource";
 import { run } from "./groups/run";
 import { runner } from "./groups/runner";
+import { runnerMetrics } from "./groups/runner-metrics";
 import { secret } from "./groups/secret";
 import { session } from "./groups/session";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
+import { mcpServer } from "./groups/mcp-server";
 import { skill } from "./groups/skill";
 import { subscription } from "./groups/subscription";
 import { task } from "./groups/task";
@@ -58,8 +65,10 @@ export const api = HttpApi.make("hercule")
     permission,
     secret,
     task,
+    initiative,
     notification,
     signal,
+    externalEntity,
     ignoreRule,
     discussion,
     project,
@@ -73,8 +82,12 @@ export const api = HttpApi.make("hercule")
     eventKind,
     run,
     runner,
+    runnerMetrics,
     plugin,
+    harness,
     provider,
+    providerAccount,
+    modelProfile,
     connection,
     agent,
     assistant,
@@ -85,6 +98,7 @@ export const api = HttpApi.make("hercule")
     memory,
     wikiPage,
     skill,
+    mcpServer,
     attachment,
     controller,
   )

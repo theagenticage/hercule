@@ -1,0 +1,187 @@
+/**
+ * The details pane's read: `task.readDetail` returns everything the pane of
+ * one Task draws, in one reply (spec 09, spec 11).
+ *
+ * The Task row is this domain's. The Task's sessions and runs belong to
+ * domains that depend on this one, so this domain reaches them through ports
+ * the controller daemon implements (ADR 0033):
+ *
+ * - `TaskBoardFacts` for the facts of the card, the same port the board uses;
+ * - `TaskRuns` for the runs, the same port the Task's summary uses;
+ * - `TaskDetailFacts` for the sessions and the number of runs.
+ *
+ * The outside things the Task links come from the card's facts, so the card
+ * and the pane are built from one read of the context.
+ */
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import type * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+import {
+  createInvalidStateError,
+  createNotFoundError,
+  type InvalidState,
+  type Forbidden,
+  type Id,
+  MAX_CARD_CONTEXTS,
+  MAX_DETAIL_SESSIONS,
+  type NotFound,
+  type TaskDetail,
+  type TaskDetailSession,
+  type WorkCard,
+  type Unauthenticated,
+} from "@hercule/contract";
+import { requireGrant } from "../actor";
+import { buildWorkCard, TaskBoardFacts, type BoardEntityContext } from "./board";
+import { blockerRepository } from "./blockers";
+import { taskRepository } from "./repository";
+import { TaskRuns } from "./task-runs";
+
+export class TaskDetailFacts extends Context.Service<
+  TaskDetailFacts,
+  {
+    /**
+     * Returns up to `limit` sessions of the Task, with the number of sessions
+     * the Task has. The unfinished sessions come first, then the finished
+     * ones, each group newest first. `pinnedSessionId`, when it names a
+     * session of the Task, is always among them, in its place in that order.
+     * A session's open Requests are the ones the `Session` record shows. It
+     * reads no transcript, and the number of statements is fixed, whatever
+     * the number of sessions.
+     */
+    readonly readSessions: (
+      taskId: string,
+      limit: number,
+      pinnedSessionId: string | undefined,
+    ) => Effect.Effect<
+      { readonly sessions: ReadonlyArray<TaskDetailSession>; readonly total: number },
+      SqlError
+    >;
+
+    /** Returns how many runs the Task has. */
+    readonly countRuns: (taskId: string) => Effect.Effect<number, SqlError>;
+  }
+>()("hercule/controller/tasks/TaskDetailFacts") {}
+
+const NO_BOARD_CARD =
+  "this task is finished (done or dropped), so it has no details to show. Move it back to a board stage first";
+
+/**
+ * Returns the outside things a Task links for its pane: `entities`, the
+ * linked refs that have a record, in the order they were linked (at most
+ * `MAX_CARD_CONTEXTS`), and the `places` and `edges` among the refs the card
+ * lists in `contextRefs`. They are cut from the board's context, which the
+ * card was built from, so the pane never disagrees with its card.
+ */
+const buildLinkedEntities = (
+  linkedRefs: ReadonlyArray<string>,
+  card: WorkCard,
+  context: BoardEntityContext,
+) => {
+  const shown = new Set(card.contextRefs);
+  const places = context.places.filter((place) => shown.has(place.ref));
+  const placeByRef = new Map(places.map((place) => [place.ref, place] as const));
+  return {
+    // A linked ref with no record has no row to draw, so it is left out.
+    entities: linkedRefs.slice(0, MAX_CARD_CONTEXTS).flatMap((ref) => placeByRef.get(ref) ?? []),
+    places,
+    edges: context.edges.filter((edge) => shown.has(edge.fromRef) && shown.has(edge.toRef)),
+  };
+};
+
+const make = Effect.gen(function* () {
+  const tasks = yield* taskRepository;
+  const blockers = yield* blockerRepository;
+  const cardFacts = yield* TaskBoardFacts;
+  const runs = yield* TaskRuns;
+  const detailFacts = yield* TaskDetailFacts;
+
+  return {
+    /**
+     * Returns the details of one Task: the Task in full, the card the board
+     * shows for it, up to `MAX_DETAIL_SESSIONS` of its sessions (the
+     * unfinished first, then newest, and always the Thread that asks the
+     * card's open question) with how many it has, up to
+     * `MAX_DETAIL_RUNS` of its runs (the newest, oldest first) with how many
+     * it has, and the outside things it links with the
+     * places above them. It lists the Tasks the Task waits on (`blockers`) and
+     * the Tasks that wait on it (`blocks`), every edge whatever the stage of
+     * the other end, where the card lists only the blockers that still block.
+     *
+     * The caller needs `task.read`, `session.query` and `run.query`, because
+     * the reply shows a session's open Requests and a run's output. A caller
+     * without all three gets `Forbidden`, not a thinner reply. Each is
+     * checked before anything is read.
+     *
+     * An id of a Task that was merged into another returns the survivor's
+     * details, whose `task.id` differs: the pane replaces the id it holds.
+     *
+     * Fails with `NotFound` when the Task does not exist or is deleted, and
+     * with `InvalidState` when it is at `done` or `dropped`: the card has a
+     * board stage, and the pane opens from a card. The message of the second
+     * case says so.
+     *
+     * It opens no transaction, so every statement runs on the read-only
+     * connection. The number of statements is fixed, whatever the number of
+     * sessions and runs. The Task and its card come from one statement, so
+     * they always agree. Later statements can still see a newer state than the
+     * Task, and the push that change makes brings the next read.
+     */
+    read: (
+      requestedId: Id,
+    ): Effect.Effect<
+      TaskDetail,
+      Unauthenticated | Forbidden | NotFound | InvalidState | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireGrant("task.readDetail");
+        yield* requireGrant("session.query");
+        yield* requireGrant("run.query");
+        const found = Option.getOrUndefined(yield* tasks.readLiveWithCard(requestedId));
+        if (found === undefined) return yield* Effect.fail(createNotFoundError("no such task"));
+        const { task, card: boardTask } = found;
+        if (boardTask === undefined) {
+          return yield* Effect.fail(createInvalidStateError(NO_BOARD_CARD));
+        }
+        const id = task.id;
+        const {
+          cards: [facts],
+          context,
+        } = yield* cardFacts.readFacts([boardTask]);
+        const card = buildWorkCard(boardTask, facts!, yield* blockers.readCardBlockersOf(id));
+        // The card's open question is asked by one Thread, and the pane answers it from that
+        // Thread's Requests, so that Thread is listed even when newer sessions would crowd it out.
+        const { sessions, total: sessionCount } = yield* detailFacts.readSessions(
+          id,
+          MAX_DETAIL_SESSIONS,
+          card.openQuestion?.sessionId,
+        );
+        const taskRuns = yield* runs.readRunHistory(id);
+        const runCount = yield* detailFacts.countRuns(id);
+        const blocking = yield* blockers.readDetailBlocking(id);
+        return {
+          task,
+          card,
+          sessions,
+          sessionCount,
+          runs: taskRuns,
+          runCount,
+          ...blocking,
+          ...buildLinkedEntities(facts!.linkedRefs, card, context),
+        };
+      }),
+  };
+});
+
+/** The details pane's read. */
+export class TaskDetails extends Context.Service<TaskDetails, Effect.Success<typeof make>>()(
+  "hercule/controller/tasks/TaskDetails",
+) {}
+
+export const TaskDetailsLayer: Layer.Layer<
+  TaskDetails,
+  never,
+  SqlClient.SqlClient | TaskBoardFacts | TaskRuns | TaskDetailFacts
+> = Layer.effect(TaskDetails)(make);

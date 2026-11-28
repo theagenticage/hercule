@@ -21,23 +21,75 @@ _Avoid_: filter, topic
 ### Work
 
 **Task**:
-A unit of human intent: a described piece of work someone wants done. Work-type-agnostic; a task is not itself an execution.
+A unit of human intent: a described piece of work someone wants done. Work-type-agnostic; a task is not itself an execution. Every Thread belongs to one Task, which the core makes for the Thread when it has none to join; an Agent's session may join one, and an Assistant's session never does. A Task has a Stage.
 _Avoid_: ticket, issue (reserved for external trackers)
 
+**Stage**:
+Where a Task stands: one of `exploring`, `planned`, `building`, `in-review`, `landed`, `done` or `dropped`. The list is fixed and any stage can follow any other. Only an explicit update moves a Task's stage; the core never does, and a Task Summary never does. A shipped workflow may write the stage when a Fact arrives, and the Task's fence makes a person's drag win until a newer Fact arrives. No shipped workflow sets `done`. A Task's status is a coarse reading of its stage. Done on a Task and Done on a Thread are separate acts: a Task at `done` leaves its Threads as they are, and marking a Thread Done leaves its Task where it is.
+_Avoid_: step (a workflow's, see Step), status (the coarse reading of the stage, not the stage itself), column (how a board draws a stage), reviewing (the stage is `in-review`)
+
+**Fact (Stage)**:
+A record that a thing a live Task links changed its lifecycle (`open`, `completed` or `abandoned`), or was just linked or first observed with a link. It comes from the External Entity kept true by polls, not from a raw event, so a merge that no event reported is still a Fact. A Fact is a row with an integer id, and that id is its order: never a time. The core writes it, in the transaction of the change, with the Platform Event `task.entityChanged`, and decides nothing about the stage. A workflow acts on it by passing its id to `task.update` as `stageFactId`; the Task's fence refuses a Fact at or below the highest one already accounted for, so a late or repeated Fact never undoes a drag. An unlink voids the Facts of that Task and ref. A Fact is not an outside change shown on a timeline, and not a Runner Fact.
+_Avoid_: event (the Platform Event is what carries a Fact, not the Fact), signal (a **Signal** asks the user for a move), update, change (bare), fence (bare: it is the Task's counter, not the Fact)
+
 **Provenance**:
-A task's append-only record of what created or touched it: entries pointing at events, runs, external refs, and the signals handed off onto it. What lets a later event about the same thing find its existing task.
+A task's record of what created or touched it: entries pointing at events, runs, external refs, the signals handed off onto it, and the Tasks merged into it. Entries are only appended, and an entry is never edited or removed; the one thing that can happen to one is that a Merge moves it, unchanged, to the surviving Task. What lets a later event about the same thing find its existing task.
 _Avoid_: history, audit trail (reserved for the event log)
+
+**Task Summary**:
+A description of a Task that a Text Generation writes after the Task's work changes: a line of about six words for the card, where the Task stands, and what is left. It describes and never decides. It holds no question, answer or judgement, never moves a card or changes the Task, and is kept in a table of its own, not on the Task. A card's open question and failure come from real rows, never from a summary. Stale when something changed since it was written or the last attempt failed.
+_Avoid_: description (the Task's own markdown, written by people and agents), status (the coarse reading of the stage), AI summary, digest
+
+**Merge (Task)**:
+The user's act of making two Tasks one (`task.merge`). The Task they name survives, keeping its title, stage, project, priority and place on the board; the other, the merged Task, gives its labels, description, Threads, runs, workspaces, provenance and any failure to the survivor, and its old id then reads as the survivor. A merge is the user's correction of how work is grouped; a session or a workflow never merges. Moving one Thread to another Task is a different act (`session.moveToTask`).
+_Avoid_: combine, join (a Thread joins a Task), dedupe, close as duplicate
+
+**Initiative**:
+A lasting intent of the user's own, such as "Gift card refunds": a name, what it is for, an optional target and target date, a colour, and an optional project whose lane it draws in. Only the user creates, changes, closes, reopens or deletes one; a session may put a Task on one that exists. A Task belongs to at most one Initiative, and an Initiative may hold Tasks from several projects. Closing keeps its Tasks; deleting clears them. Its Tasks are the whole count of its progress ("2 of 8 landed"; Done counts as landed, Dropped leaves the total). It decides nothing and gates nothing ([ADR 0056](./docs/adr/0056-initiatives-and-blockers-are-thin-structure-over-tasks.md)). An initiative that lives in an outside tool, such as a Linear initiative, is an **External Entity**: it is only ever a lane or a filter on Work, under its own caption, and filtering by one never sets a Task's Initiative.
+_Avoid_: plan (as the name of a record; the design drawings drew Initiatives under "Plans"), epic, project (a **Project** groups materials and is the lane a card sits in), goal, objective
+
+**Blocker**:
+A Task that another Task waits on. One stored direction: the edge says "this Task waits on that one", and **blocks** is the inverse read of the same rows, never a second relation. The edges always form a DAG, checked in one writer transaction, and a refusal names the path. A Blocker at `landed`, `done` or `dropped` no longer blocks, and the edge stays as history. A blocked card goes quiet and says why; the core gates nothing on a blocker, so a blocked Task can still be moved, started and finished. A Blocker may be in another project. A Follow-up relation between Tasks ("do this after") is not a Blocker, and is not built.
+_Avoid_: dependency, subtask, parent, gate
 
 **External Ref**:
 A fully-qualified canonical identifier for a thing outside Hercule (`github:issue:owner/repo#42`, `gmail:thread:<id>`). The plugin defining the type owns canonicalization; the connection an event arrived through is not part of the identity. Not unique across tasks.
 _Avoid_: link, URL (a ref is an identity, not a location)
 
+**External Entity**:
+A durable record of one outside thing, such as a pull request, an issue or a repository, kept true by a plugin's polls and not by events. One record per External Ref, shared by every Connection that sees the thing. It holds what a card draws and is never a copy of the thing. A record of a kind with no card, such as a repository, is a place that things belong to. The Signals about it attach to it by its ref, on read, and it keeps a short timeline of what changed at its source, which Hercule shows and never acts on. A word for code and docs only: the UI says the kind's noun, "Pull request", and "entity" never reaches a screen.
+_Avoid_: item, object, mirror, copy, resource (a **Resource** is something Hercule works in); "entity" in any text the user reads
+
+**Entity Kind**:
+One kind of External Entity that a plugin's event source declares as data: its noun, ref prefix, card size, pace and patience, the templates for its identifier, person and facts, its statuses and the sentence for each reason a card is here. The core renders every card from it and keeps copies of its nouns, status words and templates on the row, so a card still draws after its plugin is gone; the Card Face is the exception, drawn on read from the declared fields. A kind with `pace: context` is a place and has no card. A kind is not a signal kind: `linear/issue` can be both, in two namespaces.
+_Avoid_: entity type, schema, template (the kind holds templates), signal kind
+
+**Facet**:
+A field a plugin marks as browsable on an Entity Kind, such as a Linear issue's team or project, or a pull request's repository. Browse lists its values and Narrow offers them, each with a count, and a click adds the same clause the search bar would. A Facet may name a context kind whose stored records are every value the source knows of, so Browse can list a Linear project that holds nothing of the user's yet. Then the field holds the record's ref, not its name. A plugin declares Facets as plain data, and the controller counts them.
+_Avoid_: filter (a Facet is declared by the plugin and is a way to browse; the user sets no filter), category, tag, label (a source's own labels are plain fields)
+
+**Card Face**:
+What a kind's row shows, drawn on read from the field values stored for the thing and the kind's declaration: the status glyph, the identifier, the place, the context and the fact. A plugin declares which declared fields fill the place, the context and the fact, and nothing is stored per thing. A thing whose plugin is inactive has no Card Face and draws the generic card from the title, identifier, status and noun the record holds.
+_Avoid_: card template, layout, bundle, renderer (a plugin never draws), view
+
+**Observation**:
+What one Connection says about one External Ref: the Concerns it reported, whether it can read the ref, and when it last tried. Kept per ref and Connection, so one account's failure never hides another account's good read. An entity's concerns, access and freshness are worked out from its observations. Also what a plugin hands to `reconcile`: one thing it read from its source.
+_Avoid_: snapshot, sync, poll result
+
+**Concern**:
+Why an External Entity matters to the user: `assigned`, `opened`, `review-requested` or `mentioned`, each reported by a plugin for one Connection, or `following`, which is worked out from a live Task the user added to Work from nothing that concerned them. An entity's concerns are the union over its Connections plus `following`. When a complete read no longer lists a thing, its concerns become empty and its card leaves the Inbox, and the record stays.
+_Avoid_: reason (a card's *reason* is the sentence it shows; the concern is the fact behind it), interest, watch, subscription (reserved for events)
+
+**Relation Claim**:
+One reporter's word that two External Refs are related: `part-of`, from a child to a parent, or `linked`, between peers. A source (a Connection), a person or a piece of text makes it, and the core stamps which. `part-of` is a graph, not a chain: a thing can have many parents, and a claim that would close a loop is stored as conflicted and shown. Two reporters of one relation make two claims, and the pair shows once, under the firmest. A claim made from text is a hint: it joins and groups nothing until a person links the two. A claim grants no permission and creates no Concern. A claim written while its thing was not yet a full record is baseline: what a thing arrived with is not news, so it never writes a change on the timeline, not even when it resolves later.
+_Avoid_: edge (the drawn step of a path), link (bare), hierarchy, parent (bare: there can be many)
+
 **Session**:
-One run of a provider-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace.
+One run of a harness-backed agent: its process, context and transcript, resumable and forkable. When its process has exited and its transcript is still on its runner it is resumed in place, under its own id, by the next input; forking mints a new session. Maps onto a Claude Code session, a Codex thread or a pi session. A session copies its configuration from an Agent at spawn and never reads through it afterwards, or has no Agent at all and is a Thread. *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A session also has its own list of MCP Servers, which the MCP Gateway serves it; only a Thread's list can hold servers until [#222](https://github.com/theagenticage/hercule/issues/222). Every session has exactly one kind, the field `kind`: a Thread, an Agent's session, a run's step or an assistant's. Not required to belong to a task or workspace: an assistant's session never belongs to a Task, and an Agent's session belongs to one only when it joins one.
 _Avoid_: execution, chat, conversation (reserved for an assistant's exchange in one channel container); "new session on resume", "continue to resume", "exited = unrecoverable" (an exited session whose transcript is still on its runner is resumed in place, under its own id, by the next input)
 
 **Thread**:
-A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. Nothing outlives it, nothing about it is named or reusable. The bare word always means this; a Codex thread or a Slack thread is always qualified.
+A session with no Agent behind it, driven by hand. The user starts it, or a session holding the `thread.start` grant starts it for the user. A Thread the user starts takes the user's thread defaults; one a session starts copies the calling session. One exception, for both: a Thread started in a Project whose Model Profile has a default entry starts on that entry when the call names no model ([spec 06 section 17.9](./docs/spec/06-providers.md#179-a-projects-profile-and-how-a-new-thread-starts)). *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* Its list of MCP Servers starts the same way: one the user starts takes the list chosen on its Draft Thread, else its Project's, else the default list in Settings; one a session starts copies the calling session's list ([spec 21](./docs/spec/21-mcp.md)). Nothing outlives it, nothing about it is named or reusable. A Thread always belongs to a Task. The bare word always means this; a Codex thread or a Slack thread is always qualified.
 _Avoid_: interactive session, chat-first session, chat (reserved for a possible non-agentic conversation surface)
 
 **Role**:
@@ -88,7 +140,7 @@ The tokens an agent's model calls have used over a session's whole life. It only
 _Avoid_: context usage, context fill (how full the model's window is right now, which drops on compaction), cost (money, not tokens)
 
 **Request**:
-A provider-held question that one agent of a session - its own agent or one of its subagents - is parked on until an answer arrives, except an **Async question**, which the agent does not wait on. A session can have several open at once, each from its own asker and each answered on its own, in any order; they are surfaced on the card docked on the thread's composer. A request is one of two different things. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respondToApprovalRequest` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. Every approval a session waits on also raises a decision Notification whose Bound Actions are those same answers, so it can be answered from the notification center too. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by `session.respondToQuestion` with answers, each either one or more of the offered options or a custom string the user types. A question takes no decision: to turn it down, the user stops the asking agent's turn. Only the rendering is alike.
+A harness-held question that one agent of a session - its own agent or one of its subagents - is parked on until an answer arrives, except an **Async question**, which the agent does not wait on. A session can have several open at once, each from its own asker and each answered on its own, in any order; they are surfaced on the card docked on the thread's composer. A request is one of two different things. An **approval** (`command_approval`, `file_change_approval`, `file_read_approval`, `tool_approval`) names what would be run and is resolved by `session.respondToApprovalRequest` with one of the four `ApprovalDecision` values - allow / allow always / deny / cancel - and never by free text. Every approval a session waits on also raises a decision Notification whose Bound Actions are those same answers, so it can be answered from the notification center too. A **question** (kind `question`) carries one to many structured questions (chip, prose, options, whether several may be chosen) and is resolved by `session.respondToQuestion` with answers, each either one or more of the offered options or a custom string the user types. A question takes no decision: to turn it down, the user stops the asking agent's turn. Only the rendering is alike.
 _Avoid_: user input (the old name for the `question` kind), permission request (reserved for grant escalation), approval prompt, tool prompt
 
 **Async question**:
@@ -96,7 +148,7 @@ A question Request (`async: true`) that the asking agent does not wait on. The a
 _Avoid_: non-blocking question, background question (a question in a background session or subagent is an ordinary question)
 
 **Steering**:
-Delivering user input into a session's running turn, folding it into that turn instead of opening a new one. A guarantee every session gives: where the provider cannot steer natively, the running turn is interrupted and the input is sent as the next turn. An owner's message to a busy assistant is steered without being asked, and so is one session's message to another session, unless it names itself or says `steer: false`.
+Delivering user input into a session's running turn, folding it into that turn instead of opening a new one. A guarantee every session gives: where the harness cannot steer natively, the running turn is interrupted and the input is sent as the next turn. An owner's message to a busy assistant is steered without being asked, and so is one session's message to another session, unless it names itself or says `steer: false`.
 _Avoid_: interrupt (that's stopping a turn), inject
 
 **Queued Input**:
@@ -106,7 +158,7 @@ User input held by the controller for delivery when the session's running turn c
 - a session's first input cannot be cancelled before the session starts: stop the session instead.
 
 A conversation's session keeps its queued input through any exit and is resumed for it. An agent step's session keeps its step prompt through an exit that is no fault of the session (an idle unload, a runner restart) and is resumed for it. Any other session, a Thread included, has it cancelled at any exit. An input's status is `queued`, `sent`, `delivered` or `cancelled`. Only an agent step's prompt becomes `sent`: it left the controller, the runner never confirmed it, and it is never sent again. A step prompt that never left the controller, because the runner had no connection, stays `queued`. An input with the source `discussion` is a Discussion Input, which the controller writes to tell a session about Discussions. It is written already claimed for its send, so it never waits in the queue.
-_Avoid_: follow-up (provider-native term), pending message
+_Avoid_: follow-up (harness-native term), pending message
 
 **Draft Thread**:
 A thread the user is still composing: it does not exist on the controller yet, and its config and first message are held by the client until the first submission starts it.
@@ -117,15 +169,19 @@ A thread that exists as a Session on the controller, whatever its status. Everyt
 _Avoid_: existing thread, materialized thread, live thread
 
 **Done (Thread)**:
-A mark the user puts on a Thread they have finished with (`session.markDone`), recording when and by whom. A Done Thread leaves its project's list for the Done shelf; nothing about the session itself changes, and a running one keeps running. It is taken off by `session.reopen`, or by any new input to the Thread, and the Thread then sorts as if started at that moment. Only a Thread can be Done; a session spawned from an Agent cannot.
-_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), archived (nothing is hidden or frozen; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves Intake rather than a project list)
+A mark the user puts on a Thread they have finished with (`session.markDone`), recording when and by whom. It is not the Task's `done` stage: the two are separate acts, and neither changes the other. A Done Thread leaves its project's list for the Done shelf; nothing about the session itself changes, and a running one keeps running. It is taken off by `session.reopen`, or by any new input to the Thread, and the Thread then sorts as if started at that moment. Only a Thread can be Done; a session spawned from an Agent cannot.
+_Avoid_: settled (a client's derived reading of a session that has exited and cannot be resumed, whoever marked it), a Task at stage `done`, archived (a separate, final state: see Archived; a Done Thread is listed, readable and takes input), closed, resolved; a Signal marked done (a different record with its own `signal.markDone`, and it leaves the Inbox rather than a project list)
+
+**Archived (Thread)**:
+A final state the user puts a Thread in when they want it gone (`session.archive`), recording when and by whom. An archived Thread can never be resumed, sent input or reopened; its transcript stays readable on the controller. Archiving marks the Thread Done first. Once every Thread of a workspace is archived, its Agent sessions are archived too, so a sidebar row goes whole, and automatic cleanup may remove the workspace. An archived Thread leaves the sidebar and the Done shelf. Only the user archives, and a working Thread (queued, starting or busy) cannot be archived. There is no undo.
+_Avoid_: Done (reversible and changes nothing about the session), deleted (the transcript stays), closed, hidden
 
 **Thread Config**:
-What a thread runs with: provider instance, model and its options, access mode, runner, permission profile, workspace, checkout and branch. Set by the draft at start.
+What a thread runs with: Provider Account, harness, model and its options, access mode, runner, permission profile, workspace, checkout and branch. Set by the draft at start.
 _Avoid_: settings (reserved for the settings store), spec (reserved for the session spec), setup
 
 **Message Draft**:
-The unsent content the composer holds for one thread or one assistant's Conversation: its text, and on a thread the Attachments on its shelf; context later. One per thread, draft or active, and one per assistant. It lives in the client's memory only, so a reload loses it.
+The unsent content the composer holds for one thread or one assistant's Conversation: its text, and on a thread the Attachments on its shelf; context later. One per thread, draft or active, and one per assistant. It lives in the client's memory only, so a reload loses it. While the composer answers a question Request, it shows that question's answer instead; the Message Draft is kept and comes back when the composer stops answering. Typed text that picking an option displaces from an answer is moved, exactly as typed, to the end of the Message Draft where the app has one; on a secret question it is erased instead.
 _Avoid_: prompt (the first message as the spawn carries it), composer state
 
 **Submission**:
@@ -139,7 +195,7 @@ _Avoid_: file, upload (the act, not the thing), blob, tool image or screenshot a
 ### Actors
 
 **Agent**:
-A named, reusable configuration and identity for work: prompt, provider instance, permission profile and session defaults. Supplies values to a session at spawn; the session never reads through it afterwards. Owned by the controller, not by any repo.
+A named, reusable configuration and identity for work: prompt, Provider Account and model (and optionally a harness), permission profile and session defaults. Supplies values to a session at spawn; the session never reads through it afterwards. Owned by the controller, not by any repo.
 _Avoid_: persona, worker (as a noun)
 
 **Assistant**:
@@ -186,7 +242,7 @@ _Avoid_: registration, route (bare)
 
 **Conversation**:
 One continuous exchange with an assistant inside one platform container: a Discord channel, thread or DM, a Slack thread or DM, or the assistant's one conversation on the web channel. Each conversation has its own session lineage and is never merged with another; continuity across conversations comes from memory and recall. The lineage is derived, not stored: it is the sessions that carry the conversation's id, and the current session is the newest of them. Its messages are conversation input, never events.
-_Avoid_: chat, thread (reserved for provider-native objects)
+_Avoid_: chat, thread (reserved for harness-native objects)
 
 **Conversation Message**:
 One line of a conversation, stored in order with its sender's role and label: what the owner said, the assistant's reply, or a notice. A reply or a notice links to the session that wrote it, and a reply names the turn that wrote it and the assistant text it holds. The owner's words reach the assistant only as a conversation message, so the conversation is the record of what was said; channels add third-party and bot lines. Input to an assistant, never an event.
@@ -194,10 +250,10 @@ _Avoid_: chat message, event, input (bare; a Queued Input is the session-side de
 
 **Notice**:
 A conversation message the system writes in one of three forms: "<name> was interrupted: <reason>" when the session exits while a turn runs, or when a turn fails or is stopped while the session lives; "<name> can't be reached: <why>" when a message cannot be delivered and waits, because no session could take it or the crash-loop guard holds that session; and "There was a problem delivering your message to <name>: <reason>" when a message is given up on for good, because its session cannot be resumed or the runner failed it in a way that sending it again would not mend. No other event writes one. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
-_Avoid_: notification (Hercule's central message to its user), error message, alert, runtime notice (a provider adapter's neutral report, a **Runtime Notice**)
+_Avoid_: notification (Hercule's central message to its user), error message, alert, runtime notice (a harness adapter's neutral report, a **Runtime Notice**)
 
 **Runtime Notice**:
-Neutral information a provider adapter reports about a session that is neither a problem nor a failure, such as "Conversation was cleared" or "Recalled 3 memories". It is the `runtime.notice` event. A client draws it as a plain note in the thread, where it happened, and it never opens a turn or ends one. Not a Notice, which is a conversation message the system writes, and not a warning, which tells the user something went wrong or may.
+Neutral information a harness adapter reports about a session that is neither a problem nor a failure, such as "Conversation was cleared" or "Recalled 3 memories". It is the `runtime.notice` event. A client draws it as a plain note in the thread, where it happened, and it never opens a turn or ends one. Not a Notice, which is a conversation message the system writes, and not a warning, which tells the user something went wrong or may.
 _Avoid_: notice (bare; a **Notice** is a conversation message), warning, alert
 
 **Idle Unload**:
@@ -206,11 +262,15 @@ _Avoid_: sleep (as the name of the unload), hibernate, suspend, rotation
 
 **Rotation**:
 Retiring a conversation's live session by distilling what matters into memory and continuing the conversation in a fresh session. Triggered by context size, a daily timer, or the user asking to start fresh; never mid-turn; distillation is part of the contract, not an optional step. Distinct from a session's process merely stopping while idle and resuming later, which changes nothing the assistant remembers.
-_Avoid_: reset, compaction (reserved for provider-native context handling)
+_Avoid_: reset, compaction (reserved for harness-native context handling)
 
 **Memory**:
 An assistant's durable notes: assistant-scoped, maintained by the assistant itself, visible and editable by the user, bounded in size, never shared between assistants. Two tiers: a single **core** note (always present in every session; what the assistant knows about the user, as opposed to the persona the user wrote for it) and named **topic** notes (each with a one-line gist, listed by name and gist, opened on demand). A note written while the assistant could see third-party messages carries a provenance mark the user can review.
 _Avoid_: knowledge base, brain, journal
+
+**Taint**:
+*(Added 2026-11-17, [#736](https://github.com/theagenticage/hercule/issues/736).)* The flag on a session that says it has read third-party text. The core sets it, never the agent. It passes on to a session that a tainted session starts, forks, or puts text into, and ends when the conversation rotates. A tainted session cannot change the Skill Library, and its memory writes carry provenance. The flag is stored on the session and is not on the public Session record.
+_Avoid_: dirty, untrusted session, infected, poisoned
 
 **Heartbeat**:
 An assistant's standing recurring scheduled wake with a user-editable prompt, letting it check on things and act unprompted. On by default; the main mechanism of true proactivity. A heartbeat that finds nothing to say stays silent.
@@ -227,7 +287,7 @@ _Avoid_: timer, alarm
 ### Organization
 
 **Project**:
-A grouping of related work and its materials, purely a way to organise information inside Hercule: no behaviour, no defaults. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
+A grouping of related work and its materials, a way to organise information inside Hercule: no behaviour, and ~~one default only, the Model Profile a new thread in it opens on~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* two defaults only for a new thread in it: the Model Profile it opens on ([ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)) and the MCP Servers it starts with ([ADR 0059](./docs/adr/0059-sessions-reach-mcp-servers-through-a-gateway-in-the-controller.md)). Changing the project's MCP Servers later never touches a thread that exists. May span multiple resources (repos, folders, mailboxes), and a resource may belong to several projects; not bound to a single git repo.
 _Avoid_: workspace (as a grouping term)
 
 **Resource**:
@@ -247,7 +307,7 @@ The user-facing word for a primary is **main workspace**: `primary` is the kind 
 _Avoid_: worktree (reserved for the git mechanism), playground; current checkout, shared checkout, main checkout (all three named the primary before; "main workspace" replaced them); attachment, attached checkout (an Attachment is an image in a prompt; say adopted checkout and adoption); bench, crew, piece of work (for the sessions working in one workspace there is no noun: say the workspace's threads, or its sessions)
 
 **Workspace Lease**:
-A holder's use of a workspace - a session or a run - recorded on the workspace when the holder opens or joins it. It is active until the holder releases it. At release the holder picks a retention window, fixed then. Active leases protect current use; a workspace's separate retention policy decides whether automatic cleanup is allowed. A Thread makes its workspace manually retained, including after the Thread exits.
+A holder's use of a workspace - a session or a run - recorded on the workspace when the holder opens or joins it. It is active until the holder releases it. At release the holder picks a retention window, fixed then. Active leases protect current use; a workspace's separate retention policy decides whether automatic cleanup is allowed. A Thread makes its workspace manually retained, including after the Thread exits, until every Thread of the workspace is Archived.
 _Avoid_: claim (a Subscription is a claim), pin (a run is pinned to a runner), reference count
 
 **Checkout**:
@@ -300,11 +360,11 @@ The Queued Input, with the source `discussion`, that the controller sends to tel
 _Avoid_: alert (the Android app's notification), nudge (a live topic's invalidation), ping, notification
 
 **Wiki**:
-The set of Wiki Pages of one repository, which agents keep for the agents after them. The repository's own docs win over it. The Wiki is not a record of its own.
-_Avoid_: knowledge base, memory (an assistant's), docs
+The set of Wiki Pages of one repository, which agents keep for the agents after them: general lessons about the repository that many agents need on many tasks, one page per subject. It is not a worklog, and no page is about one ticket. The repository's own docs win over it. The Wiki is not a record of its own.
+_Avoid_: knowledge base, memory (an assistant's), docs, worklog
 
 **Wiki Page**:
-One page of a Wiki: a slug, a title, a one-line summary and a Markdown body. A write creates a page or updates one, and every write is a revision stamped with its actor and time. An update names the revision it read (`expectedRevision`), and a stale update is refused.
+One page of a Wiki: a slug, a title, a one-line summary and a Markdown body. A write creates a page or updates one, and every write is a revision stamped with its actor and time. An update names the revision it read (`expectedRevision`), and a stale update is refused. A page is never deleted. One that no longer helps is **archived**, with who archived it, when and why: it leaves the listing and takes no update, is still read by its id, and can be restored.
 _Avoid_: note (an assistant's memory has notes), article, document
 
 ### Infrastructure
@@ -336,8 +396,12 @@ A fact about a runner used for placement: a probed toolchain or a user-applied l
 _Avoid_: bare "capability" where the kind isn't obvious
 
 **Runner Facts**:
-The probed facts a runner self-reports about itself: OS and architecture, RAM, toolchains, and which provider CLIs are on PATH. Reported at hello, refreshed hourly with a report only on change, and refreshed unconditionally on demand via `runner.refreshFacts`.
+The probed facts a runner self-reports about itself: OS and architecture, RAM, disk size, toolchains, and which harnesses are on PATH. Reported at hello, refreshed hourly with a report only on change, and refreshed unconditionally on demand via `runner.refreshFacts`.
 _Avoid_: re-probe
+
+**Runner Metrics**:
+What a runner measures about its machine every minute, because it changes: free disk, available memory, and CPU use (the minute's average and peak). The controller keeps a history of them with the minute's session counts, for the Fleet graphs. The disk limit a runner's free disk is checked against is its **watermark**; the metrics are not.
+_Avoid_: watermark (the old name of the report; now only the disk limit), readings, stats, telemetry
 
 **Promotion**:
 Moving the controller to another machine by migrating its state bundle. A migration, never a live handoff; the old controller ends up sealed.
@@ -357,35 +421,68 @@ _Avoid_: install dir, config dir
 The one unit per machine that the OS supervisor keeps running: a launchd LaunchAgent on macOS, a systemd user unit on Linux. It runs `hercule serve` on the controller's machine and `hercule runner` on a runner-only machine, with the machine's Hercule Home. `hercule service` installs and manages it; `hercule runner join` installs it for a runner. The controller's local runner is the controller's child process and has no Service Unit of its own.
 _Avoid_: daemon (that is a runner process), LaunchAgent or systemd unit as the general term, service file, supervisor (that is launchd or systemd)
 
+**Harness**:
+An agent program Hercule runs for a Session or a Text Generation: ~~Claude Code, Codex, pi~~ *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Claude Code, Codex, pi, Antigravity. Installed on runners; one harness can run the models of several Providers, and one Provider's models can run in several harnesses.
+_Avoid_: provider (its name before [ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md)), CLI, agent (that is a configuration)
+
+**Harness Definition**:
+A harness's static self-description: identity, declared capabilities, and which Providers and Account Kinds it can run, and how. What a harness plugin registers; distinct from the running adapter.
+_Avoid_: provider definition (the old name)
+
+**Harness Adapter**:
+The runner-side code that drives one harness for a Session, and once, non-interactively, for a Text Generation, and reports what happens as normalized events.
+_Avoid_: provider adapter (the old name)
+
 **Provider**:
-An adapter wrapping a coding harness (Claude Code, Codex, pi). It drives the harness interactively for a Session, and once, non-interactively, for a Text Generation. Only this; integrations like GitHub are event sources, not providers.
-_Avoid_: harness (for the adapter itself), integration
+The company that serves models and bills for them: ~~Anthropic, OpenAI, OpenRouter, Z.ai, OpenCode, MiniMax~~ *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* Anthropic, OpenAI, Google, OpenRouter, Z.ai, OpenCode, MiniMax. A provider plugin declares its Account Kinds, how to read an account's Model Catalog and Account Usage, which harnesses each kind may run in, and its Default Selection. Integrations like GitHub are event sources, not providers.
+_Avoid_: vendor, model source, backend; provider for a harness (the meaning before [ADR 0048](./docs/adr/0048-harnesses-and-provider-accounts-are-separate.md))
 
-**Provider Definition**:
-A provider's static self-description: identity, config schema, declared capabilities, and the model it suggests for Text Generation. What a provider plugin registers; distinct from the running adapter.
+**Account Kind**:
+One way to hold an account at a Provider: an API key, a subscription signed in on each machine, or a subscription token Hercule holds for every machine. A provider declares its kinds and the setup steps each takes.
+_Avoid_: sign-in method (wording for the user only), auth type, plan
 
-**Provider Instance**:
-One account of a provider: a row carrying the config that provider runs under, with its own isolated provider home on every runner and its own vendor login. The instance id, never the provider id, is what placement, snapshots and the composer route on, because one provider can hold several accounts. The controller opens one per registered provider at boot.
-_Avoid_: provider account, provider config (for the row), profile
+**Provider Account**:
+One account at one Provider, of one Account Kind, named after its provider with an optional label: "Anthropic", "Anthropic · Work". It pays for the models; a Session, an Agent and the Text Generation Model name one, with a model and optionally a harness. One account is one person at the provider, on every machine it is signed in on.
+_Avoid_: account (bare; reserved for a future Hercule user concept), provider instance (the retired concept it replaces), connection (an external account for events and actions), wallet, model source
+
+**Harness Home**:
+The folder one harness runs in for one Provider Account on one runner: its login, its settings and its own session files. Kept apart per account and per harness, and never moved once used.
+_Avoid_: provider home (the old name), config dir
+
+**Model Catalog**:
+The models one Provider Account may use, as last read for it, each with the date it was first seen.
+_Avoid_: catalog (bare; that is the plugin catalog), model list
+
+**Default Selection**:
+The models a Provider Account brings into a Model Profile when it joins one: the provider's current models as its catalog source lists them, or none for a provider with hundreds. A model that newly enters it is announced as new. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* A provider may also say that only the current models of one maker enter it. Google does, because it resells models of other makers and its menu starts with Google's own ([spec 06 section 17.3](./docs/spec/06-providers.md)).
+_Avoid_: featured models, recommended models
+
+**Model Profile**:
+A named menu of models for the composer, picked from the Provider Accounts: accounts in order, their models in order, the harness each runs in, and a default entry. An account may sit in several profiles, and a Project may name one.
+_Avoid_: profile (bare; Permission Profile and Settings › Profile exist), wallet, model set, preset
+
+**Account Usage**:
+What a Provider Account has used of its limits or credit, as last reported for it: usage windows with their reset times, or a credit balance, each with the time it was read. Never an estimate.
+_Avoid_: quota, rate limit (one reason a window fills), token usage (a session's tokens)
 
 **Secret Field**:
-A config field a provider definition marks secret: its value is never part of the instance's config but a Secret owned by the provider instance, entered through a masked input, hidden on every read, and decrypted only as a frame to a runner is built. Spelled `secret()` and `secretFields` in the plugin host, `ProviderSecretField`/`secretFields` in the contract, and `InstanceSecrets` in the protocol, which is the one place the values themselves travel.
+A credential an Account Kind asks for at setup, such as an API key: a Secret owned by the Provider Account, entered through a masked input, hidden on every read, and decrypted only as a frame to a runner is built.
 _Avoid_: API key field, pi key, credential field
 
 **Access Mode**:
-The session-level permission axis a provider adapter enforces: approval-required, auto-accept-edits, auto, or full-access. A fixed vocabulary; per-provider support is declared, and a mode a provider lacks is substituted before the session starts by a hardcoded fallback chain that only ever moves to a less permissive mode, never silently.
+The session-level permission axis a harness adapter enforces: approval-required, auto-accept-edits, auto, or full-access. A fixed vocabulary; per-harness support is declared, and a mode a harness lacks is substituted before the session starts by a hardcoded fallback chain that only ever moves to a less permissive mode, never silently.
 _Avoid_: permission mode (vendor term), runtime mode
 
 **Capability Snapshot**:
-The merged declared-plus-probed facts about a provider instance on a specific runner: auth state, harness version, model catalog. What UI affordances derive from; never obtained by creating or mutating a provider conversation.
+What one runner found out about one Provider Account in one harness: whether it is signed in and as whom, and the models it lists. Never obtained by creating or mutating a harness conversation. *(Amended 2026-11-25, [#1278](https://github.com/theagenticage/hercule/issues/1278).)* One exception may be needed: Antigravity's probe opens a conversation, sends no prompt and closes it, if `agy` lists its models in no other way ([spec 06 section 3.2](./docs/spec/06-providers.md)).
 _Avoid_: provider status
 
 **Text Generation**:
-One model call made on a runner: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn, and it is not a Session: it has no Session row and takes no session slot. Code inside the controller asks for one, such as for a Thread's title, and so does a workflow's text generation step, as its run; agents never do.
+One model call made on a runner: instructions, one input and an output schema go in, and a value that matches the schema comes out. It has no tools, no workspace, no transcript and no turn, and it is not a Session: it has no Session row and takes no session slot. Code inside the controller asks for one, such as for a Thread's title or a Task Summary, and so does a workflow's text generation step, as its run; agents never do.
 _Avoid_: completion, LLM call, one-shot session, prompt (for the whole call), text gen
 
 **Text Generation Model**:
-The provider instance and model every Text Generation runs on, set by one controller setting: Automatic (the first provider in a fixed order whose suggested model a logged-in instance offers), one model the user chose, or Off. A chosen model never falls back to another.
+The Provider Account and model, and optionally the harness, every Text Generation runs on, set by one controller setting: Automatic (the first account, in the order accounts were added, that can run now, whose harness makes text generations, and whose provider suggests a small model), one model the user chose, or Off. A chosen model never falls back to another.
 _Avoid_: utility model, small model, cheap model, title model
 
 **Purpose**:
@@ -402,11 +499,11 @@ _Avoid_: subscription (reserved for the domain concept)
 ### Extension
 
 **Plugin**:
-A self-contained unit of functionality that extends Hercule by requesting plugin capabilities and registering contributions. The structuring principle of v1: channels, event sources, providers, and workflow actions are all built as plugins.
+A self-contained unit of functionality that extends Hercule by requesting plugin capabilities and registering contributions. The structuring principle of v1: channels, event sources, harnesses, providers, and workflow actions are all built as plugins.
 _Avoid_: extension, addon, integration
 
 **Extension Point**:
-A typed slot plugins contribute into. The v1 set is fixed: provider, channel, event source, workflow action. Plugins cannot define new extension points.
+A typed slot plugins contribute into. The v1 set is fixed: harness, provider, channel, event source, ~~workflow action.~~ *(Amended 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* workflow action, MCP server. Plugins cannot define new extension points.
 _Avoid_: hook
 
 **Contribution**:
@@ -426,6 +523,14 @@ The surface a plugin programs against: capability-sliced services handed to the 
 **Manifest**:
 A plugin's static self-description: identity, host API version, requested plugin capabilities, config schema. Deliberately coarse; contributions are not in it.
 
+**MCP Server**:
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* A record on the controller: a remote MCP server that offers tools to sessions, and what it is reached with: a plugin's Connection, or its own sign-in when the user added it by URL. A plugin registers the server of its service as a contribution, and the record exists once the user switches it on. It knows nothing about projects or threads. A Project names the MCP Servers a new thread starts with, and a session keeps its own list.
+_Avoid_: tool server, connector, integration. Not the MCP Gateway.
+
+**MCP Gateway**:
+*(Added 2026-11-20, [#1207](https://github.com/theagenticage/hercule/issues/1207).)* The controller's one MCP endpoint, `<controller>/mcp`, that the harness of every session on a runner and harness that support it is given as its one MCP server, with the session's own Session Token. It answers with the tools of the session's MCP Servers and forwards each call with a credential the controller holds, so no vendor token reaches a runner.
+_Avoid_: proxy, bridge. Not an MCP Server (a record it serves from).
+
 ### Automation
 
 **Connection**:
@@ -437,7 +542,7 @@ An origin of external events. GitHub and Gmail are event-source plugins in v1; c
 _Avoid_: integration, provider
 
 **Platform Event**:
-An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`). Flows through the same pipeline as external events and is routed like them, so triggers and subscriptions can wait on it. An audit entry sits in the same log but is never routed, and is not a platform event.
+An event emitted by the controller itself rather than an external source (`run.completed`, `run.failed`, `run.cancelled`, `task.created`, `task.updated`, `task.entityChanged`). `task.entityChanged` carries a Fact: it is emitted once for each live Task that links a thing whose lifecycle changed, and it is the one platform event about a linked thing rather than about a row. Flows through the same pipeline as external events and is routed like them, so triggers and subscriptions can wait on it. An audit entry sits in the same log but is never routed, and is not a platform event.
 _Avoid_: internal event, system event
 
 **Core Kind**:
@@ -478,8 +583,12 @@ A CEL source stored on a subscription or a trigger and evaluated against one eve
 _Avoid_: rule, predicate string
 
 **Workflow**:
-A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. Editing a workflow never affects in-flight runs. A stored workflow is **invalid** while it no longer validates because a plugin, Agent or Connection it uses changed after it was saved, or because a newer controller checks it more strictly: its triggers start no runs until it validates again.
+A named, stored, editable source of execution plans. Owns its triggers; can be as small as one trigger plus one action. It declares typed inputs, and one may take an External Entity (an *entity input*: the value is its External Ref, with the signal kinds the workflow answers), so the workflow can be handed a card from the Inbox. Editing a workflow never affects in-flight runs. A stored workflow is **invalid** while it no longer validates because a plugin, Agent or Connection it uses changed after it was saved, or because a newer controller checks it more strictly: its triggers start no runs until it validates again.
 _Avoid_: recipe
+
+**Shipped Workflow**:
+A workflow the core installs at boot with its source written in code, such as `card-in-review` and `card-landed`, which move a card when a Fact arrives. It is an ordinary workflow once installed: listed, editable, and it can be disabled or deleted. It is installed once per key (`shipped_workflows`) and never upgraded: an edit is never overwritten, and a deleted one never comes back. Who owns a shipped workflow is still open (#502).
+_Avoid_: default workflow, template, built-in (a **Built-in Action** is an operation a step calls), system workflow, preset
 
 **Trigger**:
 A workflow's rule for when events enter it. Two kinds: a start trigger (static condition, spawns a new run) and a signal trigger (condition shape plus correlation key; a source node of the graph that fires its outgoing edges each time a matching event reaches the live run). What a trigger fires on is its `on`: an Event Selector, or for a start trigger a Schedule. A start trigger whose `on` is a Schedule is a **cron trigger**. Lives inside the workflow, not as a standalone routing entity.
@@ -554,8 +663,8 @@ A trigger's limit on how many runs it may spawn per window. Exceeding it trips t
 _Avoid_: rate limit (bare), throttle
 
 **Notification**:
-A persisted message from Hercule to its user about Hercule itself ("run failed", "trigger paused", "agent needs a decision"), shown in Check-in and never on Intake. Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
-_Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer); signal (what Intake holds is a **Signal**, its own record)
+A persisted message from Hercule to its user about Hercule itself ("run failed", "trigger paused", "agent needs a decision"), shown in Check-in and never on the Inbox. Produced by the core, by workflow notify steps, by sessions, or by plugins; always recorded centrally, with delivery through channels decided by the core, never claimed by plugins. A decision stays open until its question is answered, wherever that happens, and is withdrawn when the question stops existing; nothing else about it ever changes.
+_Avoid_: alert, ping, notice (a conversation message saying an assistant could not answer); signal (what asks the user for a move is a **Signal**, its own record)
 
 **Bound Action**:
 One choice laid out for the user on a decision Notification or a Signal, ready to run: a label, an optional note from whoever laid it out, and at most one operation whose input is already filled in and frozen ("bound"). Laying it out does nothing. Only when the user picks it does it run, as the user; the pick is the user's answer. A choice with no operation (Dismiss, Done) closes the item and runs nothing. Each choice shows a **Describe Line**, written by the core, saying what the click will do. An operation can be bound only where it declares itself usable (`notification.answer`, `signal.answer`).
@@ -566,11 +675,15 @@ The line the core writes under a Bound Action to say what taking it does to the 
 _Avoid_: summary, preview, action description (the producer's own `description` of what an answer means)
 
 **Intake**:
-Where events become something for the user to deal with: Signals they handle one by one, among them what triage prepares across many events (Proposals, Offers). Which events triage may read is set per event kind by the plugin, with your overrides for the plugin and per Connection; Intake never shows the full event stream. Also the name of the view that presents it: To do, Later and Done over Signals, with Tracking at the foot of To do, and Everything over the events behind them.
-_Avoid_: command center, inbox, dashboard; "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
+Which events can become something for the user to deal with: which event kinds triage may read, and which signal kinds are on. The plugin sets both per kind, with your overrides for the plugin and per Connection. The events triage may read are Intake's events (`event.query --intake`); the full event stream is never shown to triage. The API keeps the word (`plugin.updateIntake`, the `intake` field of a Connection), and the UI shows these settings in Settings › Signals. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* The Intake screen is retired: To do, Later, Done, Everything and Tracking are deleted. A Signal about an External Entity is seen on the Inbox; a Signal with no entity is reachable with `hercule signal list` only, until follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox.
+_Avoid_: command center, dashboard; Intake for a screen or a list the user works through (retired: the Inbox is that place); To do, Later, Everything and **To do clear** as screens or states (retired with the Intake screen); "considered for Intake" (retired: an event kind is *available to triage*, a signal kind is *on* or *off*)
+
+**Inbox**:
+The desktop page of everything out there that concerns the user, before they take it on: External Entities with a current Concern, an open signal or a live Task, as one list of rows with a pane beside it. What is on it is worked out on read, and its sidebar number counts what has a clock on it. A Task taken from a row is an ordinary Task on Work. Things that are linked to each other, by a source or by the user, are drawn together as one group, named after the group's most lasting thing; the UI says Link, never "bundle". A signal that lands while the page is open waits behind a bar and never moves a row. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* It is where the user sees the Signals about an External Entity; the Intake screen that listed every Signal is retired. A Signal with no entity has no place on it yet.
+_Avoid_: Intake (the settings for which events triage may read), To do, queue, feed, notifications; "inbox zero" (the Inbox's own empty page is the sunrise)
 
 **Signal**:
-Something put in front of the user on Intake because a move is asked of them: a review request, a mention, an email that asks something of them, or work an agent prepared. Someone or something is waiting on the user; they may answer it, mark it done, snooze it, or let it be. A plugin declares its own signal kinds and the core raises them from its events; the core's kinds (`proposal`, `offer`, `unsure`, `fyi`) are raised by workflows, assistants or the core itself. It leaves the moment the user makes their move, or when none is asked of them any more; never when the work behind it finishes. Its own record, never a Notification.
+Something put in front of the user because a move is asked of them: a review request, a mention, an email that asks something of them, or work an agent prepared. Someone or something is waiting on the user; they may answer it, mark it done, or let it be. A plugin declares its own signal kinds and the core raises them from its events; the core's kinds (`proposal`, `offer`, `unsure`, `fyi`) are raised by workflows, assistants or the core itself. It leaves the moment the user makes their move, or when none is asked of them any more; never when the work behind it finishes. A Signal about an External Entity attaches to it by its thread ref, on read, and shows on the Inbox with that entity: one record, one resolution. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* A Signal with no entity (the core's kinds, and any signal whose entity is missing or cannot be read) has no place on the desktop for now: it is reachable with `hercule signal list` only, until follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox. The Signal can end while the entity stays, and acting on the card (taking it on, dismissing it) ends no Signal it did not answer. Its own record, never a Notification.
 _Avoid_: ask, item, request (a Permission Request or an agent's request); "signal" for any incoming event (that is an **Event**; a signal trigger is a workflow concept)
 
 **Block**:
@@ -578,8 +691,8 @@ One part of a Signal's body: data a producer fills, drawn by each app in its own
 _Avoid_: widget, card, section
 
 **Snooze**:
-Hiding an open Signal from To do until a chosen time, when it comes back marked "Back". Snoozing is not an answer: the signal stays open and its source is told nothing. Only Signals are snoozed, never Notifications.
-_Avoid_: remind me, defer, park
+Retired. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* Snoozing hid an open Signal from Intake's To do until a chosen time. It went with the Intake screen, and a Signal that was snoozed is live again. Nothing hides a Signal for a while any more; Not urgent, which lowered a Signal's priority, is retired the same way.
+_Avoid_: snooze, Later, Not urgent, remind me, defer, park
 
 **Screener**:
 The shipped, editable workflow that reads one event when a signal kind's rule answers *undecided*, and decides whether it becomes a Signal of that kind, using the guidance the kind declares. Unlike Triage, it sees one event at a time, and it writes no content: the signal's body comes from the plugin.
@@ -590,20 +703,20 @@ One request for the Screener to decide whether one event becomes a signal of one
 _Avoid_: review, check
 
 **Ignore Rule**:
-The user's rule that keeps signals of one kind, with given field values, from being raised ("review requests from dependabot in webshop"). Made by the user from a signal, or accepted from a suggestion Hercule offers after the user marked several such signals done without answering. Never edited, only deleted; always visible in Intake settings. The events it catches still show in Everything, with the rule named.
+The user's rule that keeps signals of one kind, with given field values, from being raised ("review requests from dependabot in webshop"). Made by the user with `hercule ignore-rule create`, or accepted from a suggestion Hercule offers after the user marked several such signals done without answering (an `offer` Signal, answered with the CLI). Never edited, only deleted; always listed in Settings › Signals, where it can be deleted. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* The desktop no longer makes one from a signal, and Everything, which showed the events a rule caught, is retired.
 _Avoid_: filter, mute (a Notification delivery setting)
 
 **Handoff**:
-Handing a Signal to an agent from Intake: the user's pick of a Hand to an agent answer. It resolves the signal and puts the work on a Task, continuing the open Task that carries the signal's thread ref, or creating one. The Task's provenance records it as one entry naming the signal and the run it started. Each handoff is one leg of the Task's trip: its signal, its run and that run's re-runs. A run started any other way is not a handoff.
+Handing work to an agent, as the user, with the work put on a Task. It starts one of two ways. From a thing on the Inbox, it is the user's pick of a workflow on the thing (its *workflow offers*, not an Offer): it ends only the open signals of the kinds that workflow answers, and continues the active Task of the thing's ref, or creates one. From a Signal, it is the user's pick of a Hand to an agent answer (`signal.handOff`): it resolves the signal and continues the active Task of the signal's thread ref, or creates one. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* The desktop no longer offers the second way, because the Intake screen is retired; the CLI and stored answers still take it. The Task's provenance records it as one entry naming the run it started, and the signal too when it came from a Signal's answer. A handoff from the Inbox can be taken back (Undo) only while nothing of its run has started and nothing has joined or moved the Task. Each handoff is one leg of the Task's trip: its run and that run's re-runs. A run started any other way is not a handoff.
 _Avoid_: delegation, dispatch; "handoff" for a Migration
 
 **Tracking**:
-The section at the foot of To do that lists the Tasks the user handed off from Intake, until they mark one done or cancel it. A view over Tasks, not a record, and never called a Task on screen. Each row is in one state, worked out on read, highest first: Needs you (a Request, or an open signal that names the Task), Failed, Working, Finished (the agent is done and the user has not ticked it off) or Stopped. The rows that wait on the user count toward To do.
-_Avoid_: follow-up (the provider's word for queued input), out with agents, handed off; "Back" for a finished row (that is a snooze that ran out)
+Retired. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* Tracking was the section at the foot of Intake's To do that listed the Tasks the user handed off from Intake. It went with the Intake screen. A Task handed off from the Inbox is an ordinary Task on Work.
+_Avoid_: Tracking for any view of Tasks; follow-up (the harness's word for queued input), out with agents, handed off
 
 **Handling**:
-What came of an event in Intake, or what is still to come: raised a signal, ended one, caught by an Ignore Rule, evidence for triage's signals, on a Task, known work, pending triage, or no action. Worked out when read, never stored. Shown to the user as "What came of it".
-_Avoid_: stamp, outcome (a resolved signal's line), result
+Retired. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* A handling was what came of an event in Intake (raised a signal, ended one, caught by an Ignore Rule, and so on), worked out on read and shown on Everything as "What came of it". It went with Everything.
+_Avoid_: handling, stamp, outcome (a resolved signal's line), result
 
 **Proposal**:
 A `proposal` Signal: work an agent prepared and asks the user to accept or dismiss. No Task exists until the user accepts; Accept creates the Task and leaves it in the backlog, and starting it is a separate act. Dismiss runs nothing.
@@ -614,14 +727,22 @@ An `offer` Signal: an immediate action proposed with no task behind it ("merge t
 _Avoid_: quick fix, shortcut, suggestion
 
 **Topic**:
-A label that groups Tasks: a Connection may carry a topic its events file into, and triage puts a topic on the Task a proposal would create (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined; a label, never a domain state. Intake's tabs are its sources, not topics.
+A label that groups Tasks: a Connection may carry a topic its events file into, and triage puts a topic on the Task a proposal would create (the connection's when it has one, unless the content says otherwise). A new Connection starts with none. User-defined; a label, never a domain state.
 _Avoid_: category, area, folder
 
 ### Office
 
+**Overview**:
+The place in the desktop app where the user sees all their work at once. It has two views, the Office and Work, and one pill names the place and switches between them. The sidebar's Overview row opens the view used last. Not the Office's camera button, which flies back to the whole building and reads "Whole office".
+_Avoid_: dashboard, home; "overview" for the Office's camera button or for a camera position
+
+**Work**:
+The view of the Overview that draws every unfinished Task as a card, placed by Stage in a lane for each Project. A view, not a record: the cards are Tasks, and nothing is stored as a board. What a card shows (a Thread's open question, a failed run, a working session) is decided on the controller. The sidebar's section is headed Work too, and the view is only ever a tab in the Overview's pill.
+_Avoid_: board as a record name, kanban
+
 **Office**:
-The view that shows the user's sessions as characters at work in one 3D place: each session at a desk in a room, queuing at the user's desk while it has an open Request. One view, whatever its Office Map makes it look like.
-_Avoid_: virtual office, floor view, scene
+One of the two views of the Overview. It shows the user's sessions as characters at work in one 3D place: each session at a desk in a room, queuing at the user's desk while it has an open Request. One view, whatever its Office Map makes it look like.
+_Avoid_: virtual office, floor view, scene; overview (the place with the Office and Work, see Overview)
 
 **Office Map**:
 The description an Office is built from: its fixed rooms and their furniture, what a wing and a room stand for, and the named rule by which the place grows as sessions arrive. A bureau, a tower and a cave are different office maps of the same Office; inside the Office the UI says "map".

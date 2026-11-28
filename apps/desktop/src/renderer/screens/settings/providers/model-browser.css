@@ -1,0 +1,353 @@
+/* The model browser, from the prototype `prototype/desktop-settings-
+   providers`, variant I (docs/design/providers-directions/r3.css, the `.mb*`
+   rules). Its measurements decide; the rules below carry them, on the app's
+   tokens. Differences from the prototype: the table has no Released column and
+   no sort buttons in its head (the sort is the select), a row shows no ability
+   flags, and the list is virtualized instead of paged. Class names start with
+   `mb-`. */
+
+/* On the glass dialog, but the prototype's browser sits 11vh from the top
+   where `.glass-dialog` sits 18vh, is 920px wide, and 680px tall up to 78vh. */
+.glass-dialog.model-browser {
+  width: 920px;
+  height: min(680px, 84vh);
+  max-height: 78vh;
+  margin-top: 11vh;
+  overflow: hidden;
+}
+
+/* ---------- The head ---------- */
+.mb-h {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+/* The account's mark on a sunken square, as the account sheet draws it. */
+.mb-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--sunken);
+  color: var(--ink);
+}
+.mb-t {
+  display: grid;
+  gap: 0;
+  min-width: 150px;
+}
+.mb-t > b {
+  font-weight: var(--w-bold);
+}
+/* The age line is the picker's head (`.q-h`), without its padding and weight:
+   under the name it reads as the prototype's small line. */
+.mb-t > .q-h {
+  padding: 0;
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+}
+.field.mb-search {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+}
+.field.mb-search > input {
+  font-size: var(--t-14);
+}
+.field.mb-search > .ic {
+  flex: none;
+  color: var(--faint);
+}
+.field.mb-sort {
+  flex: none;
+  height: 30px;
+}
+
+/* A failed read of the catalog, or a refused save, under the head or over the
+   foot. */
+.mb-read-error,
+.mb-save-error {
+  flex: none;
+  margin: 0;
+  padding: 8px 16px;
+  color: var(--fail-ink);
+  font-size: var(--t-12);
+  line-height: 1.45;
+}
+.mb-read-error {
+  border-bottom: 1px solid var(--line-soft);
+}
+.mb-save-error {
+  border-top: 1px solid var(--line-soft);
+}
+
+/* ---------- The facets ---------- */
+/* The prototype's column is 196px. Its segmented controls do not read cleanly
+   in 168px of content, so the column is 20px wider: "Under $1" and "Under $5"
+   then have about 14px between them. */
+.mb-body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 216px minmax(0, 1fr);
+  min-height: 0;
+}
+.mb-side {
+  padding: 10px 14px 16px;
+  overflow: auto;
+  border-right: 1px solid var(--line-soft);
+}
+.mb-facet {
+  margin-bottom: 16px;
+}
+.mb-facet > h3 {
+  margin: 0 0 6px;
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-bold);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+/* A catalog like OpenRouter's has about 60 makers. Seven show, and the rest
+   scroll, so Can, Context and Price stay in view under them. */
+.mb-makers {
+  max-height: 182px;
+  margin-right: -6px;
+  padding-right: 6px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.mb-check {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  font-size: var(--t-12);
+  cursor: pointer;
+}
+.mb-check > small {
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-variant-numeric: tabular-nums;
+}
+/* A segmented control as wide as the column, its segments equally wide, so
+   "Under $1" and "Under $5" sit apart instead of at the width of their text. */
+.seg.mb-seg {
+  display: flex;
+}
+.seg.mb-seg button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 24px;
+  padding: 0;
+  font-size: var(--t-11);
+  white-space: nowrap;
+}
+.mb-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--faint);
+  font-size: var(--t-11);
+}
+.mb-clear {
+  font-size: var(--t-12);
+}
+
+/* ---------- The table ---------- */
+.mb-main {
+  padding: 0 8px 12px;
+  overflow: auto;
+  /* A focused row scrolls clear of the sticky head, which is 36px tall. */
+  scroll-padding-top: 36px;
+}
+.mb-th,
+.mb-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 118px 30px;
+  align-items: center;
+  gap: 12px;
+  padding-inline: 8px;
+}
+.mb-th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 36px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--glass-fill);
+  color: var(--faint);
+  font-size: var(--t-11);
+  font-weight: var(--w-medium);
+}
+.mb-th > :nth-child(2),
+.mb-th > :nth-child(3) {
+  text-align: right;
+}
+.mb-rows {
+  position: relative;
+}
+.mb-row {
+  width: 100%;
+  height: var(--model-browser-height-row);
+  padding-block: 4px;
+  border-bottom: 1px solid var(--line-soft);
+  text-align: left;
+}
+.mb-row:hover:not(.is-held, .is-frozen) {
+  background: var(--hover);
+}
+.mb-row:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.mb-row.is-picked {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--accent) 9%, transparent),
+    transparent 70%
+  );
+}
+.mb-row.is-held,
+.mb-row.is-frozen {
+  cursor: default;
+}
+/* While the picks are saved they cannot change: the rows that are not picked
+   dim, the picked ones stay as they are. */
+.mb-row.is-frozen:not(.is-picked, .is-held) {
+  opacity: 0.55;
+}
+.mb-name {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.mb-name > b {
+  overflow: hidden;
+  font-weight: var(--w-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.is-held .mb-name > b {
+  color: var(--muted);
+}
+.mb-name > small {
+  overflow: hidden;
+  color: var(--faint);
+  font-size: var(--t-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mb-num {
+  color: var(--muted);
+  font-size: var(--t-12);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+/* The mark at the end of a row: a plus in a ring for a model that can be
+   picked, a filled check for one that is picked, and a bare faint check for
+   one the profile has. */
+.mb-act {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line-soft);
+  color: var(--muted);
+}
+.mb-row:hover:not(.is-frozen) .mb-act {
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--ink);
+}
+.is-picked .mb-act {
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--surface);
+}
+.is-held .mb-act {
+  box-shadow: none;
+  color: var(--faint);
+}
+.mb-empty {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 60px 0;
+  color: var(--muted);
+  text-align: center;
+}
+.mb-empty > span {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.mb-status {
+  margin: 0;
+  padding: 24px 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.mb-status.is-failed {
+  color: var(--fail-ink);
+}
+
+/* ---------- The foot: the tray, Cancel and Add ---------- */
+.mb-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line-soft);
+}
+.mb-tray {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  font-size: var(--t-12);
+  list-style: none;
+  scrollbar-width: none;
+}
+.mb-tray-empty {
+  color: var(--faint);
+  white-space: nowrap;
+}
+.mb-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--r-pill);
+  background: color-mix(in oklab, var(--accent) 12%, var(--raised));
+  font-size: var(--t-12);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+}
+.mb-chip > button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--faint);
+}
+.mb-chip > button:hover:not([aria-disabled="true"]) {
+  background: var(--press);
+  color: var(--ink);
+}
+.mb-chip > button[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.45;
+}

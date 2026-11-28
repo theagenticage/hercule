@@ -55,8 +55,8 @@ export class AssistantSessions extends Context.Service<
      * the same rows. A resume runs under the assistant's current access mode
      * and permission profile, so a change to either reaches the session at its
      * next resume. A resume reads the controller settings, the stored spec
-     * and the provider, so it can also fail with their errors, and with
-     * `InvalidState` when the provider supports no access mode at or below
+     * and the harness, so it can also fail with their errors, and with
+     * `InvalidState` when the harness supports no access mode at or below
      * the assistant's.
      */
     readonly give: (request: {

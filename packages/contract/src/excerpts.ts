@@ -35,20 +35,28 @@ export const quoteAuthorText = (text: string): string =>
 const MAX_LISTED_NAMES = 5;
 
 /**
- * Joins names into an English list: `a`, `a and b`, `a, b and c`. With more
- * than `MAX_LISTED_NAMES` names, returns the first ones and a count of the
- * rest, such as `a, b, c, d, e and 3 more`, so a message does not grow with
- * the number of names.
+ * Joins names into an English list, all of them: `a`, `a and b`, `a, b and c`.
+ * Returns "" for no names. Use it only when the list is already bounded and
+ * the message must name every item. For a list of unknown length, use
+ * `joinNames`, which shortens a long list.
  */
-export const joinNames = (names: ReadonlyArray<string>): string => {
-  const listed =
+export const joinAllNames = (names: ReadonlyArray<string>): string =>
+  names.length <= 1
+    ? (names[0] ?? "")
+    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+
+/**
+ * Joins names into an English list like `joinAllNames`, but with more than
+ * `MAX_LISTED_NAMES` names returns the first ones and a count of the rest,
+ * such as `a, b, c, d, e and 3 more`, so a message does not grow with the
+ * number of names. This is the default for error messages.
+ */
+export const joinNames = (names: ReadonlyArray<string>): string =>
+  joinAllNames(
     names.length <= MAX_LISTED_NAMES
       ? names
-      : [...names.slice(0, MAX_LISTED_NAMES), `${String(names.length - MAX_LISTED_NAMES)} more`];
-  return listed.length <= 1
-    ? listed.join("")
-    : `${listed.slice(0, -1).join(", ")} and ${listed.at(-1)!}`;
-};
+      : [...names.slice(0, MAX_LISTED_NAMES), `${String(names.length - MAX_LISTED_NAMES)} more`],
+  );
 
 /** The maximum number of characters of a library's message that an error message repeats. */
 const MAX_LIBRARY_MESSAGE_LENGTH = 120;

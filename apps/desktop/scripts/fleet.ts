@@ -10,8 +10,8 @@
  * runs it on plain Node; that is also why its imports name the `.ts` file.
  *
  * Every thread is pinned to a scripted runner and to the Claude Code
- * instance. The controller also starts a runner of its own, on this machine,
- * which may be logged in to a real provider: a thread that lands there would
+ * account. The controller also starts a runner of its own, on this machine,
+ * which may be signed in to a real provider: a thread that lands there would
  * run a real agent.
  *
  * A thread can also play a script: the turn its prompt opens reports the work
@@ -21,8 +21,9 @@
 import type {
   IDENTITY_PORT,
   IDENTITY_PORT_COUNT,
+  ModelProfile,
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Session,
   SpawnWorkspace,
@@ -30,7 +31,12 @@ import type {
 } from "../../../packages/contract/src/index";
 import type { TurnState } from "../../../packages/protocol/src/index";
 import { PASSWORD, USERNAME } from "../../../scripts/controller-process.ts";
-import { enlistScriptedRunner, type ScriptedRunner, type ScriptStep } from "./scripted-runner.ts";
+import {
+  enlistScriptedRunner,
+  type ScriptedMachine,
+  type ScriptedRunner,
+  type ScriptStep,
+} from "./scripted-runner.ts";
 import { pollUntil } from "./poll.ts";
 
 /** How many spawns are in flight at once; SQLite writes one at a time anyway. */
@@ -89,7 +95,7 @@ export interface Fleet {
   /**
    * Enlists a scripted runner under `name` and returns it once the controller
    * can place threads on it: it is online, and its probe of the Claude Code
-   * instance reported a login.
+   * account reported a sign-in.
    *
    * - `maxConcurrentSessions` overrides the cap the controller derives from
    *   the runner's memory, which is 32.
@@ -97,10 +103,21 @@ export interface Fleet {
    *   endpoint. A test that wants the app to find this runner on its own
    *   machine serves `/identity` on that port itself. Without it, the runner
    *   reports a port nothing serves.
+   * - `joinToken` is the join token the runner joins with, such as the one an
+   *   Add a machine dialog showed. Without it, a token is minted.
+   * - `machine` sets the memory and disk size the runner reports, which a
+   *   machine page needs for its Memory graph and its disk gauge, and whether
+   *   the runner claims to measure disk usage or makes text generations (see
+   *   `ScriptedMachine`).
    */
   readonly enlistRunner: (
     name: string,
-    options?: { readonly maxConcurrentSessions?: number; readonly identityPort?: number },
+    options?: {
+      readonly maxConcurrentSessions?: number;
+      readonly identityPort?: number;
+      readonly joinToken?: string;
+      readonly machine?: ScriptedMachine;
+    },
   ) => Promise<ScriptedRunner>;
   readonly createProject: (name: string) => Promise<Project>;
   /** Creates a repository resource for `remote`, filed under the given projects. */
@@ -156,11 +173,63 @@ export async function connectFleet(url: string): Promise<Fleet> {
   const call = <T>(method: string, path: string, body?: unknown): Promise<T> =>
     callApi<T>(url, token, method, path, body);
 
+  // A fresh controller has no account, and every thread the fleet spawns
+  // runs on a Claude Code account, so the fleet makes one before any runner
+  // joins. The scripted runners answer its probe as signed in.
+  const accounts = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
+  if (!accounts.some((account) => account.defaultHarnessId === "claude-code/claude-code")) {
+    await call("POST", "/provider-accounts", {
+      providerId: "anthropic/anthropic",
+      kind: "subscription-per-machine",
+    });
+  }
+  // An account made through the API is in no Model Profile, and a thread's
+  // composer offers only what its profile holds. A user puts the account in
+  // "Main" from the Models page; the fleet does it here, with the account's
+  // Default Selection, which the first scripted probe fills in.
+  const [main] = await call<ReadonlyArray<ModelProfile>>("GET", "/model-profiles");
+  const everyAccount = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
+  const joined = new Set(main!.accounts.map((section) => section.providerAccountId));
+  if (everyAccount.some((account) => !joined.has(account.id))) {
+    await call("PATCH", `/model-profiles/${main!.id}`, {
+      expectedRevision: main!.revision,
+      name: main!.name,
+      accounts: [
+        ...main!.accounts.map(({ providerAccountId, harnessId, selectionPending, entries }) => ({
+          providerAccountId,
+          harnessId,
+          ...(selectionPending
+            ? {}
+            : {
+                entries: entries.map(({ model, harnessId: entryHarnessId }) => ({
+                  providerAccountId,
+                  model,
+                  harnessId: entryHarnessId,
+                })),
+              }),
+        })),
+        ...everyAccount
+          .filter((account) => !joined.has(account.id))
+          .map((account) => ({ providerAccountId: account.id, harnessId: null })),
+      ],
+      defaultEntry: main!.defaultEntry,
+      dismissedNewModels: main!.dismissedNewModels,
+    });
+  }
+  // A real install gets the default assistant with its first ready account
+  // (a sign-in on a real machine). The fleet has no sign-in to make, and
+  // some tests have no runner at all, so it creates the assistant itself.
+  const assistants = await call<{ readonly items: ReadonlyArray<unknown> }>(
+    "GET",
+    "/assistants?limit=1",
+  );
+  if (assistants.items.length === 0) await call("POST", "/assistants", { name: "Hercule" });
+
   const runners: Array<ScriptedRunner> = [];
-  let instanceId: string | undefined;
+  let providerAccountId: string | undefined;
   let spawned = 0;
 
-  /** Spawns one thread with `prompt`, pinned to the placement's runner and the Claude Code instance. */
+  /** Spawns one thread with `prompt`, pinned to the placement's runner and the Claude Code account. */
   const spawnThread = (
     prompt: string,
     { runner, projectId, workspace }: ThreadPlacement,
@@ -168,7 +237,7 @@ export async function connectFleet(url: string): Promise<Fleet> {
     call<Session>("POST", "/sessions", {
       prompt,
       runnerId: runner.runnerId,
-      instanceId,
+      providerAccountId,
       ...(projectId === undefined ? {} : { projectId }),
       ...(workspace === undefined ? {} : { workspace }),
     });
@@ -198,12 +267,16 @@ export async function connectFleet(url: string): Promise<Fleet> {
   return {
     token,
     call,
-    enlistRunner: async (name, { identityPort = UNSERVED_IDENTITY_PORT, ...settings } = {}) => {
-      const joinToken = await call<{ readonly token: string }>("POST", "/runners/join-tokens");
-      const runner = await enlistScriptedRunner(url, joinToken.token, identityPort);
+    enlistRunner: async (
+      name,
+      { identityPort = UNSERVED_IDENTITY_PORT, joinToken, machine, ...settings } = {},
+    ) => {
+      const joinSecret =
+        joinToken ?? (await call<{ readonly token: string }>("POST", "/runners/join-tokens")).token;
+      const runner = await enlistScriptedRunner(url, joinSecret, identityPort, machine);
       runners.push(runner);
       await call("PATCH", `/runners/${runner.runnerId}`, { name, ...settings });
-      instanceId = await waitForLoggedInProbe(call, runner.runnerId);
+      providerAccountId = await waitForSignedInProbe(call, runner.runnerId);
       return runner;
     },
     createProject: (name) => call<Project>("POST", "/projects", { name }),
@@ -247,23 +320,29 @@ export async function connectFleet(url: string): Promise<Fleet> {
 }
 
 /**
- * Waits until the Claude Code instance has a logged-in snapshot from the given
- * runner, and returns the instance's id. The controller probes every instance
- * on a runner when it connects, and places a thread only on a runner whose
- * snapshot shows a login. Fails at once when the controller has no Claude
- * Code instance, and after 10 s when the probe has not reported a login.
+ * Waits until the Anthropic account has a signed-in snapshot in Claude Code
+ * from the given runner, and returns the account's id. The controller probes
+ * every account on a runner when it connects, and places a thread only on a
+ * runner whose snapshot shows a sign-in. Fails at once when the controller has
+ * no account whose default harness is Claude Code, and after 10 s when the
+ * probe has not reported a sign-in.
  */
-function waitForLoggedInProbe(
+function waitForSignedInProbe(
   call: <T>(method: string, path: string) => Promise<T>,
   runnerId: string,
 ): Promise<string> {
   return pollUntil(
     async () => {
-      const instances = await call<ReadonlyArray<ProviderInstance>>("GET", "/providers");
-      const claudeCode = instances.find((instance) => instance.providerId === "claude-code");
-      if (claudeCode === undefined) throw new Error("the controller has no Claude Code instance");
+      const accounts = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
+      const claudeCode = accounts.find(
+        (account) => account.defaultHarnessId === "claude-code/claude-code",
+      );
+      if (claudeCode === undefined) throw new Error("the controller has no Claude Code account");
       const probed = claudeCode.snapshots.some(
-        (snapshot) => snapshot.runnerId === runnerId && snapshot.auth.status === "ok",
+        (snapshot) =>
+          snapshot.runnerId === runnerId &&
+          snapshot.harnessId === "claude-code/claude-code" &&
+          snapshot.auth.status === "ok",
       );
       return probed ? claudeCode.id : undefined;
     },

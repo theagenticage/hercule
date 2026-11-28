@@ -4,7 +4,7 @@ import dev.hercule.android.ui.fixtures.buildBookThreadState
 import dev.hercule.android.wire.ExitReason
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.Question
 import dev.hercule.android.wire.QuestionOption
 import dev.hercule.android.wire.QuestionRequest
@@ -58,10 +58,10 @@ class ThreadBlocksTest {
     fun `builds a work item with an empty target when the detail is missing or the kind is unknown`() {
         val at = "2026-09-29T09:00:00Z"
         val rows = listOf(
-            ProviderEvent.TurnStarted(turnId = "t", model = null),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.CommandExecution, detail = null),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "b", kind = ItemKind("a_kind_from_the_future"), detail = buildJsonObject { put("other", 1) }),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "c", kind = ItemKind.FileRead, detail = buildJsonObject { put("paths", 3) }),
+            HarnessEvent.TurnStarted(turnId = "t", model = null),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.CommandExecution, detail = null),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "b", kind = ItemKind("a_kind_from_the_future"), detail = buildJsonObject { put("other", 1) }),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "c", kind = ItemKind.FileRead, detail = buildJsonObject { put("paths", 3) }),
         ).mapIndexed { index, event -> TranscriptRow(index + 1L, at, event) }
 
         val work = buildThreadBlocks(rows, emptyList()).single() as WorkBlock
@@ -74,9 +74,9 @@ class ThreadBlocksTest {
     @Test
     fun `skips a row whose time does not parse and keeps the rest`() {
         val rows = listOf(
-            TranscriptRow(1, "2026-09-29T09:00:00Z", ProviderEvent.TurnStarted(turnId = "t", model = null)),
-            TranscriptRow(2, "not-a-date", ProviderEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.FileRead, detail = null)),
-            TranscriptRow(3, "2026-09-29T09:00:01Z", ProviderEvent.ItemStarted(turnId = "t", itemId = "b", kind = ItemKind.CommandExecution, detail = null)),
+            TranscriptRow(1, "2026-09-29T09:00:00Z", HarnessEvent.TurnStarted(turnId = "t", model = null)),
+            TranscriptRow(2, "not-a-date", HarnessEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.FileRead, detail = null)),
+            TranscriptRow(3, "2026-09-29T09:00:01Z", HarnessEvent.ItemStarted(turnId = "t", itemId = "b", kind = ItemKind.CommandExecution, detail = null)),
         )
 
         val work = buildThreadBlocks(rows, emptyList()).single() as WorkBlock
@@ -159,28 +159,28 @@ class ThreadBlocksTest {
     @Test
     fun `marks an agent message open while it is the open item of the running turn`() {
         val writing = listOf(
-            ProviderEvent.TurnStarted(turnId = "t", model = null),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
-            ProviderEvent.ContentDelta(turnId = "t", itemId = "m", streamKind = StreamKind.AssistantText, delta = "Hello"),
+            HarnessEvent.TurnStarted(turnId = "t", model = null),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
+            HarnessEvent.ContentDelta(turnId = "t", itemId = "m", streamKind = StreamKind.AssistantText, delta = "Hello"),
         )
-        val completed = ProviderEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed)
+        val completed = HarnessEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed)
 
         assertEquals(listOf(true), readOpen(writing))
         assertEquals(listOf(false), readOpen(writing + completed))
         // A message whose end never arrived is not open once its turn has ended, however it ended.
-        assertEquals(listOf(false), readOpen(writing + ProviderEvent.TurnCompleted(turnId = "t", state = TurnState.Interrupted)))
-        assertEquals(listOf(false), readOpen(writing + ProviderEvent.SessionExited(ExitReason.ProcessExit)))
-        assertEquals(listOf(false), readOpen(writing + ProviderEvent.SessionStarted))
-        assertEquals(listOf(false), readOpen(writing + ProviderEvent.TurnStarted(turnId = "t2", model = null)))
+        assertEquals(listOf(false), readOpen(writing + HarnessEvent.TurnCompleted(turnId = "t", state = TurnState.Interrupted)))
+        assertEquals(listOf(false), readOpen(writing + HarnessEvent.SessionExited(ExitReason.ProcessExit)))
+        assertEquals(listOf(false), readOpen(writing + HarnessEvent.SessionStarted))
+        assertEquals(listOf(false), readOpen(writing + HarnessEvent.TurnStarted(turnId = "t2", model = null)))
     }
 
     @Test
     fun `keeps an open agent message with no text yet, and drops one that ended with none`() {
         val started = listOf(
-            ProviderEvent.TurnStarted(turnId = "t", model = null),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
+            HarnessEvent.TurnStarted(turnId = "t", model = null),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
         )
-        val completed = ProviderEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed)
+        val completed = HarnessEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed)
 
         assertEquals(listOf(true), readOpen(started))
         assertEquals(emptyList(), readOpen(started + completed))
@@ -189,10 +189,10 @@ class ThreadBlocksTest {
     @Test
     fun `keeps an ended agent message whose text is only spaces, as client-core does`() {
         val rows = listOf(
-            ProviderEvent.TurnStarted(turnId = "t", model = null),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
-            ProviderEvent.ContentDelta(turnId = "t", itemId = "m", streamKind = StreamKind.AssistantText, delta = " "),
-            ProviderEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
+            HarnessEvent.TurnStarted(turnId = "t", model = null),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
+            HarnessEvent.ContentDelta(turnId = "t", itemId = "m", streamKind = StreamKind.AssistantText, delta = " "),
+            HarnessEvent.ItemCompleted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
         )
 
         assertEquals(listOf(false), readOpen(rows))
@@ -201,9 +201,9 @@ class ThreadBlocksTest {
     @Test
     fun `names the session whose agent sent a message, and none for the user's own`() {
         val rows = listOf(
-            ProviderEvent.TurnStarted(turnId = "t", model = null),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.UserMessage, detail = buildJsonObject { put("text", "From the user") }),
-            ProviderEvent.ItemStarted(
+            HarnessEvent.TurnStarted(turnId = "t", model = null),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.UserMessage, detail = buildJsonObject { put("text", "From the user") }),
+            HarnessEvent.ItemStarted(
                 turnId = "t",
                 itemId = "b",
                 kind = ItemKind.UserMessage,
@@ -221,14 +221,14 @@ class ThreadBlocksTest {
 
     @Test
     fun `builds the same blocks as a full build, token by token, and keeps every block a token did not change`() {
-        val events = mutableListOf<ProviderEvent>(
-            ProviderEvent.TurnStarted(turnId = "t", model = null),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "u", kind = ItemKind.UserMessage, detail = buildJsonObject { put("text", "Write it") }),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "m1", kind = ItemKind.AssistantMessage),
-            ProviderEvent.ContentDelta(turnId = "t", itemId = "m1", streamKind = StreamKind.AssistantText, delta = "First message."),
-            ProviderEvent.ItemCompleted(turnId = "t", itemId = "m1", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "c", kind = ItemKind.CommandExecution),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "m2", kind = ItemKind.AssistantMessage),
+        val events = mutableListOf<HarnessEvent>(
+            HarnessEvent.TurnStarted(turnId = "t", model = null),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "u", kind = ItemKind.UserMessage, detail = buildJsonObject { put("text", "Write it") }),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "m1", kind = ItemKind.AssistantMessage),
+            HarnessEvent.ContentDelta(turnId = "t", itemId = "m1", streamKind = StreamKind.AssistantText, delta = "First message."),
+            HarnessEvent.ItemCompleted(turnId = "t", itemId = "m1", kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "c", kind = ItemKind.CommandExecution),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "m2", kind = ItemKind.AssistantMessage),
         )
         val builder = ThreadBlockBuilder()
         var rows = toRows(events)
@@ -239,7 +239,7 @@ class ThreadBlocksTest {
             tail += token
             // Every 20 tokens a row stores the tail, as the controller stores it every 4 KB.
             if (index % 20 == 19) {
-                events += ProviderEvent.ContentDelta(turnId = "t", itemId = "m2", streamKind = StreamKind.AssistantText, delta = tail)
+                events += HarnessEvent.ContentDelta(turnId = "t", itemId = "m2", streamKind = StreamKind.AssistantText, delta = tail)
                 rows = toRows(events)
                 tail = ""
             }
@@ -256,9 +256,9 @@ class ThreadBlocksTest {
     @Test
     fun `draws a tail of an ended message that the rows alone draw no block for`() {
         val events = listOf(
-            ProviderEvent.TurnStarted(turnId = "t", model = null),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
-            ProviderEvent.ItemStarted(turnId = "t", itemId = "c", kind = ItemKind.CommandExecution),
+            HarnessEvent.TurnStarted(turnId = "t", model = null),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "m", kind = ItemKind.AssistantMessage),
+            HarnessEvent.ItemStarted(turnId = "t", itemId = "c", kind = ItemKind.CommandExecution),
         )
         val tails = mapOf("m" to "Streamed before the command")
 
@@ -275,10 +275,10 @@ class ThreadBlocksTest {
                 async = async,
             )
             val events = listOf(
-                ProviderEvent.TurnStarted(turnId = "t", model = null),
-                ProviderEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.CommandExecution),
-                ProviderEvent.RequestOpened(request = request),
-                ProviderEvent.ItemStarted(turnId = "t", itemId = "b", kind = ItemKind.FileRead),
+                HarnessEvent.TurnStarted(turnId = "t", model = null),
+                HarnessEvent.ItemStarted(turnId = "t", itemId = "a", kind = ItemKind.CommandExecution),
+                HarnessEvent.RequestOpened(request = request),
+                HarnessEvent.ItemStarted(turnId = "t", itemId = "b", kind = ItemKind.FileRead),
             )
             return buildThreadBlocks(toRows(events), listOf(request))
         }
@@ -306,11 +306,11 @@ class ThreadBlocksTest {
         val blocks = buildThreadBlocks(
             toRows(
                 listOf(
-                    ProviderEvent.RuntimeNotice(message = "Conversation was cleared"),
-                    ProviderEvent.Unknown(canonical),
-                    ProviderEvent.Unknown(raw),
-                    ProviderEvent.Unknown(ofSubagent),
-                    ProviderEvent.RuntimeNotice(subagentId = "a1", message = "Of a subagent"),
+                    HarnessEvent.RuntimeNotice(message = "Conversation was cleared"),
+                    HarnessEvent.Unknown(canonical),
+                    HarnessEvent.Unknown(raw),
+                    HarnessEvent.Unknown(ofSubagent),
+                    HarnessEvent.RuntimeNotice(subagentId = "a1", message = "Of a subagent"),
                 ),
             ),
             emptyList(),
@@ -326,8 +326,8 @@ class ThreadBlocksTest {
         val blocks = buildThreadBlocks(
             toRows(
                 listOf(
-                    ProviderEvent.RuntimeError(errorClass = "rate_limit", message = "Too many requests"),
-                    ProviderEvent.RuntimeError(errorClass = "rate_limit"),
+                    HarnessEvent.RuntimeError(errorClass = "rate_limit", message = "Too many requests"),
+                    HarnessEvent.RuntimeError(errorClass = "rate_limit"),
                 ),
             ),
             emptyList(),
@@ -336,10 +336,10 @@ class ThreadBlocksTest {
     }
 
     /** Returns whether each agent message the transcript of [events] holds is open. */
-    private fun readOpen(events: List<ProviderEvent>): List<Boolean> =
+    private fun readOpen(events: List<HarnessEvent>): List<Boolean> =
         buildThreadBlocks(toRows(events), emptyList()).filterIsInstance<AgentBlock>().map { it.open }
 
-    private fun toRows(events: List<ProviderEvent>) = events.mapIndexed { index, event -> TranscriptRow(index + 1L, "2026-09-29T09:00:0${index % 10}Z", event) }
+    private fun toRows(events: List<HarnessEvent>) = events.mapIndexed { index, event -> TranscriptRow(index + 1L, "2026-09-29T09:00:0${index % 10}Z", event) }
 
     private var itemSeq = 0
 

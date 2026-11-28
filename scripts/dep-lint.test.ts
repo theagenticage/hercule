@@ -58,6 +58,12 @@ export const start = (): void => console.log(VERSION);`,
   "ipc/contract.ts": `import { Schema } from "effect";
 export type Reply<Response> = { readonly response: Response };
 export const Message = Schema.String;`,
+  // The platform folder is the one part of the IPC folder the preload may
+  // link at run time, because it imports nothing.
+  "ipc/platform/platform.ts": `export const read = (name: string): string => name;`,
+  "preload/platform.ts": `import { contextBridge } from "electron";
+import { read } from "../ipc/platform/platform";
+contextBridge.exposeInMainWorld("hercule", { platform: read(process.platform) });`,
   // `import type` is erased along with the import.
   "preload/clean.ts": `import { contextBridge, ipcRenderer } from "electron";
 import type { Reply } from "../ipc/contract";
@@ -105,6 +111,17 @@ export const read = () => protocol;`,
   "renderer-ui-import.tsx": `import "./ui-import.css";`,
   "ui-import.css": `@import "@hercule/ui/styles.css";`,
   "renderer-ui-font.tsx": `import "./ui-font.css";`,
+
+  // The ACP client's folder. The vendored copy sits beside the client's own
+  // source, as in packages/acp, and links effect and a Node built-in.
+  "acp/vendor/effect-acp/src/client.ts": `import * as Schema from "effect/Schema";
+import { basename } from "node:path";
+export const make = (path: string) => Schema.decodeUnknownSync(Schema.String)(basename(path));`,
+  "acp/src/clean.ts": `import { Effect } from "effect";
+import { make } from "../vendor/effect-acp/src/client.ts";
+export const open = Effect.sync(() => make("/a/b"));`,
+  "acp/src/other-package.ts": `import globals from "globals";
+export const open = (): unknown => globals;`,
   "ui-font.css": `@font-face {
   font-family: "Onest";
   src: url(${UI_FONT}) format("woff2");
@@ -126,6 +143,7 @@ beforeAll(async () => {
   await mkdir(join(dir, "node_modules/@hercule"), { recursive: true });
   await symlink(join(root, "apps/web/node_modules/react"), join(dir, "node_modules/react"));
   await symlink(join(root, "node_modules/effect"), join(dir, "node_modules/effect"));
+  await symlink(join(root, "node_modules/globals"), join(dir, "node_modules/globals"));
   for (const name of ["contract", "protocol", "home", "ui"]) {
     await symlink(join(root, "packages", name), join(dir, "node_modules/@hercule", name));
   }
@@ -242,6 +260,11 @@ describe("dep-lint on the desktop app's layers", () => {
     expect(stdout).toContain("is clean");
   });
 
+  it("passes a preload that links the IPC folder's platform folder at run time", async () => {
+    const { stdout } = await runDepLint("desktop preload", "preload/platform.ts");
+    expect(stdout).toContain("is clean");
+  });
+
   it("fails when the preload imports types without `import type`", async () => {
     const error = await readDepLintFailure("desktop preload", "preload/inline-type.ts");
     expect(error.stderr).toContain(describeRefusedFirstParty(""));
@@ -308,6 +331,26 @@ describe("dep-lint on the desktop app's layers", () => {
       expect(error.stderr).toContain("  a Node or Bun built-in:\n");
     },
   );
+});
+
+describe("dep-lint on the ACP client", () => {
+  it("passes a client that links its vendored copy, effect and a Node built-in", async () => {
+    const { stdout } = await runDepLint("ACP client", "acp/src/clean.ts");
+    expect(stdout).toContain("is clean");
+  });
+
+  it("fails when the client links an npm package other than effect", async () => {
+    const error = await readDepLintFailure("ACP client", "acp/src/other-package.ts");
+    expect(error.stderr).toContain("  an npm package other than effect:\n");
+    expect(error.stderr).toContain(
+      'acp/src/other-package.ts imports "globals" (node_modules/.pnpm/globals@',
+    );
+  });
+
+  it("fails on what the runner must not link, such as the DB engine", async () => {
+    const error = await readDepLintFailure("ACP client", "db-static.ts");
+    expect(error.stderr).toContain("  the DB engine:\n");
+  });
 });
 
 /**
@@ -454,7 +497,7 @@ describe("the runner's user material", () => {
       'import { linkUserMaterial } from "../user-material";\nexport const ctx = linkUserMaterial;\n',
     "sessions/context.test.ts": 'import "../user-material/links";\n',
     "sessions/testing.ts": 'import "../user-material";\n',
-    "providers/claude.ts":
+    "harnesses/claude.ts":
       'import type { Link } from "../user-material";\nexport const link: Link = "";\n',
   };
 
@@ -479,10 +522,10 @@ describe("the runner's user material", () => {
   // dep-lint reports it with.
   it.each([
     [
-      "a provider imports the folder",
-      "providers/claude.ts",
+      "a harness imports the folder",
+      "harnesses/claude.ts",
       'import "../user-material";\n',
-      'providers/claude.ts imports "../user-material"',
+      'harnesses/claude.ts imports "../user-material"',
     ],
     [
       "a file beside the context resolver re-exports a file in it",
@@ -497,10 +540,10 @@ describe("the runner's user material", () => {
       'daemon.ts imports "./user-material/index"',
     ],
     [
-      "a provider imports it at runtime",
-      "providers/codex.ts",
+      "a harness imports it at runtime",
+      "harnesses/codex.ts",
       'export const load = () => import("../user-material");\n',
-      'providers/codex.ts imports "../user-material"',
+      'harnesses/codex.ts imports "../user-material"',
     ],
   ])("fails when %s", async (_, file, body, reported) => {
     const script = await createRunnerRoot({ ...CLEAN_RUNNER, [file]: body });

@@ -20,20 +20,29 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   HarnessNotInstalled,
+  MAX_MESSAGE_LENGTH,
+  buildMcpServersCapability,
   SessionSpec,
   SteerRefused,
   type AdapterError,
+  type ModelDeclaration,
   type ModelSelection,
-  type ProviderEvent,
+  type HarnessAccount,
+  type HarnessEvent,
   type SessionInputResult,
   type SessionStart,
 } from "@hercule/protocol";
-import type { Passage } from "@hercule/contract";
+import {
+  createInvalidStateError,
+  createNotFoundError,
+  type InvalidState,
+  type Passage,
+} from "@hercule/contract";
 import { buildSessionStamp, CurrentActor, type Actor, type SessionActor } from "../actor";
 import { buildHomePaths, HerculeHome } from "../config";
 import { connectionRepository, ConnectionTypesLayer, GITHUB_CONNECTION_TYPE } from "../connections";
 import { hashToken } from "../credentials";
-import { IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
+import { EntityObservationsLayer, IngestExecutorLayer, OpenSignalsLayer } from "../daemon/ingest";
 import {
   AfterCommit,
   mintUuid,
@@ -44,18 +53,29 @@ import {
 } from "../db";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { TestDatabase } from "../db/testing";
-import { AuditLogLayer } from "../events";
+import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { readEventsOfKind } from "../events/testing";
 import { NotifierLayer } from "../notifications";
+import { mcpServerRepository } from "../mcp-servers";
 import { permissionRequestRepository, SessionTokens, SessionTokensLayer } from "../permissions";
-import { PluginConfigsLayer, PluginHostLayer } from "../plugins";
+import { PluginConfigsLayer, PluginHost, PluginHostLayer } from "../plugins";
+import {
+  buildHarnessDefinition,
+  buildMcpServerPlugin,
+  createPluginFixture,
+  USER,
+} from "../plugins/testing";
 import { masterKeyLayer } from "../secrets/masterKey";
 import { Secrets, secretsLayer, type SecretOwner } from "../secrets/repository";
 import { RunWorkspaceStepActivityLayer } from "../runs";
 import { SettingsLayer } from "../settings";
 import { subscriptionRepository } from "../subscriptions";
+import { TaskService, TaskServiceLayer } from "../tasks";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 import { githubAccounts, WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { inputRepository, type StoredInput } from "./inputs";
+import { providerAccountRepository } from "../provider-accounts";
+import { AccountUsage, AccountUsageLayer } from "../usage";
 import { sessionRepository } from "./repository";
 import { SessionEditObserver } from "./edit-observer";
 import { SessionObserver } from "./observer";
@@ -63,6 +83,7 @@ import {
   SessionService,
   SessionServiceLayer,
   type PassageQueryInput,
+  type StartNeeds,
   type StartRequest,
 } from "./service";
 
@@ -71,17 +92,19 @@ let homes: Array<string> = [];
 
 /**
  * Builds a real plugin host with no plugins. It is needed because a session
- * record lists what its provider does not enforce, and that list is read from
- * the provider definitions the host holds.
+ * record lists what its harness does not enforce, and that list is read from
+ * the harness definitions the host holds.
  */
 const buildHostLayer = (secrets: Layer.Layer<Secrets, unknown, SqlClient.SqlClient>) =>
   PluginHostLayer.pipe(
-    Layer.provide([IngestExecutorLayer, OpenSignalsLayer]),
+    Layer.provide([IngestExecutorLayer, OpenSignalsLayer, EntityObservationsLayer]),
     Layer.provideMerge(ConnectionTypesLayer),
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(secrets),
     Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
+    // The ingest records Task facts, which are Platform Events.
+    Layer.provideMerge(PlatformEventsLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
   );
 
@@ -144,10 +167,13 @@ const buildWorkspaceLayer = () =>
 
 const layer = SessionServiceLayer.pipe(
   Layer.provideMerge(buildWorkspaceLayer()),
+  Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
   Layer.provideMerge(
     Layer.mergeAll(
       AuditLogLayer,
+      PlatformEventsLayer,
       SessionTokensLayer,
+      AccountUsageLayer,
       ignoreSessions,
       buildHostLayer(buildRealSecretsLayer()),
     ),
@@ -179,40 +205,21 @@ const mintId = () => uuidToString(mintUuid());
 /** Encodes a spec the way `create` stores it on a queued row. */
 const encodeSpec = Schema.encodeUnknownSync(SessionSpec);
 
-const buildSpec = (instanceId: string, model: string): SessionSpec => ({
-  instanceId,
+const buildSpec = (providerAccountId: string, model: string): SessionSpec => ({
+  providerAccountId,
   workspaceId: null,
   modelSelection: { model, options: {} },
   accessMode: "approval-required",
   timeouts: { inactivityMs: 60_000, absoluteMs: 3_600_000 },
 });
 
-/**
- * Inserts a provider instance row. A start frame's `providerId` and `config`
- * come from this row, which `oldestQueued` joins in.
- */
-const insertInstance = (
-  providerId: string,
-  config: Readonly<Record<string, unknown>>,
-): Effect.Effect<string, SqlError, SqlClient.SqlClient> =>
-  Effect.gen(function* () {
-    const sql = yield* SqlClient.SqlClient;
-    const id = mintUuid();
-    yield* withTransaction(
-      sql,
-      sql`
-        INSERT INTO provider_instances (id, provider_id, name, config, created_at, updated_at)
-        VALUES (${id}, ${providerId}, 'an instance', ${JSON.stringify(config)}, ${at}, ${at})
-      `,
-    );
-    return uuidToString(id);
-  });
-
 /** Inserts one queued session on a runner, the way `create` stores one. */
 const insertQueuedSession = (
   runnerId: string,
   options: {
-    readonly instanceId: string;
+    readonly providerAccountId: string;
+    /** The harness the session runs in. Without it, `an-adapter`. */
+    readonly harnessId?: string;
     readonly spec: SessionSpec;
     /** Stores this string as the spec, as is, instead of encoding `spec`. */
     readonly storedSpec?: string;
@@ -222,6 +229,8 @@ const insertQueuedSession = (
     readonly permissionProfileId?: string;
     /** The Agent the session runs as. Without it the session is a Thread. */
     readonly agentId?: string;
+    /** The Task the session belongs to. Without it the session has none. */
+    readonly taskId?: string | undefined;
     /** The actor stamp of whoever created the session. Without it, the user. */
     readonly createdBy?: string;
     /**
@@ -247,10 +256,12 @@ const insertQueuedSession = (
           agentId: options.agentId,
           conversationId: undefined,
           step: undefined,
-          instanceId: options.instanceId,
+          providerAccountId: options.providerAccountId,
+          harnessId: options.harnessId ?? HARNESS_ID,
           runnerId,
           workspaceId: null,
           projectId: undefined,
+          taskId: options.taskId,
           checkoutBranch: options.checkoutBranch,
           githubConnectionId: options.githubConnectionId,
           requestedAccessMode: "approval-required",
@@ -305,10 +316,13 @@ const buildGatedCredentialStack = (
   );
   return SessionServiceLayer.pipe(
     Layer.provideMerge(buildWorkspaceLayer()),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(
       Layer.mergeAll(
         AuditLogLayer,
+        PlatformEventsLayer,
         SessionTokensLayer,
+        AccountUsageLayer,
         ignoreSessions,
         gatedSecrets,
         buildHostLayer(gatedSecrets),
@@ -349,19 +363,35 @@ const aGithubConnection = Effect.gen(function* () {
   );
 });
 
-/** Returns no credentials, for the instance these sessions run on. */
-const NO_SECRETS = (): Effect.Effect<Record<string, string>> => Effect.succeed({});
+/** The harness the sessions of these tests run in unless a test names another. */
+const HARNESS_ID = "an-adapter";
+
+/** The home, model argument and credential the start frame carries for an account. */
+const buildHarnessAccountFor = (providerAccountId: string): HarnessAccount => ({
+  providerAccountId,
+  harnessHome: `providers/${providerAccountId}`,
+  modelArgument: "{model}",
+  credentialVariables: ["AN_API_KEY"],
+  credential: { variable: "AN_API_KEY", value: "a-key" },
+});
+
+/** Prepares the account the way the controller daemon does, with no database read. */
+const prepareAccount = (providerAccountId: string): Effect.Effect<HarnessAccount> =>
+  Effect.succeed(buildHarnessAccountFor(providerAccountId));
 
 /**
  * Calls `claimStarts` the way the controller daemon does: inside the caller's
  * transaction. The controller has no local runner, no connection has a GitHub
  * account, and every session gets `coordination` as its coordination
- * paragraph, or none when it is left out.
+ * paragraph, or none when it is left out. No harness is told about the catalog,
+ * unless `findModelDeclarations` says otherwise.
  */
 const claimStarting = (
   runnerId: string,
   room: number,
   coordination?: string,
+  findModelDeclarations: StartNeeds["findModelDeclarations"] = () => Effect.succeed(undefined),
+  negotiatedCapabilities: ReadonlyArray<string> = [],
 ): Effect.Effect<ReadonlyArray<StartRequest>, SqlError, SessionService | SqlClient.SqlClient> =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -371,9 +401,11 @@ const claimStarting = (
       sessions.claimStarts(runnerId, room, {
         readGithubAccount: () => Effect.succeed(undefined),
         readGitIdentity: () => Effect.succeed(undefined),
-        readSecrets: NO_SECRETS,
+        requireAccountRunnable: () => Effect.void,
+        prepareHarnessAccount: prepareAccount,
+        findModelDeclarations,
         buildCoordination: () => Effect.succeed(coordination),
-        runner: { name: "a runner", negotiatedCapabilities: [] },
+        runner: { name: "a runner", negotiatedCapabilities },
         localRunnerId: undefined,
       }),
     );
@@ -407,23 +439,21 @@ describe("SessionService.claimStarts", () => {
     const result = await run(
       Effect.gen(function* () {
         const rows = yield* sessionRepository;
-        const instanceId = yield* insertInstance("an-adapter", {
-          token: "t",
-          baseUrl: "https://api",
-        });
+        const providerAccountId = mintId();
         const runnerId = mintId();
-        const specOnBranch = buildSpec(instanceId, "clever");
-        const specPlain = buildSpec(instanceId, "fast");
+        const specOnBranch = buildSpec(providerAccountId, "clever");
+        const specPlain = buildSpec(providerAccountId, "fast");
         const onBranch = yield* insertQueuedSession(runnerId, {
-          instanceId,
+          providerAccountId,
           spec: specOnBranch,
           checkoutBranch: "feature-x",
         });
-        const plain = yield* insertQueuedSession(runnerId, { instanceId, spec: specPlain });
+        const plain = yield* insertQueuedSession(runnerId, { providerAccountId, spec: specPlain });
         const claimed = yield* claimStarting(runnerId, 2);
         const inputs = yield* inputRepository;
         return {
           claimed,
+          providerAccountId,
           onBranch,
           plain,
           specOnBranch,
@@ -444,8 +474,8 @@ describe("SessionService.claimStarts", () => {
 
     const branch = frames.get(result.onBranch)!;
     expect(branch._tag).toBe("sessionStart");
-    expect(branch.providerId).toBe("an-adapter");
-    expect(branch.config).toEqual({ token: "t", baseUrl: "https://api" });
+    expect(branch.harnessId).toBe("an-adapter");
+    expect(branch.harnessAccount).toEqual(buildHarnessAccountFor(result.providerAccountId));
     // Decoded from the spec the row stores, not built again from other fields.
     expect(branch.spec).toStrictEqual(result.specOnBranch);
     expect(branch.checkoutBranch).toBe("feature-x");
@@ -476,14 +506,196 @@ describe("SessionService.claimStarts", () => {
     );
   });
 
+  it("puts the account's catalog on the frame, an empty one included, asking once for each account and harness", async () => {
+    const catalog: ReadonlyArray<ModelDeclaration> = [
+      { slug: "api-only", name: "API only", imageInput: null, contextWindow: 200_000 },
+    ];
+    const asked: Array<ReadonlyArray<string>> = [];
+    const claimAll = (declarations: ReadonlyArray<ModelDeclaration>) =>
+      run(
+        Effect.gen(function* () {
+          const providerAccountId = mintId();
+          const runnerId = mintId();
+          yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
+          });
+          yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "other"),
+          });
+          const claimed = yield* claimStarting(runnerId, 2, undefined, (...args) => {
+            asked.push(args);
+            return Effect.succeed(declarations);
+          });
+          return { claimed, providerAccountId };
+        }),
+      );
+
+    const full = await claimAll(catalog);
+    expect(full.claimed.map((claim) => claim.frame.catalogModels)).toEqual([catalog, catalog]);
+    expect(asked).toEqual([[full.providerAccountId, HARNESS_ID]]);
+
+    const empty = await claimAll([]);
+    expect(empty.claimed.map((claim) => claim.frame.catalogModels)).toEqual([[], []]);
+  });
+
+  it("leaves catalogModels off the frame when the harness is told nothing about the catalog", async () => {
+    const claimed = await run(
+      Effect.gen(function* () {
+        const providerAccountId = mintId();
+        const runnerId = mintId();
+        yield* insertQueuedSession(runnerId, {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+        });
+        return yield* claimStarting(runnerId, 1);
+      }),
+    );
+
+    expect(claimed).toHaveLength(1);
+    expect("catalogModels" in claimed[0]!.frame).toBe(false);
+  });
+
+  it("ends a queued session, with the reason, when its account cannot be prepared", async () => {
+    // A refusal never passes by itself: retrying it on every pass would only
+    // log it again and keep the account from being deleted.
+    const refusals = [
+      createInvalidStateError("the key could not be decrypted"),
+      createNotFoundError("no such provider account"),
+    ];
+    for (const refusal of refusals) {
+      const result = await run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const sessions = yield* SessionService;
+          const runnerId = mintId();
+          const refusedAccountId = mintId();
+          const fineAccountId = mintId();
+          const refused = yield* insertQueuedSession(runnerId, {
+            providerAccountId: refusedAccountId,
+            spec: buildSpec(refusedAccountId, "clever"),
+          });
+          // Claimed in the same pass: a refusal ends one session, not the batch.
+          const fine = yield* insertQueuedSession(runnerId, {
+            providerAccountId: fineAccountId,
+            spec: buildSpec(fineAccountId, "clever"),
+          });
+          const claimed = yield* withTransaction(
+            sql,
+            sessions.claimStarts(runnerId, 2, {
+              readGithubAccount: () => Effect.succeed(undefined),
+              readGitIdentity: () => Effect.succeed(undefined),
+              requireAccountRunnable: () => Effect.void,
+              prepareHarnessAccount: (id) =>
+                id === refusedAccountId ? Effect.fail(refusal) : prepareAccount(id),
+              findModelDeclarations: () => Effect.succeed(undefined),
+              buildCoordination: () => Effect.succeed(undefined),
+              runner: { name: "a runner", negotiatedCapabilities: [] },
+              localRunnerId: undefined,
+            }),
+          );
+          const again = yield* claimStarting(runnerId, 2);
+          const exitRows = yield* sql<{ readonly event: string }>`
+            SELECT event FROM session_stream WHERE session_id = ${uuidFromString(refused)}
+          `;
+          const inputRows = yield* sql<{ readonly status: string; readonly reason: string | null }>`
+            SELECT status, reason FROM session_inputs WHERE session_id = ${uuidFromString(refused)}
+          `;
+          return {
+            claimed: claimed.map((claim) => claim.sessionId),
+            again,
+            refused,
+            fine,
+            refusedStatus: yield* readStatus(refused),
+            fineStatus: yield* readStatus(fine),
+            exitRows,
+            inputRows,
+          };
+        }),
+      );
+
+      expect(result.claimed).toEqual([result.fine]);
+      expect(result.fineStatus).toBe("starting");
+      expect(result.refusedStatus).toBe("exited");
+      expect(result.again).toEqual([]);
+      expect(JSON.stringify(result.exitRows)).toContain(refusal.error.message);
+      expect(result.inputRows).toEqual([{ status: "cancelled", reason: refusal.error.message }]);
+    }
+  });
+
+  it("ends a queued session, with the reason, when its account can no longer run on the runner", async () => {
+    // Queued under the rule of that moment: a sign-in or a harness may have
+    // gone before the runner has room. The check runs once per account and
+    // harness, however many sessions are queued.
+    const reason = "Anthropic · work is not signed in on that machine";
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const lostAccountId = mintId();
+        const fineAccountId = mintId();
+        const lost = yield* insertQueuedSession(runnerId, {
+          providerAccountId: lostAccountId,
+          spec: buildSpec(lostAccountId, "clever"),
+        });
+        const lostToo = yield* insertQueuedSession(runnerId, {
+          providerAccountId: lostAccountId,
+          spec: buildSpec(lostAccountId, "clever"),
+        });
+        const fine = yield* insertQueuedSession(runnerId, {
+          providerAccountId: fineAccountId,
+          spec: buildSpec(fineAccountId, "clever"),
+        });
+        const asked: Array<string> = [];
+        const claimed = yield* withTransaction(
+          sql,
+          sessions.claimStarts(runnerId, 3, {
+            readGithubAccount: () => Effect.succeed(undefined),
+            readGitIdentity: () => Effect.succeed(undefined),
+            requireAccountRunnable: (id) => {
+              asked.push(id);
+              return id === lostAccountId
+                ? Effect.fail(createInvalidStateError(reason))
+                : Effect.void;
+            },
+            prepareHarnessAccount: prepareAccount,
+            findModelDeclarations: () => Effect.succeed(undefined),
+            buildCoordination: () => Effect.succeed(undefined),
+            runner: { name: "a runner", negotiatedCapabilities: [] },
+            localRunnerId: undefined,
+          }),
+        );
+        const inputRows = yield* sql<{ readonly status: string; readonly reason: string | null }>`
+          SELECT status, reason FROM session_inputs WHERE session_id = ${uuidFromString(lost)}
+        `;
+        return {
+          claimed: claimed.map((claim) => claim.sessionId),
+          asked,
+          fine,
+          lostStatus: yield* readStatus(lost),
+          lostTooStatus: yield* readStatus(lostToo),
+          inputRows,
+        };
+      }),
+    );
+
+    expect(result.claimed).toEqual([result.fine]);
+    expect(result.lostStatus).toBe("exited");
+    expect(result.lostTooStatus).toBe("exited");
+    expect(result.asked).toHaveLength(2);
+    expect(result.inputRows).toEqual([{ status: "cancelled", reason }]);
+  });
+
   it("adds the coordination paragraph to the spec the frame carries", async () => {
     const coordination = "Other agent sessions may work on the same repositories as you.";
     const result = await run(
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         const runnerId = mintId();
-        const spec = buildSpec(instanceId, "clever");
-        yield* insertQueuedSession(runnerId, { instanceId, spec });
+        const spec = buildSpec(providerAccountId, "clever");
+        yield* insertQueuedSession(runnerId, { providerAccountId, spec });
         return { spec, claimed: yield* claimStarting(runnerId, 1, coordination) };
       }),
     );
@@ -500,16 +712,16 @@ describe("SessionService.claimStarts", () => {
       Effect.provide(
         Effect.gen(function* () {
           const rows = yield* sessionRepository;
-          const instanceId = yield* insertInstance("an-adapter", {});
+          const providerAccountId = mintId();
           const runnerId = mintId();
           const legacy = yield* insertQueuedSession(runnerId, {
-            instanceId,
-            spec: buildSpec(instanceId, "clever"),
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
             withoutInput: true,
           });
           const current = yield* insertQueuedSession(runnerId, {
-            instanceId,
-            spec: buildSpec(instanceId, "clever"),
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
           });
           const claimed = yield* claimStarting(runnerId, 2);
           // Every later dispatch pass reads the row again.
@@ -542,7 +754,7 @@ describe("SessionService.claimStarts", () => {
         const sql = yield* SqlClient.SqlClient;
         const rows = yield* sessionRepository;
         const workspaces = yield* WorkspaceService;
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         // A runner that is not retired, a ready workspace on it and a known
         // transcript: everything the session needs to read as resumable.
         const arranged = yield* withTransaction(
@@ -561,17 +773,17 @@ describe("SessionService.claimStarts", () => {
           VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(runnerId)}, 'ephemeral',
                   'ready', ${at})
         `;
-            const spec = JSON.stringify(encodeSpec(buildSpec(instanceId, "clever")));
+            const spec = JSON.stringify(encodeSpec(buildSpec(providerAccountId, "clever")));
             const sessionId = yield* insertQueuedSession(runnerId, {
-              instanceId,
-              spec: buildSpec(instanceId, "clever"),
+              providerAccountId,
+              spec: buildSpec(providerAccountId, "clever"),
               withoutInput: true,
             });
             yield* sql`
           UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
           WHERE id = ${uuidFromString(sessionId)}
         `;
-            yield* rows.bind(sessionId, runnerId, instanceId, "native-1");
+            yield* rows.bind(sessionId, runnerId, providerAccountId, "native-1");
             const holder = { kind: "session", id: sessionId } as const;
             yield* workspaces.acquire(holder, workspaceId, exitedAt);
             const { lastActivityAt: lastActiveBeforeExit } = Option.getOrThrow(
@@ -638,15 +850,15 @@ describe("SessionService.claimStarts", () => {
   it("creates a new token and stores only its hash on the row", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         const runnerId = mintId();
         const first = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
         });
         const second = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
         });
         const claimed = yield* claimStarting(runnerId, 2);
         return {
@@ -674,7 +886,7 @@ describe("SessionService.claimStarts", () => {
   it("leaves any number of undecodable rows queued and starts the row behind them, even with room for one", async () => {
     const result = await run(
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         const runnerId = mintId();
         // Valid JSON that the current `SessionSpec` schema fails to decode.
         // This is what a queued row looks like after the schema changed
@@ -683,15 +895,15 @@ describe("SessionService.claimStarts", () => {
         for (let i = 0; i < 6; i += 1) {
           poisoned.push(
             yield* insertQueuedSession(runnerId, {
-              instanceId,
-              spec: buildSpec(instanceId, "clever"),
+              providerAccountId,
+              spec: buildSpec(providerAccountId, "clever"),
               storedSpec: "{}",
             }),
           );
         }
         const good = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
         });
         const claimed = yield* claimStarting(runnerId, 1);
         return {
@@ -754,12 +966,12 @@ describe("SessionService.claimStarts", () => {
           const rows = yield* sessionRepository;
           const sessions = yield* SessionService;
           const accounts = yield* githubAccounts;
-          const instanceId = yield* insertInstance("an-adapter", {});
+          const providerAccountId = mintId();
           const runnerId = mintId();
           const connectionId = yield* aGithubConnection;
           const sessionId = yield* insertQueuedSession(runnerId, {
-            instanceId,
-            spec: buildSpec(instanceId, "clever"),
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
             githubConnectionId: connectionId,
           });
           const claim = withTransaction(
@@ -767,7 +979,9 @@ describe("SessionService.claimStarts", () => {
             sessions.claimStarts(runnerId, 1, {
               readGithubAccount: accounts.readGithubAccount,
               readGitIdentity: accounts.readGitIdentity,
-              readSecrets: NO_SECRETS,
+              requireAccountRunnable: () => Effect.void,
+              prepareHarnessAccount: prepareAccount,
+              findModelDeclarations: () => Effect.succeed(undefined),
               buildCoordination: () => Effect.succeed(undefined),
               runner: { name: "a runner", negotiatedCapabilities: [] },
               localRunnerId: undefined,
@@ -794,6 +1008,714 @@ describe("SessionService.claimStarts", () => {
     // claim.
     expect(result.after?.status).toBe("queued");
     expect(result.hash).toBeNull();
+  });
+});
+
+/** The harness of the MCP tests that can be given the gateway's entry. */
+const NATIVE_MCP_HARNESS_ID = "mcptest/native";
+
+/**
+ * A second harness that can be given the gateway's entry, for a runner that
+ * negotiated the capability of the first harness only (Codex on a runner that
+ * maps the entry for Claude Code and not yet for Codex).
+ */
+const OTHER_NATIVE_MCP_HARNESS_ID = "mcptest/other";
+
+/** The harness of the MCP tests that cannot (`mcpPassthrough: "unsupported"`). */
+const BARE_MCP_HARNESS_ID = "mcptest/bare";
+
+/** The contribution of the plugin whose MCP servers the tests list. */
+const DESK_SERVER_CONTRIBUTION_ID = "mcpdesk/desk";
+
+/** The contribution of a second plugin, which a test can stop without stopping the first. */
+const OTHER_DESK_SERVER_CONTRIBUTION_ID = "mcpother/desk";
+
+/**
+ * Registers the four harnesses of the MCP tests, which the claim reads
+ * `mcpPassthrough` from, and the two plugins that offer the tests' MCP
+ * servers.
+ */
+const bootMcpHarnesses = Effect.flatMap(PluginHost, (host) => {
+  const native = buildHarnessDefinition("native");
+  return host.boot([
+    createPluginFixture({
+      id: "mcptest",
+      definitions: [
+        native,
+        buildHarnessDefinition("other"),
+        {
+          ...buildHarnessDefinition("bare"),
+          declared: { ...native.declared, mcpPassthrough: "unsupported" },
+        },
+      ],
+    }).plugin,
+    // The harness a runner of the first MCP Gateway build gives the entry to.
+    createPluginFixture({
+      id: "claude-code",
+      definitions: [buildHarnessDefinition("claude-code")],
+    }).plugin,
+    buildMcpServerPlugin("mcpdesk"),
+    buildMcpServerPlugin("mcpother"),
+  ]);
+});
+
+/** Inserts a permission profile with the grants given and returns its id. */
+const aProfileWith = (grants: ReadonlyArray<string>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const id = mintId();
+    yield* withTransaction(
+      sql,
+      sql`
+        INSERT INTO permission_profiles (id, name, grants, shipped, created_at, updated_at)
+        VALUES (${uuidFromString(id)}, ${`profile ${id}`}, ${JSON.stringify(grants)}, 0, ${at}, ${at})
+      `,
+    );
+    return id;
+  });
+
+/** What an MCP server is in these tests: its name and what the checks last wrote about it. */
+interface TestMcpServer {
+  readonly name: string;
+  readonly status: "checking" | "ready" | "needs-sign-in" | "unreachable" | "error";
+  readonly enabled?: boolean;
+  /** The status of the server's Connection, `connected` unless given. */
+  readonly connectionStatus?: "connected" | "needs-reauth" | "disabled";
+  /** The contribution the server comes from, `DESK_SERVER_CONTRIBUTION_ID` unless given. */
+  readonly contributionId?: string;
+}
+
+/** Inserts the MCP servers on a Connection of their own each, and returns their ids in order. */
+const insertMcpServers = (servers: ReadonlyArray<TestMcpServer>) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const connections = yield* connectionRepository;
+    const mcpServers = yield* mcpServerRepository;
+    return yield* withTransaction(
+      sql,
+      Effect.forEach(servers, (server) =>
+        Effect.gen(function* () {
+          const contributionId = server.contributionId ?? DESK_SERVER_CONTRIBUTION_ID;
+          // The Connection is of the type the contribution needs, which is `<plugin id>/desk`.
+          const pluginId = contributionId.slice(0, contributionId.indexOf("/"));
+          const connection = yield* connections.insert({
+            pluginId,
+            type: `${pluginId}/desk`,
+            label: server.name,
+            displayName: server.name,
+            accountId: `account-${server.name}`,
+            labels: [],
+            config: {},
+            at,
+          });
+          const stored = yield* mcpServers.insertPlugin({
+            name: server.name,
+            contributionId,
+            connectionId: connection.id,
+            accountId: `account-${server.name}`,
+            connectionGeneration: 0,
+            at,
+          });
+          if (server.connectionStatus !== undefined) {
+            yield* sql`
+              UPDATE connections SET status = ${server.connectionStatus}
+              WHERE id = ${uuidFromString(connection.id)}`;
+          }
+          yield* sql`
+            UPDATE mcp_servers SET status = ${server.status},
+              enabled = ${server.enabled === false ? 0 : 1}
+            WHERE id = ${uuidFromString(stored.id)}`;
+          return stored.id;
+        }),
+      ),
+    );
+  });
+
+/** Queues a session on `harnessId` and profile `permissionProfileId`, with the servers as its list. */
+const insertQueuedSessionWithServers = (
+  runnerId: string,
+  options: {
+    readonly harnessId: string;
+    readonly permissionProfileId: string;
+    readonly servers: ReadonlyArray<{ readonly id: string; readonly name: string }>;
+  },
+) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sessionRepository;
+    const providerAccountId = mintId();
+    const sessionId = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec: buildSpec(providerAccountId, "clever"),
+      harnessId: options.harnessId,
+      permissionProfileId: options.permissionProfileId,
+    });
+    yield* withTransaction(
+      sql,
+      rows.replaceMcpServers(
+        sessionId,
+        options.servers.map((server) => server.id),
+      ),
+    );
+    return sessionId;
+  });
+
+/** Returns the `runtime.warning` events of the session's stream, in order. */
+const readRuntimeWarnings = (sessionId: string) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sql<{ readonly event: string }>`
+      SELECT event FROM session_stream
+      WHERE session_id = ${uuidFromString(sessionId)}
+        AND json_extract(event, '$._tag') = 'runtime.warning'
+      ORDER BY position`;
+    return rows.map(
+      (row) => JSON.parse(row.event) as { readonly message: string; readonly mcpServers?: unknown },
+    );
+  });
+
+/** Returns the reason of each entry of the session's list, in list order, by the server's name. */
+const readLeftOut = (sessionId: string) =>
+  Effect.gen(function* () {
+    const rows = yield* sessionRepository;
+    return (yield* rows.one(sessionId))
+      .pipe(Option.getOrThrow)
+      .mcpServers.map((entry) => [entry.name, entry.leftOut] as const);
+  });
+
+describe("the MCP servers of a session at a start", () => {
+  /**
+   * The capabilities of a runner that maps the gateway's entry for every
+   * harness that can take it. No runner lists one for the bare harness, which
+   * cannot.
+   */
+  const withMcp = [NATIVE_MCP_HARNESS_ID, OTHER_NATIVE_MCP_HARNESS_ID].map(
+    buildMcpServersCapability,
+  );
+
+  it("records why each server cannot be called, and writes one warning that names them", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const runnerId = mintId();
+        const ids = yield* insertMcpServers([
+          { name: "sentry", status: "ready" },
+          { name: "linear", status: "needs-sign-in" },
+          { name: "github", status: "ready", enabled: false },
+          { name: "fresh", status: "checking" },
+        ]);
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: ["sentry", "linear", "github", "fresh"].map((name, index) => ({
+            id: ids[index]!,
+            name,
+          })),
+        });
+
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return {
+          ids,
+          leftOut: yield* readLeftOut(sessionId),
+          warnings: yield* readRuntimeWarnings(sessionId),
+        };
+      }),
+    );
+
+    expect(result.leftOut).toEqual([
+      ["sentry", null],
+      ["linear", "needs-sign-in"],
+      ["github", "switched-off"],
+      ["fresh", "checking"],
+    ]);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatchObject({
+      message:
+        "MCP servers not available in this session: linear (needs sign-in), github (switched off), fresh (still being checked)",
+      mcpServers: [
+        { mcpServerId: result.ids[1], reason: "needs-sign-in" },
+        { mcpServerId: result.ids[2], reason: "switched-off" },
+        { mcpServerId: result.ids[3], reason: "checking" },
+      ],
+    });
+  });
+
+  it("judges the servers without reading their stored tool lists", async () => {
+    // A tool list can be several MiB, and the claim holds the database writer. The
+    // column is made invalid JSON on purpose, past its CHECK: a claim that decoded
+    // it would fail.
+    const leftOut = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const sql = yield* SqlClient.SqlClient;
+        const runnerId = mintId();
+        const ids = yield* insertMcpServers([
+          { name: "sentry", status: "ready" },
+          { name: "linear", status: "needs-sign-in" },
+        ]);
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`PRAGMA ignore_check_constraints = ON`;
+            yield* sql`UPDATE mcp_servers SET tools = 'not json'`;
+            yield* sql`PRAGMA ignore_check_constraints = OFF`;
+          }),
+        );
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: [
+            { id: ids[0]!, name: "sentry" },
+            { id: ids[1]!, name: "linear" },
+          ],
+        });
+
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return yield* readLeftOut(sessionId);
+      }),
+    );
+
+    expect(leftOut).toEqual([
+      ["sentry", null],
+      ["linear", "needs-sign-in"],
+    ]);
+  });
+
+  it("leaves out every server for the harness, the runner and the profile, in that order, and writes no warning when nothing is left out", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const withUse = yield* aProfileWith(["mcp.use"]);
+        const withoutUse = yield* aProfileWith(["session.read"]);
+        const [ready] = yield* insertMcpServers([{ name: "sentry", status: "ready" }]);
+        const list = [{ id: ready!, name: "sentry" }];
+        const oldRunner = mintId();
+        const tooOld = yield* insertQueuedSessionWithServers(oldRunner, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: withoutUse,
+          servers: list,
+        });
+        yield* claimStarting(oldRunner, 1);
+
+        const runnerId = mintId();
+        const bare = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: BARE_MCP_HARNESS_ID,
+          permissionProfileId: withoutUse,
+          servers: list,
+        });
+        const ungranted = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: withoutUse,
+          servers: list,
+        });
+        const fine = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: withUse,
+          servers: list,
+        });
+        yield* claimStarting(runnerId, 3, undefined, undefined, withMcp);
+
+        return {
+          tooOld: yield* readLeftOut(tooOld),
+          bare: yield* readLeftOut(bare),
+          ungranted: yield* readLeftOut(ungranted),
+          fine: yield* readLeftOut(fine),
+          fineWarnings: yield* readRuntimeWarnings(fine),
+          tooOldWarnings: yield* readRuntimeWarnings(tooOld),
+        };
+      }),
+    );
+
+    expect(result.tooOld).toEqual([["sentry", "runner-too-old"]]);
+    expect(result.bare).toEqual([["sentry", "harness-unsupported"]]);
+    expect(result.ungranted).toEqual([["sentry", "missing-grant"]]);
+    expect(result.fine).toEqual([["sentry", null]]);
+    expect(result.fineWarnings).toEqual([]);
+    expect(result.tooOldWarnings).toHaveLength(1);
+  });
+
+  it("decides from the Connection and the plugin as they are at the claim, before anything wrote the server's status, and keeps the order of the reasons", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const host = yield* PluginHost;
+        yield* bootMcpHarnesses;
+        const runnerId = mintId();
+        const servers: ReadonlyArray<TestMcpServer> = [
+          { name: "healthy", status: "ready" },
+          { name: "connection-off", status: "ready", connectionStatus: "disabled" },
+          { name: "reauth", status: "ready", connectionStatus: "needs-reauth" },
+          {
+            name: "plugin-stopped",
+            status: "ready",
+            contributionId: OTHER_DESK_SERVER_CONTRIBUTION_ID,
+          },
+          { name: "switched-off", status: "ready", enabled: false, connectionStatus: "disabled" },
+          { name: "first-list", status: "checking", connectionStatus: "disabled" },
+        ];
+        const ids = yield* insertMcpServers(servers);
+        yield* host.stop("mcpother");
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: servers.map((server, index) => ({ id: ids[index]!, name: server.name })),
+        });
+
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return yield* readLeftOut(sessionId);
+      }),
+    );
+
+    expect(result).toEqual([
+      ["healthy", null],
+      ["connection-off", "error"],
+      ["reauth", "needs-sign-in"],
+      ["plugin-stopped", "error"],
+      ["switched-off", "switched-off"],
+      ["first-list", "checking"],
+    ]);
+  });
+
+  it("records again at the next start, which is how a resume starts", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        yield* bootMcpHarnesses;
+        const runnerId = mintId();
+        const ids = yield* insertMcpServers([
+          { name: "sentry", status: "unreachable" },
+          { name: "linear", status: "needs-sign-in" },
+        ]);
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith(["mcp.use"]),
+          servers: [
+            { id: ids[0]!, name: "sentry" },
+            { id: ids[1]!, name: "linear" },
+          ],
+        });
+        const [first] = yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+        const afterFirst = yield* readLeftOut(sessionId);
+
+        // The runner never got the frame, so the session goes back to the queue,
+        // and the user signs in to linear before it starts again.
+        yield* withTransaction(sql, sessions.requeue(first!));
+        yield* withTransaction(
+          sql,
+          sql`UPDATE mcp_servers SET status = 'ready' WHERE id = ${uuidFromString(ids[1]!)}`,
+        );
+        yield* claimStarting(runnerId, 1, undefined, undefined, withMcp);
+
+        return {
+          afterFirst,
+          afterSecond: yield* readLeftOut(sessionId),
+          warnings: yield* readRuntimeWarnings(sessionId),
+        };
+      }),
+    );
+
+    expect(result.afterFirst).toEqual([
+      ["sentry", "unreachable"],
+      ["linear", "needs-sign-in"],
+    ]);
+    expect(result.afterSecond).toEqual([
+      ["sentry", "unreachable"],
+      ["linear", null],
+    ]);
+    expect(result.warnings.map((warning) => warning.message)).toEqual([
+      "MCP servers not available in this session: sentry (unreachable), linear (needs sign-in)",
+      "MCP servers not available in this session: sentry (unreachable)",
+    ]);
+  });
+
+  it("does nothing for a session with an empty list", async () => {
+    const warnings = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const runnerId = mintId();
+        const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+          harnessId: NATIVE_MCP_HARNESS_ID,
+          permissionProfileId: yield* aProfileWith([]),
+          servers: [],
+        });
+        yield* claimStarting(runnerId, 1);
+        return yield* readRuntimeWarnings(sessionId);
+      }),
+    );
+
+    expect(warnings).toEqual([]);
+  });
+
+  /** The entry a start gives the harness for the MCP Gateway. */
+  const GATEWAY_ENTRY = { name: "tools", type: "http", url: "/mcp", bearer: "session-token" };
+
+  /** Reads the spec the session's row stores, as written. */
+  const readStoredSpec = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly spec: string }>`
+        SELECT spec FROM sessions WHERE id = ${uuidFromString(sessionId)}`;
+      return JSON.parse(rows[0]!.spec) as Record<string, unknown>;
+    });
+
+  it("puts the gateway entry on the frame of a start and of the next one, only for a runner and a harness that can take it, and never stores it", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        yield* bootMcpHarnesses;
+        const profile = yield* aProfileWith([]);
+        const queue = (runnerId: string, harnessId: string) =>
+          insertQueuedSessionWithServers(runnerId, {
+            harnessId,
+            permissionProfileId: profile,
+            servers: [],
+          });
+        const capable = mintId();
+        const oldRunner = mintId();
+        const bareRunner = mintId();
+        // The list is empty in each of them: the entry does not depend on it.
+        const native = yield* queue(capable, NATIVE_MCP_HARNESS_ID);
+        yield* queue(oldRunner, NATIVE_MCP_HARNESS_ID);
+        yield* queue(bareRunner, BARE_MCP_HARNESS_ID);
+
+        const [first] = yield* claimStarting(capable, 1, undefined, undefined, withMcp);
+        const [tooOld] = yield* claimStarting(oldRunner, 1);
+        const [bare] = yield* claimStarting(bareRunner, 1, undefined, undefined, withMcp);
+        // A start sent again, which is how a resume reaches the claim.
+        yield* withTransaction(sql, sessions.requeue(first!));
+        const [again] = yield* claimStarting(capable, 1, undefined, undefined, withMcp);
+
+        return {
+          first: first!.frame.spec,
+          tooOld: tooOld!.frame.spec,
+          bare: bare!.frame.spec,
+          again: again!.frame.spec,
+          stored: yield* readStoredSpec(native),
+        };
+      }),
+    );
+
+    expect(result.first.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.again.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.tooOld.mcpServers).toBeUndefined();
+    expect(result.bare.mcpServers).toBeUndefined();
+    expect(result.stored).not.toHaveProperty("mcpServers");
+  });
+
+  it("gives the entry for a harness only to a runner that negotiated the capability of that harness, and leaves its servers out as runner-too-old otherwise", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        const [sentry] = yield* insertMcpServers([{ name: "sentry", status: "ready" }]);
+        const profile = yield* aProfileWith(["mcp.use"]);
+        const start = (
+          negotiated: ReadonlyArray<string>,
+          harnessId = OTHER_NATIVE_MCP_HARNESS_ID,
+        ) =>
+          Effect.gen(function* () {
+            const runnerId = mintId();
+            const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+              harnessId,
+              permissionProfileId: profile,
+              servers: [{ id: sentry!, name: "sentry" }],
+            });
+            const [claimed] = yield* claimStarting(runnerId, 1, undefined, undefined, negotiated);
+            return {
+              spec: claimed!.frame.spec,
+              leftOut: yield* readLeftOut(sessionId),
+              warnings: yield* readRuntimeWarnings(sessionId),
+            };
+          });
+        return {
+          // This runner maps the entry for the native harness only.
+          otherHarnessOnly: yield* start([buildMcpServersCapability(NATIVE_MCP_HARNESS_ID)]),
+          // A runner of the first MCP Gateway build lists only the plain capability,
+          // which stands for Claude Code alone: too old for any other harness.
+          plainOnly: yield* start(["mcpServers"]),
+          plainOnlyForClaudeCode: yield* start(["mcpServers"], "claude-code/claude-code"),
+          matching: yield* start([buildMcpServersCapability(OTHER_NATIVE_MCP_HARNESS_ID)]),
+        };
+      }),
+    );
+
+    for (const tooOld of [result.otherHarnessOnly, result.plainOnly]) {
+      expect(tooOld.spec.mcpServers).toBeUndefined();
+      expect(tooOld.leftOut).toEqual([["sentry", "runner-too-old"]]);
+      expect(tooOld.warnings).toEqual([
+        expect.objectContaining({
+          message:
+            "MCP servers not available in this session: sentry (its runner is too old to reach MCP servers)",
+        }),
+      ]);
+    }
+    expect(result.plainOnlyForClaudeCode.spec.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.plainOnlyForClaudeCode.leftOut).toEqual([["sentry", null]]);
+    expect(result.matching.spec.mcpServers).toEqual([GATEWAY_ENTRY]);
+    expect(result.matching.leftOut).toEqual([["sentry", null]]);
+    expect(result.matching.warnings).toEqual([]);
+  });
+});
+
+describe("MCP servers added to a running session", () => {
+  /** Inserts a runner row, which the warning reads the capabilities of. */
+  const insertRunnerWithCapabilities = (capabilities: ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const runnerId = mintId();
+      yield* withTransaction(
+        sql,
+        sql`
+          INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                               credential_hash, negotiated_capabilities, created_at, updated_at)
+          VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                  ${`hash-${runnerId}`}, ${JSON.stringify(capabilities)}, ${at}, ${at})`,
+      );
+      return runnerId;
+    });
+
+  /** Starts an idle session with an empty list, adds a server to it, and returns the warnings it wrote. */
+  const addServerToRunningSession = (
+    name: string,
+    harnessId: string,
+    capabilities: ReadonlyArray<string>,
+    afterStart: (
+      runnerId: string,
+      sessionId: string,
+    ) => Effect.Effect<unknown, unknown, SqlClient.SqlClient> = () => Effect.void,
+  ) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      const rows = yield* sessionRepository;
+      const runnerId = yield* insertRunnerWithCapabilities(capabilities);
+      const [sentry] = yield* insertMcpServers([{ name, status: "ready" }]);
+      const sessionId = yield* insertQueuedSessionWithServers(runnerId, {
+        harnessId,
+        permissionProfileId: yield* aProfileWith(["mcp.use"]),
+        servers: [],
+      });
+      yield* claimStarting(runnerId, 1, undefined, undefined, capabilities);
+      yield* withTransaction(sql, rows.moved(sessionId, "idle", at));
+      yield* withTransaction(sql, afterStart(runnerId, sessionId));
+      yield* withTransaction(
+        sql,
+        Effect.provideService(sessions.setMcpServers(sessionId, [sentry!]), CurrentActor, USER),
+      );
+      return { sentry: sentry!, warnings: yield* readRuntimeWarnings(sessionId) };
+    });
+
+  it("warns once, naming the server and why, when the runner is too old or the harness cannot take MCP servers", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        yield* bootMcpHarnesses;
+        return {
+          tooOld: yield* addServerToRunningSession("old", NATIVE_MCP_HARNESS_ID, []),
+          // A runner that has every capability, and the harness cannot take the entry.
+          bare: yield* addServerToRunningSession("bare", BARE_MCP_HARNESS_ID, [
+            buildMcpServersCapability(NATIVE_MCP_HARNESS_ID),
+            buildMcpServersCapability(OTHER_NATIVE_MCP_HARNESS_ID),
+          ]),
+          fine: yield* addServerToRunningSession("fine", NATIVE_MCP_HARNESS_ID, [
+            buildMcpServersCapability(NATIVE_MCP_HARNESS_ID),
+          ]),
+          otherHarnessOnly: yield* addServerToRunningSession("other", OTHER_NATIVE_MCP_HARNESS_ID, [
+            buildMcpServersCapability(NATIVE_MCP_HARNESS_ID),
+          ]),
+          otherHarness: yield* addServerToRunningSession("other-ok", OTHER_NATIVE_MCP_HARNESS_ID, [
+            buildMcpServersCapability(OTHER_NATIVE_MCP_HARNESS_ID),
+          ]),
+        };
+      }),
+    );
+
+    expect(result.tooOld.warnings).toEqual([
+      expect.objectContaining({
+        message:
+          "MCP servers not available in this session: old (its runner is too old to reach MCP servers)",
+        mcpServers: [{ mcpServerId: result.tooOld.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
+    expect(result.bare.warnings).toEqual([
+      expect.objectContaining({
+        message:
+          "MCP servers not available in this session: bare (its harness cannot be given MCP servers)",
+        mcpServers: [{ mcpServerId: result.bare.sentry, reason: "harness-unsupported" }],
+      }),
+    ]);
+    expect(result.fine.warnings).toEqual([]);
+    // The runner maps the entry for another harness only: it is too old for this one.
+    expect(result.otherHarnessOnly.warnings).toEqual([
+      expect.objectContaining({
+        message:
+          "MCP servers not available in this session: other (its runner is too old to reach MCP servers)",
+        mcpServers: [{ mcpServerId: result.otherHarnessOnly.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
+    expect(result.otherHarness.warnings).toEqual([]);
+  });
+
+  it("follows what the start decided, not what the runner offers when the server is added", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* bootMcpHarnesses;
+        // A controller upgrade makes a runner's negotiated capabilities differ
+        // from the ones the start used. The runner row stands for that here.
+        const setCapabilities = (capabilities: ReadonlyArray<string>) => (runnerId: string) =>
+          sql`UPDATE runners SET negotiated_capabilities = ${JSON.stringify(capabilities)}
+              WHERE id = ${uuidFromString(runnerId)}`;
+        return {
+          gainedLater: yield* addServerToRunningSession(
+            "gained",
+            NATIVE_MCP_HARNESS_ID,
+            [],
+            setCapabilities([buildMcpServersCapability(NATIVE_MCP_HARNESS_ID)]),
+          ),
+          lostLater: yield* addServerToRunningSession(
+            "lost",
+            NATIVE_MCP_HARNESS_ID,
+            [buildMcpServersCapability(NATIVE_MCP_HARNESS_ID)],
+            setCapabilities([]),
+          ),
+        };
+      }),
+    );
+
+    expect(result.gainedLater.warnings).toEqual([
+      expect.objectContaining({
+        mcpServers: [{ mcpServerId: result.gainedLater.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
+    expect(result.lostLater.warnings).toEqual([]);
+  });
+
+  it("counts a session as having no gateway when its start was never recorded and its runner is gone", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* bootMcpHarnesses;
+        return yield* addServerToRunningSession(
+          "orphan",
+          NATIVE_MCP_HARNESS_ID,
+          [buildMcpServersCapability(NATIVE_MCP_HARNESS_ID)],
+          (runnerId, sessionId) =>
+            Effect.gen(function* () {
+              yield* sql`UPDATE sessions SET mcp_gateway = NULL WHERE id = ${uuidFromString(sessionId)}`;
+              yield* sql`DELETE FROM runners WHERE id = ${uuidFromString(runnerId)}`;
+            }),
+        );
+      }),
+    );
+
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        mcpServers: [{ mcpServerId: result.sentry, reason: "runner-too-old" }],
+      }),
+    ]);
   });
 });
 
@@ -844,6 +1766,7 @@ const insertRunningSession = (
   runnerId: string,
   status: "starting" | "idle" | "busy",
   heardAgoMs: number,
+  taskId?: string,
 ) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -852,11 +1775,12 @@ const insertRunningSession = (
     return yield* withTransaction(
       sql,
       Effect.gen(function* () {
-        const instanceId = yield* insertInstance("an-adapter", {});
+        const providerAccountId = mintId();
         const sessionId = yield* insertQueuedSession(runnerId, {
-          instanceId,
-          spec: buildSpec(instanceId, "clever"),
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
           permissionProfileId: yield* aProfile,
+          taskId,
         });
         const [claim] = yield* claimStarting(runnerId, 1);
         if (status !== "starting") {
@@ -867,7 +1791,7 @@ const insertRunningSession = (
         yield* sql`
       UPDATE sessions SET last_activity_at = ${heardAt} WHERE id = ${uuidFromString(sessionId)}
     `;
-        return { sessionId, tokenHash: hashToken(claim!.frame.token) };
+        return { sessionId, tokenHash: hashToken(claim!.frame.token), claim: claim! };
       }),
     );
   });
@@ -1103,6 +2027,165 @@ const openedAnswer = (requestId: string): SessionInputResult => ({
  * twice: the send waiting for it records it (`recordInputAnswer`), and the session's
  * ordered traffic applies it (`applyInputResult`). Either can run first.
  */
+describe("SessionService.resume", () => {
+  /**
+   * Exits a session that has a waiting input on a runner that is not retired,
+   * and returns its ids. Whether its account exists is up to the caller.
+   */
+  const arrangeExitedSession = (providerAccountId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sessionRepository;
+      return yield* withTransaction(
+        sql,
+        Effect.gen(function* () {
+          const runnerId = mintId();
+          yield* sql`
+            INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                                 credential_hash, created_at, updated_at)
+            VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                    'a hash', ${at}, ${at})
+          `;
+          const sessionId = yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
+          });
+          yield* rows.bind(sessionId, runnerId, providerAccountId, "native-1");
+          yield* rows.moved(sessionId, "exited", at);
+          return sessionId;
+        }),
+      );
+    });
+
+  const resumeNow = (sessionId: string, providerAccountId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      return yield* withTransaction(
+        sql,
+        sessions.resume(
+          sessionId,
+          () => Effect.succeed(JSON.stringify(encodeSpec(buildSpec(providerAccountId, "clever")))),
+          at,
+          false,
+        ),
+      ).pipe(Effect.exit);
+    });
+
+  it("refuses to queue a session whose account was deleted, and leaves it exited", async () => {
+    // The caller checked the account before the transaction. An account
+    // deleted since then must not leave a queued session that dispatch can
+    // never prepare.
+    const result = await run(
+      Effect.gen(function* () {
+        const providerAccountId = mintId();
+        const sessionId = yield* arrangeExitedSession(providerAccountId);
+        const exit = yield* resumeNow(sessionId, providerAccountId);
+        return { exit, status: yield* readStatus(sessionId) };
+      }),
+    );
+
+    expect(Exit.isFailure(result.exit)).toBe(true);
+    expect(JSON.stringify(result.exit)).toContain("The account this thread ran on was deleted.");
+    expect(result.status).toBe("exited");
+  });
+
+  it("queues a session whose account exists", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const account = yield* withTransaction(
+          sql,
+          accounts.insert({
+            providerId: "a-provider",
+            kind: "a-kind",
+            label: null,
+            defaultHarnessId: HARNESS_ID,
+            at,
+          }),
+        );
+        const sessionId = yield* arrangeExitedSession(account.id);
+        const exit = yield* resumeNow(sessionId, account.id);
+        return { exit, status: yield* readStatus(sessionId) };
+      }),
+    );
+
+    expect(Exit.isSuccess(result.exit) && result.exit.value).toBe(true);
+    expect(result.status).toBe("queued");
+  });
+});
+
+describe("an archived session", () => {
+  /** Arranges an idle session on a runner, marks it archived, and returns its id. */
+  const arrangeArchivedIdleSession = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const rows = yield* sessionRepository;
+    const providerAccountId = mintId();
+    return yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        const runnerId = mintId();
+        yield* sql`
+          INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                               credential_hash, created_at, updated_at)
+          VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                  'a hash', ${at}, ${at})
+        `;
+        const sessionId = yield* insertQueuedSession(runnerId, {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+          withoutInput: true,
+        });
+        yield* rows.bind(sessionId, runnerId, providerAccountId, "native-1");
+        yield* rows.moved(sessionId, "idle", at);
+        yield* sql`UPDATE sessions SET archived_at = ${at}, archived_by = 'user'
+                   WHERE id = ${uuidFromString(sessionId)}`;
+        return sessionId;
+      }),
+    );
+  });
+
+  /** Counts the inputs stored for the session. */
+  const countInputs = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const [counted] = yield* sql<{ readonly total: number }>`
+        SELECT count(*) AS total FROM session_inputs WHERE session_id = ${uuidFromString(sessionId)}
+      `;
+      return counted!.total;
+    });
+
+  it("takes no input from any path, and stores nothing", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const sessionId = yield* arrangeArchivedIdleSession;
+        const taken = yield* withTransaction(
+          sql,
+          sessions.takeInput({
+            sessionId,
+            modelSelection: { model: "clever", options: {} },
+            buildResumeSpec: undefined,
+            text: "more",
+            attachments: [],
+            at,
+            claimWhenIdle: true,
+          }),
+        ).pipe(Effect.exit);
+        const discussed = yield* sessions.storeClaimedDiscussionInput(sessionId, "news", "idle");
+        return { taken, discussed, inputs: yield* countInputs(sessionId) };
+      }),
+    );
+
+    expect(Exit.isFailure(result.taken)).toBe(true);
+    expect(JSON.stringify(result.taken)).toContain("This thread is archived");
+    expect(Option.isNone(result.discussed)).toBe(true);
+    expect(result.inputs).toBe(0);
+  });
+});
+
 describe("SessionService.claimInput", () => {
   it("claims a waiting input in a transaction of its own, and refuses a second claim", async () => {
     const result = await run(
@@ -1366,6 +2449,219 @@ describe("files a runner reports as edited by commands", () => {
   });
 });
 
+/** Builds a plugin with a provider whose one account kind reports its usage through sessions. */
+const buildMeteredPlugin = () =>
+  createPluginFixture({
+    id: "metered",
+    capabilities: ["harnesses", "providers"],
+    definitions: [
+      buildHarnessDefinition("metered", [
+        {
+          providerId: "metered/metered",
+          kinds: [{ kind: "subscription", modelArgument: "{model}" }],
+          models: "all",
+        },
+      ]),
+    ],
+    providers: [
+      {
+        id: "metered",
+        displayName: "Metered",
+        kinds: [
+          {
+            id: "subscription",
+            title: "Subscription",
+            description: "A plan signed in on each machine.",
+            setup: [{ kind: "harness-login", method: "sign-in" }],
+            usage: { readBy: "sessions" },
+            harnesses: ["metered/metered"],
+          },
+        ],
+        defaultHarnessId: "metered/metered",
+        catalogSource: { kind: "harness-probe", harnessId: "metered/metered" },
+        defaultSelection: "current-models",
+      },
+    ],
+  }).plugin;
+
+describe("the start of a session's process", () => {
+  it("is stored when dispatch claims the session", async () => {
+    const stored = await run(
+      Effect.gen(function* () {
+        const rows = yield* sessionRepository;
+        const { sessionId } = yield* insertRunningSession(mintId(), "starting", 0);
+        return yield* rows.one(sessionId);
+      }),
+    );
+
+    expect(Option.getOrThrow(stored).processStartedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe("usage a runner reports for a session", () => {
+  const readings = [
+    {
+      kind: "window" as const,
+      window: "five-hour" as const,
+      usedPercent: 42,
+      resetsAt: null,
+      hit: false,
+      takenAt: at,
+    },
+  ];
+
+  /**
+   * Boots a provider whose one kind reports usage through sessions, inserts a
+   * running session on an account of it, held by `runnerId`, and returns the
+   * ids of the session and the account.
+   */
+  const arrangeMeteredSession = (runnerId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const host = yield* PluginHost;
+      const accounts = yield* providerAccountRepository;
+      yield* host.boot([buildMeteredPlugin()]);
+      const account = yield* withTransaction(
+        sql,
+        accounts.insert({
+          providerId: "metered/metered",
+          kind: "subscription",
+          label: null,
+          defaultHarnessId: "metered/metered",
+          at,
+        }),
+      );
+      const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+      yield* withTransaction(
+        sql,
+        sql`
+          UPDATE sessions SET provider_account_id = ${uuidFromString(account.id)}
+          WHERE id = ${uuidFromString(sessionId)}
+        `,
+      );
+      return { sessionId, accountId: account.id };
+    });
+
+  const report = (sessionId: string) => ({
+    _tag: "accountUsageReported" as const,
+    sessionId,
+    readings,
+  });
+
+  it("is stored for the session's account when the runner holds the session", async () => {
+    const runnerId = mintId();
+    const stored = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const usage = yield* AccountUsage;
+        const { sessionId, accountId } = yield* arrangeMeteredSession(runnerId);
+        yield* sessions.applyAccountUsageReported(runnerId, report(sessionId));
+        return yield* usage.read(accountId);
+      }),
+    );
+
+    expect(stored).toMatchObject([{ window: "five-hour", usedPercent: 42, source: "session" }]);
+  });
+
+  it("is dropped when the session's process started before the account's credential was replaced", async () => {
+    const runnerId = mintId();
+    const stored = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const usage = yield* AccountUsage;
+        const { sessionId, accountId } = yield* arrangeMeteredSession(runnerId);
+        yield* usage.clear(accountId);
+        yield* sessions.applyAccountUsageReported(runnerId, report(sessionId));
+        return yield* usage.read(accountId);
+      }),
+    );
+
+    expect(stored).toEqual([]);
+  });
+
+  it("is stored when the session's process started after the account's credential was replaced", async () => {
+    const runnerId = mintId();
+    const stored = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const usage = yield* AccountUsage;
+        const { sessionId, accountId } = yield* arrangeMeteredSession(runnerId);
+        yield* usage.clear(accountId);
+        // The session was resumed after the replacement: dispatch stamped a later process start.
+        const resumedAt = new Date(Date.now() + 60_000).toISOString();
+        yield* withTransaction(
+          sql,
+          sql`
+            UPDATE sessions SET process_started_at = ${resumedAt}
+            WHERE id = ${uuidFromString(sessionId)}
+          `,
+        );
+        yield* sessions.applyAccountUsageReported(runnerId, report(sessionId));
+        return yield* usage.read(accountId);
+      }),
+    );
+
+    expect(stored).toMatchObject([{ window: "five-hour", usedPercent: 42, source: "session" }]);
+  });
+
+  it("is dropped when the session has exited", async () => {
+    const runnerId = mintId();
+    const stored = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const rows = yield* sessionRepository;
+        const usage = yield* AccountUsage;
+        const { sessionId, accountId } = yield* arrangeMeteredSession(runnerId);
+        yield* withTransaction(sql, rows.moved(sessionId, "exited", at));
+        yield* sessions.applyAccountUsageReported(runnerId, report(sessionId));
+        return yield* usage.read(accountId);
+      }),
+    );
+
+    expect(stored).toEqual([]);
+  });
+
+  it("is dropped, and logged, when another runner holds the session", async () => {
+    const logged: Array<string> = [];
+    const stored = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sessions = yield* SessionService;
+          const usage = yield* AccountUsage;
+          const { sessionId, accountId } = yield* arrangeMeteredSession(mintId());
+          yield* sessions.applyAccountUsageReported(mintId(), report(sessionId));
+          return yield* usage.read(accountId);
+        }),
+        layer.pipe(Layer.provideMerge(captureLogs(logged))),
+      ),
+    );
+
+    expect(stored).toEqual([]);
+    expect(logged.filter((line) => line.includes("Dropped a runner's usage report"))).toHaveLength(
+      1,
+    );
+  });
+
+  it("is dropped for a session the controller does not know", async () => {
+    const logged: Array<string> = [];
+    await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const sessions = yield* SessionService;
+          yield* sessions.applyAccountUsageReported(mintId(), report(mintId()));
+        }),
+        layer.pipe(Layer.provideMerge(captureLogs(logged))),
+      ),
+    );
+
+    expect(logged.filter((line) => line.includes("Dropped a runner's usage report"))).toHaveLength(
+      1,
+    );
+  });
+});
+
 /** Reads the status of every approval notification in the database. */
 const readApprovalNotificationStatuses = Effect.flatMap(
   SqlClient.SqlClient,
@@ -1412,6 +2708,140 @@ describe("a report applied after its session ended", () => {
     expect(result.session.status).toBe("exited");
     expect(result.session.openRequests).toEqual([]);
     expect(result.notifications).toEqual([]);
+  });
+});
+
+describe("a runner's runtime warning", () => {
+  it("is stored without the MCP server entries, which only the controller writes", async () => {
+    const warnings = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const event = {
+          _tag: "runtime.warning" as const,
+          eventId: crypto.randomUUID(),
+          sessionId,
+          at,
+          message: "the harness retried",
+          mcpServers: [{ mcpServerId: mintId(), reason: "needs-sign-in" as const }],
+        };
+
+        const folded = yield* sessions.foldReport(runnerId, 1, event);
+        yield* withTransaction(sql, sessions.applyReport(runnerId, event, folded!));
+
+        return yield* readRuntimeWarnings(sessionId);
+      }),
+    );
+
+    expect(warnings).toEqual([expect.objectContaining({ message: "the harness retried" })]);
+    expect(warnings[0]).not.toHaveProperty("mcpServers");
+  });
+});
+
+describe("a warning the controller writes while a turn runs", () => {
+  /** Returns the stored rows of the session's stream, in position order, as tag, text and sequence. */
+  const readRows = (sessionId: string) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const rows = yield* sql<{ readonly event: string; readonly runner_seq: number }>`
+        SELECT event, runner_seq FROM session_stream
+        WHERE session_id = ${uuidFromString(sessionId)} ORDER BY position`;
+      return rows.map((row) => {
+        const event = JSON.parse(row.event) as { _tag: string; delta?: string };
+        return { tag: event._tag, delta: event.delta, seq: row.runner_seq };
+      });
+    });
+
+  const buildEvent = (sessionId: string, event: object) =>
+    ({ eventId: crypto.randomUUID(), sessionId, at, ...event }) as HarnessEvent;
+
+  it("keeps the text held for the open item of the runner", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const report = (seq: number, event: object) =>
+          Effect.gen(function* () {
+            const harnessEvent = buildEvent(sessionId, event);
+            const folded = yield* sessions.foldReport(runnerId, seq, harnessEvent);
+            yield* withTransaction(sql, sessions.applyReport(runnerId, harnessEvent, folded!));
+          });
+        const delta = (text: string) => ({
+          _tag: "content.delta",
+          turnId: "t1",
+          itemId: "i1",
+          streamKind: "assistant_text",
+          delta: text,
+        });
+
+        yield* report(1, delta("Hel"));
+        yield* sessions.writeRuntimeWarning(sessionId, "a refused call");
+        yield* report(2, delta("lo"));
+        yield* report(3, {
+          _tag: "item.completed",
+          turnId: "t1",
+          itemId: "i1",
+          kind: "assistant_message",
+          status: "completed",
+        });
+        return yield* readRows(sessionId);
+      }),
+    );
+
+    expect(rows.map((row) => row.tag)).toEqual([
+      "runtime.warning",
+      "content.delta",
+      "item.completed",
+    ]);
+    expect(rows[1]?.delta).toBe("Hello");
+  });
+
+  it("cuts a warning to the protocol's message bound, never inside a character", async () => {
+    const warnings = await run(
+      Effect.gen(function* () {
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        // An emoji is two UTF-16 units, so the cut falls inside one.
+        yield* sessions.writeRuntimeWarning(sessionId, "😀".repeat(MAX_MESSAGE_LENGTH));
+        yield* sessions.writeRuntimeWarning(sessionId, "short");
+        return yield* readRuntimeWarnings(sessionId);
+      }),
+    );
+
+    const [cut, short] = warnings.map((warning) => warning.message);
+    expect(cut!.length).toBeLessThanOrEqual(MAX_MESSAGE_LENGTH);
+    // `encodeURIComponent` throws on a lone surrogate.
+    expect(() => encodeURIComponent(cut!)).not.toThrow();
+    expect(cut!.endsWith("…")).toBe(true);
+    expect(short).toBe("short");
+  });
+
+  it("does not take the sequence number of a report that is folded but not yet written", async () => {
+    const rows = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0);
+        const started = buildEvent(sessionId, {
+          _tag: "turn.started",
+          turnId: "t1",
+        });
+
+        const folded = yield* sessions.foldReport(runnerId, 1, started);
+        // The report waits for the database's one writer while a refused call is written.
+        yield* sessions.writeRuntimeWarning(sessionId, "a refused call");
+        yield* withTransaction(sql, sessions.applyReport(runnerId, started, folded!));
+        return yield* readRows(sessionId);
+      }),
+    );
+
+    expect(rows.map((row) => row.tag).toSorted()).toEqual(["runtime.warning", "turn.started"]);
   });
 });
 
@@ -1497,11 +2927,15 @@ describe("SessionService.setGeneratedTitleAndRole", () => {
         );
 
         yield* sessions
-          .setGeneratedTitleAndRole(sessionId, {
-            title: generated.title,
-            needsRefinement: generated.needsRefinement ?? false,
-            role: generated.role ?? "",
-          })
+          .setGeneratedTitleAndRole(
+            sessionId,
+            {
+              title: generated.title,
+              needsRefinement: generated.needsRefinement ?? false,
+              role: generated.role ?? "",
+            },
+            undefined,
+          )
           .pipe(Effect.provide(listener));
 
         const [stored] = yield* sql<{ readonly needs_refinement: number | null }>`
@@ -1662,18 +3096,26 @@ describe("SessionService.queryPassages", () => {
    */
   const seed = Effect.gen(function* () {
     const sessions = yield* sessionRepository;
-    const instanceId = yield* insertInstance("an-adapter", {});
-    const spec = buildSpec(instanceId, "clever");
+    const providerAccountId = mintId();
+    const spec = buildSpec(providerAccountId, "clever");
     const runnerId = mintId();
-    const thread = yield* insertQueuedSession(runnerId, { instanceId, spec });
-    const agentRun = yield* insertQueuedSession(runnerId, { instanceId, spec, agentId: agentA });
+    const thread = yield* insertQueuedSession(runnerId, { providerAccountId, spec });
+    const agentRun = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec,
+      agentId: agentA,
+    });
     const child = yield* insertQueuedSession(runnerId, {
-      instanceId,
+      providerAccountId,
       spec,
       agentId: agentA,
       createdBy: buildSessionStamp(thread),
     });
-    const other = yield* insertQueuedSession(runnerId, { instanceId, spec, agentId: agentB });
+    const other = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec,
+      agentId: agentB,
+    });
     const base = { eventId: "e", sessionId: "native", at: t[0]! };
     const userMessage = (text: string) =>
       ({
@@ -1695,7 +3137,7 @@ describe("SessionService.queryPassages", () => {
         streamKind,
         delta: text,
       }) as const;
-    const rows: ReadonlyArray<readonly [string, string, ProviderEvent]> = [
+    const rows: ReadonlyArray<readonly [string, string, HarnessEvent]> = [
       [agentRun, t[0]!, { _tag: "item.started", ...userMessage("launch the rocket today") }],
       [
         agentRun,
@@ -1857,5 +3299,665 @@ describe("SessionService.queryPassages", () => {
     const page = await runSeeded(() => queryAs(USER, { text: "?!" }));
 
     expect(page).toEqual({ items: [] });
+  });
+});
+
+describe("the card of a Task", () => {
+  const buildCardChange = (taskId: string): Change => ({
+    _tag: "record",
+    topic: "task",
+    id: taskId,
+    kind: "updated",
+    derived: true,
+  });
+
+  /**
+   * Creates a Task and a runner, lets `arrange` write what the case needs and
+   * return the action to test, then runs the action and returns the Task and
+   * the changes to `task` records that the action announced. Whatever
+   * `arrange` wrote is not part of it.
+   */
+  const announcedByAction = (
+    arrange: (
+      runnerId: string,
+      taskId: string,
+    ) => Effect.Effect<
+      Effect.Effect<unknown, SqlError | InvalidState, SessionService | SqlClient.SqlClient>,
+      SqlError,
+      SessionService | SqlClient.SqlClient
+    >,
+  ) =>
+    run(
+      Effect.gen(function* () {
+        const taskId = (yield* Effect.provideService(
+          (yield* TaskService).create({ title: "Add a refund button", description: "" }),
+          CurrentActor,
+          USER,
+        )).id;
+        const action = yield* arrange(mintId(), taskId);
+        const published: Array<Change> = [];
+        yield* action.pipe(
+          Effect.provide(
+            Layer.succeed(AfterCommit, {
+              publish: (changes: ReadonlyArray<Change>) =>
+                Effect.sync(() => {
+                  published.push(...changes);
+                }),
+            }),
+          ),
+        );
+        return {
+          taskId,
+          changes: published.filter(
+            (change) => change._tag === "record" && change.topic === "task",
+          ),
+        };
+      }),
+    );
+
+  /** Folds and applies one report from the runner in a transaction, as ingest does. */
+  const report = (runnerId: string, sessionId: string, seq: number, event: object) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      const harnessEvent = {
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        ...event,
+      } as HarnessEvent;
+      const folded = yield* sessions.foldReport(runnerId, seq, harnessEvent);
+      yield* withTransaction(sql, sessions.applyReport(runnerId, harnessEvent, folded!));
+    });
+
+  const insertQueuedSessionForTask = (runnerId: string, taskId: string) => {
+    const providerAccountId = mintId();
+    return Effect.flatMap(aProfile, (permissionProfileId) =>
+      insertQueuedSession(runnerId, {
+        providerAccountId,
+        spec: buildSpec(providerAccountId, "clever"),
+        permissionProfileId,
+        taskId,
+      }),
+    );
+  };
+
+  const questionRequest = {
+    requestId: "q-1",
+    itemId: "i1",
+    kind: "question",
+    detail: {
+      questions: [{ question: "Which size?", header: "Size", options: [], multiSelect: false }],
+    },
+  };
+
+  const approvalRequest = {
+    requestId: "a-1",
+    itemId: "i1",
+    kind: "command_approval",
+    decisions: ["allow", "deny"],
+    detail: { command: "ls -la" },
+  };
+
+  it("is announced when a session joins the Task", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.succeed(Effect.asVoid(insertQueuedSessionForTask(runnerId, taskId))),
+    );
+
+    expect(changes).toEqual([buildCardChange(taskId)]);
+  });
+
+  it("is announced when dispatch starts a session of the Task", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.as(insertQueuedSessionForTask(runnerId, taskId), claimStarting(runnerId, 1)),
+    );
+
+    expect(changes).toEqual([buildCardChange(taskId)]);
+  });
+
+  it("is announced once when a report changes the status of a session of the Task, and not by the reports that follow", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertRunningSession(runnerId, "idle", 0, taskId), ({ sessionId }) =>
+        Effect.gen(function* () {
+          yield* report(runnerId, sessionId, 1, { _tag: "turn.started", turnId: "t1" });
+          // A token, a finished item and a tool call change no status.
+          yield* report(runnerId, sessionId, 2, {
+            _tag: "content.delta",
+            turnId: "t1",
+            itemId: "i1",
+            streamKind: "assistant_text",
+            delta: "Hello",
+          });
+          yield* report(runnerId, sessionId, 3, {
+            _tag: "item.started",
+            turnId: "t1",
+            itemId: "i1",
+            kind: "command_execution",
+            detail: {},
+          });
+        }),
+      ),
+    );
+
+    expect(changes).toEqual([buildCardChange(taskId)]);
+  });
+
+  it("is announced when the runner of a session of the Task is retired", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertRunningSession(runnerId, "busy", 0, taskId), () =>
+        Effect.flatMap(SessionService, (sessions) =>
+          Effect.flatMap(SqlClient.SqlClient, (sql) =>
+            withTransaction(sql, sessions.endOnRunner(runnerId)),
+          ),
+        ),
+      ),
+    );
+
+    expect(changes).toEqual([buildCardChange(taskId)]);
+  });
+
+  it("is announced when a queued session of the Task is cancelled", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertQueuedSessionForTask(runnerId, taskId), (sessionId) =>
+        Effect.flatMap(SessionService, (sessions) =>
+          Effect.flatMap(SqlClient.SqlClient, (sql) =>
+            withTransaction(sql, sessions.endQueued(sessionId, at)),
+          ),
+        ),
+      ),
+    );
+
+    expect(changes).toEqual([buildCardChange(taskId)]);
+  });
+
+  it("is announced when a start that could not be sent puts the session back on the queue", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertRunningSession(runnerId, "starting", 0, taskId), ({ claim }) =>
+        Effect.flatMap(SessionService, (sessions) => sessions.requeue(claim)),
+      ),
+    );
+
+    expect(changes).toEqual([buildCardChange(taskId)]);
+  });
+
+  it("is announced when an exited session of the Task is resumed", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sessionRepository;
+        // Resuming checks that the session's account still exists.
+        const accounts = yield* providerAccountRepository;
+        const { id: providerAccountId } = yield* withTransaction(
+          sql,
+          accounts.insert({
+            providerId: "a-provider",
+            kind: "a-kind",
+            label: null,
+            defaultHarnessId: HARNESS_ID,
+            at,
+          }),
+        );
+        // Exited with its first input still waiting, as the resume tests above arrange it.
+        yield* withTransaction(
+          sql,
+          sql`
+            INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                                 credential_hash, created_at, updated_at)
+            VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                    'a hash', ${at}, ${at})
+          `,
+        );
+        const sessionId = yield* insertQueuedSession(runnerId, {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+          taskId,
+        });
+        yield* withTransaction(
+          sql,
+          Effect.andThen(
+            rows.bind(sessionId, runnerId, providerAccountId, "native-1"),
+            rows.moved(sessionId, "exited", at),
+          ),
+        );
+        return Effect.flatMap(SessionService, (sessions) =>
+          withTransaction(
+            sql,
+            sessions.resume(
+              sessionId,
+              () =>
+                Effect.succeed(JSON.stringify(encodeSpec(buildSpec(providerAccountId, "clever")))),
+              at,
+              false,
+            ),
+          ),
+        );
+      }),
+    );
+
+    expect(changes).toEqual([buildCardChange(taskId)]);
+  });
+
+  it("is announced when a question opens and when it closes, and for an approval neither time", async () => {
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertRunningSession(runnerId, "busy", 0, taskId), ({ sessionId }) =>
+        Effect.gen(function* () {
+          yield* report(runnerId, sessionId, 1, {
+            _tag: "request.opened",
+            request: approvalRequest,
+          });
+          yield* report(runnerId, sessionId, 2, {
+            _tag: "request.resolved",
+            requestId: "a-1",
+            decision: "allow",
+          });
+          yield* report(runnerId, sessionId, 3, {
+            _tag: "request.opened",
+            request: questionRequest,
+          });
+          yield* report(runnerId, sessionId, 4, {
+            _tag: "request.resolved",
+            requestId: "q-1",
+            answers: { Size: "Large" },
+          });
+        }),
+      ),
+    );
+
+    // One for the question opening and one for it closing. The coalescing
+    // window merges them for the client.
+    expect(changes).toEqual([buildCardChange(taskId), buildCardChange(taskId)]);
+  });
+
+  it("is announced for both Tasks when a session moves from one to the other, as a reopened Thread does", async () => {
+    const otherTaskId = await run(
+      Effect.provideService(
+        Effect.map(
+          Effect.flatMap(TaskService, (tasks) =>
+            tasks.create({ title: "Fix the login redirect", description: "" }),
+          ),
+          (task) => task.id,
+        ),
+        CurrentActor,
+        USER,
+      ),
+    );
+    const { taskId, changes } = await announcedByAction((runnerId, taskId) =>
+      Effect.map(insertQueuedSessionForTask(runnerId, taskId), (sessionId) =>
+        Effect.flatMap(SqlClient.SqlClient, (sql) =>
+          Effect.flatMap(sessionRepository, (rows) =>
+            withTransaction(sql, rows.setTaskId(sessionId, otherTaskId)),
+          ),
+        ),
+      ),
+    );
+
+    expect(changes).toEqual([buildCardChange(taskId), buildCardChange(otherTaskId)]);
+  });
+
+  it("is not announced for a session with no Task", async () => {
+    const { changes } = await announcedByAction((runnerId) =>
+      Effect.map(insertRunningSession(runnerId, "idle", 0), ({ sessionId }) =>
+        report(runnerId, sessionId, 1, { _tag: "turn.started", turnId: "t1" }),
+      ),
+    );
+
+    expect(changes).toEqual([]);
+  });
+
+  describe("and its summary", () => {
+    /**
+     * Opens a busy Thread of a new Task, applies `events` one by one, and
+     * returns how many times the Task's summary was marked dirty after each.
+     */
+    const revisionsAfter = (events: ReadonlyArray<object>) =>
+      run(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const taskId = (yield* Effect.provideService(
+            (yield* TaskService).create({ title: "Add a refund button", description: "" }),
+            CurrentActor,
+            USER,
+          )).id;
+          const runnerId = mintId();
+          const { sessionId } = yield* insertRunningSession(runnerId, "busy", 0, taskId);
+          const revisions: Array<number> = [];
+          for (const [index, event] of events.entries()) {
+            yield* report(runnerId, sessionId, index + 1, event);
+            const rows = yield* sql<{ readonly dirty_revision: number }>`
+              SELECT dirty_revision FROM task_summaries WHERE task_id = ${uuidFromString(taskId)}`;
+            revisions.push(rows[0]?.dirty_revision ?? 0);
+          }
+          return revisions;
+        }),
+      );
+
+    const secondQuestion = { ...questionRequest, requestId: "q-2" };
+
+    it("is out of date when the Thread's first question opens and when its last one closes, and for an approval neither time", async () => {
+      const revisions = await revisionsAfter([
+        { _tag: "request.opened", request: approvalRequest },
+        { _tag: "request.resolved", requestId: "a-1", decision: "allow" },
+        { _tag: "request.opened", request: questionRequest },
+        { _tag: "request.opened", request: secondQuestion },
+        { _tag: "request.resolved", requestId: "q-1", answers: { Size: "Large" } },
+        { _tag: "request.resolved", requestId: "q-2", answers: { Size: "Large" } },
+      ]);
+
+      // The approval changes nothing. The second question, and the first one
+      // closing while another is open, change nothing either.
+      expect(revisions).toEqual([0, 0, 1, 1, 1, 2]);
+    });
+
+    it("is out of date when a question that a subagent asked opens", async () => {
+      const revisions = await revisionsAfter([
+        { _tag: "subagent.started", subagentId: "helper" },
+        { _tag: "request.opened", subagentId: "helper", request: questionRequest },
+      ]);
+
+      expect(revisions).toEqual([0, 1]);
+    });
+  });
+});
+
+describe("SessionService.moveToTask", () => {
+  /** A Thread on a Task, in an ephemeral workspace whose `task_workspaces` row names that Task. */
+  const arrangeThread = Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const tasks = yield* TaskService;
+    const oldTaskId = (yield* Effect.provideService(
+      tasks.create({ title: "Northwind gift card refunds", description: "", stage: "building" }),
+      CurrentActor,
+      USER,
+    )).id;
+    const runnerId = mintId();
+    const workspaceId = mintId();
+    yield* withTransaction(
+      sql,
+      Effect.gen(function* () {
+        yield* sql`
+        INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                             credential_hash, created_at, updated_at)
+        VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                'a hash', ${at}, ${at})`;
+        yield* sql`
+        INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+        VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(runnerId)}, 'ephemeral',
+                'ready', ${at})`;
+        yield* sql`
+        INSERT INTO task_workspaces (workspace_id, task_id, joined_at)
+        VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(oldTaskId)}, ${at})`;
+      }),
+    );
+    const providerAccountId = mintId();
+    const sessionId = yield* insertQueuedSession(runnerId, {
+      providerAccountId,
+      spec: buildSpec(providerAccountId, "clever"),
+      taskId: oldTaskId,
+    });
+    yield* withTransaction(
+      sql,
+      sql`
+        UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
+        WHERE id = ${uuidFromString(sessionId)}`,
+    );
+    return { runnerId, workspaceId, sessionId, oldTaskId };
+  });
+
+  const createTaskAt = (stage: "building" | "done" | "dropped") =>
+    Effect.map(
+      Effect.flatMap(TaskService, (tasks) =>
+        Effect.provideService(
+          tasks.create({ title: "Fix the login redirect", description: "", stage }),
+          CurrentActor,
+          USER,
+        ),
+      ),
+      (task) => task.id,
+    );
+
+  const moveAs = (actor: Actor, sessionId: string, taskId?: string) =>
+    Effect.flatMap(SessionService, (sessions) =>
+      Effect.provideService(
+        sessions.moveToTask(sessionId, taskId === undefined ? {} : { taskId }),
+        CurrentActor,
+        actor,
+      ),
+    );
+
+  /** Returns the revision of the Task's summary: how many times it was marked dirty. */
+  const readDirtyRevision = (taskId: string) =>
+    Effect.map(
+      Effect.flatMap(
+        SqlClient.SqlClient,
+        (sql) =>
+          sql<{ readonly dirty_revision: number }>`
+          SELECT dirty_revision FROM task_summaries WHERE task_id = ${uuidFromString(taskId)}`,
+      ),
+      (rows) => rows[0]?.dirty_revision ?? 0,
+    );
+
+  const readWorkspaceRows = Effect.map(
+    Effect.flatMap(
+      SqlClient.SqlClient,
+      (sql) =>
+        sql<{ readonly workspace_id: Uint8Array; readonly task_id: Uint8Array }>`
+        SELECT workspace_id, task_id FROM task_workspaces`,
+    ),
+    (rows) =>
+      rows.map((row) => [uuidToString(row.workspace_id), uuidToString(row.task_id)] as const),
+  );
+
+  it("moves a Thread to another Task: the session changes, nothing else, and both Tasks are marked dirty", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const { workspaceId, sessionId, oldTaskId } = yield* arrangeThread;
+        const newTaskId = yield* createTaskAt("building");
+        const before = [yield* readDirtyRevision(oldTaskId), yield* readDirtyRevision(newTaskId)];
+        const moved = yield* moveAs(USER, sessionId, newTaskId);
+        return {
+          moved,
+          newTaskId,
+          workspaceId,
+          oldTaskId,
+          before,
+          after: [yield* readDirtyRevision(oldTaskId), yield* readDirtyRevision(newTaskId)],
+          workspaceRows: yield* readWorkspaceRows,
+          audit: yield* readEventsOfKind("session.movedToTask"),
+        };
+      }),
+    );
+
+    expect(result.moved.taskId).toBe(result.newTaskId);
+    expect(result.after).toEqual([result.before[0]! + 1, result.before[1]! + 1]);
+    expect(result.workspaceRows).toEqual([[result.workspaceId, result.oldTaskId]]);
+    expect(result.audit.map((entry) => [entry.actor, entry.payload])).toEqual([
+      [
+        "user",
+        {
+          sessionId: result.moved.id,
+          fromTaskId: result.oldTaskId,
+          toTaskId: result.newTaskId,
+        },
+      ],
+    ]);
+  });
+
+  it("moves a Thread that names a Task merged away onto the Task it was merged into", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const { sessionId } = yield* arrangeThread;
+        const tasks = yield* TaskService;
+        const mergedAway = yield* createTaskAt("building");
+        const survivor = yield* createTaskAt("building");
+        yield* Effect.provideService(
+          tasks.merge(mergedAway, { intoTaskId: survivor }),
+          CurrentActor,
+          USER,
+        );
+        const moved = yield* moveAs(USER, sessionId, mergedAway);
+        return { moved, survivor, audit: yield* readEventsOfKind("session.movedToTask") };
+      }),
+    );
+
+    expect(result.moved.taskId).toBe(result.survivor);
+    expect(result.audit.map((entry) => entry.payload["toTaskId"])).toEqual([result.survivor]);
+  });
+
+  it("moves a Thread to a new Task made from it, without recording a workspace for it, so the next Thread in the folder still joins the old Task", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const { workspaceId, sessionId, oldTaskId } = yield* arrangeThread;
+        const moved = yield* moveAs(USER, sessionId);
+        const tasks = yield* TaskService;
+        const next = yield* tasks.joinSession({
+          requestedTaskId: undefined,
+          callerTaskId: undefined,
+          workspaceId,
+          sessionKind: "thread",
+          title: "Another thread",
+          projectId: undefined,
+        });
+        return {
+          moved,
+          oldTaskId,
+          workspaceId,
+          newTask: yield* Effect.provideService(tasks.read(moved.taskId!), CurrentActor, USER),
+          dirtyOfNew: yield* readDirtyRevision(moved.taskId!),
+          dirtyOfOld: yield* readDirtyRevision(oldTaskId),
+          workspaceRows: yield* readWorkspaceRows,
+          next,
+        };
+      }),
+    );
+
+    expect(result.moved.taskId).not.toBe(result.oldTaskId);
+    expect(result.newTask).toMatchObject({ title: "a session", stage: "exploring" });
+    expect(result.workspaceRows).toEqual([[result.workspaceId, result.oldTaskId]]);
+    expect(result.next).toEqual({ taskId: result.oldTaskId, created: false });
+    expect(result.dirtyOfNew).toBeGreaterThan(0);
+    expect(result.dirtyOfOld).toBeGreaterThan(0);
+  });
+
+  it("returns the Thread unchanged, and writes nothing, when it moves to the Task it is on", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const { sessionId, oldTaskId } = yield* arrangeThread;
+        const dirtyBefore = yield* readDirtyRevision(oldTaskId);
+        const moved = yield* moveAs(USER, sessionId, oldTaskId);
+        return {
+          moved,
+          oldTaskId,
+          dirtyBefore,
+          dirtyAfter: yield* readDirtyRevision(oldTaskId),
+          audit: yield* readEventsOfKind("session.movedToTask"),
+        };
+      }),
+    );
+
+    expect(result.moved.taskId).toBe(result.oldTaskId);
+    expect(result.dirtyAfter).toBe(result.dirtyBefore);
+    expect(result.audit).toEqual([]);
+  });
+
+  describe("refuses", () => {
+    /** Runs `move` after the arrangement, and returns the error it fails with and the Thread's Task afterwards. */
+    const refusedWith = (
+      move: (
+        arranged: { readonly sessionId: string; readonly runnerId: string },
+        sessionTaskId: string,
+      ) => Effect.Effect<unknown, unknown, Layer.Success<typeof layer>>,
+    ) =>
+      run(
+        Effect.gen(function* () {
+          const arranged = yield* arrangeThread;
+          const error = yield* Effect.flip(move(arranged, arranged.oldTaskId));
+          const sessions = yield* sessionRepository;
+          const stored = Option.getOrThrow(yield* sessions.one(arranged.sessionId));
+          return {
+            error: error as { readonly error: { readonly code: string } },
+            stayed: stored.taskId === arranged.oldTaskId,
+          };
+        }),
+      );
+
+    it("a session that is not a Thread", async () => {
+      const { error, stayed } = await refusedWith(({ runnerId }) =>
+        Effect.gen(function* () {
+          const providerAccountId = mintId();
+          const agentSessionId = yield* insertQueuedSession(runnerId, {
+            providerAccountId,
+            spec: buildSpec(providerAccountId, "clever"),
+            agentId: mintId(),
+          });
+          return yield* moveAs(USER, agentSessionId);
+        }),
+      );
+
+      expect(error.error.code).toBe("invalid_state");
+      expect(stayed).toBe(true);
+    });
+
+    it("a Task that does not exist, and a Task that was deleted", async () => {
+      const missing = await refusedWith(({ sessionId }) => moveAs(USER, sessionId, mintId()));
+      const deleted = await refusedWith(({ sessionId }) =>
+        Effect.gen(function* () {
+          const taskId = yield* createTaskAt("building");
+          yield* Effect.provideService(
+            Effect.flatMap(TaskService, (tasks) => tasks.delete(taskId)),
+            CurrentActor,
+            USER,
+          );
+          return yield* moveAs(USER, sessionId, taskId);
+        }),
+      );
+
+      expect([missing.error.error.code, deleted.error.error.code]).toEqual([
+        "not_found",
+        "not_found",
+      ]);
+      expect([missing.stayed, deleted.stayed]).toEqual([true, true]);
+    });
+
+    it("a Task that is done or dropped, and leaves the Thread where it was", async () => {
+      const done = await refusedWith(({ sessionId }) =>
+        Effect.flatMap(createTaskAt("done"), (taskId) => moveAs(USER, sessionId, taskId)),
+      );
+      const dropped = await refusedWith(({ sessionId }) =>
+        Effect.flatMap(createTaskAt("dropped"), (taskId) => moveAs(USER, sessionId, taskId)),
+      );
+
+      expect([done.error.error.code, dropped.error.error.code]).toEqual([
+        "invalid_state",
+        "invalid_state",
+      ]);
+      expect([done.stayed, dropped.stayed]).toEqual([true, true]);
+    });
+
+    it("a caller that is a session, and makes no Task", async () => {
+      const refused = await run(
+        Effect.gen(function* () {
+          const { sessionId, oldTaskId } = yield* arrangeThread;
+          const grants = ["session.steer"] as const;
+          const asSession: Actor = {
+            _tag: "session",
+            sessionId,
+            profileId: mintId(),
+            grants,
+            profileGrants: grants,
+            assistantId: null,
+            agentId: null,
+          };
+          const error = (yield* Effect.flip(moveAs(asSession, sessionId))) as {
+            readonly error: { readonly code: string };
+          };
+          const sql = yield* SqlClient.SqlClient;
+          const count = yield* sql<{ readonly n: number }>`SELECT COUNT(*) AS n FROM tasks`;
+          return { error, oldTaskId, taskCount: count[0]!.n };
+        }),
+      );
+
+      expect(refused.error.error.code).toBe("forbidden");
+      expect(refused.taskCount).toBe(1);
+    });
   });
 });

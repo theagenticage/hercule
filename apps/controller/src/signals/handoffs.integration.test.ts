@@ -130,7 +130,11 @@ const insertPluginSignal = async (
 };
 
 /** Returns the source of a workflow with one signal input, `signal`, that takes these kinds. */
-const buildSignalInputSource = (name: string, kinds: ReadonlyArray<string>): string =>
+const buildSignalInputSource = (
+  name: string,
+  kinds: ReadonlyArray<string>,
+  stepLines: string,
+): string =>
   [
     `name: ${name}`,
     "inputs:",
@@ -139,18 +143,31 @@ const buildSignalInputSource = (name: string, kinds: ReadonlyArray<string>): str
     `      kinds: [${kinds.join(", ")}]`,
     "    required: true",
     "steps:",
-    buildTaskStep("file_task"),
+    stepLines,
     "",
   ].join("\n");
+
+/**
+ * A step that waits a minute, so the run stays pending or running for the
+ * whole test.
+ */
+const LONG_WAIT_STEP = [
+  "  - id: hold",
+  "    kind: action",
+  "    action: wait",
+  "    params:",
+  "      seconds: 60",
+].join("\n");
 
 /** Creates an enabled workflow that takes the plugin's kind, and returns what a signal offers of it. */
 const createWorkflowToOffer = async (
   base: string,
   token: string,
   name: string,
+  stepLines: string = buildTaskStep("file_task"),
 ): Promise<WorkflowToOffer> => {
   const workflow = await createWorkflowOrFail(base, token, {
-    source: buildSignalInputSource(name, [KIND, "offer"]),
+    source: buildSignalInputSource(name, [KIND, "offer"], stepLines),
   });
   const response = await updateWorkflow(base, token, workflow.id, { enabled: true });
   expect(response.status, await response.clone().text()).toBe(200);
@@ -407,7 +424,7 @@ describe.each(["hand-off", "act"] as const)("handing a plugin signal off with %s
 });
 
 describe("which Task a handoff continues", () => {
-  it("continues the most recently updated open Task of the thread, sets it in-progress, and passes over done and other threads", async () => {
+  it("continues the open Task with the oldest link to the thread, whatever was updated since, sets it in-progress, and passes over done and other threads", async () => {
     await withServer(async (harness) => {
       const { base } = harness;
       const token = await completeSetup(base);
@@ -420,8 +437,9 @@ describe("which Task a handoff continues", () => {
       await updateTask(base, token, done.id, { status: "done" });
       await createTaskWithRef(base, token, "Other thread", OTHER_ISSUE_REF);
       await tick();
-      // Touching the older Task makes it the most recently updated open one.
-      await updateTask(base, token, older.id, { title: "Older open Task, edited" });
+      // Touching the newer Task makes it the most recently updated open one.
+      // The oldest link still decides.
+      await updateTask(base, token, newer.id, { title: "Newer open Task, edited" });
       await tick();
       const signalId = await insertPluginSignal(harness, {
         threadRef: ISSUE_REF,
@@ -433,7 +451,7 @@ describe("which Task a handoff continues", () => {
       });
       const open = await readSignal(base, token, signalId);
       expect(joinLine(open, `hand-to-${workflow.id}`)).toBe(
-        "Starts Implement on acme/api#7, continues Older open Task, edited",
+        "Starts Implement on acme/api#7, continues Older open Task",
       );
 
       await handOff("hand-off", base, token, signalId, workflow.id);
@@ -543,6 +561,43 @@ describe("a handoff that cannot go through", () => {
       expect(refusal.message).toContain(offered.id);
       expect((await readSignal(base, token, signalId)).status).toBe("open");
       expect(await listHandedOffTasks(base, token)).toEqual([]);
+    });
+  });
+
+  it("refuses a workflow that already has a live run on the continued Task, and still allows another workflow", async () => {
+    await withServer(async (harness) => {
+      const { base } = harness;
+      const token = await completeSetup(base);
+      const implement = await createWorkflowToOffer(base, token, "Implement", LONG_WAIT_STEP);
+      const review = await createWorkflowToOffer(base, token, "Review", LONG_WAIT_STEP);
+      const fields = {
+        threadRef: ISSUE_REF,
+        place: "acme/api#7",
+        priority: "normal",
+        workflows: [implement, review],
+      } as const;
+      const first = await insertPluginSignal(harness, {
+        ...fields,
+        eventId: 41,
+        title: "Retry failed webhooks",
+      });
+      const second = await insertPluginSignal(harness, {
+        ...fields,
+        eventId: 42,
+        title: "Checks failed on #7",
+      });
+      await handOff("hand-off", base, token, first, implement.id);
+      const refused = await requestHandOff(base, token, second, implement.id);
+
+      const refusal = await readErrorBody(refused);
+      expect(refused.status, refusal.text).toBe(409);
+      expect(refusal.code).toBe("invalid_state");
+      expect(refusal.message).toBe("Implement is already working on this.");
+      expect((await readSignal(base, token, second)).status).toBe("open");
+      expect(await countRuns(base, token)).toBe(1);
+
+      await handOff("hand-off", base, token, second, review.id);
+      expect(await countRuns(base, token)).toBe(2);
     });
   });
 

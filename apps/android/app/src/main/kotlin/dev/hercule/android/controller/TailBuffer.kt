@@ -1,6 +1,6 @@
 package dev.hercule.android.controller
 
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.StreamKind
 import dev.hercule.android.wire.TapItem
 import dev.hercule.android.wire.TranscriptRow
@@ -50,11 +50,11 @@ class TailBuffer {
     fun applyRows(rows: List<TranscriptRow>) {
         for (row in rows) {
             when (val event = row.event) {
-                is ProviderEvent.ItemCompleted -> {
+                is HarnessEvent.ItemCompleted -> {
                     tails -= event.itemId
                     skipped -= event.itemId
                 }
-                is ProviderEvent.ContentDelta -> {
+                is HarnessEvent.ContentDelta -> {
                     if (event.streamKind != StreamKind.AssistantText || event.itemId in skipped) continue
                     val tail = tails[event.itemId].orEmpty()
                     if (tail.startsWith(event.delta)) {
@@ -94,8 +94,8 @@ private fun findOpenItemIds(rows: List<TranscriptRow>): Set<String> {
     val open = LinkedHashSet<String>()
     for (row in rows) {
         when (val event = row.event) {
-            is ProviderEvent.ItemStarted -> open += event.itemId
-            is ProviderEvent.ItemCompleted -> open -= event.itemId
+            is HarnessEvent.ItemStarted -> open += event.itemId
+            is HarnessEvent.ItemCompleted -> open -= event.itemId
             else -> Unit
         }
     }

@@ -289,6 +289,25 @@ describe("install", () => {
     expect(actions).toEqual([]);
   });
 
+  it("refuses OTEL_EXPORTER_OTLP_ENDPOINT, which sets telemetry.otlp_endpoint", async () => {
+    expect(
+      await run(["install"], {
+        env: { HERCULE_HOME: home, OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:4318" },
+      }),
+    ).toBe(1);
+    expect(err).toEqual([
+      `hercule: OTEL_EXPORTER_OTLP_ENDPOINT is set, and the service reads only ${join(home, "config.toml")}. Put telemetry.otlp_endpoint in that file instead, then unset OTEL_EXPORTER_OTLP_ENDPOINT and run this again.`,
+    ]);
+    expect(actions).toEqual([]);
+  });
+
+  it("installs with an empty OTEL_EXPORTER_OTLP_ENDPOINT, which counts as unset", async () => {
+    expect(
+      await run(["install"], { env: { HERCULE_HOME: home, OTEL_EXPORTER_OTLP_ENDPOINT: "" } }),
+    ).toBe(0);
+    expect(err).toEqual([]);
+  });
+
   it("refuses a config.toml it cannot parse, before reaching the Supervisor", async () => {
     // The unit's process would stop at the same error at every start.
     writeFileSync(join(home, "config.toml"), "[data\n");

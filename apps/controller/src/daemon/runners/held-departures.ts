@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
 import { PromotionState } from "../../promotion";
 import { RunnerConnections } from "../../runners";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * Writes the held runner departures each time the controller starts serving

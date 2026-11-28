@@ -12,7 +12,6 @@ import { computeLengthAtStep, computeTextSizeStepPx } from "./evaluate-text-size
 import rowHeights from "./row-heights.css?raw";
 import { readLengths } from "../app/text-size";
 import { LIST_HEIGHT_PROPERTIES } from "../screens/list-pane/list-row-sizes";
-import { readIntakeListHeights } from "../screens/intake/list-heights";
 import { ITEM_HEIGHT_PROPERTIES } from "../shell/sidebar-items";
 
 /** The registered properties and their `initial-value`s, by name. */
@@ -44,9 +43,13 @@ describe("row-heights.css", () => {
       "--list-height-one-line-row": [40, 1],
       "--list-height-two-line-row": [52, 2],
       "--list-height-column-row": [46, 2],
-      "--intake-height-section": [40, 1],
-      "--intake-height-row": [52, 2],
-      "--tracking-height-row": [46, 2],
+      "--model-browser-height-row": [46, 2],
+      "--fleet-activity-height-day": [48, 1],
+      "--fleet-activity-height-entry": [35, 1],
+      "--fleet-activity-height-detail": [19, 1],
+      "--fleet-activity-height-last-detail": [28, 1],
+      "--fleet-running-height-work": [54, 2],
+      "--fleet-running-height-session": [46, 1],
     };
     expect([...initialValues.keys()].sort()).toEqual(Object.keys(rows).sort());
     for (const [name, [height, lines]] of Object.entries(rows)) {
@@ -98,9 +101,5 @@ describe("the heights of the default Text size", () => {
       twoLineRow: 52,
       columnRow: 46,
     });
-  });
-
-  it("are those of Intake's list and opened Tracking", () => {
-    expect(readIntakeListHeights()).toEqual({ section: 40, signalRow: 52, trackingRow: 46 });
   });
 });

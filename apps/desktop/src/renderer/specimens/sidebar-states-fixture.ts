@@ -66,7 +66,7 @@ import {
   CLAUDE_OPUS,
   CLAUDE_SONNET,
   GPT,
-  SPECIMEN_INSTANCES,
+  SPECIMEN_ACCOUNTS,
   SPECIMEN_NOW,
   STUDIO_MAC,
   type SpecimenModel,
@@ -796,7 +796,7 @@ const buildSceneRecords = (threads: ReadonlyArray<Session>): SidebarRecords => (
   workspaces: [...WORKSPACES, RESULT_WORKSPACE, THREE_DS_WORKSPACE],
   resources: [WEBSHOP_REPO, ONBOARDING_REPO],
   runners: [STUDIO_MAC, BUILD_BOX],
-  instances: SPECIMEN_INSTANCES,
+  accounts: SPECIMEN_ACCOUNTS,
   user: { username: "Rogier" },
 });
 

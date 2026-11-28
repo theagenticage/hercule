@@ -256,33 +256,52 @@ describe("the Discussion list", () => {
     ]);
   });
 
-  it("shows each Discussion's subject, its counts and its last Post, and marks an overlap", async () => {
+  it("shows each Discussion's subject, its counts and its last Post, and marks every row's kind", async () => {
     await openDiscussions();
 
+    const readMark = (cell: Element) =>
+      cell.classList.contains("kind-mark--overlap")
+        ? "overlap"
+        : cell.classList.contains("kind-mark--general")
+          ? "general"
+          : null;
     const readCells = (name: string) =>
       [...within(getList()).getByRole("link", { name }).children].map((cell) => ({
         text: cell.textContent,
-        isMark: cell.classList.contains("overlap-mark"),
+        mark: readMark(cell),
       }));
     // The mark, the subject with its code span, the sessions, the Posts, and the day or time.
     expect(readCells("Edits overlap in src/cart/totals.ts")).toEqual([
-      { text: "", isMark: true },
-      { text: "Edits overlap in src/cart/totals.ts", isMark: false },
-      { text: "3", isMark: false },
-      { text: "6", isMark: false },
-      { text: "09:41", isMark: false },
+      { text: "", mark: "overlap" },
+      { text: "Edits overlap in src/cart/totals.ts", mark: null },
+      { text: "3", mark: null },
+      { text: "6", mark: null },
+      { text: "09:41", mark: null },
     ]);
     expect(readCells("Who owns the price formatting helpers?")).toEqual([
-      { text: "", isMark: false },
-      { text: "Who owns the price formatting helpers?", isMark: false },
-      { text: "1", isMark: false },
-      { text: "1", isMark: false },
-      { text: "Sat", isMark: false },
+      { text: "", mark: "general" },
+      { text: "Who owns the price formatting helpers?", mark: null },
+      { text: "1", mark: null },
+      { text: "1", mark: null },
+      { text: "Sat", mark: null },
     ]);
     const code = within(getList()).getByRole("link", {
       name: "Edits overlap in src/cart/totals.ts",
     });
     expect(code.querySelector("code")?.textContent).toBe("src/cart/totals.ts");
+  });
+
+  it("sets a last Post written today in the rows' ink, and an older one in the numbers' faint ink", async () => {
+    await openDiscussions();
+
+    const readLastPost = (name: string) =>
+      within(getList()).getByRole("link", { name }).lastElementChild!;
+    const today = readLastPost("Edits overlap in src/cart/totals.ts");
+    const older = readLastPost("Who owns the price formatting helpers?");
+    expect(today.textContent).toBe("09:41");
+    expect(today.className).toBe("table-num is-today");
+    expect(older.textContent).toBe("Sat");
+    expect(older.className).toBe("table-num");
   });
 
   it("opens a Discussion from its row, and marks the row selected", async () => {
@@ -413,11 +432,15 @@ describe("the Discussion list's widths", () => {
       [...within(getList()).getByRole("link", { name }).children].map((part) => part.textContent);
     const readRow = (name: string) => within(getList()).getByRole("link", { name });
     expect(
-      readRow("Edits overlap in src/cart/totals.ts").querySelector(".column-mark .overlap-mark"),
+      readRow("Edits overlap in src/cart/totals.ts").querySelector(
+        ".column-mark .kind-mark--overlap",
+      ),
     ).toBeTruthy();
     expect(
-      readRow("Who owns the price formatting helpers?").querySelector(".overlap-mark"),
-    ).toBeNull();
+      readRow("Who owns the price formatting helpers?").querySelector(
+        ".column-mark .kind-mark--general",
+      ),
+    ).toBeTruthy();
     expect(readParts("Edits overlap in src/cart/totals.ts")).toEqual([
       "",
       "Edits overlap in src/cart/totals.ts6 posts · 3 sessions",
@@ -546,7 +569,7 @@ describe("an open Discussion", () => {
         .getAllByRole("listitem")
         .map((chip) => chip.textContent),
     ).toEqual(["acme/webshop", "3 sessions · 6 posts"]);
-    expect(open.querySelector(".open-lead .overlap-mark")).toBeTruthy();
+    expect(open.querySelector(".open-lead .kind-mark--overlap")).toBeTruthy();
   });
 
   it("lists the shared files with the faces and the names of the sessions that edited them", async () => {
@@ -571,8 +594,8 @@ describe("an open Discussion", () => {
     });
     expect(screen.queryByRole("heading", { name: /Shared files/ })).toBeNull();
     expect(screen.queryByRole("list", { name: "Shared files" })).toBeNull();
-    // A general Discussion has no overlap mark beside its subject.
-    expect(open.querySelector(".overlap-mark")).toBeNull();
+    // A general Discussion has no mark beside its subject.
+    expect(open.querySelector(".kind-mark")).toBeNull();
   });
 
   it("draws the Posts in order, each as its author's kind of Post", async () => {

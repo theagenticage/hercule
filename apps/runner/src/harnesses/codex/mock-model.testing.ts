@@ -1,0 +1,468 @@
+/**
+ * Runs a local Responses API fixture while Codex owns threads, tools and approvals.
+ *
+ * - `stopScenario` grows the tree the Stop tests need and holds the root's
+ *   later calls open.
+ * - `onWaitingChange` is called each time `waitingChildren` changes, so a test
+ *   can wait for a held call without polling.
+ */
+export const startMockModel = (
+  version: "v1" | "v2",
+  {
+    stopScenario = false,
+    onWaitingChange = () => {},
+  }: { readonly stopScenario?: boolean; readonly onWaitingChange?: () => void } = {},
+) => {
+  const calls = new Map<string, number>();
+  const children = new Set<string>();
+  const waitingChildren = new Set<string>();
+  let followupSteps: Array<Record<string, unknown>> = [];
+  let heldChildId: string | undefined;
+  let rootThreadId: string | undefined;
+  let branchThreadId: string | undefined;
+  let sequence = 0;
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    // A held response sends one chunk and then nothing until the test lets it
+    // go. Bun closes a connection after 10 idle seconds by default, which
+    // would make Codex reconnect in the middle of a test.
+    idleTimeout: 0,
+    fetch(request) {
+      if (request.method !== "POST") return Response.json({ data: [] });
+      const threadId = request.headers.get("thread-id")!;
+      rootThreadId ??= threadId;
+      const child = threadId !== rootThreadId;
+      if (child) children.add(threadId);
+      if (child && stopScenario) branchThreadId ??= threadId;
+      const call = (calls.get(threadId) ?? 0) + 1;
+      calls.set(threadId, call);
+      const responseId = `response-${++sequence}`;
+      const items: Array<Record<string, unknown>> = [];
+      if (!child && followupSteps.length > 0) {
+        items.push(followupSteps.shift()!);
+      } else if (!child && call === 2 && version === "v1") {
+        items.push({
+          type: "tool_search_call",
+          call_id: "discover-subagents",
+          execution: "client",
+          arguments: { query: "spawn_agent", limit: 1 },
+        });
+      } else if (!child && call === (version === "v1" ? 3 : 2)) {
+        for (const name of ["first", "second"]) {
+          items.push({
+            type: "function_call",
+            namespace: version === "v1" ? "multi_agent_v1" : "collaboration",
+            name: "spawn_agent",
+            call_id: `spawn-${name}`,
+            arguments: JSON.stringify(
+              version === "v1"
+                ? { message: `Child ${name}: ask approval, then finish.`, fork_context: true }
+                : {
+                    task_name: name,
+                    message: `Child ${name}: ask approval, then finish.`,
+                    fork_turns: "all",
+                  },
+            ),
+          });
+        }
+      } else if (stopScenario && threadId === branchThreadId && version === "v1" && call === 1) {
+        items.push({
+          type: "tool_search_call",
+          call_id: "discover-descendant",
+          execution: "client",
+          arguments: { query: "spawn_agent", limit: 1 },
+        });
+      } else if (
+        stopScenario &&
+        threadId === branchThreadId &&
+        call === (version === "v1" ? 2 : 1)
+      ) {
+        items.push({
+          type: "function_call",
+          namespace: version === "v1" ? "multi_agent_v1" : "collaboration",
+          name: "spawn_agent",
+          call_id: "spawn-descendant",
+          arguments: JSON.stringify(
+            version === "v1"
+              ? { message: "Descendant: ask approval, then finish.", fork_context: true }
+              : {
+                  task_name: "descendant",
+                  message: "Descendant: ask approval, then finish.",
+                  fork_turns: "all",
+                },
+          ),
+        });
+      } else if (
+        child &&
+        call === (stopScenario && threadId === branchThreadId ? (version === "v1" ? 3 : 2) : 1)
+      ) {
+        items.push({
+          type: "function_call",
+          name: "exec_command",
+          call_id: `command-${threadId}`,
+          arguments: JSON.stringify({
+            cmd: "printf approved",
+            sandbox_permissions: "require_escalated",
+            justification: "Run the isolated fixture command?",
+            login: false,
+          }),
+        });
+      } else {
+        items.push({
+          type: "message",
+          role: "assistant",
+          id: `message-${sequence}`,
+          content: [{ type: "output_text", text: child ? "Child done." : "Root done." }],
+        });
+      }
+      const inputTokens = child ? 300 : call === 1 ? 1_000 : 100;
+      const events = [
+        { type: "response.created", response: { id: responseId } },
+        ...items.map((item) => ({ type: "response.output_item.done", item })),
+        {
+          type: "response.completed",
+          response: {
+            id: responseId,
+            usage: {
+              input_tokens: inputTokens,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 10,
+              output_tokens_details: null,
+              total_tokens: inputTokens + 10,
+            },
+          },
+        },
+      ];
+      if (
+        threadId === heldChildId ||
+        (stopScenario && !child && call > (version === "v1" ? 3 : 2))
+      ) {
+        waitingChildren.add(threadId);
+        onWaitingChange();
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode(`data: ${JSON.stringify(events[0])}\n\n`),
+              );
+            },
+            cancel() {
+              waitingChildren.delete(threadId);
+              onWaitingChange();
+            },
+          }),
+          { headers: { "content-type": "text/event-stream" } },
+        );
+      }
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    children,
+    waitingChildren,
+    /** Schedules native continuation of one existing child, optionally holding its model response. */
+    scheduleFollowup: (childId: string, holdResponse: boolean) => {
+      heldChildId = holdResponse ? childId : undefined;
+      waitingChildren.clear();
+      onWaitingChange();
+      const callId = `followup-${sequence}`;
+      followupSteps =
+        version === "v2"
+          ? [
+              {
+                type: "function_call",
+                namespace: "collaboration",
+                name: "followup_task",
+                call_id: callId,
+                arguments: JSON.stringify({
+                  target: childId,
+                  message: "Continue the fixture task.",
+                }),
+              },
+            ]
+          : [
+              {
+                type: "tool_search_call",
+                call_id: `discover-${callId}`,
+                execution: "client",
+                arguments: { query: "resume_agent send_input", limit: 3 },
+              },
+              {
+                type: "function_call",
+                namespace: "multi_agent_v1",
+                name: "resume_agent",
+                call_id: `resume-${callId}`,
+                arguments: JSON.stringify({ id: childId }),
+              },
+              {
+                type: "function_call",
+                namespace: "multi_agent_v1",
+                name: "send_input",
+                call_id: callId,
+                arguments: JSON.stringify({
+                  target: childId,
+                  message: "Continue the fixture task.",
+                }),
+              },
+            ];
+    },
+    config: [
+      'model_provider = "fixture"',
+      'model = "gpt-5.4"',
+      "[features]",
+      "multi_agent = true",
+      `multi_agent_v2 = ${version === "v2"}`,
+      // The Stop tree runs three subagents at once: two children and one
+      // descendant. Under Codex's default thread limit, and even under a limit
+      // of exactly 3, Codex sometimes refuses the descendant's spawn with
+      // "agent thread limit reached", and the tree never grows its third
+      // level. A limit well above the tree's size leaves room for that.
+      ...(stopScenario
+        ? ["[agents]", "max_depth = 2", "max_concurrent_threads_per_session = 16"]
+        : []),
+      "[model_providers.fixture]",
+      'name = "Isolated fixture"',
+      `base_url = "${server.url.toString()}v1"`,
+      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+      'wire_api = "responses"',
+      "supports_websockets = false",
+    ].join("\n"),
+    stop: () => server.stop(true),
+  };
+};
+
+/** The model catalog entry that lets a fixture model call `request_user_input_async`. */
+export const ASYNC_QUESTION_CATALOG = {
+  models: [
+    {
+      slug: "gpt-5.4",
+      display_name: "Local fixture",
+      description: "Local model fixture",
+      supported_reasoning_levels: [],
+      shell_type: "unified_exec",
+      visibility: "list",
+      supported_in_api: true,
+      priority: 0,
+      support_verbosity: false,
+      truncation_policy: { mode: "tokens", limit: 10000 },
+      experimental_supported_tools: ["request_user_input_async"],
+      base_instructions: "Complete the isolated fixture task.",
+    },
+  ],
+};
+
+/**
+ * Runs a local Responses API fixture whose model asks one async question on
+ * its first call, says it is done on its second (after the tool's reply), and
+ * thanks the user on every call after that. `bodies` holds the JSON body of
+ * every request Codex made, so a test can read what the model was shown.
+ * `config` is the `config.toml` text that points Codex at the fixture.
+ */
+export const startAsyncQuestionModel = (title: string, options: ReadonlyArray<string>) => {
+  const bodies: Array<{ readonly input: ReadonlyArray<Record<string, unknown>> }> = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(request) {
+      if (request.method !== "POST") return Response.json({ data: [] });
+      bodies.push((await request.json()) as (typeof bodies)[number]);
+      const call = bodies.length;
+      const item =
+        call === 1
+          ? {
+              type: "function_call",
+              name: "request_user_input_async",
+              call_id: "call-async-question",
+              arguments: JSON.stringify({ questions: [{ title, options }] }),
+            }
+          : {
+              type: "message",
+              role: "assistant",
+              id: `message-${call}`,
+              content: [{ type: "output_text", text: call === 2 ? "Asked." : "Thanks." }],
+            };
+      const events = [
+        { type: "response.created", response: { id: `response-${call}` } },
+        { type: "response.output_item.done", item },
+        {
+          type: "response.completed",
+          response: {
+            id: `response-${call}`,
+            usage: {
+              input_tokens: 100,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 10,
+              output_tokens_details: null,
+              total_tokens: 110,
+            },
+          },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    bodies,
+    config: [
+      'model_provider = "fixture"',
+      'model = "gpt-5.4"',
+      "[model_providers.fixture]",
+      'name = "Isolated fixture"',
+      `base_url = "${server.url.toString()}v1"`,
+      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+      'wire_api = "responses"',
+      "supports_websockets = false",
+    ].join("\n"),
+    stop: () => server.stop(true),
+  };
+};
+
+/** One request Codex made to the scripted model, as `startScriptedModel` records it. */
+export interface ScriptedModelRequest {
+  /** The `thread-id` header: the Codex thread that made the request. */
+  readonly threadId: string;
+  readonly body: {
+    readonly input: ReadonlyArray<Record<string, unknown>>;
+    readonly tools: ReadonlyArray<Record<string, unknown>>;
+    /** Set on a request of Codex's automatic reviewer: a JSON output schema with a name. */
+    readonly text?: { readonly format?: { readonly name?: string } };
+  };
+}
+
+/**
+ * Runs a local Responses API fixture that answers each request with the items
+ * `script` returns for it, or with one assistant message ("done") when the
+ * script returns `undefined`. `requests` holds every request Codex made, in
+ * order, so a test can read what the model was shown and what it was sent
+ * back. `config` is the `config.toml` text that points Codex at the fixture.
+ */
+export const startScriptedModel = (
+  script: (request: ScriptedModelRequest) => ReadonlyArray<Record<string, unknown>> | undefined,
+) => {
+  const requests: Array<ScriptedModelRequest> = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    // Bun cuts a connection after ten idle seconds by default, which would make
+    // Codex reconnect in the middle of a test.
+    idleTimeout: 0,
+    async fetch(request) {
+      if (request.method !== "POST") return Response.json({ data: [] });
+      const asked: ScriptedModelRequest = {
+        threadId: request.headers.get("thread-id") ?? "",
+        body: (await request.json()) as ScriptedModelRequest["body"],
+      };
+      requests.push(asked);
+      const call = requests.length;
+      const items = script(asked) ?? [
+        {
+          type: "message",
+          role: "assistant",
+          id: `message-${call}`,
+          content: [{ type: "output_text", text: "done" }],
+        },
+      ];
+      const events = [
+        { type: "response.created", response: { id: `response-${call}` } },
+        ...items.map((item) => ({ type: "response.output_item.done", item })),
+        {
+          type: "response.completed",
+          response: {
+            id: `response-${call}`,
+            usage: {
+              input_tokens: 100,
+              input_tokens_details: { cached_tokens: 0 },
+              output_tokens: 10,
+              output_tokens_details: null,
+              total_tokens: 110,
+            },
+          },
+        },
+      ];
+      return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+  return {
+    requests,
+    config: [
+      'model_provider = "fixture"',
+      'model = "gpt-5.4"',
+      "[model_providers.fixture]",
+      'name = "Isolated fixture"',
+      `base_url = "${server.url.toString()}v1"`,
+      'env_key = "HERCULE_CODEX_FIXTURE_KEY"',
+      'wire_api = "responses"',
+      "supports_websockets = false",
+    ].join("\n"),
+    stop: () => server.stop(true),
+  };
+};
+
+/**
+ * Returns the tool a user message asks the model to call: the message
+ * `call <tool>` asks for that tool of the MCP Gateway entry. Returns
+ * `undefined` when the last input item is not such a message.
+ */
+const readCalledTool = (input: ReadonlyArray<Record<string, unknown>>): string | undefined => {
+  const last = input.at(-1);
+  if (last?.["role"] !== "user") return undefined;
+  const parts = last["content"] as ReadonlyArray<{ readonly text?: string }>;
+  return parts.flatMap((part) => /^call (\S+)$/.exec(part.text ?? "")?.[1] ?? [])[0];
+};
+
+/**
+ * Runs a scripted model fixture whose model calls an MCP tool when the user
+ * says `call <tool>`, and answers every other request with a short text. The
+ * tool belongs to the MCP Gateway entry, named `tools`, so Codex shows it to
+ * the model in the namespace `mcp__tools`.
+ *
+ * Codex's automatic reviewer asks the model too, with a JSON output schema.
+ * The fixture answers it with `reviewer.outcome`, which a test may change at
+ * any time.
+ */
+export const startMcpCallModel = () => {
+  let calls = 0;
+  const reviewer = { outcome: "allow" as "allow" | "deny" };
+  const model = startScriptedModel((request) => {
+    if (request.body.text?.format?.name === "codex_output_schema") {
+      return [
+        {
+          type: "message",
+          role: "assistant",
+          id: `message-review-${request.threadId}`,
+          content: [
+            {
+              type: "output_text",
+              text: JSON.stringify({
+                outcome: reviewer.outcome,
+                risk_level: "low",
+                user_authorization: "high",
+                rationale: "The fixture reviewer decides.",
+              }),
+            },
+          ],
+        },
+      ];
+    }
+    const tool = readCalledTool(request.body.input);
+    return tool === undefined
+      ? undefined
+      : [
+          {
+            type: "function_call",
+            namespace: "mcp__tools",
+            name: tool,
+            call_id: `call-${++calls}`,
+            arguments: "{}",
+          },
+        ];
+  });
+  return { ...model, reviewer };
+};

@@ -1,5 +1,5 @@
 /**
- * Sessions: one run of a provider-backed agent, and the stream of events it
+ * Sessions: one run of a harness-backed agent, and the stream of events it
  * leaves behind.
  *
  * This domain owns the session rows, their lifecycle, the inputs waiting on
@@ -9,6 +9,7 @@
  * that a request calls directly. It also builds the frames and makes the
  * status changes that the controller daemon calls while it talks to a runner.
  */
+export { ARCHIVED_REFUSAL, refuseArchived } from "./archived";
 export type { WaitEndedBy } from "./approval-notification";
 export {
   combineSessionObservers,
@@ -28,27 +29,33 @@ export {
   buildTimeouts,
   validateOptions,
 } from "./options";
-export { sessionRecordComposer } from "./records";
+export { buildOpenRequests, sessionRecordComposer } from "./records";
 export { validateAnswers, validateDecision } from "./responses";
 export { isResumeHeld } from "./resume-hold";
 export {
   readSessionOrFail,
   sessionRepository,
+  type BoardSession,
+  type BoardSessionTotals,
   type SessionAccess,
   type SessionRows,
   type StoredSession,
 } from "./repository";
 export {
+  ACCOUNT_DELETED,
   endStrandedInputs,
   SessionService,
   SessionServiceLayer,
   type StartRequest,
+  type TaskSource,
+  type TitleParts,
 } from "./service";
 export { attributeEvent } from "./stream";
 export { buildUnfinishedClause } from "./unfinished";
 export {
   agentExists,
   readAssistantTexts,
+  readRecentAssistantText,
   readTranscriptHead,
   readTranscriptRowsAfter,
 } from "./transcript-log";

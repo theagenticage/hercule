@@ -32,7 +32,7 @@ import {
   type Validation,
   type WorkflowAction,
 } from "@hercule/contract";
-import { nowIso, withTransaction } from "../db";
+import { announce, nowIso, withTransaction } from "../db";
 import { currentStamp, requireGrant } from "../actor";
 import { connectionStateRepository } from "../connections";
 import { AuditLog } from "../events";
@@ -96,6 +96,7 @@ const make = Effect.gen(function* () {
             ({ extensionPoint, id, definition }) => ({ extensionPoint, id, definition }),
           ),
           intake: yield* host.readPluginIntakeSettings(plugin.id, intake),
+          entityKinds: yield* host.listEntityKinds(plugin.id),
         } satisfies PluginDetail;
       }),
     );
@@ -177,6 +178,19 @@ const make = Effect.gen(function* () {
       );
     });
 
+  /**
+   * Starts or stops the plugin to match its stored state, then announces the
+   * plugin on the `plugin` topic. The write that came before was announced
+   * when it committed, which is before the plugin started, so a listener that
+   * read the plugin's status then found the old one. Announcing again after
+   * the status has settled lets it read the new one.
+   */
+  const refreshPlugin = (id: string): Effect.Effect<void, SqlError> =>
+    Effect.andThen(
+      host.refresh(id),
+      announce({ _tag: "record", topic: "plugin", id, kind: "updated" }),
+    );
+
   return {
     query: (): Effect.Effect<ReadonlyArray<PluginDetail>, ReadError> =>
       Effect.gen(function* () {
@@ -219,7 +233,7 @@ const make = Effect.gen(function* () {
             yield* writePluginChange(id, "plugin.enabled", (at) =>
               repository.setEnabled(id, true, at),
             );
-            yield* host.refresh(id);
+            yield* refreshPlugin(id);
             yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),
@@ -278,7 +292,7 @@ const make = Effect.gen(function* () {
             yield* writePluginChange(id, "plugin.configured", (at) =>
               repository.setConfig(id, config, at),
             );
-            if (stopped) yield* host.refresh(id);
+            if (stopped) yield* refreshPlugin(id);
             yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),
@@ -334,7 +348,7 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(createValidationError([{ path: [], message }], message));
             }
             yield* writePluginChange(id, "plugin.retried", () => Effect.void);
-            yield* host.refresh(id);
+            yield* refreshPlugin(id);
             yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),
@@ -360,7 +374,7 @@ const make = Effect.gen(function* () {
             yield* writePluginChange(id, "plugin.stateReset", () =>
               Effect.andThen(repository.kvWipe(id), connectionState.wipePluginState(id)),
             );
-            if (stopped) yield* host.refresh(id);
+            if (stopped) yield* refreshPlugin(id);
             yield* observer.pluginStatusChanged();
             return yield* readPluginOrFail(id);
           }),

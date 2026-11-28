@@ -1,0 +1,16 @@
+/* A quiet line on a page: a read that failed, with a button to read it again. */
+.desk-note {
+  margin: 0;
+  color: var(--muted);
+  font: var(--type-summary);
+}
+.desk-note button {
+  margin-left: 6px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+  text-decoration: underline;
+}
+.desk-note button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}

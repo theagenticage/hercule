@@ -1,14 +1,17 @@
 /**
  * Tests how the window appears at launch (spec 17, §Native behaviour). Main
- * keeps the window hidden until the page reports its first screen, and the
- * page reports only once the frame that draws that screen, fonts included,
- * has reached the window. So the first frame the user sees already holds the
- * whole first screen, never the bare background or a part of the screen.
+ * keeps the window hidden until the page reports its first screen. On macOS
+ * the page reports only once the frame that draws that screen, fonts
+ * included, has reached the window. On Linux a hidden window presents no
+ * frame, so the page reports once the screen is laid out, its fonts are
+ * loaded and two animation frames have run. Either way the first frame the
+ * user sees already holds the whole first screen, never the bare background
+ * or a part of the screen.
  *
  * The tests check that:
  *
- * - main shows the window on the page's report, after the frame was presented,
- *   and not on its own time limit;
+ * - main shows the window on the page's report, and not on its own time limit;
+ *   on macOS after the frame was presented, on Linux before;
  * - the "connecting" screen reports when the saved controller never answers;
  * - the page already holds the whole first screen, the focused field's focus
  *   ring included, when main calls `show()`: a capture of the page taken
@@ -60,6 +63,18 @@ function readPageEntryTime(page: Page, name: string): Promise<number | null> {
     const [entry] = performance.getEntriesByName(entryName);
     return entry === undefined ? null : performance.timeOrigin + entry.startTime;
   }, name);
+}
+
+/**
+ * Waits until the page has recorded the performance entry `name`, and returns
+ * when, as `readPageEntryTime` does. On Linux the page paints after the window
+ * shows, so on a loaded machine its entries can come after the launch returns.
+ */
+async function waitForPageEntryTime(page: Page, name: string): Promise<number> {
+  await expect
+    .poll(() => readPageEntryTime(page, name), { message: `the page never recorded ${name}` })
+    .not.toBeNull();
+  return (await readPageEntryTime(page, name))!;
 }
 
 /** The parts of Electron's `NativeImage` that the capture comparison reads. */
@@ -240,31 +255,43 @@ function compareShowCaptureWithSettled(app: ElectronApplication): Promise<{
   });
 }
 
-it("shows the window once its first screen has been presented, on the page's report", async () => {
+it("shows the window on the page's report, not on main's time limit", async () => {
   const { app, page, readMainOutput } = await launchForTest();
 
   // The page sets `first-screen` at the moment the frame that drew its first
-  // screen was presented, and reports to main after that. Main and the page
-  // measure time in separate processes, but both count from the machine's
-  // clock, so their times compare to well under a millisecond.
+  // screen was presented. Main and the page measure time in separate
+  // processes, but both count from the machine's clock, so their times
+  // compare to well under a millisecond.
   const windowShownAt = await readWindowShownTime(app);
-  const firstScreenAt = await readPageEntryTime(page, "first-screen");
-  const firstPaintAt = await readPageEntryTime(page, "first-paint");
+  // On Linux the mark comes after the show, when the frame the show caused is
+  // presented, so on a busy machine it can still be missing when the launch
+  // returns.
+  const firstScreenAt = await waitForPageEntryTime(page, "first-screen");
+  const firstPaintAt = await waitForPageEntryTime(page, "first-paint");
   expect(windowShownAt).not.toBeNull();
-  expect(firstScreenAt).not.toBeNull();
-  expect(firstPaintAt).not.toBeNull();
 
-  expect(
-    windowShownAt! - firstScreenAt!,
-    "the window showed before its first screen had been presented",
-  ).toBeGreaterThan(0);
+  if (process.platform === "linux") {
+    // A hidden window under X11 presents no frame, so the page reports
+    // before its frame is presented, and the frame it marks is the one that
+    // showing the window caused.
+    expect(
+      firstScreenAt - windowShownAt!,
+      "the first screen was marked as presented before the window was shown, and a hidden window presents nothing",
+    ).toBeGreaterThan(0);
+  } else {
+    // On macOS the page reports after its frame was presented.
+    expect(
+      windowShownAt! - firstScreenAt,
+      "the window showed before its first screen had been presented",
+    ).toBeGreaterThan(0);
+  }
   // Main logs the error just before it shows the window, and the launch
   // waits 200 ms after the show, so an error would have arrived by now.
   expect(readMainOutput()).not.toContain(SHOWN_WITHOUT_FIRST_SCREEN_ERROR);
   // Main's time limit fires at the earliest this long after the first paint.
   // A window shown sooner was shown by the page's report.
   expect(
-    windowShownAt! - firstPaintAt!,
+    windowShownAt! - firstPaintAt,
     "the window was shown by main's time limit, not by the page's report",
   ).toBeLessThan(FIRST_SCREEN_TIMEOUT_MS);
 });
@@ -280,11 +307,10 @@ it("shows the window on the connecting screen's report when the saved controller
   expect(await page.getByText(`Connecting to ${server.url}…`).isVisible()).toBe(true);
   expect(readMainOutput()).not.toContain(SHOWN_WITHOUT_FIRST_SCREEN_ERROR);
   const windowShownAt = await readWindowShownTime(app);
-  const firstPaintAt = await readPageEntryTime(page, "first-paint");
+  const firstPaintAt = await waitForPageEntryTime(page, "first-paint");
   expect(windowShownAt).not.toBeNull();
-  expect(firstPaintAt).not.toBeNull();
   expect(
-    windowShownAt! - firstPaintAt!,
+    windowShownAt! - firstPaintAt,
     "the window was shown by main's time limit, not by the connecting screen's report",
   ).toBeLessThan(FIRST_SCREEN_TIMEOUT_MS);
 });

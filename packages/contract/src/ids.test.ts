@@ -5,7 +5,6 @@ import {
   Id,
   listDecodeIssues,
   readShorthandDecoder,
-  SignalSnoozeInput,
   Timestamp,
   TimestampWithOffset,
 } from "./index";
@@ -79,7 +78,7 @@ describe("an exact time with its offset", () => {
   });
 
   it("is its own shorthand, so the command line converts the typed time the same way", () => {
-    expect(readShorthandDecoder(SignalSnoozeInput.fields.until)?.("2026-10-13T09:00+02:00")).toBe(
+    expect(readShorthandDecoder(TimestampWithOffset)?.("2026-10-13T09:00+02:00")).toBe(
       "2026-10-13T07:00:00.000Z",
     );
   });

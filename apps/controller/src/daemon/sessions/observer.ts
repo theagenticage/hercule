@@ -5,9 +5,11 @@
  * - The assistants domain writes an assistant's replies and notices into its
  *   conversation.
  * - The runs domain fails an agent step whose prompt no runner saw.
+ * - The tasks domain marks a Task's summary out of date when a turn of one of
+ *   its sessions ends.
  *
- * The sessions domain cannot import either domain, and the runs domain
- * already imports the sessions domain, so the observers are joined here.
+ * The sessions domain cannot import these domains, and they already import
+ * the sessions domain, so the observers are joined here.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -17,6 +19,8 @@ import { makeAssistantSessionObserver } from "../../assistants";
 import type { ConversationMessages } from "../../conversations";
 import { makeRunSessionObserver, RunService } from "../../runs";
 import { combineSessionObservers, SessionObserver } from "../../sessions";
+import type { TaskService } from "../../tasks";
+import { makeTaskSessionObserver } from "../tasks";
 import { makeLateReference, type LateReference } from "../late-reference";
 
 /**
@@ -56,7 +60,7 @@ export const RunServiceReferenceFill: Layer.Layer<never, never, RunServiceRefere
 export const SessionObserverLayer: Layer.Layer<
   SessionObserver,
   never,
-  SqlClient.SqlClient | ConversationMessages | RunServiceReference
+  SqlClient.SqlClient | ConversationMessages | RunServiceReference | TaskService
 > = Layer.effect(SessionObserver)(
   Effect.gen(function* () {
     const reference = yield* RunServiceReference;
@@ -68,6 +72,7 @@ export const SessionObserverLayer: Layer.Layer<
             runs.failStepWithDroppedPrompt(session, droppedIterations, message),
           ),
       }),
+      yield* makeTaskSessionObserver,
     ]);
   }),
 );

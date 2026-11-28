@@ -1,6 +1,6 @@
 /**
  * The texts that tell an agent inside a session about Hercule. Each text is the
- * same for every provider; each adapter delivers them to its harness in the
+ * same for every harness; each adapter delivers them to its harness in the
  * way that harness reads them (spec 06 section 9.3).
  *
  * - `SESSION_ORIENTATION` is short and always in the agent's instructions.
@@ -21,8 +21,12 @@
  * One section of the skill is the exception: "Discussions and the wiki" names
  * the commands an agent needs the moment another session reaches it, with an
  * example each, so it can act without first reading the help (spec 19 section
- * 7.2). The test checks that every command the section names exists.
+ * 7.2). The test checks that every command the section names exists. What
+ * belongs in a Wiki is not written out here: the section quotes the
+ * contract's `WIKI_WRITING_RULES`, which the session's start-up paragraph and
+ * the CLI's help quote too.
  */
+import { WIKI_WRITING_RULES } from "@hercule/contract";
 
 /**
  * The text every session starts with, placed first in its instructions. It is
@@ -32,11 +36,11 @@
  */
 export const SESSION_ORIENTATION = `This session runs inside Hercule, the platform that started it. The **hercule** CLI is on PATH, already signed in as this session, and \`hercule --help\` lists everything it can do. When this session has a GitHub token, \`gh\` always gets a fresh one; for another tool that reads \`GH_TOKEN\`, run \`token=$(hercule github-token) && GH_TOKEN=$token sometool\`.
 
-Other sessions are reached through Hercule. To start a session, on any provider or model, see \`hercule session spawn --help\`. To send a message to a session that exists, see \`hercule session input --help\`. If your harness has its own way to reach other sessions or agents outside this one, do not use it: Hercule would not see that work, and nobody could follow it. Your harness's own subagent tool, if it has one, starts a helper inside this session, and that is fine to use.`;
+Other sessions are reached through Hercule. To start a session, on any harness or model, see \`hercule session spawn --help\`. To send a message to a session that exists, see \`hercule session input --help\`. If your harness has its own way to reach other sessions or agents outside this one, do not use it: Hercule would not see that work, and nobody could follow it. Your harness's own subagent tool, if it has one, starts a helper inside this session, and that is fine to use.`;
 
 /** The one-paragraph summary a harness shows for the skill before the agent opens it. */
 export const SKILL_DESCRIPTION =
-  "Hercule is the platform this session lives in, and the hercule CLI on your PATH opens all of it - far more than this session's own tools. Start and message other agent sessions on any provider or model, read and update the tasks and projects this work belongs to, run workflows, keep memory, and use the connections Hercule holds. Open this skill whenever the work reaches beyond this session - to coordinate, delegate, hand off, or find context you do not have yet.";
+  "Hercule is the platform this session lives in, and the hercule CLI on your PATH opens all of it - far more than this session's own tools. Start and message other agent sessions on any harness or model, read and update the tasks and projects this work belongs to, run workflows, keep memory, and use the connections Hercule holds. Open this skill whenever the work reaches beyond this session - to coordinate, delegate, hand off, or find context you do not have yet.";
 
 /** The skill: how to use the `hercule` CLI from inside a session. */
 export const HERCULE_SKILL = `# hercule
@@ -85,14 +89,20 @@ for new posts, the first post to read from. Read it, then post who changes what:
   discussion on any subject in the repository you have checked out.
 
 The wiki holds what a repository's own docs do not say; those docs win over it.
+${WIKI_WRITING_RULES}
 
 - List a repository's pages: \`hercule wiki-page list --resource <id>\`. The
   repository's id is on its line in your instructions.
 - Read a page and its revision number: \`hercule wiki-page read <page-id>\`.
-- Write a new page, with its body on stdin:
-  \`hercule wiki-page create --slug release-process --title "Release process" --summary "How a release is cut" < page.md\`
 - Change a page by writing its whole body again, passing the revision you read:
   \`hercule wiki-page update <page-id> --expected-revision 3 < page.md\`. If the
   update is refused because the page changed since, read it again, merge your
   change into it, and update again with the new revision.
+- Write a new page, with its body on stdin:
+  \`hercule wiki-page create --slug release-process --title "Release process" --summary "How a release is cut" < page.md\`
+- Archive a page that no longer helps, after moving what is still worth
+  keeping to the page that takes over:
+  \`hercule wiki-page archive <page-id> --expected-revision 3 --reason "Merged into the page release-process"\`.
+  The page leaves the list but is not deleted. The command prints how to
+  bring it back, with \`hercule wiki-page restore\` and the page's full id.
 `;

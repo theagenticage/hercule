@@ -27,9 +27,7 @@ import {
   HOST_API,
   PluginError,
   PluginManifest,
-  ProviderDefinition,
   listChoiceFields,
-  listSecretFields,
   type ActivationContext,
   type ConnectionTypeContribution,
   type Deactivate,
@@ -38,6 +36,7 @@ import {
   type PluginCapability,
   type PluginMark,
   type PluginSecrets,
+  type QualifiedEntityKindDeclaration,
   type RegistrationHost,
 } from "@hercule/plugin-host";
 import {
@@ -67,6 +66,8 @@ import {
   type RegisteredConnectionType,
 } from "../connections";
 import { toPluginError, describeFieldIssues } from "./errors";
+import { registerHarnessContribution, type RegisteredHarness } from "./harnesses";
+import { registerProviderContribution, type RegisteredProvider } from "./providers";
 import {
   registerEventSourceContribution,
   type RegisteredEventKind,
@@ -76,7 +77,13 @@ import { applyIntakeOverrides, createPluginNotLoadedError, PluginIntake } from "
 import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
+import {
+  checkMcpServerConnectionTypes,
+  registerMcpServerContribution,
+  type RegisteredMcpServer,
+} from "./mcp-servers";
 import type { IngestExecutor } from "./ingest-executor";
+import type { EntityObservations } from "./entity-observations";
 import type { OpenSignals } from "./open-signals";
 import { PromotionState } from "../promotion";
 import { pluginRepository, type NewContribution } from "./repository";
@@ -94,6 +101,7 @@ import {
  * being activated without what it asked for.
  */
 const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
+  "harnesses",
   "providers",
   "kv",
   "secrets",
@@ -101,7 +109,9 @@ const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "event-sources",
   "events",
   "resources",
+  "entities",
   "workflow-actions",
+  "mcp-servers",
 ];
 
 /**
@@ -164,15 +174,7 @@ const toLoadedPlugin = (entry: Entry): LoadedPlugin => ({
 });
 
 /** The names of the extension points registered in this file. */
-const PROVIDER = "provider";
 const CONNECTION_TYPE = "connection-type";
-
-// An unknown key fails the decode rather than being stripped: dropping a field
-// the host does not know would make an unserializable value look accepted.
-const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
-  errors: "all",
-  onExcessProperty: "error",
-});
 
 // Decodes the serializable part of a connection type. `validate` is removed
 // first: it is a function, and no catalog column can hold one.
@@ -242,15 +244,6 @@ const decodeManifest = (manifest: unknown, index: number): Effect.Effect<PluginM
       ),
     ),
   );
-
-/**
- * A credential is entered per provider instance and stored under that
- * instance as its owner, so a secret field anywhere else has nowhere to be
- * stored. This is reported at registration, because the form that would show
- * the field is built from the schema rejected here.
- */
-const SECRET_FIELDS_ARE_PROVIDER_ONLY =
-  "a secret-valued config field is supported on a provider definition only";
 
 /**
  * Only a Connection's config form can load choices from the external account,
@@ -364,12 +357,6 @@ const inspectManifest = (
   if (missing !== undefined) {
     return Result.fail({ kind: "unimplementedCapability", capability: missing });
   }
-  if (listSecretFields(manifest.configSchema).length > 0) {
-    return Result.fail({
-      kind: "unsupportedConfigSchema",
-      message: truncateMessage(`the plugin's own config: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`),
-    });
-  }
   if (listChoiceFields(manifest.configSchema).length > 0) {
     return Result.fail({
       kind: "unsupportedConfigSchema",
@@ -389,64 +376,35 @@ const inspectManifest = (
  * caught in the caller's array, not by the primary key, where the failed
  * insert would lose every other plugin's rows too.
  *
- * A connection type's id joins the plugin's id and the type name it declared.
- * Two plugins may each declare a type `gmail` and still get two different
- * types, so no plugin can take a name from another.
+ * The id of a harness, a provider or a connection type joins the plugin's id and
+ * the word it declared. Two plugins may each declare a type `gmail` and still get two
+ * different types, so no plugin can take a name from another.
  */
 const buildRegistrationHost = (
   manifest: PluginManifest,
   declared: Array<NewContribution>,
-  live: Array<ProviderDefinition>,
+  liveHarnesses: Array<RegisteredHarness>,
+  liveProviders: Array<RegisteredProvider>,
   types: Array<Omit<RegisteredConnectionType, "feeds">>,
   kinds: Map<string, RegisteredEventKind>,
   sources: Array<RegisteredEventSource>,
   actions: Map<string, RegisteredWorkflowAction>,
+  mcpServers: Array<RegisteredMcpServer>,
+  otherPluginsSources: ReadonlyArray<RegisteredEventSource>,
 ): RegistrationHost => ({
+  ...(manifest.capabilities.includes("harnesses")
+    ? {
+        harnesses: {
+          register: (definition) =>
+            registerHarnessContribution(manifest, definition, declared, liveHarnesses),
+        },
+      }
+    : {}),
   ...(manifest.capabilities.includes("providers")
     ? {
         providers: {
-          register: (definition) =>
-            Effect.gen(function* () {
-              const decoded = yield* decodeProvider(definition).pipe(
-                Effect.mapError(toPluginError),
-              );
-              if (listChoiceFields(decoded.configSchema).length > 0) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the provider ${decoded.id}: ${CHOICES_ARE_CONNECTION_ONLY}`,
-                  }),
-                );
-              }
-              // The catalog stores the derived JSON Schema: the plugin's Effect
-              // Schema is an object no catalog reader can use.
-              const configSchema = deriveConfigJsonSchema(decoded.configSchema);
-              if (Result.isFailure(configSchema)) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the provider ${decoded.id}: ${configSchema.failure.message}`,
-                  }),
-                );
-              }
-              if (
-                declared.some((row) => row.extensionPoint === PROVIDER && row.id === decoded.id)
-              ) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the ${PROVIDER} contribution ${decoded.id} is registered twice`,
-                  }),
-                );
-              }
-              declared.push({
-                owner: manifest.id,
-                extensionPoint: PROVIDER,
-                id: decoded.id,
-                definition: { ...decoded, configSchema: configSchema.success },
-              });
-              // The catalog cannot hold an Effect Schema, so the definition is
-              // also kept in memory: decoding an instance's config needs the
-              // plugin's Effect Schema, not the JSON Schema derived from it.
-              live.push(decoded);
-            }),
+          register: (definition, options) =>
+            registerProviderContribution(manifest, definition, declared, liveProviders, options),
         },
       }
     : {}),
@@ -488,16 +446,6 @@ const buildRegistrationHost = (
               // A config schema goes into the catalog as the JSON Schema the
               // generated form is built from. The Effect Schema stays in memory,
               // where a connection's stored config is decoded against it.
-              if (
-                decoded.configSchema !== undefined &&
-                listSecretFields(decoded.configSchema).length > 0
-              ) {
-                return yield* Effect.fail(
-                  new PluginError({
-                    message: `the connection type ${type}: ${SECRET_FIELDS_ARE_PROVIDER_ONLY}`,
-                  }),
-                );
-              }
               if (
                 decoded.configSchema !== undefined &&
                 listChoices === undefined &&
@@ -549,7 +497,14 @@ const buildRegistrationHost = (
     ? {
         eventSources: {
           register: (contribution) =>
-            registerEventSourceContribution(manifest, contribution, declared, kinds, sources),
+            registerEventSourceContribution(
+              manifest,
+              contribution,
+              declared,
+              kinds,
+              sources,
+              otherPluginsSources,
+            ),
         },
       }
     : {}),
@@ -558,6 +513,14 @@ const buildRegistrationHost = (
         workflowActions: {
           register: (contribution) =>
             registerWorkflowActionContribution(manifest.id, contribution, declared, actions),
+        },
+      }
+    : {}),
+  ...(manifest.capabilities.includes("mcp-servers")
+    ? {
+        mcpServers: {
+          register: (contribution) =>
+            registerMcpServerContribution(manifest, contribution, declared, mcpServers),
         },
       }
     : {}),
@@ -575,16 +538,20 @@ const make = Effect.gen(function* () {
   const entries = yield* Ref.make<ReadonlyMap<string, Entry>>(new Map());
   // Not guarded by `gate`, unlike everything else here: registration has no
   // side effects and runs only at boot, so this does not change after boot.
-  const providers = yield* Ref.make<ReadonlyArray<ProviderDefinition>>([]);
-  /** Every event kind this boot registered, by name. Set at boot, like the providers. */
+  const harnesses = yield* Ref.make<ReadonlyArray<RegisteredHarness>>([]);
+  /** Every provider this boot registered, in registry order. Set at boot, like the harnesses. */
+  const providers = yield* Ref.make<ReadonlyArray<RegisteredProvider>>([]);
+  /** Every event kind this boot registered, by name. Set at boot, like the harnesses. */
   const eventKinds = yield* Ref.make<ReadonlyMap<string, RegisteredEventKind>>(new Map());
-  /** Every event source this boot registered, in registry order. Set at boot, like the providers. */
+  /** Every event source this boot registered, in registry order. Set at boot, like the harnesses. */
   const eventSources = yield* Ref.make<ReadonlyArray<RegisteredEventSource>>([]);
   /**
    * Every workflow action this boot registered, built-in ones included, keyed
-   * by the qualified id a step uses. Set at boot, like the providers.
+   * by the qualified id a step uses. Set at boot, like the harnesses.
    */
   const workflowActions = yield* Ref.make<ReadonlyMap<string, RegisteredWorkflowAction>>(new Map());
+  /** Every MCP server this boot registered, in registry order. Set at boot, like the harnesses. */
+  const mcpServers = yield* Ref.make<ReadonlyArray<RegisteredMcpServer>>([]);
   /**
    * One permit for the whole host, held across a lifecycle change's reads,
    * plugin hooks and writes. Without it, two changes could interleave while
@@ -760,17 +727,39 @@ const make = Effect.gen(function* () {
     plugin: Plugin,
     manifest: PluginManifest,
     declared: Array<NewContribution>,
-    live: Array<ProviderDefinition>,
+    liveHarnesses: Array<RegisteredHarness>,
+    liveProviders: Array<RegisteredProvider>,
     types: Array<Omit<RegisteredConnectionType, "feeds">>,
     kinds: Map<string, RegisteredEventKind>,
     sources: Array<RegisteredEventSource>,
     actions: Map<string, RegisteredWorkflowAction>,
+    servers: Array<RegisteredMcpServer>,
+    otherPluginsSources: ReadonlyArray<RegisteredEventSource>,
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
       plugin.register(
-        buildRegistrationHost(manifest, declared, live, types, kinds, sources, actions),
+        buildRegistrationHost(
+          manifest,
+          declared,
+          liveHarnesses,
+          liveProviders,
+          types,
+          kinds,
+          sources,
+          actions,
+          servers,
+          otherPluginsSources,
+        ),
       ),
     ).pipe(
+      Effect.andThen(
+        Effect.suspend(() =>
+          checkMcpServerConnectionTypes(
+            servers,
+            types.map((type) => type.contribution.type),
+          ),
+        ),
+      ),
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
         Effect.succeed<PluginStatus>({ _tag: "errored", message: summarizeCause(cause) }),
@@ -913,6 +902,16 @@ const make = Effect.gen(function* () {
       };
     });
 
+  /**
+   * Returns the event sources of every active plugin, in registry order. The
+   * ingest loops open these sources only: a plugin that is disabled, or that
+   * failed to start, ingests nothing.
+   */
+  const listActiveEventSources = (): Effect.Effect<ReadonlyArray<RegisteredEventSource>> =>
+    Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
+      sources.filter((source) => active.has(source.pluginId)),
+    );
+
   return {
     /**
      * Loads the registry in four steps: check each manifest, register, write
@@ -926,11 +925,13 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         const booted = new Map<string, Entry>();
         const catalog: Array<NewContribution> = [];
-        const registeredProviders: Array<ProviderDefinition> = [];
+        const registeredHarnesses: Array<RegisteredHarness> = [];
+        const registeredProviders: Array<RegisteredProvider> = [];
         const registeredTypes: Array<RegisteredConnectionType> = [];
         const registeredKinds = new Map<string, RegisteredEventKind>();
         const registeredSources: Array<RegisteredEventSource> = [];
         const registeredActions = new Map<string, RegisteredWorkflowAction>();
+        const registeredServers: Array<RegisteredMcpServer> = [];
         // The built-in actions go into the same catalog as the plugins'
         // actions, so every reader finds all actions in one list.
         registerBuiltInWorkflowActions(catalog, registeredActions);
@@ -978,27 +979,33 @@ const make = Effect.gen(function* () {
           }
 
           const declared: Array<NewContribution> = [];
-          const live: Array<ProviderDefinition> = [];
+          const liveHarnesses: Array<RegisteredHarness> = [];
+          const liveProviders: Array<RegisteredProvider> = [];
           // A plugin may register a type's event source before or after the
           // type itself, so each type gets its feeds once the pass is over.
           const types: Array<Omit<RegisteredConnectionType, "feeds">> = [];
           const kinds = new Map<string, RegisteredEventKind>();
           const sources: Array<RegisteredEventSource> = [];
           const actions = new Map<string, RegisteredWorkflowAction>();
+          const servers: Array<RegisteredMcpServer> = [];
           const status = yield* registerPass(
             plugin,
             manifest,
             declared,
-            live,
+            liveHarnesses,
+            liveProviders,
             types,
             kinds,
             sources,
             actions,
+            servers,
+            registeredSources,
           );
           const registered = status._tag !== "errored";
           if (registered) {
             catalog.push(...declared);
-            registeredProviders.push(...live);
+            registeredHarnesses.push(...liveHarnesses);
+            registeredProviders.push(...liveProviders);
             registeredTypes.push(
               ...types.map((type) => ({
                 ...type,
@@ -1010,6 +1017,7 @@ const make = Effect.gen(function* () {
             for (const [kind, entry] of kinds) registeredKinds.set(kind, entry);
             registeredSources.push(...sources);
             for (const [id, action] of actions) registeredActions.set(id, action);
+            registeredServers.push(...servers);
           }
           booted.set(manifest.id, {
             ...facts,
@@ -1029,10 +1037,12 @@ const make = Effect.gen(function* () {
           }),
         );
         yield* Ref.set(entries, booted);
+        yield* Ref.set(harnesses, registeredHarnesses);
         yield* Ref.set(providers, registeredProviders);
         yield* Ref.set(eventKinds, registeredKinds);
         yield* Ref.set(eventSources, registeredSources);
         yield* Ref.set(workflowActions, registeredActions);
+        yield* Ref.set(mcpServers, registeredServers);
         yield* connectionTypes.replace(registeredTypes);
 
         yield* gate.withPermits(1)(
@@ -1055,8 +1065,11 @@ const make = Effect.gen(function* () {
     loaded: (): Effect.Effect<ReadonlyArray<LoadedPlugin>> =>
       Effect.map(Ref.get(entries), (booted) => [...booted.values()].map(toLoadedPlugin)),
 
+    /** Returns every harness this boot registered, in registry order. */
+    harnesses: (): Effect.Effect<ReadonlyArray<RegisteredHarness>> => Ref.get(harnesses),
+
     /** Returns every provider this boot registered, in registry order. */
-    providers: (): Effect.Effect<ReadonlyArray<ProviderDefinition>> => Ref.get(providers),
+    providers: (): Effect.Effect<ReadonlyArray<RegisteredProvider>> => Ref.get(providers),
 
     /** Returns every event kind this boot registered, by name. */
     eventKinds: (): Effect.Effect<ReadonlyMap<string, RegisteredEventKind>> => Ref.get(eventKinds),
@@ -1071,17 +1084,24 @@ const make = Effect.gen(function* () {
         [...kinds.values()].filter((kind) => active.has(kind.pluginId)),
       ),
 
-    /**
-     * Returns the event sources of every active plugin, in registry order. The
-     * ingest loops open these sources only: a plugin that is disabled, or that
-     * failed to start, ingests nothing.
-     */
-    listActiveEventSources: (): Effect.Effect<ReadonlyArray<RegisteredEventSource>> =>
-      Effect.map(Effect.zip(Ref.get(eventSources), listActivePluginIds), ([sources, active]) =>
-        sources.filter((source) => active.has(source.pluginId)),
-      ),
+    listActiveEventSources,
 
     readDefaultIntakeSettings,
+
+    /**
+     * Returns the entity kinds a plugin declares, qualified, in the order it
+     * declares them, whatever the status of the plugin. They are empty for a
+     * plugin whose registration failed or was refused, because none of its
+     * sources was registered.
+     */
+    listEntityKinds: (
+      pluginId: string,
+    ): Effect.Effect<ReadonlyArray<QualifiedEntityKindDeclaration>> =>
+      Effect.map(Ref.get(eventSources), (sources) =>
+        sources
+          .filter((source) => source.pluginId === pluginId)
+          .flatMap((source) => source.entityKinds),
+      ),
 
     /**
      * Returns the Intake settings in effect at the plugin's level: the
@@ -1148,6 +1168,19 @@ const make = Effect.gen(function* () {
      */
     findWorkflowAction: (id: string): Effect.Effect<Option.Option<RegisteredWorkflowAction>> =>
       Effect.map(Ref.get(workflowActions), (actions) => Option.fromUndefinedOr(actions.get(id))),
+
+    /**
+     * Returns the MCP server with this qualified id, whatever the status of
+     * its plugin, or `None` when no plugin this boot loaded registered it. The
+     * caller decides what a plugin that is not active means, with `isActive`.
+     */
+    findMcpServer: (id: string): Effect.Effect<Option.Option<RegisteredMcpServer>> =>
+      Effect.map(Ref.get(mcpServers), (servers) =>
+        Option.fromUndefinedOr(servers.find((server) => server.id === id)),
+      ),
+
+    /** Returns every MCP server this boot registered, whatever the status of its plugin. */
+    listMcpServers: (): Effect.Effect<ReadonlyArray<RegisteredMcpServer>> => Ref.get(mcpServers),
 
     /** Checks whether the plugin is running, as `listActivePluginIds` defines it. */
     isActive: (pluginId: string): Effect.Effect<boolean> =>
@@ -1258,6 +1291,7 @@ export const PluginHostLayer: Layer.Layer<
   | ConnectionTypes
   | IngestExecutor
   | OpenSignals
+  | EntityObservations
   | PromotionState
 > = Layer.mergeAll(ActivePluginsLayer, PluginIntakeLayer).pipe(
   Layer.provideMerge(Layer.effect(PluginHost)(make).pipe(Layer.provideMerge(IngestLoopsLayer))),

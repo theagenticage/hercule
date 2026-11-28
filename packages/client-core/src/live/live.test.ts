@@ -443,6 +443,58 @@ describe("createLive", () => {
     );
   });
 
+  it("invalidates only the Work board, the pushed Task's detail and the merge checks for a derived task push", async () => {
+    const { fetch } = stubTicketServer();
+    const started = createSupervisor(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("task", (keys) => invalidations.push(keys));
+    started.start();
+    await settleTimers();
+
+    const socket = readLastSocket();
+    const call = socket.calls("subscribe")[0];
+    assert.isDefined(call);
+    socket.chunk(call?.id, [
+      { _tag: "invalidate", ids: ["task-1"], kind: "updated", derived: true },
+    ]);
+    await settleTimers();
+    assert.deepStrictEqual(invalidations[1], [
+      queryKeys.workBoard(),
+      queryKeys.taskDetail("task-1"),
+      queryKeys.mergeCheck(),
+    ]);
+  });
+
+  it("invalidates the projects and the settings only for an MCP server push that reports a delete", async () => {
+    const { fetch } = stubTicketServer();
+    const started = createSupervisor(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("mcpServer", (keys) => invalidations.push(keys));
+    started.start();
+    await settleTimers();
+
+    const socket = readLastSocket();
+    const call = socket.calls("subscribe")[0];
+    assert.isDefined(call);
+    socket.chunk(call?.id, [
+      { _tag: "invalidate", ids: ["s-1"], kind: "updated" },
+      { _tag: "invalidate", ids: ["s-1"], kind: "deleted" },
+    ]);
+    await settleTimers();
+
+    // invalidations[0] is the first push, which reads every key of the topic.
+    assert.deepStrictEqual(invalidations[0], [queryKeys.mcpServers(), queryKeys.mcpServer()]);
+    assert.deepStrictEqual(invalidations[1], [queryKeys.mcpServers(), queryKeys.mcpServer("s-1")]);
+    assert.deepStrictEqual(invalidations[2], [
+      queryKeys.mcpServers(),
+      queryKeys.mcpServer("s-1"),
+      queryKeys.projects(),
+      queryKeys.settings(),
+    ]);
+  });
+
   it("invalidates the current session of each conversation a session push names", async () => {
     const { fetch } = stubTicketServer();
     const started = createSupervisor(fetch);
@@ -977,24 +1029,27 @@ describe("createLive", () => {
 });
 
 describe("buildQueryKeys", () => {
-  it("maps a task push to the list prefix, one detail key per id, Tracking's snapshot, each Tracking pane's read and Your work", () => {
+  it("maps a task push to the list prefix, one detail key per id and the Inbox", () => {
     assert.deepStrictEqual(buildQueryKeys("task", ["a", "b"]), [
       ["tasks"],
       ["task", "a"],
       ["task", "b"],
-      ["tracking"],
-      ["trackingDetail", "a"],
-      ["trackingDetail", "b"],
-      ["your-work"],
+      ["inbox"],
+      ["inbox-count"],
+      ["external-entity"],
+      ["entity-suggestions"],
+      ["mergeCheck"],
     ]);
 
     // The same key builders the task queries use.
     assert.deepStrictEqual(buildQueryKeys("task", ["a"]), [
       queryKeys.tasks(),
       queryKeys.task("a"),
-      queryKeys.tracking(),
-      queryKeys.trackingDetail("a"),
-      queryKeys.yourWork(),
+      queryKeys.inbox(),
+      queryKeys.inboxCount(),
+      queryKeys.externalEntity(),
+      queryKeys.entitySuggestions(),
+      queryKeys.mergeCheck(),
     ]);
   });
 
@@ -1002,17 +1057,20 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("task", []), [
       ["tasks"],
       ["task"],
-      ["tracking"],
-      ["trackingDetail"],
-      ["your-work"],
+      ["inbox"],
+      ["inbox-count"],
+      ["external-entity"],
+      ["entity-suggestions"],
+      ["mergeCheck"],
     ]);
   });
 
-  it("maps a runner push to the runner list, the page of each runner in it, and the controller", () => {
+  it("maps a runner push to the runner list, the page of each runner in it, the harnesses and the controller", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", ["r1", "r2"]), [
       ["runners"],
       ["runner", "r1"],
       ["runner", "r2"],
+      ["harnesses"],
       ["controller"],
     ]);
 
@@ -1020,21 +1078,29 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("runner", ["r1"]), [
       queryKeys.runners(),
       queryKeys.runner("r1"),
+      queryKeys.harnesses(),
       queryKeys.controller(),
     ]);
 
     // A push with no ids means any runner may have changed.
-    assert.deepStrictEqual(buildQueryKeys("runner", []), [["runners"], ["runner"], ["controller"]]);
-  });
-
-  it("maps a provider push to the instance list and the controller, whose text generation status follows logins", () => {
-    assert.deepStrictEqual(buildQueryKeys("provider", ["codex"]), [
-      queryKeys.providers(),
-      queryKeys.controller(),
+    assert.deepStrictEqual(buildQueryKeys("runner", []), [
+      ["runners"],
+      ["runner"],
+      ["harnesses"],
+      ["controller"],
     ]);
   });
 
-  it("maps a workflow push to the workflow list, the page of each workflow in it, every trigger list, and every signal", () => {
+  it("maps a provider push to the account list, the model profiles, the controller, and the harness list, whose version verdicts come from the probes", () => {
+    assert.deepStrictEqual(buildQueryKeys("provider", ["codex"]), [
+      queryKeys.providerAccounts(),
+      queryKeys.modelProfiles(),
+      queryKeys.controller(),
+      queryKeys.harnesses(),
+    ]);
+  });
+
+  it("maps a workflow push to the workflow list, the page of each workflow in it, every trigger list, every signal, and the Inbox and entity panes, whose offers come from the workflows", () => {
     assert.deepStrictEqual(buildQueryKeys("workflow", ["w1", "w2"]), [
       queryKeys.workflows(),
       queryKeys.workflow("w1"),
@@ -1042,6 +1108,8 @@ describe("buildQueryKeys", () => {
       queryKeys.triggers(),
       queryKeys.signals(),
       queryKeys.signal(),
+      queryKeys.inbox(),
+      queryKeys.externalEntity(),
     ]);
 
     // A push with no ids means any workflow may have changed.

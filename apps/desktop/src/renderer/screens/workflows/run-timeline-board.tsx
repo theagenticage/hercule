@@ -32,7 +32,7 @@ import { hasRunMark } from "@hercule/client-core/run-marks";
 import { formatPlace } from "./axis-place";
 import { useListTime } from "./list-time";
 import { isAnimationPlaying, isMotionReduced } from "./change-motion";
-import { ViewSwitch, type ViewChoice } from "./view-switch";
+import { ViewSwitch, type ViewChoice } from "../view-switch";
 import { useDurationText } from "../../app/age-clock";
 import { useIsOnScreen, useScreenWatcher, type ScreenWatcher } from "../../app/screen-watcher";
 import { ChevronLeftIcon } from "../../icons/chevron-left";

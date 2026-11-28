@@ -11,10 +11,9 @@ import kotlinx.serialization.Serializable
 data class Assistant(
     val id: String,
     val name: String,
-    val instanceId: String,
     val permissionProfileId: String,
     val accessMode: AccessMode,
-    /** Null means the provider instance's default model. */
+    /** Null means the default model of the assistant's Provider Account. */
     val model: ModelSelection?,
     val createdAt: Instant,
     val updatedAt: Instant,

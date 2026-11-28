@@ -17,9 +17,6 @@
 import type { AnswerPlace } from "@hercule/plugin-host";
 import type { Grant } from "./grants";
 
-/** The prefix every route carries. */
-export const API_PREFIX = "/api/v1";
-
 /**
  * What a caller must hold. A grant always contains a dot, so the three markers
  * can never collide with one:
@@ -48,12 +45,20 @@ export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  * `bound-operations.test.ts` refuses it when it is too dangerous for one click.
  * Which operations a workflow step may call is decided by the built-in
  * actions, not by this field.
+ *
+ * `carriesSecret` marks an operation whose input can carry a secret although
+ * its grant does not show it: the grant family of `requires` already says so
+ * for the `credential`, `secret` and `infra` families (see `canCarrySecrets`).
+ * `mcp.manage` also covers operations that carry none, so
+ * `mcpServer.create`, `mcpServer.setToken` and `mcpServer.finishSignIn`, which
+ * take a token or a sign-in code, set it.
  */
 interface OperationRow {
   readonly requires: Requirement;
   readonly method: Method;
   readonly path: string;
   readonly readOnly?: true;
+  readonly carriesSecret?: true;
   readonly usableIn?: readonly [AnswerPlace, ...ReadonlyArray<AnswerPlace>];
 }
 
@@ -131,22 +136,24 @@ const TABLE = {
   },
 
   "task.query": { requires: "task.read", method: "GET", path: "/api/v1/tasks" },
-  // Reads the Tasks and the runs of the work handed off from Intake, so the
-  // service also needs `run.read`.
-  "task.queryTracking": {
+  // Reads a Thread's open question and the runs of each Task as well as the
+  // Tasks, so a caller also needs `session.query` and `run.query` (the grants
+  // `session.read` and `run.read`). A caller without them gets `Forbidden`,
+  // not a thinner board. A GET only reads, so the row needs no `readOnly`.
+  "task.queryBoard": { requires: "task.read", method: "GET", path: "/api/v1/tasks/board" },
+  // Reads whether any live Task has a failed run, so the service also needs
+  // `run.query`.
+  "task.readAttention": {
     requires: "task.read",
     method: "GET",
-    path: "/api/v1/tasks/tracking",
+    path: "/api/v1/tasks/attention",
   },
-  // Reads the runs of the handed-off Tasks as well as the Tasks, so the service
-  // also needs `run.read`.
-  "task.queryLegs": { requires: "task.read", method: "GET", path: "/api/v1/tasks/legs" },
-  // Reads the runs of one Task as well as the Task, so the service also needs
-  // `run.read`.
-  "task.readTracking": {
+  // Reads a Task's sessions, their open Requests and its runs, so the service
+  // also needs `session.query` and `run.query`, as `task.queryBoard` does.
+  "task.readDetail": {
     requires: "task.read",
     method: "GET",
-    path: "/api/v1/tasks/:id/tracking",
+    path: "/api/v1/tasks/:id/detail",
   },
   "task.read": { requires: "task.read", method: "GET", path: "/api/v1/tasks/:id" },
   "task.create": {
@@ -161,7 +168,71 @@ const TABLE = {
     path: "/api/v1/tasks/:id",
     usableIn: ["notification.answer", "signal.answer"],
   },
+  "task.move": { requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/move" },
+  "task.linkEntity": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/entities/link",
+  },
+  "task.unlinkEntity": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/entities/unlink",
+  },
+  // Merging and undoing a Try again are the user's own corrections: a session
+  // token is refused whatever its profile holds.
+  "task.merge": { requires: "task.update", method: "POST", path: "/api/v1/tasks/:id/merge" },
+  // Adding and removing a blocker are `task.update` writes, so a session may
+  // set one. The merge check only reads.
+  "task.addBlocker": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/blockers",
+  },
+  "task.removeBlocker": {
+    requires: "task.update",
+    method: "DELETE",
+    path: "/api/v1/tasks/:id/blockers/:blockedByTaskId",
+  },
+  "task.checkMerge": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/tasks/:id/merge-check",
+  },
+  "task.undoTryAgain": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/tasks/:id/try-again/undo",
+  },
   "task.delete": { requires: "task.delete", method: "DELETE", path: "/api/v1/tasks/:id" },
+
+  // An Initiative has no grant family of its own: it reuses `task.read` and
+  // `task.update`, as an External Entity does. Every write is the user's
+  // only, which the service checks, so a session is refused whatever its
+  // profile holds.
+  "initiative.query": { requires: "task.read", method: "GET", path: "/api/v1/initiatives" },
+  "initiative.read": { requires: "task.read", method: "GET", path: "/api/v1/initiatives/:id" },
+  "initiative.create": { requires: "task.update", method: "POST", path: "/api/v1/initiatives" },
+  "initiative.update": {
+    requires: "task.update",
+    method: "PATCH",
+    path: "/api/v1/initiatives/:id",
+  },
+  "initiative.close": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/initiatives/:id/close",
+  },
+  "initiative.reopen": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/initiatives/:id/reopen",
+  },
+  "initiative.delete": {
+    requires: "task.update",
+    method: "DELETE",
+    path: "/api/v1/initiatives/:id",
+  },
 
   "notification.query": {
     requires: "notification.read",
@@ -190,12 +261,6 @@ const TABLE = {
   },
 
   "signal.query": { requires: "signal.read", method: "GET", path: "/api/v1/signals" },
-  // Reads Task titles, so the service also needs `task.read`.
-  "signal.queryYourWork": {
-    requires: "signal.read",
-    method: "GET",
-    path: "/api/v1/signals/your-work",
-  },
   "signal.read": { requires: "signal.read", method: "GET", path: "/api/v1/signals/:id" },
   // Raising is a verb on signals with no signal to act on yet, so its path is
   // the collection's plus the verb, as `run.start`'s is.
@@ -213,23 +278,148 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/signals/:id/withdraw",
   },
-  // The four moves that send nothing to the source take a list of ids, so
-  // their paths are the collection's plus the verb.
+  // Done sends nothing to the source and takes a list of ids, so its path is
+  // the collection's plus the verb.
   "signal.markDone": {
     requires: "signal.write",
     method: "POST",
     path: "/api/v1/signals/mark-done",
   },
-  "signal.snooze": { requires: "signal.write", method: "POST", path: "/api/v1/signals/snooze" },
-  "signal.unsnooze": {
-    requires: "signal.write",
+  // An External Entity has no grant family of its own: the Inbox is the
+  // user's view of what concerns them, and a card becomes a Task, so reading
+  // uses `task.read` and every move uses `task.update`, as `modelProfile`
+  // reuses `infra.*`. Take on, undo, dismiss, restore, search, add, link and
+  // unlink are the user's only, which the service checks. Search also needs the
+  // Connection read grant, because it reads through the user's Connections.
+  // The Inbox and the detail show the text of signals, so `queryInbox`,
+  // `countInbox` and `read` also need `signal.query`, which the service checks
+  // beside the `task.read` that this table checks. `readInboxOutline` and
+  // `suggestInboxValues` need `connection.query` too, because they name accounts.
+  // `queryInbox` also needs `workflow.query`, `connection.query` and
+  // `run.query`, for the offers and the workflows running on a card's Task.
+  "externalEntity.queryInbox": {
+    requires: "task.read",
     method: "POST",
-    path: "/api/v1/signals/unsnooze",
+    path: "/api/v1/external-entities/inbox/query",
   },
-  "signal.lowerPriority": {
-    requires: "signal.write",
+  // Reads the values of one field among a list's things, so the service also
+  // checks `signal.query`, as `queryInbox` does, and `connection.query`, because
+  // the `account` field's values are account labels.
+  "externalEntity.suggestInboxValues": {
+    requires: "task.read",
     method: "POST",
-    path: "/api/v1/signals/lower-priority",
+    path: "/api/v1/external-entities/inbox/values",
+  },
+  // Reads the group of one thing: its members and the links between them. It
+  // shows no signal text, but a thing is on the Inbox because of its signals,
+  // so the service also checks `signal.query`, as `countInbox` does.
+  "externalEntity.readInboxGroup": {
+    requires: "task.read",
+    method: "POST",
+    path: "/api/v1/external-entities/inbox/group",
+  },
+  "externalEntity.countInbox": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/inbox/count",
+  },
+  "externalEntity.readInboxOutline": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/inbox/outline",
+  },
+  // Names a Project and a Resource, so the service also checks `project.read`
+  // and `resource.read`. A POST that reads and stores nothing.
+  "externalEntity.matchProject": {
+    requires: "task.read",
+    method: "POST",
+    path: "/api/v1/external-entities/match-project",
+  },
+  // The card of each thing, from stored record data only: no signal text,
+  // offer or Inbox membership, so `task.read` is the whole grant. A POST that
+  // reads and stores nothing.
+  "externalEntity.readCards": {
+    requires: "task.read",
+    method: "POST",
+    path: "/api/v1/external-entities/cards",
+  },
+  "externalEntity.search": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/search",
+  },
+  "externalEntity.listSuggestions": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/suggestions",
+  },
+  "externalEntity.read": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/:id",
+  },
+  "externalEntity.readBlocks": {
+    requires: "task.read",
+    method: "GET",
+    path: "/api/v1/external-entities/:id/blocks",
+  },
+  "externalEntity.takeOn": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/:id/take-on",
+  },
+  "externalEntity.undoTakeOn": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/:id/take-on/undo",
+  },
+  "externalEntity.takeOnTogether": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/take-on",
+  },
+  "externalEntity.undoTakeOnTogether": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/take-on/undo",
+  },
+  // Handing off starts a run, and undoing it cancels one, so the grants are
+  // the run operations'. Both are the user's own: a session token is refused
+  // whatever its profile holds.
+  "externalEntity.handOff": {
+    requires: "run.start",
+    method: "POST",
+    path: "/api/v1/external-entities/:id/hand-off",
+  },
+  "externalEntity.undoHandOff": {
+    requires: "run.write",
+    method: "POST",
+    path: "/api/v1/external-entities/handoffs/:runId/undo",
+  },
+  "externalEntity.dismiss": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/dismiss",
+  },
+  "externalEntity.restore": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/restore",
+  },
+  "externalEntity.addToWork": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/add-to-work",
+  },
+  "externalEntity.link": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/links",
+  },
+  "externalEntity.unlink": {
+    requires: "task.update",
+    method: "POST",
+    path: "/api/v1/external-entities/links/remove",
   },
   // An Ignore Rule has no grant family of its own: it is part of how signals
   // are raised. `create` and `delete` are the user's only, which the service
@@ -305,6 +495,14 @@ const TABLE = {
     requires: "workspace.write",
     method: "DELETE",
     path: "/api/v1/workspaces/:id",
+  },
+  // Removing many workspaces at once is refused to every session token,
+  // whatever its profile holds, like `session.archive`: the user chooses what
+  // to throw away.
+  "workspace.disposeMany": {
+    requires: "workspace.write",
+    method: "POST",
+    path: "/api/v1/workspaces/dispose",
   },
   "workspace.detach": {
     requires: "workspace.write",
@@ -448,6 +646,12 @@ const TABLE = {
     path: "/api/v1/runners/join-tokens/:id",
   },
 
+  "runnerMetrics.query": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/runner-metrics",
+  },
+
   "plugin.query": { requires: "infra.read", method: "GET", path: "/api/v1/plugins" },
   "plugin.read": { requires: "infra.read", method: "GET", path: "/api/v1/plugins/:id" },
   "plugin.enable": {
@@ -477,24 +681,76 @@ const TABLE = {
     path: "/api/v1/plugins/:id/intake",
   },
 
+  "harness.query": { requires: "infra.read", method: "GET", path: "/api/v1/harnesses" },
+
   "provider.query": { requires: "infra.read", method: "GET", path: "/api/v1/providers" },
-  "provider.read": { requires: "infra.read", method: "GET", path: "/api/v1/providers/:id" },
-  "provider.create": { requires: "infra.write", method: "POST", path: "/api/v1/providers" },
-  "provider.update": { requires: "infra.write", method: "PATCH", path: "/api/v1/providers/:id" },
-  "provider.login": {
+
+  "providerAccount.query": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/provider-accounts",
+  },
+  "providerAccount.read": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/provider-accounts/:id",
+  },
+  "providerAccount.create": {
     requires: "infra.write",
     method: "POST",
-    path: "/api/v1/providers/:id/login",
+    path: "/api/v1/provider-accounts",
   },
-  "provider.submitLoginCode": {
+  "providerAccount.update": {
     requires: "infra.write",
-    method: "POST",
-    path: "/api/v1/providers/:id/login-code",
+    method: "PATCH",
+    path: "/api/v1/provider-accounts/:id",
   },
-  "provider.delete": {
+  "providerAccount.delete": {
     requires: "infra.write",
     method: "DELETE",
-    path: "/api/v1/providers/:id",
+    path: "/api/v1/provider-accounts/:id",
+  },
+  "providerAccount.signIn": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/provider-accounts/:id/sign-in",
+  },
+  "providerAccount.submitSignInCode": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/provider-accounts/:id/sign-in-code",
+  },
+  "providerAccount.readCatalog": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/provider-accounts/:id/catalog",
+  },
+  "providerAccount.refresh": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/provider-accounts/:id/refresh",
+  },
+
+  "modelProfile.query": { requires: "infra.read", method: "GET", path: "/api/v1/model-profiles" },
+  "modelProfile.read": {
+    requires: "infra.read",
+    method: "GET",
+    path: "/api/v1/model-profiles/:id",
+  },
+  "modelProfile.create": {
+    requires: "infra.write",
+    method: "POST",
+    path: "/api/v1/model-profiles",
+  },
+  "modelProfile.update": {
+    requires: "infra.write",
+    method: "PATCH",
+    path: "/api/v1/model-profiles/:id",
+  },
+  "modelProfile.delete": {
+    requires: "infra.write",
+    method: "DELETE",
+    path: "/api/v1/model-profiles/:id",
   },
 
   "connection.query": { requires: "connection.read", method: "GET", path: "/api/v1/connections" },
@@ -601,12 +857,24 @@ const TABLE = {
   "wikiPage.read": { requires: "wiki.read", method: "GET", path: "/api/v1/wiki-pages/:id" },
   "wikiPage.create": { requires: "wiki.write", method: "POST", path: "/api/v1/wiki-pages" },
   "wikiPage.update": { requires: "wiki.write", method: "PATCH", path: "/api/v1/wiki-pages/:id" },
+  "wikiPage.archive": {
+    requires: "wiki.write",
+    method: "POST",
+    path: "/api/v1/wiki-pages/:id/archive",
+  },
+  "wikiPage.restore": {
+    requires: "wiki.write",
+    method: "POST",
+    path: "/api/v1/wiki-pages/:id/restore",
+  },
 
   "skill.query": { requires: "skill.read", method: "GET", path: "/api/v1/skills" },
   "skill.read": { requires: "skill.read", method: "GET", path: "/api/v1/skills/:name" },
   // The service refuses every caller but the user, whatever grants a
   // session's profile holds: a session proposes a skill instead.
   "skill.import": { requires: "skill.apply", method: "POST", path: "/api/v1/skills/import" },
+  // Only a session may call it: the service refuses every other caller.
+  "skill.propose": { requires: "skill.write", method: "POST", path: "/api/v1/skills/propose" },
   "skill.delete": { requires: "skill.apply", method: "DELETE", path: "/api/v1/skills/:name" },
   "skill.check": { requires: "skill.write", method: "POST", path: "/api/v1/skills/check" },
   "skill.diff": {
@@ -619,10 +887,49 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/skills/:name/revisions/:revisionHash/apply",
   },
+  "skill.reject": {
+    requires: "skill.apply",
+    method: "POST",
+    path: "/api/v1/skills/:name/revisions/:revisionHash/reject",
+  },
   "skill.applyUpdates": {
     requires: "skill.apply",
     method: "POST",
     path: "/api/v1/skills/apply-updates",
+  },
+
+  "mcpServer.query": { requires: "mcp.read", method: "GET", path: "/api/v1/mcp-servers" },
+  "mcpServer.read": { requires: "mcp.read", method: "GET", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.create": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers",
+  },
+  "mcpServer.update": { requires: "mcp.manage", method: "PATCH", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.delete": { requires: "mcp.manage", method: "DELETE", path: "/api/v1/mcp-servers/:id" },
+  "mcpServer.check": {
+    requires: "mcp.manage",
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/check",
+  },
+  "mcpServer.setToken": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/token",
+  },
+  "mcpServer.startSignIn": {
+    requires: "mcp.manage",
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/sign-in",
+  },
+  // The query holds the one-time `code` of the sign-in.
+  "mcpServer.finishSignIn": {
+    requires: "mcp.manage",
+    carriesSecret: true,
+    method: "POST",
+    path: "/api/v1/mcp-servers/:id/sign-in/finish",
   },
 
   "conversation.query": { requires: "agent.read", method: "GET", path: "/api/v1/conversations" },
@@ -720,6 +1027,22 @@ const TABLE = {
     method: "POST",
     path: "/api/v1/sessions/reopen",
   },
+  // Moving a Thread to another Task changes how it is filed, as marking it
+  // Done does, so it takes the same grant. Only the user may do it.
+  "session.moveToTask": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/:id/move-to-task",
+  },
+  // Archiving puts Threads away for good. The grant is the one the user
+  // holds, but the operation is also refused to every session token, whatever
+  // its profile holds, because an agent that archived a Thread could make the
+  // user's work unresumable without the user seeing it.
+  "session.archive": {
+    requires: "session.steer",
+    method: "POST",
+    path: "/api/v1/sessions/archive",
+  },
 
   // Owned sub-resources of a session: the id in the path is the session's, and
   // the grant is the session's, because an input is what that session was told.
@@ -795,6 +1118,8 @@ export const ALL_OPERATIONS: ReadonlyArray<Operation> = Object.entries(TABLE).ma
 /** Checks whether the string is an operation id. */
 export const isOperationId = (id: string): id is OperationId => id in TABLE;
 
+const ROWS: Readonly<Record<OperationId, OperationRow>> = TABLE;
+
 /** Returns what a caller must hold to call the operation. */
 export const readRequirement = (id: OperationId): Requirement => TABLE[id].requires;
 
@@ -803,12 +1128,13 @@ export const readRequirement = (id: OperationId): Requirement => TABLE[id].requi
  * value. These are the operations that need:
  *
  * - a grant of the `credential` or `secret` family;
- * - a grant of the `infra` family, because a provider is created with its API
+ * - a grant of the `infra` family, because a Provider Account is given its API
  *   keys;
  * - `connection.manage`, because a Connection is created with its
  *   credentials;
  * - no grant at all, before sign-in: `auth.login` and `setup.complete` carry
- *   a password.
+ *   a password;
+ * - a row that sets `carriesSecret`, which takes a token.
  *
  * Text that could hold such a value must not be copied into a record many
  * readers see, such as a notification or an event.
@@ -819,6 +1145,7 @@ export const canCarrySecrets = (id: OperationId): boolean => {
     /^(credential|secret|infra)\./.test(requirement) ||
     requirement === "connection.manage" ||
     requirement === "unauthenticated" ||
-    requirement === "setup-token"
+    requirement === "setup-token" ||
+    ROWS[id].carriesSecret === true
   );
 };

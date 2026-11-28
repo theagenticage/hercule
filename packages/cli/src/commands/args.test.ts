@@ -13,6 +13,7 @@ const taskUpdate = lookUpCommand("task", "update");
 const projectUpdate = lookUpCommand("project", "update");
 const sessionInput = lookUpCommand("session", "input");
 const setPassword = lookUpCommand("user", "set-password");
+const modelProfileUpdate = lookUpCommand("model-profile", "update");
 
 const refuseStdinRead = () => Promise.reject(new Error("stdin was read"));
 const stubStdin = (text: string) => () => Promise.resolve(text);
@@ -119,6 +120,46 @@ describe("user set-password", () => {
   });
 });
 
+// Tests that a full-profile replace can send lists, including empty ones.
+describe("model-profile update", () => {
+  const flags = ["--expected-revision", "3", "--name", "Main", "--default-entry", "null"];
+
+  it("reads the sections and the dismissed models as two JSON lists on stdin", async () => {
+    const section = { providerAccountId: "a1", harnessId: null, entries: [] };
+    const dismissed = { providerAccountId: "a1", model: "m1" };
+    const args = await parseArguments(
+      modelProfileUpdate,
+      [ID, ...flags],
+      stubStdin(`${JSON.stringify([section])}\n${JSON.stringify([dismissed])}\n`),
+    );
+    expect(args.payload).toEqual({
+      expectedRevision: 3,
+      name: "Main",
+      defaultEntry: null,
+      accounts: [section],
+      dismissedNewModels: [dismissed],
+    });
+  });
+
+  it("sends empty lists for both", async () => {
+    const args = await parseArguments(modelProfileUpdate, [ID, ...flags], stubStdin("[]\n[]\n"));
+    expect(args.payload["accounts"]).toEqual([]);
+    expect(args.payload["dismissedNewModels"]).toEqual([]);
+  });
+
+  it("refuses a list given inline, and names the stdin form", async () => {
+    await expect(
+      parseArguments(modelProfileUpdate, [ID, ...flags, "--accounts", "[]"], refuseStdinRead),
+    ).rejects.toThrow(/--accounts-stdin/);
+  });
+
+  it("refuses stdin that is not two lines", async () => {
+    await expect(
+      parseArguments(modelProfileUpdate, [ID, ...flags], stubStdin("[]\n")),
+    ).rejects.toThrow(/1 line\(s\), but 2 fields/);
+  });
+});
+
 describe("parseArguments", () => {
   it("accepts --flag value and --flag=value alike", async () => {
     const spaced = await parseArguments(
@@ -189,12 +230,12 @@ describe("parseArguments", () => {
 
   it("refuses --sort on a paged list with one fixed order", async () => {
     const signalList = lookUpCommand("signal", "list");
-    await expect(parseArguments(signalList, ["--sort", "until"], refuseStdinRead)).rejects.toThrow(
-      /unknown flag --sort/,
-    );
+    await expect(
+      parseArguments(signalList, ["--sort", "createdAt"], refuseStdinRead),
+    ).rejects.toThrow(/unknown flag --sort/);
     const paged = await parseArguments(
       signalList,
-      ["--view", "later", "--limit", "5"],
+      ["--view", "done", "--limit", "5"],
       refuseStdinRead,
     );
     expect(paged.limit).toBe(5);
@@ -271,6 +312,29 @@ describe("--image", () => {
 
   it("leaves a terminal without --image to the reader, which refuses it", async () => {
     await expect(parseArguments(sessionInput, [ID], refuseStdinRead, true)).rejects.toThrow(
+      "stdin was read",
+    );
+  });
+});
+
+// Tests `--context`, which stands in for the prompt the way `--image` does.
+describe("--context", () => {
+  const sessionSpawn = lookUpCommand("session", "spawn");
+  const context = '{"kind":"entity","entityId":"7b41d0a5-0000-7000-8000-000000000011"}';
+
+  it("sends empty text without reading stdin when stdin is a terminal", async () => {
+    const args = await parseArguments(sessionSpawn, ["--context", context], refuseStdinRead, true);
+    expect(args.payload["prompt"]).toBe("");
+    expect(args.payload["context"]).toEqual([JSON.parse(context)]);
+  });
+
+  it("still reads a pipe, and an empty pipe sends empty text", async () => {
+    const args = await parseArguments(sessionSpawn, ["--context", context], stubStdin(""));
+    expect(args.payload["prompt"]).toBe("");
+  });
+
+  it("leaves a terminal without --context or --image to the reader, which refuses it", async () => {
+    await expect(parseArguments(sessionSpawn, [], refuseStdinRead, true)).rejects.toThrow(
       "stdin was read",
     );
   });
@@ -362,5 +426,136 @@ describe("a field that takes named values", () => {
     const setCredentials = lookUpCommand("connection", "set-credentials");
     const args = await parseArguments(setCredentials, [ID], stubStdin('{"pat":"ghp_yyy"}\n'));
     expect(args.payload["credentials"]).toEqual({ pat: "ghp_yyy" });
+  });
+});
+
+// `runner metrics` is the one command with an optional positional (a query
+// parameter), a flag with a default, and a closed set typed in kebab case.
+describe("runner metrics", () => {
+  const runnerMetrics = lookUpCommand("runner", "metrics");
+  const SINCE = "2026-11-01T09:00:00Z";
+
+  it("takes the runner as an optional positional, and sends every runner without it", async () => {
+    const with_ = await parseArguments(runnerMetrics, [ID, "--since", SINCE], refuseStdinRead);
+    expect(with_.positionals).toEqual([ID]);
+    const without = await parseArguments(runnerMetrics, ["--since", SINCE], refuseStdinRead);
+    expect(without.positionals).toEqual([]);
+    await expect(
+      parseArguments(runnerMetrics, [ID, "extra", "--since", SINCE], refuseStdinRead),
+    ).rejects.toThrow(/takes 0 to 1 argument\(s\): \[<runner-id>\]/);
+  });
+
+  it("uses hour when --resolution is left out", async () => {
+    const args = await parseArguments(runnerMetrics, ["--since", SINCE], refuseStdinRead);
+    expect(args.query["resolution"]).toBe("hour");
+  });
+
+  it("types fiveMinutes as five-minutes, and refuses the schema's own spelling's near misses", async () => {
+    const args = await parseArguments(
+      runnerMetrics,
+      ["--since", SINCE, "--resolution", "five-minutes"],
+      refuseStdinRead,
+    );
+    expect(args.query["resolution"]).toBe("fiveMinutes");
+    await expect(
+      parseArguments(runnerMetrics, ["--since", SINCE, "--resolution", "minute"], refuseStdinRead),
+    ).rejects.toThrow(/is not one of five-minutes, hour/);
+  });
+});
+
+// `mcp-server create` sends one of two shapes of `source`, picked by the flags given.
+describe("mcp-server create", () => {
+  const mcpServerCreate = lookUpCommand("mcp-server", "create");
+
+  it("builds a plugin source from its flags and the fixed kind", async () => {
+    const args = await parseArguments(
+      mcpServerCreate,
+      ["--plugin", "sentry/sentry", "--connection", ID, "--name", "work_sentry"],
+      refuseStdinRead,
+    );
+    expect(args.payload).toEqual({
+      source: {
+        kind: "plugin",
+        contributionId: "sentry/sentry",
+        connectionId: ID,
+        name: "work_sentry",
+      },
+    });
+  });
+
+  it("builds a source by address, with a token read from stdin only when --token-stdin is given", async () => {
+    const withToken = await parseArguments(
+      mcpServerCreate,
+      ["--url", "https://mcp.example.com/mcp", "--name", "example", "--token-stdin"],
+      stubStdin("s3cret-t0ken\n"),
+    );
+    expect(withToken.payload).toEqual({
+      source: {
+        kind: "url",
+        url: "https://mcp.example.com/mcp",
+        name: "example",
+        token: "s3cret-t0ken",
+      },
+    });
+
+    const withoutToken = await parseArguments(
+      mcpServerCreate,
+      ["--url", "https://mcp.example.com/mcp"],
+      refuseStdinRead,
+    );
+    expect(withoutToken.payload).toEqual({
+      source: { kind: "url", url: "https://mcp.example.com/mcp" },
+    });
+  });
+
+  it("has no --token flag that would put the token in argv", async () => {
+    await expect(
+      parseArguments(
+        mcpServerCreate,
+        ["--url", "https://mcp.example.com/mcp", "--token", "s3cret-t0ken"],
+        refuseStdinRead,
+      ),
+    ).rejects.toThrow("--token does not exist");
+  });
+
+  it("refuses the flags of both forms before it reads stdin", async () => {
+    const refused = parseArguments(
+      mcpServerCreate,
+      ["--url", "https://mcp.example.com/mcp", "--plugin", "sentry/sentry", "--token-stdin"],
+      refuseStdinRead,
+    );
+    await expect(refused).rejects.toThrow(UsageError);
+    await expect(refused).rejects.toThrow("cannot be given with");
+  });
+
+  it("reports a missing key of the picked form by its flag", async () => {
+    await expect(
+      parseArguments(mcpServerCreate, ["--plugin", "sentry/sentry"], refuseStdinRead),
+    ).rejects.toThrow(new UsageError("missing required --connection", "mcp-server create"));
+    await expect(
+      parseArguments(mcpServerCreate, ["--token-stdin"], refuseStdinRead),
+    ).rejects.toThrow("no flag says which form to use");
+    await expect(parseArguments(mcpServerCreate, ["--name", "x"], refuseStdinRead)).rejects.toThrow(
+      "no flag says which form to use: give --plugin and --connection, or --url",
+    );
+  });
+
+  it("has no --source flag", async () => {
+    await expect(
+      parseArguments(mcpServerCreate, ["--source", "{}"], refuseStdinRead),
+    ).rejects.toThrow("unknown flag --source");
+  });
+});
+
+describe("mcp-server set-token", () => {
+  const setToken = lookUpCommand("mcp-server", "set-token");
+
+  it("reads the token from stdin and takes no flag for it", async () => {
+    const args = await parseArguments(setToken, [ID], stubStdin("s3cret-t0ken\n"));
+    expect(args.positionals).toEqual([ID]);
+    expect(args.payload).toEqual({ token: "s3cret-t0ken" });
+    await expect(
+      parseArguments(setToken, [ID, "--token", "s3cret-t0ken"], refuseStdinRead),
+    ).rejects.toThrow("--token does not exist");
   });
 });

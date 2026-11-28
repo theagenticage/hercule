@@ -1,0 +1,40 @@
+/* What the Work board draws while it moves by itself or answers a fold, a
+   filter or a read. The springs are in the motion kernel; this file holds only
+   the parts a stylesheet must draw. Only `transform` and `opacity` change. */
+
+/* The layer for copies of cards in flight: over the board, under the toolbar
+   (z-index 30). It exists only while a copy flies. */
+.board-flights {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  overflow: hidden;
+  pointer-events: none;
+}
+.board-flights .is-ghost {
+  pointer-events: none;
+}
+
+/* A Task that arrived wears a thin ring, which fades over 3.2 seconds. The
+   board sets `data-new` on the card and takes it off when the animation ends.
+   The ring is a plain outline that fades by opacity alone. */
+@media (prefers-reduced-motion: no-preference) {
+  .desk-card[data-new]::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: var(--card-r);
+    box-shadow: 0 0 0 1px var(--focus);
+    pointer-events: none;
+    animation: card-new-ring 3.2s var(--m-ease) both;
+  }
+}
+@keyframes card-new-ring {
+  0%,
+  30% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

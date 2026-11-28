@@ -5,9 +5,9 @@
  */
 import { Effect } from "effect";
 import type * as HttpClient from "effect/http/HttpClient";
-import { callSentry, decodeSentryBody, type SentryFailure } from "../api";
+import type { SentryFailure } from "../api";
 import type { LatestEvent } from "../kinds";
-import type { OrganizationAccess } from "../organization";
+import { buildIssuePath, readOrganizationResource, type OrganizationAccess } from "../organization";
 import {
   ApiIssueDetail,
   ApiLatestEvent,
@@ -15,9 +15,6 @@ import {
   listRegressions,
   type Regression,
 } from "../sentry-objects";
-
-const issuePath = (access: OrganizationAccess, issueId: string): string =>
-  `/api/0/organizations/${access.organization.slug}/issues/${issueId}/`;
 
 /**
  * Reads the times an issue came back after it was resolved or archived,
@@ -28,15 +25,10 @@ export const readRegressions = (
   access: OrganizationAccess,
   issueId: string,
 ): Effect.Effect<ReadonlyArray<Regression>, SentryFailure, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const path = issuePath(access, issueId);
-    const response = yield* callSentry(
-      { method: "GET", baseUrl: access.organization.regionUrl, path, token: access.token },
-      [404],
-    );
-    if (response.status === 404) return [];
-    return listRegressions(yield* decodeSentryBody(ApiIssueDetail, response.body, path));
-  });
+  Effect.map(
+    readOrganizationResource(access, buildIssuePath(access, issueId), ApiIssueDetail),
+    (detail) => (detail === undefined ? [] : listRegressions(detail)),
+  );
 
 /**
  * Reads an issue's newest event. Returns undefined when Sentry has none (a
@@ -49,15 +41,11 @@ export const readLatestEvent = (
   issueId: string,
   fallbackDate: string,
 ): Effect.Effect<LatestEvent | undefined, SentryFailure, HttpClient.HttpClient> =>
-  Effect.gen(function* () {
-    const path = `${issuePath(access, issueId)}events/latest/`;
-    const response = yield* callSentry(
-      { method: "GET", baseUrl: access.organization.regionUrl, path, token: access.token },
-      [404],
-    );
-    if (response.status === 404) return undefined;
-    return buildLatestEvent(
-      yield* decodeSentryBody(ApiLatestEvent, response.body, path),
-      fallbackDate,
-    );
-  });
+  Effect.map(
+    readOrganizationResource(
+      access,
+      `${buildIssuePath(access, issueId)}events/latest/`,
+      ApiLatestEvent,
+    ),
+    (event) => (event === undefined ? undefined : buildLatestEvent(event, fallbackDate)),
+  );

@@ -1,7 +1,7 @@
 /**
- * The access-mode fallback (spec 06 §8.4). When a provider declares a mode
+ * The access-mode fallback (spec 06 §8.4). When a harness declares a mode
  * `unsupported`, a session asking for it runs in the nearest less permissive
- * mode the provider declares `native`, never in a more permissive one.
+ * mode the harness declares `native`, never in a more permissive one.
  *
  * The controller uses this function when it spawns a session, and the
  * composer's menu uses it to dim modes. Because both use the same function,
@@ -23,7 +23,7 @@ export const ACCESS_MODE_CHAIN: readonly AccessMode[] = [
  * Returns the mode a session actually gets when it asks for `requested`: the
  * nearest mode at or below `requested` that `declared` marks `native`.
  * Returns `undefined` when not even `approval-required` is native on this
- * provider, so there is no mode to fall back to.
+ * harness, so there is no mode to fall back to.
  */
 export const findNearestSupportedAccessMode = (
   requested: AccessMode,

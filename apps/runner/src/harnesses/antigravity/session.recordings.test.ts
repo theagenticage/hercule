@@ -1,0 +1,528 @@
+/**
+ * Plays recordings of a real `agy` through an Antigravity session, the way a
+ * user drives one. A fake `agy` replays what the real one sent in answer to
+ * each client message. The test drives the adapter's own interface the way
+ * the recorded scenario did: `sendInput` for each prompt, an approval or an
+ * answer where the recording shows the client gave one, and `interrupt` where
+ * it sent `session/cancel`. It then checks the whole event stream, and that
+ * the session wrote to `agy` what the recorded client wrote.
+ *
+ * Not played:
+ * - The three-prompt `question-variants` stops after two prompts: its third
+ *   prompt is answered with `decline`, which the session sends only for a
+ *   question nobody can answer, and no input of the adapter's interface asks
+ *   for it.
+ * - `deny-cancelled-followup` answers the request with the outcome `cancelled`
+ *   and then sends its own follow-up, with no `session/cancel`. The session's
+ *   `cancel` decision also sends `session/cancel` and sends no follow-up, so
+ *   it cannot write what the recorded client wrote.
+ *
+ * `normalize.recordings.test.ts` plays every other recording through the
+ * normalizer alone.
+ */
+import { cpSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Stream from "effect/Stream";
+import { TestClock } from "effect/testing";
+import { readRecording, type JsonRpcMessage, type RecordingName } from "@hercule/acp/testing";
+import type { HarnessEvent, QuestionAnswers, SessionSpec } from "@hercule/protocol";
+import type { ApprovalDecision } from "@hercule/protocol";
+import { cleanupHomes, CWD, settle, waitUntil } from "../testing";
+import { makeAntigravityAdapter } from "./adapter";
+import { APP_DATA_DIR } from "./harness-home";
+import { expectEventStreamToHoldTogether } from "./event-stream.testing";
+import {
+  buildFakeAgy,
+  buildStartContext,
+  createSignedInHome,
+  type FakeAgyOptions,
+} from "./fake-agy.testing";
+
+afterEach(cleanupHomes);
+
+const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
+const ACCOUNT = "0199e0e7-0000-7000-8000-00000000000a";
+
+const SPEC: SessionSpec = {
+  providerAccountId: ACCOUNT,
+  workspaceId: null,
+  modelSelection: { model: "gemini-4-neon", options: { effort: "high" } },
+  accessMode: "approval-required",
+  timeouts: { inactivityMs: 1_800_000, absoluteMs: 28_800_000 },
+};
+
+/** What the user does while a turn runs. */
+type Action =
+  | { readonly decide: ApprovalDecision }
+  | { readonly answer: QuestionAnswers }
+  /** Interrupts once `ready` holds, which is what the recording waited for before it cancelled. */
+  | { readonly interrupt: (events: ReadonlyArray<HarnessEvent>) => boolean };
+
+/** One input of the user: the recorded prompts its turn sent (the first is the input, the rest follow-ups), and what the user does. */
+interface Input {
+  readonly prompts: ReadonlyArray<number>;
+  readonly actions: ReadonlyArray<Action>;
+  readonly modelSelection?: SessionSpec["modelSelection"];
+  readonly end: "completed" | "interrupted" | "failed";
+}
+
+interface Scenario {
+  readonly recording: RecordingName;
+  readonly accessMode?: SessionSpec["accessMode"];
+  readonly inputs: ReadonlyArray<Input>;
+  /** The positions, among the recorded client's replies, of the replies to prompts the scenario does not play. */
+  readonly unplayedReplies?: ReadonlyArray<number>;
+}
+
+const toolStarted = (events: ReadonlyArray<HarnessEvent>) =>
+  events.some((event) => event._tag === "item.started" && event.kind !== "assistant_message");
+
+const SCENARIOS: ReadonlyArray<Scenario> = [
+  {
+    recording: "basic-allow",
+    inputs: [{ prompts: [0], actions: [{ decide: "allow" }], end: "completed" }],
+  },
+  {
+    recording: "two-requests",
+    inputs: [
+      { prompts: [0], actions: [{ decide: "allow" }, { decide: "allow" }], end: "completed" },
+    ],
+  },
+  {
+    // The session follows a denial with a prompt of its own, in the same turn.
+    recording: "deny-followup",
+    inputs: [{ prompts: [0, 1], actions: [{ decide: "deny" }], end: "completed" }],
+  },
+  {
+    recording: "cancel-during-permission",
+    inputs: [
+      {
+        prompts: [0],
+        actions: [
+          {
+            interrupt: (events) => events.some((event) => event._tag === "request.opened"),
+          },
+        ],
+        end: "interrupted",
+      },
+    ],
+  },
+  {
+    recording: "interrupt-running",
+    accessMode: "full-access",
+    inputs: [{ prompts: [0], actions: [{ interrupt: toolStarted }], end: "interrupted" }],
+  },
+  {
+    recording: "question-variants",
+    unplayedReplies: [2],
+    inputs: [
+      { prompts: [0], actions: [{ answer: { "Question 1": "Red" } }], end: "completed" },
+      { prompts: [1], actions: [{ answer: { Question: "Purple" } }], end: "completed" },
+    ],
+  },
+  {
+    recording: "model-switch",
+    inputs: [
+      {
+        prompts: [0],
+        actions: [],
+        modelSelection: { model: "gemini-4-carbon", options: { effort: "low" } },
+        end: "completed",
+      },
+    ],
+  },
+  {
+    // agy writes its own error into the chat and replies end_turn: the turn fails.
+    recording: "failed-turn-network-watch",
+    // The recorder cancelled after the reply to look for more; the session has nothing to cancel.
+    unplayedReplies: [0],
+    accessMode: "full-access",
+    inputs: [{ prompts: [0], actions: [], end: "failed" }],
+  },
+  {
+    recording: "nonzero-exit",
+    accessMode: "full-access",
+    inputs: [{ prompts: [0], actions: [], end: "completed" }],
+  },
+  {
+    recording: "background-command",
+    accessMode: "full-access",
+    inputs: [{ prompts: [0], actions: [], end: "completed" }],
+  },
+];
+
+const summarize = ({ id, result, method }: JsonRpcMessage) => ({ id, result, method });
+
+const sortReplies = (replies: ReadonlyArray<ReturnType<typeof summarize>>) =>
+  replies.toSorted((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+const isPrompt = (message: JsonRpcMessage) => message.method === "session/prompt";
+
+/** The texts of the prompts the recorded client sent, in order. */
+const readRecordedPrompts = (name: RecordingName): ReadonlyArray<string> =>
+  readRecording(name)
+    .filter(({ direction, message }) => direction === "out" && isPrompt(message))
+    .map(({ message }) => (message.params as { prompt: Array<{ text: string }> }).prompt[0]!.text);
+
+/** The usage in the reply to the recorded prompt with this index, as `turn.completed` reports it. */
+const readRecordedUsage = (name: RecordingName, promptIndex: number) => {
+  const promptId = readRecording(name).filter(
+    ({ direction, message }) => direction === "out" && isPrompt(message),
+  )[promptIndex]!.message.id;
+  const usage = (
+    readRecording(name).find(
+      ({ direction, message }) =>
+        direction === "in" && message.method === undefined && message.id === promptId,
+    )!.message.result as {
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+        cachedReadTokens: number;
+        cachedWriteTokens: number;
+      };
+    }
+  ).usage;
+  return {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadTokens: usage.cachedReadTokens,
+    cacheWriteTokens: usage.cachedWriteTokens,
+  };
+};
+
+const sumUsage = (parts: ReadonlyArray<ReturnType<typeof readRecordedUsage>>) => ({
+  inputTokens: parts.reduce((sum, part) => sum + part.inputTokens, 0),
+  outputTokens: parts.reduce((sum, part) => sum + part.outputTokens, 0),
+  cacheReadTokens: parts.reduce((sum, part) => sum + part.cacheReadTokens, 0),
+  cacheWriteTokens: parts.reduce((sum, part) => sum + part.cacheWriteTokens, 0),
+});
+
+/** The messages the recorded client wrote after its first prompt that answer a request of `agy` or cancel. */
+const readRecordedClientReplies = (name: RecordingName): ReadonlyArray<JsonRpcMessage> => {
+  const recording = readRecording(name);
+  const firstPrompt = recording.findIndex(
+    ({ direction, message }) => direction === "out" && isPrompt(message),
+  );
+  return recording
+    .slice(firstPrompt)
+    .filter(
+      ({ direction, message }) =>
+        direction === "out" &&
+        (message.result !== undefined || message.method === "session/cancel"),
+    )
+    .map(({ message }) => message);
+};
+
+/**
+ * Starts a session over a fake `agy` that plays `recording`, and returns it
+ * with what a test needs to drive it and read what it emitted.
+ */
+const openSession = (
+  recording: RecordingName,
+  accessMode: SessionSpec["accessMode"] = SPEC.accessMode,
+  fakeOptions: Omit<FakeAgyOptions, "recording"> = {},
+) =>
+  Effect.gen(function* () {
+    const home = createSignedInHome();
+    const fake = buildFakeAgy(home, { ...fakeOptions, recording });
+    const adapter = makeAntigravityAdapter(fake);
+    const events: HarnessEvent[] = [];
+    yield* Effect.forkScoped(
+      Stream.runForEach(adapter.events, (event) =>
+        Effect.sync(() => {
+          events.push(event);
+        }),
+      ),
+    );
+    yield* Effect.promise(settle);
+    yield* Effect.addFinalizer(() => adapter.stopSession(SESSION, "stopped"));
+    const context = buildStartContext(home, CWD);
+    yield* adapter.startSession(SESSION, { ...SPEC, accessMode }, context);
+    const tags = <Tag extends HarnessEvent["_tag"]>(tag: Tag) =>
+      events.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
+    const until = (what: string, ready: () => boolean) =>
+      Effect.promise(() => waitUntil(what, ready));
+    return { home, adapter, events, tags, until, received: () => fake.spawns[0]!.harness.received };
+  });
+
+/** Plays one scenario and returns what the session emitted and what it wrote to `agy`. */
+const play = (scenario: Scenario) =>
+  Effect.gen(function* () {
+    const { adapter, events, tags, until, received } = yield* openSession(
+      scenario.recording,
+      scenario.accessMode,
+    );
+
+    const prompts = readRecordedPrompts(scenario.recording);
+    let opened = 0;
+    let finished = 0;
+    for (const input of scenario.inputs) {
+      yield* adapter.sendInput(SESSION, {
+        text: prompts[input.prompts[0]!]!,
+        ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
+      });
+      for (const action of input.actions) {
+        if ("interrupt" in action) {
+          yield* until("reached the recorded point", () => action.interrupt(events));
+          yield* adapter.interrupt(SESSION);
+          continue;
+        }
+        opened += 1;
+        yield* until("opened a request", () => tags("request.opened").length === opened);
+        const requestId = tags("request.opened")[opened - 1]!.request.requestId;
+        yield* "decide" in action
+          ? adapter.respondToApprovalRequest(SESSION, requestId, action.decide)
+          : adapter.respondToQuestion(SESSION, requestId, action.answer, SPEC.modelSelection);
+      }
+      finished += 1;
+      yield* until("completed the turn", () => tags("turn.completed").length === finished);
+    }
+    return { events, tags, received: received() };
+  });
+
+describe("recordings of agy through an Antigravity session", () => {
+  for (const scenario of SCENARIOS) {
+    it(`${scenario.recording}: the session plays the recorded turns`, () =>
+      Effect.runPromise(
+        play(scenario).pipe(
+          Effect.flatMap(({ events, tags, received }) =>
+            Effect.sync(() => {
+              expectEventStreamToHoldTogether(events);
+
+              const recorded = readRecordedPrompts(scenario.recording);
+              const played = scenario.inputs.flatMap((input) => input.prompts);
+              expect(
+                received
+                  .filter(isPrompt)
+                  .map(
+                    (message) =>
+                      (message.params as { prompt: Array<{ text: string }> }).prompt[0]!.text,
+                  ),
+                "the session wrote the recorded prompts, follow-ups included",
+              ).toEqual(played.map((index) => recorded[index]));
+
+              // The order differs where the recorder cancelled before it answered, so compare as a set.
+              const recordedReplies = readRecordedClientReplies(scenario.recording).map(summarize);
+              const written = received
+                .filter(
+                  (message) => message.result !== undefined || message.method === "session/cancel",
+                )
+                .map(summarize);
+              const expectedReplies = recordedReplies.filter(
+                (_reply, index) => !(scenario.unplayedReplies ?? []).includes(index),
+              );
+              expect(sortReplies(written)).toEqual(sortReplies(expectedReplies));
+
+              const turns = tags("turn.completed");
+              expect(tags("turn.started"), "one turn per input").toHaveLength(
+                scenario.inputs.length,
+              );
+              expect(turns.map((turn) => turn.state)).toEqual(
+                scenario.inputs.map((input) => input.end),
+              );
+              expect(
+                turns.map((turn) => turn.usage),
+                "each turn reports the usage of its recorded replies",
+              ).toEqual(
+                scenario.inputs.map((input) =>
+                  sumUsage(
+                    input.prompts.map((index) => readRecordedUsage(scenario.recording, index)),
+                  ),
+                ),
+              );
+
+              // Every request is resolved before the turn it belongs to completes.
+              for (const opened of tags("request.opened")) {
+                const requestId = opened.request.requestId;
+                const resolvedAt = events.findIndex(
+                  (event) => event._tag === "request.resolved" && event.requestId === requestId,
+                );
+                const openedAt = events.indexOf(opened);
+                const completedAt = events.findIndex(
+                  (event, index) => index > openedAt && event._tag === "turn.completed",
+                );
+                expect(resolvedAt, `request ${requestId} resolves`).toBeGreaterThan(-1);
+                expect(
+                  resolvedAt,
+                  `request ${requestId} resolves before its turn ends`,
+                ).toBeLessThan(completedAt);
+              }
+              expect(tags("request.resolved")).toHaveLength(tags("request.opened").length);
+            }),
+          ),
+          Effect.scoped,
+          Effect.provide(TestClock.layer()),
+        ),
+      ));
+  }
+});
+
+describe("a provider error, as recorded", () => {
+  it("failed-turn-network-watch: the turn fails with agy's own words and shows no assistant message of them", () =>
+    Effect.runPromise(
+      play(SCENARIOS.find((scenario) => scenario.recording === "failed-turn-network-watch")!).pipe(
+        Effect.map(({ events, tags }) => {
+          expect(tags("runtime.error")).toMatchObject([
+            {
+              class: "provider_error",
+              message: expect.stringContaining("Service Unavailable") as unknown,
+            },
+          ]);
+          const shown = events
+            .filter((event) => event._tag === "content.delta")
+            .map((event) => event.delta)
+            .join("");
+          expect(shown).not.toContain("agent executor error");
+        }),
+        Effect.scoped,
+        Effect.provide(TestClock.layer()),
+      ),
+    ));
+});
+
+describe("steering, as recorded", () => {
+  it("steer-visible: the second prompt is accepted by the reply to the first, and its own reply ends the turn", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { adapter, events, tags, until, received } = yield* openSession(
+          "steer-visible",
+          "full-access",
+        );
+        const [first, second] = readRecordedPrompts("steer-visible");
+        yield* adapter.sendInput(SESSION, { text: first! });
+        yield* until("a call started", () => toolStarted(events));
+
+        const sending = yield* Effect.forkChild(adapter.sendInput(SESSION, { text: second! }));
+        // The reply to the first prompt comes 3 ms after the second is written. The wait for a refusal then runs out.
+        yield* until("the first reply was counted", () => tags("session.usage.updated").length > 0);
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust("500 millis");
+        const result = yield* Fiber.join(sending);
+        expect(result.delivery).toBe("steered");
+
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+        expectEventStreamToHoldTogether(events);
+        expect(
+          received()
+            .filter(isPrompt)
+            .map(
+              (message) => (message.params as { prompt: Array<{ text: string }> }).prompt[0]!.text,
+            ),
+        ).toEqual([first, second]);
+        expect(tags("turn.started"), "the steer joins the turn").toHaveLength(1);
+        expect(
+          tags("item.completed")
+            .filter((event) => event.kind === "user_message")
+            .map((event) => event.detail),
+        ).toMatchObject([{ text: first }, { text: second, steered: true }]);
+        expect(tags("turn.completed")[0]?.usage, "both replies count").toEqual(
+          sumUsage([readRecordedUsage("steer-visible", 0), readRecordedUsage("steer-visible", 1)]),
+        );
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
+
+  it("steer-during-request: the session refuses the steer itself while the request is open, and the first prompt goes on", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        // The recorded second prompt and its refusal are left out, because the session never writes it: the fake would wait for it for ever.
+        const { adapter, events, tags, until, received } = yield* openSession(
+          "steer-during-request",
+          "approval-required",
+          {
+            editRecording: (recording) => {
+              const second = recording.findIndex(
+                ({ direction, message }) => direction === "out" && message.id === 5,
+              );
+              return recording.filter((_entry, index) => index !== second && index !== second + 1);
+            },
+          },
+        );
+        const [first, second] = readRecordedPrompts("steer-during-request");
+        yield* adapter.sendInput(SESSION, { text: first! });
+        yield* until("a request opened", () => tags("request.opened").length === 1);
+
+        const refused = yield* Effect.flip(adapter.sendInput(SESSION, { text: second! }));
+        expect(refused._tag).toBe("SteerRefused");
+        expect(refused.message).toContain("Answer the request first");
+        expect(received().filter(isPrompt)).toHaveLength(1);
+
+        yield* adapter.respondToApprovalRequest(
+          SESSION,
+          tags("request.opened")[0]!.request.requestId,
+          "allow",
+        );
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+        expectEventStreamToHoldTogether(events);
+        expect(tags("turn.completed")).toMatchObject([
+          { state: "completed", usage: readRecordedUsage("steer-during-request", 0) },
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
+});
+
+describe("a subagent, as recorded", () => {
+  const isChild = (event: HarnessEvent) =>
+    "subagentId" in event && event.subagentId === "e4553827-0073-42e6-bc63-8e9619a7d435";
+
+  it("subagent-full: the files of agy show the subagent's work, linked to the call that started it, and its tokens join the usage", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { home, adapter, events, tags, until } = yield* openSession(
+          "subagent-full",
+          "full-access",
+        );
+        const [prompt] = readRecordedPrompts("subagent-full");
+        yield* adapter.sendInput(SESSION, { text: prompt! });
+        yield* until("the turn completed", () => tags("turn.completed").length === 1);
+
+        // The files show up after the reply of the parent, as they did in the recording.
+        cpSync(
+          join(import.meta.dirname, "fixtures", "session-files", "subagent-full", "brain"),
+          join(home, APP_DATA_DIR, "brain"),
+          { recursive: true },
+        );
+        yield* Effect.promise(settle);
+        yield* TestClock.adjust("500 millis");
+        yield* until("the subagent's turn completed", () => tags("turn.completed").some(isChild));
+
+        const launched = tags("item.completed").find((event) => event.kind === "subagent")!;
+        expect(tags("subagent.started")).toMatchObject([
+          {
+            subagentId: "e4553827-0073-42e6-bc63-8e9619a7d435",
+            itemId: launched.itemId,
+            description: "File Writer",
+            agentType: "self",
+          },
+        ]);
+        expect(tags("turn.completed").filter(isChild)).toMatchObject([{ state: "completed" }]);
+        expect(
+          tags("item.completed")
+            .filter(isChild)
+            .filter((event) => event.kind === "command_execution"),
+          "the subagent's command",
+        ).toMatchObject([
+          {
+            status: "completed",
+            detail: { command: expect.stringContaining("SUBMARK") as unknown },
+          },
+        ]);
+        expectEventStreamToHoldTogether(events.filter((event) => !isChild(event)));
+        expectEventStreamToHoldTogether(events.filter(isChild));
+
+        // The recorded reply counts the session's own agent, and the subagent's three model steps are added.
+        const snapshot = tags("session.usage.updated")
+          .filter((event) => !isChild(event))
+          .at(-1);
+        expect(snapshot).toMatchObject({
+          usage: sumUsage([
+            readRecordedUsage("subagent-full", 0),
+            { inputTokens: 6801, outputTokens: 329, cacheReadTokens: 21169, cacheWriteTokens: 0 },
+          ]),
+        });
+        expect(snapshot).not.toHaveProperty("usageReport");
+      }).pipe(Effect.scoped, Effect.provide(TestClock.layer())),
+    ));
+});

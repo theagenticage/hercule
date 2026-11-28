@@ -8,7 +8,7 @@ import {
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   renderApp,
   SIDEBAR_FIXTURE,
   stubApi,
@@ -32,7 +32,7 @@ const openDraft = async (
   path = `/?project=${project.id}`,
 ) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
     ...buildThreadHandlers(started),
     "POST /api/v1/sessions": { body: started.session },
     "GET /api/v1/settings": {

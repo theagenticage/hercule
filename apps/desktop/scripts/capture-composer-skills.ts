@@ -184,7 +184,7 @@ async function openApp(
   );
   const app = await launchTestPackage(
     userDataDir,
-    recordVideoDir === undefined ? undefined : { dir: recordVideoDir, size: APP_SIZE },
+    recordVideoDir === undefined ? {} : { recordVideo: { dir: recordVideoDir, size: APP_SIZE } },
   );
   const page = await app.firstWindow();
   page.on("pageerror", (error) => console.log(`[page error] ${error.message}`));

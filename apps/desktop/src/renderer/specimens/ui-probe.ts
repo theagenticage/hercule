@@ -27,6 +27,13 @@ import type {
   TextRole,
   ThemeTokens,
 } from "./ui-probe-types";
+import {
+  computeArea,
+  computeLostShare,
+  intersectRects,
+  isOnSpacingGrid,
+  type ClippingAncestor,
+} from "./ui-probe-clipping";
 
 // ---------- Constants ----------
 
@@ -174,20 +181,6 @@ const SPACING_PROPERTIES = [
 /** Returns the rectangle in the shape the probe's results use. */
 function toProbeRect(rect: DOMRectReadOnly): ProbeRect {
   return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
-}
-
-/** Returns the area of a rectangle in square pixels. */
-function computeArea(rect: ProbeRect): number {
-  return Math.max(0, rect.right - rect.left) * Math.max(0, rect.bottom - rect.top);
-}
-
-/** Returns the part both rectangles cover, or null when they share no area. */
-function intersectRects(first: ProbeRect, second: ProbeRect): ProbeRect | null {
-  const left = Math.max(first.left, second.left);
-  const top = Math.max(first.top, second.top);
-  const right = Math.min(first.right, second.right);
-  const bottom = Math.min(first.bottom, second.bottom);
-  return right > left && bottom > top ? { left, top, right, bottom } : null;
 }
 
 /** Returns whether two rectangles are the same, ignoring sub-pixel noise below 0.01 px. */
@@ -478,46 +471,6 @@ function clipToAncestors(
 }
 
 /**
- * Returns how far to move the span [low, high] so that it lies inside
- * [clipLow, clipHigh], the way scrolling moves content into view. A span
- * longer than the clip starts at its start.
- */
-function computeShiftIntoView(
-  low: number,
-  high: number,
-  clipLow: number,
-  clipHigh: number,
-): number {
-  if (high - low >= clipHigh - clipLow || low < clipLow) return clipLow - low;
-  return high > clipHigh ? clipHigh - high : 0;
-}
-
-/** Moves a rectangle by `delta` along one axis and cuts it to the span of `clip` along that axis. Returns null when nothing is left. */
-function moveAndCutAlongAxis(
-  rect: ProbeRect | null,
-  axis: "x" | "y",
-  delta: number,
-  clip: ProbeRect,
-): ProbeRect | null {
-  if (rect === null) return null;
-  return axis === "x"
-    ? intersectRects(
-        { ...rect, left: rect.left + delta, right: rect.right + delta },
-        { left: clip.left, right: clip.right, top: -Infinity, bottom: Infinity },
-      )
-    : intersectRects(
-        { ...rect, top: rect.top + delta, bottom: rect.bottom + delta },
-        { left: -Infinity, right: Infinity, top: clip.top, bottom: clip.bottom },
-      );
-}
-
-/** An ancestor that cuts or scrolls its content, with the area it clips the content to. */
-interface ClippingAncestor {
-  readonly facts: ElementFacts;
-  readonly clip: ProbeRect;
-}
-
-/**
  * Returns the ancestors, from `from` outward, that clip the content of a box
  * and apply to it: the ones that cut or scroll along some axis, innermost
  * first. `from` and `escape` work as in `clipToAncestors`.
@@ -550,80 +503,18 @@ function listClippingAncestors(
 }
 
 /**
- * Returns the part of a scroller's area that the user can see, or null when
- * none is left. It is the scroller's `clip`, cut by every outer ancestor that
- * cuts along an axis, and by the window unless an outer ancestor scrolls (the
- * user then scrolls the scroller itself into view, and that ancestor gets its
- * own turn in `computeLostShare`). `outer` holds the ancestors around the
- * scroller, innermost first.
- */
-function computeVisibleScrollerArea(
-  clip: ProbeRect,
-  outer: ReadonlyArray<ClippingAncestor>,
-): ProbeRect | null {
-  let visible: ProbeRect | null = clip;
-  let hasOuterScroller = false;
-  for (const { facts, clip: outerClip } of outer) {
-    if (facts.cutsX) visible = moveAndCutAlongAxis(visible, "x", 0, outerClip);
-    if (facts.cutsY) visible = moveAndCutAlongAxis(visible, "y", 0, outerClip);
-    if (facts.scrollsX || facts.scrollsY) hasOuterScroller = true;
-  }
-  return hasOuterScroller || visible === null ? visible : intersectRects(visible, readWindowRect());
-}
-
-/**
  * Returns the share of `box`, from 0 to 1, that is lost: cut off for good,
- * with no scrolling that reaches it. The rules, from the box outward:
- *
- * - An ancestor with overflow `hidden` or `clip` cuts the box along that axis.
- * - An ancestor that scrolls along an axis (overflow `auto` or `scroll`) lets
- *   the user scroll the box into view along that axis, but only into the
- *   part of the scroller the user can see: its area cut by the outer
- *   ancestors that cut and by the window. The walk moves the box into that
- *   part and goes on from there, so the ancestors around the scroller judge
- *   the box where scrolling puts it, not where it lies now. Along an axis
- *   that does not scroll, the scroller cuts like overflow `hidden`.
- * - A scroller whose visible part is empty (a panel placed outside the
- *   window) loses everything inside it, because no scrolling brings the
- *   content into view.
- * - The window cuts the box only when no ancestor scrolls.
- *
- * `from` and `escape` work as in `clipToAncestors`.
+ * with no scrolling that reaches it. It reads the ancestors from `from`
+ * outward that cut or scroll, and the window, and leaves the geometry to
+ * `computeLostShare`. `from` and `escape` work as in `clipToAncestors`.
  */
-function computeLostShare(
+function readLostShare(
   box: ProbeRect,
   from: Element | null,
   escape: Escape,
   readFacts: ReadFacts,
 ): number {
-  const ancestors = listClippingAncestors(from, escape, readFacts);
-  // `reference` is the box as scrolling would put it. The lost share is
-  // what `kept` lacks of it, so moving a box into view loses nothing.
-  let reference: ProbeRect | null = box;
-  let kept: ProbeRect | null = box;
-  let hasScroller = false;
-  for (let index = 0; index < ancestors.length && kept !== null; index++) {
-    const { facts, clip } = ancestors[index]!;
-    if (facts.cutsX) kept = moveAndCutAlongAxis(kept, "x", 0, clip);
-    if (facts.cutsY) kept = moveAndCutAlongAxis(kept, "y", 0, clip);
-    if (!facts.scrollsX && !facts.scrollsY) continue;
-    hasScroller = true;
-    const view = computeVisibleScrollerArea(clip, ancestors.slice(index + 1));
-    if (view === null) return 1;
-    if (facts.scrollsX && reference !== null) {
-      const delta = computeShiftIntoView(reference.left, reference.right, view.left, view.right);
-      reference = moveAndCutAlongAxis(reference, "x", delta, view);
-      kept = moveAndCutAlongAxis(kept, "x", delta, view);
-    }
-    if (facts.scrollsY && reference !== null) {
-      const delta = computeShiftIntoView(reference.top, reference.bottom, view.top, view.bottom);
-      reference = moveAndCutAlongAxis(reference, "y", delta, view);
-      kept = moveAndCutAlongAxis(kept, "y", delta, view);
-    }
-  }
-  if (kept !== null && !hasScroller) kept = intersectRects(kept, readWindowRect());
-  if (kept === null || reference === null) return 1;
-  return Math.max(0, 1 - computeArea(kept) / computeArea(reference));
+  return computeLostShare(box, listClippingAncestors(from, escape, readFacts), readWindowRect());
 }
 
 /** Returns what an element's own position makes it escape, for the clipping of its box. */
@@ -640,9 +531,12 @@ function hasVisibleBox(element: Element, readFacts: ReadFacts): boolean {
 
 // ---------- Text ----------
 
+/** A text fragment before its element is named: `collectText` adds the name, and the other functions name only the elements they report. */
+type UnnamedFragment = Omit<TextFragment, "element">;
+
 /** A text fragment with the paragraph it belongs to, for the prose measure. */
 interface CollectedFragment {
-  readonly fragment: TextFragment;
+  readonly fragment: UnnamedFragment;
   /** The closest paragraph or list item of a message when the text is prose, else null. */
   readonly paragraph: Element | null;
   /**
@@ -653,7 +547,7 @@ interface CollectedFragment {
   readonly hasStandInBox: boolean;
   /** The element that draws the text: a text node's parent, the input of a field, or the host of a pseudo-element. */
   readonly owner: Element;
-  /** The share of `fragment.box` that is lost, from 0 to 1: see `computeLostShare`. */
+  /** The share of `fragment.box` that is lost, from 0 to 1: see `computeLostShare` in ui-probe-clipping.ts. */
   readonly lostShare: number;
 }
 
@@ -824,6 +718,35 @@ function blursBackdrop(backdropFilter: string): boolean {
 /** How an element sitting above a point of text affects that point. */
 type Coverage = "hidden" | "partly" | "clear";
 
+/** The answers of `paintsSolidPaperOverBox` for the current pass of `readPaintedTextFragments`, which forgets them at its start because the page may have changed. */
+const paperAnswers = new Map<Element, boolean>();
+
+/**
+ * Returns whether the `::before` of an element is a solid paper over the
+ * element's whole box. `document.elementsFromPoint` never lists a
+ * pseudo-element, so without this check the opening sheet's paper (its
+ * `::before`, drawn behind its words) would not hide the board text it lies
+ * over, and that text would be measured as if it were visible.
+ *
+ * The paper counts when it is absolutely positioned, as large as the
+ * element's box, and paints a background colour with alpha of at least 0.95.
+ */
+function paintsSolidPaperOverBox(element: Element, readFacts: ReadFacts): boolean {
+  let paintsPaper = paperAnswers.get(element);
+  if (paintsPaper === undefined) {
+    const paper = getComputedStyle(element, "::before");
+    const box = element.getBoundingClientRect();
+    paintsPaper =
+      paper.content !== "none" &&
+      paper.position === "absolute" &&
+      resolveColour(paper.backgroundColor)[3] >= HIDING_ALPHA &&
+      Math.abs(Number.parseFloat(paper.width) - box.width) < 1 &&
+      Math.abs(Number.parseFloat(paper.height) - box.height) < 1;
+    paperAnswers.set(element, paintsPaper);
+  }
+  return paintsPaper && readEffectiveOpacity(element, readFacts) >= HIDING_ALPHA;
+}
+
 /**
  * Returns how an element that lies over a point affects the text at that
  * point, from what the element paints and the opacity it is drawn with (its
@@ -837,7 +760,9 @@ type Coverage = "hidden" | "partly" | "clear";
  *
  * - "hidden": the effective opacity is at least 0.95 and the element has a
  *   background colour with alpha of at least 0.95, or a backdrop filter that
- *   blurs (a frosted layer blurs what is behind it past reading).
+ *   blurs (a frosted layer blurs what is behind it past reading), or its
+ *   `::before` is a solid paper over its whole box
+ *   (`paintsSolidPaperOverBox`).
  * - "partly": the element does not hide the point, but its paint alpha is
  *   above 0.05. A wash of 50 % is an example. A background image or replaced
  *   content is never taken as hiding, because whether it is transparent at
@@ -855,6 +780,7 @@ function readCoverageOfPoint(element: Element, readFacts: ReadFacts): Coverage {
   if (opacity >= HIDING_ALPHA && (blurs || backgroundAlpha >= HIDING_ALPHA)) {
     return "hidden";
   }
+  if (paintsSolidPaperOverBox(element, readFacts)) return "hidden";
   const paintAlpha = (paintsOtherwise ? 1 : backgroundAlpha) * opacity;
   return paintAlpha > PARTLY_COVERING_ALPHA ? "partly" : "clear";
 }
@@ -949,7 +875,7 @@ function readTextNode(pass: TextPass, node: Text, parent: Element): void {
       paragraph,
       hasStandInBox: false,
       owner: parent,
-      lostShare: computeLostShare(box, parent, "none", pass.readFacts),
+      lostShare: readLostShare(box, parent, "none", pass.readFacts),
       fragment: {
         sourceId,
         length,
@@ -1010,7 +936,7 @@ function readField(
     paragraph: null,
     hasStandInBox: false,
     owner: field,
-    lostShare: computeLostShare(box, field.parentElement, escape, pass.readFacts),
+    lostShare: readLostShare(box, field.parentElement, escape, pass.readFacts),
     fragment: {
       sourceId: takeSourceId(pass),
       length: text.length,
@@ -1068,7 +994,7 @@ function readPseudoElement(pass: TextPass, host: Element, pseudo: "::before" | "
     paragraph: null,
     hasStandInBox: true,
     owner: host,
-    lostShare: computeLostShare(box, host, "none", pass.readFacts),
+    lostShare: readLostShare(box, host, "none", pass.readFacts),
     fragment: {
       sourceId: takeSourceId(pass),
       length: text.length,
@@ -1134,6 +1060,7 @@ function readTextFragments(readFacts: ReadFacts): CollectedFragment[] {
  */
 function readPaintedTextFragments(): CollectedFragment[] {
   const readFacts = createFactsReader();
+  paperAnswers.clear();
   const painted: CollectedFragment[] = [];
   for (const collected of readTextFragments(readFacts)) {
     const coverage = readCoverage(readFacts, collected);
@@ -1160,7 +1087,11 @@ function readPaintedTextFragments(): CollectedFragment[] {
  * inside an element of opacity 0 is not drawn, so it is left out.
  */
 export function collectText(): TextFragment[] {
-  return readPaintedTextFragments().map((collected) => collected.fragment);
+  const describe = createDescriber();
+  return readPaintedTextFragments().map(({ fragment, owner }) => ({
+    ...fragment,
+    element: describe(owner),
+  }));
 }
 
 // ---------- Hiding text and see-through groups ----------
@@ -1432,6 +1363,61 @@ function describeElement(element: Element): string {
   return [element.tagName.toLowerCase(), ...classes].join(".");
 }
 
+/** How many ancestors, with the element itself, `describeElementInContext` names. */
+const DESCRIBED_PATH_LENGTH = 3;
+
+/** How many characters of an element's text `describeElementInContext` shows. */
+const DESCRIBED_TEXT_LENGTH = 40;
+
+/** How many characters of an element's text are read before the spaces are collapsed: more than is shown, because spaces shrink. */
+const DESCRIBED_TEXT_READ_LENGTH = 200;
+
+/** Returns the text an element shows, for its description: the value or placeholder of a field, else its text content, on one line. */
+function readShownText(element: Element): string {
+  const text =
+    element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement
+      ? element.value || element.placeholder
+      : (element.textContent ?? "");
+  // Cut before collapsing, so that a container with a long text does not cost a pass over all of it.
+  return text
+    .slice(0, DESCRIBED_TEXT_READ_LENGTH)
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, DESCRIBED_TEXT_LENGTH);
+}
+
+/**
+ * Returns a name for an element that a person can find on the page: the tag
+ * and first two classes of the element and its two nearest ancestors (below
+ * the body), joined by " > ", then the first 40 characters of its text in
+ * quotes. The name uses no generated ids, so it is the same on every run.
+ */
+function describeElementInContext(element: Element): string {
+  const path: string[] = [];
+  for (
+    let current: Element | null = element;
+    current !== null && current !== document.body && path.length < DESCRIBED_PATH_LENGTH;
+    current = current.parentElement
+  ) {
+    path.unshift(describeElement(current));
+  }
+  const text = readShownText(element);
+  return text === "" ? path.join(" > ") : `${path.join(" > ")} "${text}"`;
+}
+
+/** Returns a function that names elements like `describeElementInContext` and builds each name once, because one element draws many lines. */
+function createDescriber(): (element: Element) => string {
+  const names = new Map<Element, string>();
+  return (element) => {
+    let name = names.get(element);
+    if (name === undefined) {
+      name = describeElementInContext(element);
+      names.set(element, name);
+    }
+    return name;
+  };
+}
+
 /** Returns every visible element of the page: it has a box, is not hidden, and the box touches the window. */
 function listVisibleElements(readFacts: ReadFacts): Element[] {
   const window_ = readWindowRect();
@@ -1551,6 +1537,12 @@ export function collectDiscipline(): DisciplineFacts {
     isSampleOrItsLabel(element) || isPiece(element);
   const visibleTypeSet = new Set(visible.filter((element) => !isExemptFromSizes(element)));
 
+  const describe = createDescriber();
+  const examples = {
+    fontSizes: new Map<string, string>(),
+    fontWeights: new Map<string, string>(),
+    radii: new Map<string, string>(),
+  };
   const fontSizes = new Set<number>();
   const fontWeights = new Set<number>();
   let pieceTextFragments = 0;
@@ -1559,17 +1551,28 @@ export function collectDiscipline(): DisciplineFacts {
       pieceTextFragments += 1;
       continue;
     }
-    fontWeights.add(fragment.fontWeight);
-    if (!isSample(owner)) fontSizes.add(fragment.fontSize);
+    if (!fontWeights.has(fragment.fontWeight)) {
+      fontWeights.add(fragment.fontWeight);
+      examples.fontWeights.set(String(fragment.fontWeight), describe(owner));
+    }
+    if (!isSample(owner) && !fontSizes.has(fragment.fontSize)) {
+      fontSizes.add(fragment.fontSize);
+      examples.fontSizes.set(String(fragment.fontSize), describe(owner));
+    }
   }
 
   const radii = new Set<string>();
   const spacingValues: number[] = [];
+  const offGridSpacing: Array<{ element: string; values: string[] }> = [];
   for (const element of visible) {
+    const offGrid: string[] = [];
     const style = readFacts(element).style;
     for (const longhand of RADIUS_LONGHANDS.slice(0, 4)) {
       const radius = style.getPropertyValue(longhand).trim();
-      if (!/^0(?:px|%)?(?: 0(?:px|%)?)?$/.test(radius)) radii.add(radius);
+      if (!/^0(?:px|%)?(?: 0(?:px|%)?)?$/.test(radius) && !radii.has(radius)) {
+        radii.add(radius);
+        examples.radii.set(radius, describe(element));
+      }
     }
     const styleMap = element.computedStyleMap();
     for (const property of SPACING_PROPERTIES) {
@@ -1578,8 +1581,10 @@ export function collectDiscipline(): DisciplineFacts {
       const value = styleMap.get(property);
       if (value instanceof CSSUnitValue && value.unit === "px" && value.value !== 0) {
         spacingValues.push(value.value);
+        if (!isOnSpacingGrid(value.value)) offGrid.push(`${property} ${String(value.value)}px`);
       }
     }
+    if (offGrid.length > 0) offGridSpacing.push({ element: describe(element), values: offGrid });
   }
 
   const offScaleFontSizes = new Set<string>();
@@ -1646,8 +1651,14 @@ export function collectDiscipline(): DisciplineFacts {
     offScaleFontSizes: [...offScaleFontSizes].sort(text),
     offTokenRadii: [...offTokenRadii].sort(text),
     spacingValues,
+    offGridSpacing,
     fixedSizeSamples: samples.length,
     pieceTextFragments,
+    examples: {
+      fontSizes: Object.fromEntries(examples.fontSizes),
+      fontWeights: Object.fromEntries(examples.fontWeights),
+      radii: Object.fromEntries(examples.radii),
+    },
   };
 }
 
@@ -1706,6 +1717,7 @@ export function collectTargets(): ProbeTarget[] {
   }
   const readFacts = createFactsReader();
   const targets: ProbeTarget[] = [];
+  const describe = createDescriber();
   for (const element of document.querySelectorAll(TARGET_SELECTOR)) {
     if (!hasVisibleBox(element, readFacts)) continue;
     if (element.closest('[inert], [aria-disabled="true"]') !== null) continue;
@@ -1726,6 +1738,7 @@ export function collectTargets(): ProbeTarget[] {
       name: nameTarget(element),
       inlineInProse: element.tagName === "A" && isInProse(element),
       inWindow: isSameRect(box, visibleBox),
+      element: describe(element),
     });
   }
   return targets;
@@ -1764,8 +1777,9 @@ function findScrollContainers(): Element[] {
 /**
  * Focuses the target `collectTargets` gave this id, as a keyboard user would
  * (`focusVisible`), without scrolling anything into view. Returns whether the
- * element is now the active element and matches `:focus-visible`. Fails when
- * no element has the id.
+ * element is now the active element and matches `:focus-visible`, or that it
+ * was replaced: no element has the id any more, because focusing an earlier
+ * target re-rendered it. A replaced target focuses nothing.
  *
  * A target focused by an earlier call is blurred first, so a caller that
  * checks many targets in a row needs one call per target, and one
@@ -1774,7 +1788,7 @@ function findScrollContainers(): Element[] {
 export function focusTarget(id: number): FocusOutcome {
   const element = document.querySelector(`[${TARGET_ATTRIBUTE}="${id}"]`);
   if (!(element instanceof HTMLElement) && !(element instanceof SVGElement)) {
-    throw new Error(`No focusable element carries the target id ${id}. Call collectTargets first.`);
+    return { focused: false, replaced: true };
   }
   if (focusSnapshot !== undefined) blurTarget();
   scrollContainers ??= findScrollContainers();
@@ -1794,7 +1808,10 @@ export function focusTarget(id: number): FocusOutcome {
     preventScroll: true,
   };
   (element as HTMLElement).focus(options);
-  return { focused: document.activeElement === element && element.matches(":focus-visible") };
+  return {
+    focused: document.activeElement === element && element.matches(":focus-visible"),
+    replaced: false,
+  };
 }
 
 /**
@@ -1929,9 +1946,13 @@ export function removePerturbation(): void {
 export function measureClipping(): ClippingFacts {
   const readFacts = createFactsReader();
   const collected = readTextFragments(readFacts);
+  const describe = createDescriber();
   let clippedCharacters = 0;
-  for (const { fragment, lostShare } of collected) {
-    clippedCharacters += Math.round(fragment.length * lostShare);
+  const clippedTexts: Array<{ element: string; characters: number }> = [];
+  for (const { fragment, lostShare, owner } of collected) {
+    const characters = Math.round(fragment.length * lostShare);
+    clippedCharacters += characters;
+    if (characters > 0) clippedTexts.push({ element: describe(owner), characters });
   }
 
   // Sweep from left to right: a fragment can overlap only the fragments that start before it ends.
@@ -1942,9 +1963,13 @@ export function measureClipping(): ClippingFacts {
         !each.hasStandInBox &&
         readCoverage(readFacts, each) !== "hidden",
     )
-    .map(({ fragment }) => ({ sourceId: fragment.sourceId, box: fragment.visibleBox! }))
+    .map(({ fragment, owner }) => ({
+      sourceId: fragment.sourceId,
+      box: fragment.visibleBox!,
+      owner,
+    }))
     .sort((first, second) => first.box.left - second.box.left);
-  let overlappingPairs = 0;
+  const overlaps: Array<{ first: string; second: string; area: number }> = [];
   for (let first = 0; first < drawn.length; first++) {
     const one = drawn[first]!;
     for (let second = first + 1; second < drawn.length; second++) {
@@ -1952,10 +1977,16 @@ export function measureClipping(): ClippingFacts {
       if (other.box.left >= one.box.right) break;
       if (other.sourceId === one.sourceId) continue;
       const shared = intersectRects(one.box, other.box);
-      if (shared !== null && computeArea(shared) > OVERLAP_THRESHOLD_PX2) overlappingPairs++;
+      if (shared !== null && computeArea(shared) > OVERLAP_THRESHOLD_PX2) {
+        overlaps.push({
+          first: describe(one.owner),
+          second: describe(other.owner),
+          area: Math.round(computeArea(shared)),
+        });
+      }
     }
   }
-  return { clippedCharacters, overlappingPairs };
+  return { clippedCharacters, overlappingPairs: overlaps.length, clippedTexts, overlaps };
 }
 
 /**
@@ -1967,7 +1998,7 @@ export function measureClipping(): ClippingFacts {
  * is chosen among all lines of the paragraph, also those out of view.
  */
 export function measureProse(): ProseFacts {
-  const byParagraph = new Map<Element, TextFragment[]>();
+  const byParagraph = new Map<Element, UnnamedFragment[]>();
   for (const { fragment, paragraph } of readPaintedTextFragments()) {
     if (paragraph === null) continue;
     const group = byParagraph.get(paragraph);
@@ -1975,13 +2006,17 @@ export function measureProse(): ProseFacts {
     else group.push(fragment);
   }
 
+  const describe = createDescriber();
+  const paragraphs: Array<{ element: string; lines: number; meanCharactersPerLine: number }> = [];
   let lines = 0;
   let characters = 0;
-  for (const fragments of byParagraph.values()) {
+  for (const [paragraph, fragments] of byParagraph) {
+    let paragraphCharacters = 0;
+    let paragraphFullLines = 0;
     const sorted = [...fragments].sort(
       (first, second) => first.box.top - second.box.top || first.box.left - second.box.left,
     );
-    const paragraphLines: TextFragment[][] = [];
+    const paragraphLines: UnnamedFragment[][] = [];
     for (const fragment of sorted) {
       const current = paragraphLines.at(-1);
       if (
@@ -1998,11 +2033,21 @@ export function measureProse(): ProseFacts {
         (fragment) => fragment.visibleBox !== null && isSameRect(fragment.box, fragment.visibleBox),
       );
       if (!isFullyVisible) continue;
+      const lineCharacters = line.reduce((sum, fragment) => sum + fragment.length, 0);
       lines++;
-      characters += line.reduce((sum, fragment) => sum + fragment.length, 0);
+      characters += lineCharacters;
+      paragraphFullLines++;
+      paragraphCharacters += lineCharacters;
+    }
+    if (paragraphFullLines > 0) {
+      paragraphs.push({
+        element: describe(paragraph),
+        lines: paragraphFullLines,
+        meanCharactersPerLine: paragraphCharacters / paragraphFullLines,
+      });
     }
   }
-  return { lines, meanCharactersPerLine: lines === 0 ? null : characters / lines };
+  return { lines, meanCharactersPerLine: lines === 0 ? null : characters / lines, paragraphs };
 }
 
 /**

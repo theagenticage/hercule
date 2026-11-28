@@ -1,7 +1,8 @@
 /**
  * Tests the sidebar's thread list in the packaged app, signed in to a real
  * controller whose threads a fleet of scripted runners puts in known states
- * (spec 17, §Design system, **The sidebar**):
+ * (spec 17, §Design system, **The sidebar**). The files `sidebar-faces.test.ts`
+ * and `sidebar-large-project.test.ts` test the rest of it:
  *
  * - the live socket connects from `app://hercule` under the release policy;
  * - the list groups the threads by project, then by workspace: the threads that
@@ -14,14 +15,7 @@
  * - a new thread joins the row of its workspace, or appears at the top of its
  *   project when it works alone, also one in a new worktree, which its row
  *   names;
- * - a runner that goes offline shows its threads as offline until it returns;
- * - the list mounts about as many rows for 500 threads as for 40;
- * - the face switch, Threads | Hercule, sits in the window's drag strip and
- *   still takes a click; it, View › Threads and View › Hercule (⌥⌘1, ⌥⌘2),
- *   and ← and → on its focused segment change the face without leaving the
- *   screen;
- * - the Office and Settings keep the Hercule face, and opening a thread shows
- *   the Threads face.
+ * - a runner that goes offline shows its threads as offline until it returns.
  *
  * One more test runs only with `HERCULE_LONG_TESTS=1`, because it takes over
  * 6 minutes: a push still arrives after the window has been hidden that long.
@@ -34,13 +28,12 @@ import { describe, expect, it } from "vitest";
 import type { HerculeClient } from "../../packages/client-core/src/index";
 import {
   arrangeFleet,
-  chooseMenuItem,
   launchPlainAppForTest,
   launchWithSavedController,
   openSignedIn,
-  openThread,
   signInAndReadToken,
 } from "./harness";
+import { readCounts } from "./sidebar-helpers";
 
 /** Whether the tests that take minutes run. */
 const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
@@ -54,16 +47,18 @@ const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
  *   name of the thread that asks when it is not the row's lead, as
  *   "Thread 1, waiting on you: Run pnpm test?" or
  *   "Thread 1, waiting on you: Thread 3 asks · Run pnpm test?";
- * - a row of one thread: its accessible name, its second line and its status,
- *   as "Thread 1, working | main | Working",
- *   "Thread 4, working | studio | Queued" or
- *   "Thread 5, idle | laptop | now". While a Request waits, the second line is
- *   its question, as "Thread 1, waiting on you | Run pnpm test? | Approval";
+ * - a row of one thread: its accessible name and its second line, which
+ *   starts with the state in words while the row has one and ends with the
+ *   age when it has none, as "Thread 1, working | Working · main",
+ *   "Thread 4, working | Queued · studio" or "Thread 5, idle | laptop · now".
+ *   While a Request waits, the second line holds its question, as
+ *   "Thread 1, waiting on you | Approval · Run pnpm test?";
  * - a row of 2 or more threads: the same, then the accessible name of its dots,
  *   which counts the threads in words, as
- *   "Thread 1, working | main | Working | 2 threads: 2 working. Unfold";
+ *   "Thread 1, working | Working · main | 2 threads: 2 working. Unfold";
  * - a "more" row: its label, which counts rows, "35 more";
- * - the Draft Thread's row: its name and its end, "New thread | draft".
+ * - the Draft Thread's row: its name and the word that starts its second
+ *   line, "New thread | Draft".
  *
  * The app opens on a Draft Thread in no project, so every list has the
  * draft's row first under "No project", which is the last section.
@@ -84,8 +79,11 @@ function readSidebarItems(page: Page): Promise<string[]> {
       if (item.matches(".side-h")) return item.textContent;
       if (item.matches(".side-row--wait")) return `${name}: ${readText(".side-ask")}`;
       if (item.matches(".side-row--more")) return item.textContent;
-      if (keyed?.getAttribute("data-key") === "draft") return `${name} | ${readText(".side-end")}`;
-      const row = `${name} | ${readText(".side-detail")} | ${readText(".side-end")}`;
+      if (keyed?.getAttribute("data-key") === "draft")
+        return `${name} | ${readText(".side-state")}`;
+      // Each part of the second line is a flex item, which `innerText` ends
+      // with a line break; the line itself never holds one.
+      const row = `${name} | ${readText(".side-detail").replaceAll("\n", "")}`;
       // Only a row of 2 or more threads has dots.
       const dots = item.querySelector(".side-dots")?.getAttribute("aria-label");
       return dots === null || dots === undefined ? row : `${row} | ${dots}`;
@@ -103,26 +101,6 @@ async function readBranch(client: HerculeClient, sessionId: string): Promise<str
   const workspace = await client.workspace.read({ params: { id: workspaceId! } });
   return workspace.checkouts[0]!.branch;
 }
-
-/** Returns the counts line at the foot of the sidebar, such as "3 working · 1 waiting · 0 idle". */
-function readCounts(page: Page): Promise<string | null> {
-  return page.locator(".side-sum").textContent();
-}
-
-/**
- * Returns which face the sidebar shows, as the face switch's selected segment
- * and the label of the list under it, such as
- * `{ tab: "Hercule", list: "Hercule" }`. The list is the sidebar's `nav`,
- * named "Threads" on the threads face and "Hercule" on the Hercule face.
- */
-async function readSidebarFace(page: Page): Promise<{ tab: string | null; list: string | null }> {
-  const tab = page.getByRole("tablist", { name: "Sidebar" }).locator('[aria-selected="true"]');
-  const list = page.locator('nav[aria-label="Threads"], nav[aria-label="Hercule"]');
-  return { tab: await tab.textContent(), list: await list.getAttribute("aria-label") };
-}
-
-const THREADS_FACE = { tab: "Threads", list: "Threads" };
-const ORCHESTRATION_FACE = { tab: "Hercule", list: "Hercule" };
 
 describe("the sidebar", () => {
   it("connects the live socket from app://hercule under the release policy", async () => {
@@ -154,7 +132,7 @@ describe("the sidebar", () => {
     expect(refusals).toEqual([]);
   });
 
-  it("lists the rows by project, newest started first, each row naming where it works and ending in its status, and holds the threads of one workspace in one row", async () => {
+  it("lists the rows by project, newest started first, each row naming its state, where it works and, with no state, its age, and holds the threads of one workspace in one row", async () => {
     const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const webshop = await fleet.createProject("Webshop");
     const payments = await fleet.createProject("Payments");
@@ -221,14 +199,14 @@ describe("the sidebar", () => {
         "Waiting on you 1",
         "Thread 1, waiting on you: Thread 3 asks · Run pnpm test?",
         "project Payments",
-        "Thread 6, can't be reached | laptop | now",
-        "Thread 5, can't be reached | laptop | Offline",
-        "Thread 4, working | studio | Queued",
+        "Thread 6, can't be reached | laptop · now",
+        "Thread 5, can't be reached | Offline · laptop",
+        "Thread 4, working | Queued · studio",
         "project Webshop",
-        "Thread 2, working | studio | Working",
-        "Thread 1, waiting on you | Thread 3 asks · Run pnpm test? | Approval | 2 threads: 1 waiting on you, 1 working. Unfold",
+        "Thread 2, working | Working · studio",
+        "Thread 1, waiting on you | Approval · Thread 3 asks · Run pnpm test? | 2 threads: 1 waiting on you, 1 working. Unfold",
         "project No project",
-        "New thread | draft",
+        "New thread | Draft",
       ]);
     // The foot counts threads, not rows.
     expect(await readCounts(page)).toBe("3 working · 1 waiting · 0 idle");
@@ -242,8 +220,8 @@ describe("the sidebar", () => {
     const { page } = await openSignedIn(url);
     const working = [
       "project No project",
-      "New thread | draft",
-      "Thread 1, working | studio | Working",
+      "New thread | Draft",
+      "Thread 1, working | Working · studio",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(working);
 
@@ -257,8 +235,8 @@ describe("the sidebar", () => {
       "Waiting on you 1",
       "Thread 1, waiting on you: Run pnpm test?",
       "project No project",
-      "New thread | draft",
-      "Thread 1, waiting on you | Run pnpm test? | Approval",
+      "New thread | Draft",
+      "Thread 1, waiting on you | Approval · Run pnpm test?",
     ]);
 
     await client.session.respondToApprovalRequest({
@@ -288,9 +266,9 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 1, working | main | Working",
+        "Thread 1, working | Working · main",
         "project No project",
-        "New thread | draft",
+        "New thread | Draft",
       ]);
 
     // Thread 2 works in the same main workspace, so it joins Thread 1's row
@@ -305,9 +283,9 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 1, working | main | Working | 2 threads: 2 working. Unfold",
+        "Thread 1, working | Working · main | 2 threads: 2 working. Unfold",
         "project No project",
-        "New thread | draft",
+        "New thread | Draft",
       ]);
 
     // The new worktree's branch was generated, so the row names the machine.
@@ -322,10 +300,10 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 3, working | studio | Working",
-        "Thread 1, working | main | Working | 2 threads: 2 working. Unfold",
+        "Thread 3, working | Working · studio",
+        "Thread 1, working | Working · main | 2 threads: 2 working. Unfold",
         "project No project",
-        "New thread | draft",
+        "New thread | Draft",
       ]);
   });
 
@@ -342,9 +320,9 @@ describe("the sidebar", () => {
     const { page } = await openSignedIn(url);
     const before = [
       "project No project",
-      "New thread | draft",
-      "Thread 2, idle | laptop | now",
-      "Thread 1, working | laptop | Working",
+      "New thread | Draft",
+      "Thread 2, idle | laptop · now",
+      "Thread 1, working | Working · laptop",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(before);
 
@@ -353,130 +331,15 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project No project",
-        "New thread | draft",
-        "Thread 2, can't be reached | laptop | Offline",
-        "Thread 1, can't be reached | laptop | Offline",
+        "New thread | Draft",
+        "Thread 2, can't be reached | Offline · laptop",
+        "Thread 1, can't be reached | Offline · laptop",
       ]);
     expect(await readCounts(page)).toBe("0 working · 0 waiting · 0 idle");
 
     await runner.reconnect();
     await expect.poll(() => readSidebarItems(page)).toEqual(before);
     expect(await readCounts(page)).toBe("1 working · 0 waiting · 1 idle");
-  });
-
-  it("mounts about as many rows for a project of 500 threads as for one of 40, expanded", async () => {
-    const { url, fleet } = await arrangeFleet();
-    const project = await fleet.createProject("Fleet");
-    const [first, second] = await Promise.all(
-      ["studio", "laptop"].map((name) => fleet.enlistRunner(name, { maxConcurrentSessions: 250 })),
-    );
-    await fleet.spawnThreads(40, { runner: first!, projectId: project.id });
-    const { page } = await openSignedIn(url);
-    await expect.poll(() => readCounts(page)).toBe("40 working · 0 waiting · 0 idle");
-
-    // Every thread works alone, so a row is a thread and the project hides 35 rows.
-    const moreRows = page.getByRole("button", { name: "35 more", exact: true });
-    await moreRows.click();
-    await moreRows.waitFor({ state: "detached" });
-    const countMounted = () =>
-      page.evaluate(() => ({
-        rows: document.querySelectorAll('nav[aria-label="Threads"] .side-row').length,
-        elements: document.querySelectorAll('nav[aria-label="Threads"] *').length,
-      }));
-    const with40 = await countMounted();
-
-    await Promise.all([
-      fleet.spawnThreads(210, { runner: first!, projectId: project.id }),
-      fleet.spawnThreads(250, { runner: second!, projectId: project.id }),
-    ]);
-    await expect
-      .poll(() => readCounts(page), { timeout: 30_000 })
-      .toBe("500 working · 0 waiting · 0 idle");
-    const with500 = await countMounted();
-
-    console.info(
-      `mounted in the thread list, one expanded project: ` +
-        `40 threads, ${with40.rows} rows and ${with40.elements} elements; ` +
-        `500 threads, ${with500.rows} rows and ${with500.elements} elements`,
-    );
-    // The component test holds the list to 45 mounted items for 500 threads;
-    // every row is an item.
-    expect(with500.rows).toBeLessThanOrEqual(45);
-    expect(with500.rows).toBeLessThanOrEqual(with40.rows + 1);
-  });
-
-  it("changes the face from the switch in the drag strip, from View's items and with ← and →, without leaving the thread", async () => {
-    const { url, fleet, waitForStatus } = await arrangeFleet();
-    const runner = await fleet.enlistRunner("studio");
-    const [thread] = await fleet.spawnThreads(1, { runner });
-    await waitForStatus(thread!.id, "busy");
-    const { app, page } = await openSignedIn(url);
-    await openThread(page, "Thread 1");
-    const transcript = page.locator('section[aria-label="Transcript"]');
-    const switchList = page.getByRole("tablist", { name: "Sidebar" });
-    const orchestrationTab = switchList.getByRole("tab", { name: "Hercule" });
-    const threadsTab = switchList.getByRole("tab", { name: "Threads" });
-    expect(await readSidebarFace(page)).toEqual(THREADS_FACE);
-
-    // The switch sits in the shell's 52px drag strip. macOS hands a mouse
-    // press in a drag region to the window, to move it, before the page sees
-    // it; Playwright's click reaches the page directly and would not notice.
-    // So the test reads that the switch opts out of the drag region, as
-    // Chromium reports it to macOS, and then clicks it.
-    const box = (await switchList.boundingBox())!;
-    expect(box.y).toBeLessThan(52);
-    expect(
-      await switchList.evaluate((element) =>
-        getComputedStyle(element).getPropertyValue("-webkit-app-region"),
-      ),
-    ).toBe("no-drag");
-    await orchestrationTab.click();
-    await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
-    await transcript.waitFor();
-
-    // Only the selected segment is in the tab order, and the arrow keys move
-    // both the selection and the focus.
-    expect(await orchestrationTab.evaluate((element) => element === document.activeElement)).toBe(
-      true,
-    );
-    await page.keyboard.press("ArrowLeft");
-    await expect.poll(() => readSidebarFace(page)).toEqual(THREADS_FACE);
-    expect(await threadsTab.evaluate((element) => element === document.activeElement)).toBe(true);
-    await page.keyboard.press("ArrowRight");
-    await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
-
-    await chooseMenuItem(app, "View", "Threads");
-    await expect.poll(() => readSidebarFace(page)).toEqual(THREADS_FACE);
-    await chooseMenuItem(app, "View", "Hercule");
-    await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
-    await transcript.waitFor();
-  });
-
-  it("keeps the Hercule face in the Office and Settings, and shows the Threads face once a thread opens", async () => {
-    const { url, fleet, waitForStatus } = await arrangeFleet();
-    const runner = await fleet.enlistRunner("studio");
-    const [thread] = await fleet.spawnThreads(1, { runner });
-    await waitForStatus(thread!.id, "busy");
-    const { app, page } = await openSignedIn(url);
-    await page
-      .getByRole("tablist", { name: "Sidebar" })
-      .getByRole("tab", { name: "Hercule" })
-      .click();
-    await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
-
-    await page.getByRole("link", { name: "Office ⌘⇧O" }).click();
-    await page.locator(".office").waitFor();
-    expect(await readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
-
-    await page.locator(".side-foot").getByRole("link", { name: "Settings" }).click();
-    await expect.poll(() => page.locator(".bar .title").textContent()).toBe("Appearance");
-    expect(await readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
-
-    // The Hercule face lists no threads that do not wait, so the thread opens
-    // from Go, which lists the threads whichever face shows.
-    await chooseMenuItem(app, "Go", "Thread 1");
-    await page.locator('section[aria-label="Transcript"]').waitFor();
-    await expect.poll(() => readSidebarFace(page)).toEqual(THREADS_FACE);
   });
 
   it.skipIf(!longTests)(
@@ -490,7 +353,7 @@ describe("the sidebar", () => {
       // Playwright's focus emulation keeps a hidden page "visible", so its
       // timers are never throttled. This test starts the app as a plain
       // process instead.
-      const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url);
+      const { evaluateInPage, callWindowMethod } = await launchPlainAppForTest(url, "bottom-left");
       const hasWaitingRow = `document.querySelector("a.side-row--wait") !== null`;
       await expect
         .poll(

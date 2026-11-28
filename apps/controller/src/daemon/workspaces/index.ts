@@ -4,3 +4,4 @@
  * that removes workspaces nothing needs any more.
  */
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./provisioning";
+export { makeRemovalSender } from "./removal";

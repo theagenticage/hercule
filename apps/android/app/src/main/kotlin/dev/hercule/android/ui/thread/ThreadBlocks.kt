@@ -4,7 +4,7 @@ import androidx.compose.runtime.Immutable
 import dev.hercule.android.ui.assistant.findOpenItem
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.QuestionRequest
 import dev.hercule.android.wire.SessionRequest
 import dev.hercule.android.wire.StreamKind
@@ -132,17 +132,17 @@ fun buildThreadBlocks(
     var runningTurnId: String? = null
     ordered.forEach { row ->
         when (val event = row.event) {
-            is ProviderEvent.TurnStarted -> if (event.subagentId == null) runningTurnId = event.turnId
-            is ProviderEvent.TurnCompleted -> if (event.subagentId == null && event.turnId == runningTurnId) runningTurnId = null
-            is ProviderEvent.SessionExited, ProviderEvent.SessionStarted -> runningTurnId = null
+            is HarnessEvent.TurnStarted -> if (event.subagentId == null) runningTurnId = event.turnId
+            is HarnessEvent.TurnCompleted -> if (event.subagentId == null && event.turnId == runningTurnId) runningTurnId = null
+            is HarnessEvent.SessionExited, HarnessEvent.SessionStarted -> runningTurnId = null
             else -> Unit
         }
         when (val event = row.event) {
-            is ProviderEvent.ContentDelta ->
+            is HarnessEvent.ContentDelta ->
                 if (event.subagentId == null && event.streamKind == StreamKind.AssistantText) {
                     texts.getOrPut(event.itemId) { StringBuilder() }.append(event.delta)
                 }
-            is ProviderEvent.ItemCompleted -> if (event.subagentId == null) statuses[event.itemId] = event.status
+            is HarnessEvent.ItemCompleted -> if (event.subagentId == null) statuses[event.itemId] = event.status
             else -> Unit
         }
     }
@@ -170,13 +170,13 @@ fun buildThreadBlocks(
         // does not take the whole Thread down.
         val at = Instant.parseOrNull(row.at) ?: return@forEach
         when (val event = row.event) {
-            is ProviderEvent.TurnStarted -> if (event.subagentId == null) {
+            is HarnessEvent.TurnStarted -> if (event.subagentId == null) {
                 closeStretch(at)
                 turnStart = at
                 turnModel = event.model
                 boundary = at
             }
-            is ProviderEvent.ItemStarted -> if (event.subagentId == null) {
+            is HarnessEvent.ItemStarted -> if (event.subagentId == null) {
                 when (event.kind) {
                     ItemKind.UserMessage -> {
                         closeStretch(at)
@@ -198,9 +198,9 @@ fun buildThreadBlocks(
                     }
                 }
             }
-            is ProviderEvent.ItemCompleted ->
+            is HarnessEvent.ItemCompleted ->
                 if (event.subagentId == null && event.kind == ItemKind.AssistantMessage) boundary = at
-            is ProviderEvent.TurnCompleted -> if (event.subagentId == null) {
+            is HarnessEvent.TurnCompleted -> if (event.subagentId == null) {
                 closeStretch(at)
                 val start = turnStart
                 if (event.state != TurnState.Completed && start != null) {
@@ -208,20 +208,20 @@ fun buildThreadBlocks(
                 }
                 turnStart = null
             }
-            is ProviderEvent.RuntimeWarning -> if (event.subagentId == null) {
+            is HarnessEvent.RuntimeWarning -> if (event.subagentId == null) {
                 blocks += WarningBlock("warning-${row.position}", event.message, at)
             }
-            is ProviderEvent.RuntimeNotice -> if (event.subagentId == null) {
+            is HarnessEvent.RuntimeNotice -> if (event.subagentId == null) {
                 blocks += NoticeBlock("notice-${row.position}", event.message, at)
             }
-            is ProviderEvent.RuntimeError -> if (event.subagentId == null) {
+            is HarnessEvent.RuntimeError -> if (event.subagentId == null) {
                 blocks += ErrorBlock("error-${row.position}", event.message ?: event.errorClass, at)
             }
-            is ProviderEvent.Unknown -> {
+            is HarnessEvent.Unknown -> {
                 val type = event.originalType
                 if (event.subagentId == null && type != null) blocks += NoticeBlock("notice-${row.position}", "Unknown event: $type", at)
             }
-            is ProviderEvent.RequestOpened -> if (event.subagentId == null && event.request.requestId in openIds && !isAsyncQuestion(event.request)) {
+            is HarnessEvent.RequestOpened -> if (event.subagentId == null && event.request.requestId in openIds && !isAsyncQuestion(event.request)) {
                 closeStretch(at)
                 blocks += WaitingBlock("waiting-${event.request.requestId}", event.request.requestId, at)
             }
@@ -307,7 +307,7 @@ private class BuildingStretch(val key: String, val startedAt: Instant) {
  * - a search reads `pattern` and `path`, or `query`;
  * - anything else reads `description`, else the tool's `name`.
  */
-private fun buildWorkItem(event: ProviderEvent.ItemStarted, status: ItemStatus?): WorkItem {
+private fun buildWorkItem(event: HarnessEvent.ItemStarted, status: ItemStatus?): WorkItem {
     val detail = readDetailObject(event.detail)
     val input = detail?.get("input") as? JsonObject
     val paths = when (event.kind) {

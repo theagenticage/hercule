@@ -38,7 +38,7 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 6. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the licences.
 7. **Alerts and Live Updates,** posted by a foreground service that holds one `/ws` socket while the user is signed in.
 
-**Out:** Intake, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
+**Out:** Intake *(superseded 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the desktop Intake screen is deleted, so the phone will not get one; what takes its place is the Inbox, which this spec does not plan yet)*, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
 
 ## Architecture
 
@@ -97,9 +97,11 @@ Tests sit under `app/src/test/`, beside the same packages. Screenshot goldens ar
 
 ### Decoding the wire
 
-Every enum on the wire decodes as an open string with an "unknown" branch, so a new value from a newer controller never fails a read. `item.*.detail` is untyped JSON whose keys differ per provider, so every key is optional, and an item of an unknown kind gets a generic row. The wire itself is described in [the wire research](../research/android/wire.md).
+Every enum on the wire decodes as an open string with an "unknown" branch, so a new value from a newer controller never fails a read. `item.*.detail` is untyped JSON whose keys differ per harness, so every key is optional, and an item of an unknown kind gets a generic row. The wire itself is described in [the wire research](../research/android/wire.md).
 
-*(Amended 2026-10-29, [#897](https://github.com/theagenticage/hercule/issues/897).)* **An event of an unknown type decodes to `ProviderEvent.Unknown`** and holds the whole event. The controller's own `unknown` event ([./06-providers.md](./06-providers.md) section 6) reads its type from `originalType`; a raw event with a future `_tag` reads it from `_tag`. The Thread screen draws each of these as a muted note, an info icon and "Unknown event: <type>". It also draws `runtime.notice` as a muted note with its message, and `runtime.error` as an error row in the failure ink, with its message or, when there is none, its class. An event of a subagent is left out of the thread, as every subagent row is.
+*(Amended 2026-10-29, [#897](https://github.com/theagenticage/hercule/issues/897).)* **An event of an unknown type decodes to `HarnessEvent.Unknown`** and holds the whole event. The controller's own `unknown` event ([./06-providers.md](./06-providers.md) section 6) reads its type from `originalType`; a raw event with a future `_tag` reads it from `_tag`. The Thread screen draws each of these as a muted note, an info icon and "Unknown event: <type>". It also draws `runtime.notice` as a muted note with its message, and `runtime.error` as an error row in the failure ink, with its message or, when there is none, its class. An event of a subagent is left out of the thread, as every subagent row is.
+
+*(Amended 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406). Amended 2026-11-01, [#944](https://github.com/theagenticage/hercule/issues/944): a field the app does not read is deleted, not made optional.)* **A field the controller will drop stops being required first.** The app is installed on its own, not with the controller, and it ignores keys it does not know but fails on a key it requires that is missing. So before the contract drops a field, the app stops requiring it, in a release of its own: it deletes the field from its wire model when it does not read it, and makes the field optional when it does. The controller change waits until that build is installed. The first case is the provider remodel ([ADR 0048](../adr/0048-harnesses-and-provider-accounts-are-separate.md)): the app deletes `instanceId`, which it never reads, from the `Session` and `Assistant` wire models before the controller replaces it with `providerAccountId` and `harnessId`. A wire model without the field decodes records from older controllers, which send it, and from newer ones, which do not. The app has no model menu, so the remodel changes nothing else in it.
 
 ### Logic ported from `client-core`
 
@@ -402,7 +404,7 @@ The You screen keeps the look of the book's `mobile/settings.html`, but holds on
 
 The book's tab bar: Threads, Intake, the new-thread button, Office and You. Threads, Office and You have screens, and switching tabs replaces the whole back stack with that tab's screen. Intake and the new-thread button are drawn faint and do nothing, so the bar keeps the book's shape without offering what the app cannot do. The app still opens on the Office.
 
-Threads carries a badge, on every tab's screen, with the number of threads waiting on the user, hidden at zero. It counts threads only, not assistants: an assistant's question shows at a glance in the Office's Waiting on you lane and its receipt. Intake has no badge, because the app reads no Intake data. *(Amended 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659): Threads was drawn faint and had no screen, and its badge was the Office's Waiting on you count, assistants included.)*
+Threads carries a badge, on every tab's screen, with the number of threads waiting on the user, hidden at zero. It counts threads only, not assistants: an assistant's question shows at a glance in the Office's Waiting on you lane and its receipt. Intake has no badge, because the app reads no Intake data. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the desktop Intake screen is deleted, so the faint Intake tab now points at nothing that will be built. The tab bar stays drawn as the book draws it until a ticket redraws it.)* *(Amended 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659): Threads was drawn faint and had no screen, and its badge was the Office's Waiting on you count, assistants included.)*
 
 ### Following new messages
 
@@ -803,7 +805,7 @@ The steps to pair the phone are in [the platform research §3](../research/andro
 
 The phone app is itself beyond what spec 01 obliges for v1. These are what later milestones add:
 
-- **The other screens:** Intake, Decision, New thread, Runs and Triggers.
+- **The other screens:** ~~Intake,~~ Decision, New thread, Runs and Triggers. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Intake is superseded; the desktop screen it would have followed is deleted.)*
 - **Mark done, Reopen and search** on the Threads tab.
 - **Memory and reminders** on the Assistant screen, once operations read them.
 - **Voice in the thread composer.**
@@ -819,4 +821,5 @@ The phone app is itself beyond what spec 01 obliges for v1. These are what later
 - [#630: the prototype report](https://github.com/theagenticage/hercule/issues/630#issuecomment-6143269197)
 - [#630: the phone results, acceptance 5 and 7](https://github.com/theagenticage/hercule/issues/630#issuecomment-6144697779)
 - [ADR 0042 - The phone app is a native Android client of the public API](../adr/0042-the-phone-app-is-a-native-android-client-of-the-public-api.md)
+- [ADR 0048 - Harnesses and provider accounts are separate](../adr/0048-harnesses-and-provider-accounts-are-separate.md) *(added 2026-10-30, [#406](https://github.com/theagenticage/hercule/issues/406))*
 - Research: [wire.md](../research/android/wire.md), the HTTP API and the `/ws` socket as a native client reads them, with the crew face algorithm, the fonts and the tokens; [platform.md](../research/android/platform.md), the phone, the toolchain, One UI's behaviour, notification facts and the background connection; the notification probe's [source](../research/android/probe-source/) and [screenshots](../research/android/probe-screenshots/)

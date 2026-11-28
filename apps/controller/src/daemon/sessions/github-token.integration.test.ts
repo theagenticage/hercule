@@ -125,6 +125,13 @@ const answerTokens = (
   };
 };
 
+/**
+ * The lifetime of a token that has expired by the time it arrives. A token
+ * answer states an expired token only with a lifetime of 0: a negative
+ * lifetime states none, so that token never expires.
+ */
+const EXPIRED_ON_ARRIVAL_SECONDS = 0;
+
 const refreshesAsked = (provider: DeviceProvider): number =>
   provider.tokenRequests.filter((form) => form["grant_type"] === "refresh_token").length;
 
@@ -251,7 +258,7 @@ describe("the start frame of a session with a GitHub Connection", () => {
 
   it("carries the Connection and the git identity but no token or expiry when the token has expired", async () => {
     await withGithubFleet(async (arranged, provider) => {
-      answerTokens(provider, -MINUTE_SECONDS);
+      answerTokens(provider, EXPIRED_ON_ARRIVAL_SECONDS);
       const connectionId = await signIn(arranged);
       await setDefaultConnection(arranged, connectionId);
 
@@ -389,9 +396,9 @@ describe("a runner's request for a session's GitHub token", () => {
     await withGithubFleet(async (arranged, provider) => {
       let finishRefresh = (): void => {};
       let gate: Promise<void> = Promise.resolve();
-      // The token is inside the refresh margin, so a request refreshes it, and
-      // that refresh waits for `gate`.
-      answerTokens(provider, 5 * MINUTE_SECONDS, { beforeRefresh: () => gate });
+      // The token has expired, so a request refreshes it, and that refresh
+      // waits for `gate`.
+      answerTokens(provider, EXPIRED_ON_ARRIVAL_SECONDS, { beforeRefresh: () => gate });
       await setDefaultConnection(arranged, await signIn(arranged));
       const start = await spawnAndAwaitStart(arranged);
       gate = new Promise<void>((resolve) => {

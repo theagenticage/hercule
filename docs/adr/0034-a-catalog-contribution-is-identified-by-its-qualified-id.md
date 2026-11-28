@@ -6,6 +6,8 @@ Date: 2026-09-13
 
 Accepted. Decided by [Connections and the core OAuth2 client (#71)](https://github.com/theagenticage/hercule/issues/71), landed in [PR #175](https://github.com/theagenticage/hercule/pull/175). Refines [ADR 0006](./0006-plugins-request-capabilities-and-register-contributions-in-code.md) (contributions are registered in code and named by id) and [ADR 0010](./0010-external-accounts-are-core-owned-connections.md) (connection types are plugin-defined).
 
+**Amended 2026-10-30 ([#406](https://github.com/theagenticage/hercule/issues/406)):** harness and provider ids take the qualified form now, with the rename of [ADR 0048](./0048-harnesses-and-provider-accounts-are-separate.md), which settles the paragraph "Providers follow in their own ticket" ([#176](https://github.com/theagenticage/hercule/issues/176)).
+
 ## Context
 
 A plugin registers contributions into the catalog and each one needs a name the rest of the system can hold: a Connection row names a connection type, a channel binding names a channel contribution, a session spec names a provider. [Spec 05](../spec/05-plugins.md) said those names are "namespaced by the defining plugin" without saying what the namespaced name *is*, so the first implementation took the plugin's declared word as the identity - the `github` plugin declares a `github` connection type, and `github` is what the API takes, what the row stores, and what a filter matches.

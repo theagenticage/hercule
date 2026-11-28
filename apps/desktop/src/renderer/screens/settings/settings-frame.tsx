@@ -66,7 +66,7 @@ export function SettingsFrame({
   const [headerTitle, setHeaderTitle] = useState<SettingsHeaderTitleProps | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   // A layout effect, so the new screen never paints at the old offset. It
-  // runs before the sections' own effects, such as Intake scrolling to a kind.
+  // runs before the sections' own effects.
   useLayoutEffect(() => {
     if (bodyRef.current !== null) bodyRef.current.scrollTop = 0;
   }, [path]);

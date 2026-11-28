@@ -208,8 +208,8 @@ const buildPlugins = () => ({
     },
   }),
   intaked: createIntakeFixture(),
-  // Declares no providers: the test server adds a working provider plugin only
-  // when none of the plugins offers providers, and setup needs one.
+  // Declares no harnesses: the test server adds a working harness plugin only
+  // when none of the plugins offers harnesses, and setup needs one.
   broken: createPluginFixture({
     id: "broken",
     capabilities: ["connections"],
@@ -1132,6 +1132,40 @@ describe("the ConnectionsRuntime a plugin is activated with", () => {
         status: "error",
         statusDetail: "rate limited",
       });
+    });
+  });
+
+  it("raises one Notification when the plugin reports needs-reauth, none for a second report, and one more after a reconnect and a new report", async () => {
+    await withConnections(async ({ base, sql }, registry, token) => {
+      const one = await createConnectionOrFail(base, token, { type: "main/main-type" });
+      const surface = readConnectionsSurface(registry.main);
+      const countNotifications = () =>
+        Effect.runPromise(
+          Effect.map(
+            Effect.orDie(
+              sql<{ readonly id: Uint8Array }>`
+                SELECT id FROM notifications WHERE kind = 'core.connection-error'
+              `,
+            ),
+            (rows) => rows.length,
+          ),
+        );
+
+      await Effect.runPromise(surface.report(one.id, { status: "needs-reauth" }));
+      expect(await countNotifications()).toBe(1);
+
+      await Effect.runPromise(surface.report(one.id, { status: "needs-reauth", detail: "again" }));
+      expect(await countNotifications()).toBe(1);
+
+      const reconnected = await post(
+        base,
+        `/api/v1/connections/${one.id}/credentials`,
+        { credentials: { token: ROTATED } },
+        token,
+      );
+      expect(reconnected.status).toBe(200);
+      await Effect.runPromise(surface.report(one.id, { status: "needs-reauth" }));
+      expect(await countNotifications()).toBe(2);
     });
   });
 

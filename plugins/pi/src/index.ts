@@ -1,38 +1,21 @@
 import { Effect, Schema } from "effect";
 import {
   HOST_API,
-  registerProvider,
-  secret,
+  registerHarness,
   type Plugin,
-  type ProviderDefinition,
+  type HarnessDefinition,
 } from "@hercule/plugin-host";
 
 /**
  * What pi's RPC mode can do, at the version Hercule pins. Every value is a fact,
  * so the controller and the UI decide what to offer from these values rather
- * than from the provider's name.
+ * than from the harness's name.
  */
-const definition: ProviderDefinition = {
+const definition: HarnessDefinition = {
   id: "pi",
   displayName: "pi",
   binaryName: "pi",
-  supportsMultipleInstances: true,
-  // Z.ai is the only upstream this build drives pi against, and it authenticates
-  // with an API key alone. The key is the user's Z.ai credential, not pi's, so
-  // the field is named and worded for Z.ai.
-  configSchema: Schema.Struct({
-    zaiApiKey: secret({
-      title: "Z.ai API key",
-      description:
-        "From your Z.ai Coding Plan subscription. It is stored on the controller " +
-        "and sent to whichever machine runs a thread, so it is entered once and " +
-        "works on every machine.",
-    }),
-  }),
-  defaultConfig: {},
-  // The slug as pi's own model catalog lists it (`pi --list-models` prints
-  // `glm-5.3-flash` under the `zai` provider); the adapter adds the provider.
-  suggestedTextGenerationModel: "glm-5.3-flash",
+  releaseSource: { kind: "npm", package: "@earendil-works/pi-coding-agent" },
   declared: {
     steering: "native",
     fork: "native",
@@ -45,12 +28,89 @@ const definition: ProviderDefinition = {
       auto: "unsupported",
       "full-access": "native",
     },
-    // MCP is an extension to pi rather than part of its core, so the pinned
-    // version passes nothing through.
-    mcpPassthrough: "unsupported",
+    // pi has an MCP client built in since 0.99, as an extension that pi
+    // bundles. Hercule starts pi with `--no-extensions`, so the adapter loads
+    // it explicitly, and its own extension registers the MCP Gateway with it.
+    mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
+  // pi runs the keys of several providers. It names a model `<provider>/<id>`,
+  // runs only the ones in its own list (but see OpenRouter below), and reads
+  // each provider's key from that provider's usual variable. OpenCode is two pi providers: `opencode-go` for
+  // a Go key and `opencode` for a Zen key, which both read the same variable.
+  // MiniMax is one pi provider (`minimax`) for both of its kinds of key.
+  runs: [
+    {
+      providerId: "anthropic/anthropic",
+      kinds: [
+        {
+          kind: "api-key",
+          modelArgument: "anthropic/{model}",
+          credentialVariable: "ANTHROPIC_API_KEY",
+        },
+      ],
+      models: "own-list",
+    },
+    {
+      providerId: "openai/openai",
+      kinds: [
+        { kind: "api-key", modelArgument: "openai/{model}", credentialVariable: "OPENAI_API_KEY" },
+      ],
+      models: "own-list",
+    },
+    {
+      providerId: "zai/zai",
+      kinds: [{ kind: "api-key", modelArgument: "zai/{model}", credentialVariable: "ZAI_API_KEY" }],
+      models: "own-list",
+    },
+    {
+      // OpenRouter lists hundreds of models that pi's own list lacks. The
+      // controller sends the ones pi lacks, and pi can run any of them.
+      providerId: "openrouter/openrouter",
+      kinds: [
+        {
+          kind: "api-key",
+          modelArgument: "openrouter/{model}",
+          credentialVariable: "OPENROUTER_API_KEY",
+        },
+      ],
+      models: "all",
+    },
+    {
+      providerId: "opencode/opencode",
+      kinds: [
+        {
+          kind: "go-key",
+          modelArgument: "opencode-go/{model}",
+          credentialVariable: "OPENCODE_API_KEY",
+        },
+        {
+          kind: "zen-key",
+          modelArgument: "opencode/{model}",
+          credentialVariable: "OPENCODE_API_KEY",
+        },
+      ],
+      models: "own-list",
+    },
+    {
+      providerId: "minimax/minimax",
+      kinds: [
+        {
+          kind: "pay-as-you-go-key",
+          modelArgument: "minimax/{model}",
+          credentialVariable: "MINIMAX_API_KEY",
+        },
+        {
+          kind: "plan-key",
+          modelArgument: "minimax/{model}",
+          credentialVariable: "MINIMAX_API_KEY",
+        },
+      ],
+      models: "own-list",
+    },
+  ],
 };
 
 export const pi: Plugin = {
@@ -58,11 +118,11 @@ export const pi: Plugin = {
     id: "pi",
     displayName: "pi",
     hostApi: HOST_API,
-    capabilities: ["providers"],
+    capabilities: ["harnesses"],
     configSchema: Schema.Struct({}),
   },
-  register: (host) => registerProvider(host, definition),
-  // Nothing runs on the controller for a provider: the runner runs sessions,
+  register: (host) => registerHarness(host, definition),
+  // Nothing runs on the controller for a harness: the runner runs sessions,
   // based on the definition above.
   activate: () => Effect.succeed(Effect.void),
 };

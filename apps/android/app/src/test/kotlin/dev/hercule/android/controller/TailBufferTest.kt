@@ -2,7 +2,7 @@ package dev.hercule.android.controller
 
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.StreamKind
 import dev.hercule.android.wire.TapItem
 import dev.hercule.android.wire.TranscriptRow
@@ -20,16 +20,16 @@ class TailBufferTest {
     private fun buildTap(itemId: String, delta: String, streamKind: StreamKind = StreamKind.AssistantText) =
         TapItem(turnId = "t1", itemId = itemId, streamKind = streamKind, delta = delta)
 
-    private fun buildRow(event: ProviderEvent) = TranscriptRow(++position, "2026-09-30T09:00:00.000Z", event)
+    private fun buildRow(event: HarnessEvent) = TranscriptRow(++position, "2026-09-30T09:00:00.000Z", event)
 
     private fun buildTextRow(itemId: String, delta: String) =
-        buildRow(ProviderEvent.ContentDelta(turnId = "t1", itemId = itemId, streamKind = StreamKind.AssistantText, delta = delta))
+        buildRow(HarnessEvent.ContentDelta(turnId = "t1", itemId = itemId, streamKind = StreamKind.AssistantText, delta = delta))
 
     private fun buildItemStarted(itemId: String) =
-        buildRow(ProviderEvent.ItemStarted(turnId = "t1", itemId = itemId, kind = ItemKind.AssistantMessage))
+        buildRow(HarnessEvent.ItemStarted(turnId = "t1", itemId = itemId, kind = ItemKind.AssistantMessage))
 
     private fun buildItemCompleted(itemId: String) = buildRow(
-        ProviderEvent.ItemCompleted(turnId = "t1", itemId = itemId, kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
+        HarnessEvent.ItemCompleted(turnId = "t1", itemId = itemId, kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
     )
 
     @Test

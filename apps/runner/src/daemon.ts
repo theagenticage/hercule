@@ -4,9 +4,10 @@
  * connection.
  */
 import { mkdirSync, rmSync } from "node:fs";
-import { networkInterfaces } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
 import * as Effect from "effect/Effect";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import { locateCompiledBinary, locateRunnerDir, locateRunnerFile } from "@hercule/home";
 import { IDENTITY_PORT, type ForwardingPointer } from "@hercule/protocol";
@@ -18,10 +19,12 @@ import {
   buildSocketPath,
 } from "./credentials";
 import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
+import { makeDiskMeasurements, makeFolderMeasurer } from "./disk-usage";
 import { openFileClock } from "./edit-marks";
 import { serveIdentity } from "./identity";
-import { probeFacts, thisMachine } from "./probe";
-import { providerLogins } from "./providers";
+import { buildThisMachine, probeFacts } from "./probe";
+import { harnessLogins, removeStaleSetupTokenFolders } from "./harnesses";
+import { deleteArchivedSessionFiles } from "./harnesses/archived-session-files";
 import { sessions } from "./sessions";
 import { makeSessionSkillsFolders } from "./skills";
 import { HERCULE_SKILL, SESSION_ORIENTATION } from "./sessions/skill";
@@ -30,9 +33,10 @@ import { reconnect, streamReconnectSignals } from "./reconnect";
 import { CONTROLLER_URL_SCHEMES, NotEnrolled, readRunnerFile } from "./runner-file";
 import { acceptControllerMove } from "./repoint";
 import { connect, type RunnerRetired } from "./socket";
-import { readMachineHeadroom } from "./watermark";
+import { readDiskAndMemory } from "./metrics";
 import { makeWorkspaceSteps } from "./workspace-steps";
 import { makeWorkspaces } from "./workspaces";
+import { makeRegistry } from "./workspaces/registry";
 
 /** Lists this machine's network addresses, sorted so two readings can be compared. */
 const listNetworkAddresses = (): ReadonlyArray<string> =>
@@ -169,16 +173,16 @@ export const runDaemon = (
         readControllerUrl: () => controllerUrl,
         port: IDENTITY_PORT,
       });
-      const probe = probeFacts(thisMachine, identityPort);
-      const headroom = readMachineHeadroom(home);
       // Everything this machine stores for its controller lives in this
-      // directory. So when the machine joins again, every provider login,
+      // directory. So when the machine joins again, every harness login,
       // workspace and cache stays behind with the old runner identity.
       const storageDir = joinPath(locateRunnerDir(home), pin.storageDirectory);
       // No other user on the machine may read a session's workspace or the
       // credential socket.
       mkdirSync(storageDir, { recursive: true, mode: 0o700 });
-      const providersDir = joinPath(storageDir, "providers");
+      // The disk the facts and the metrics describe is the one this directory
+      // is on, because that is where the sessions' files grow.
+      const probe = probeFacts(buildThisMachine(storageDir), identityPort);
       // The working directories of sessions without a workspace, one per
       // session. They can be deleted at any time.
       const scratchDir = joinPath(storageDir, "scratch");
@@ -194,9 +198,22 @@ export const runDaemon = (
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
+      // Lives as long as the daemon, like the workspaces it measures. Its
+      // worker measures every workspace nothing has measured yet, once.
+      const diskMeasurements = yield* makeDiskMeasurements({
+        storageDir,
+        registry: makeRegistry(storageDir),
+        measureFolder: makeFolderMeasurer(),
+      });
+      sessions.observeWorkspaceSessions(diskMeasurements.sessionChanges);
+      // Lives as long as the daemon, like the workspaces that signal it.
+      const workspaceRemovals = yield* Queue.sliding<void>(1);
       const workspaces = yield* makeWorkspaces({
         storageDir,
         gitEnv: buildGitCredentialEnv({ socketPath }),
+        deleteArchivedSessionFiles: (sessions) => deleteArchivedSessionFiles(storageDir, sessions),
+        observer: diskMeasurements,
+        workspaceRemovals,
       });
       const workspaceSteps = makeWorkspaceSteps({
         storageDir,
@@ -233,6 +250,9 @@ export const runDaemon = (
       rmSync(attachmentsDir, { recursive: true, force: true });
       rmSync(editMarksDir, { recursive: true, force: true });
       rmSync(sessionSkillsDir, { recursive: true, force: true });
+      // A token login keeps its scratch folder in the machine's temp directory,
+      // where a runner killed in the middle of one leaves it.
+      removeStaleSetupTokenFolders(tmpdir(), Date.now());
       const sessionSkillsFolders = makeSessionSkillsFolders({
         sessionSkillsDir,
         credential: pin.credential,
@@ -271,8 +291,8 @@ export const runDaemon = (
             pin,
             facts,
             probe,
-            headroom,
-            providersDir,
+            readDiskAndMemory: readDiskAndMemory(storageDir),
+            storageDir,
             scratchDir,
             attachmentsDir,
             editMarksDir,
@@ -287,11 +307,13 @@ export const runDaemon = (
             }),
             sessionSkillsFolders,
             workspaces,
+            workspaceRemovals,
+            diskMeasurements,
             workspaceSteps,
             socketPath,
             credentials,
             githubTokenCopies,
-            providerLogins,
+            harnessLogins,
             sessions,
             binDir,
             herculeTool,
@@ -299,6 +321,21 @@ export const runDaemon = (
           });
         }),
         signals: streamReconnectSignals({ now: () => Date.now(), addresses: listNetworkAddresses }),
-      });
+      }).pipe(
+        // The loop ends on its own only when the controller retires this
+        // runner, and nothing has asked the sessions to stop. Each live
+        // session would then keep this process running:
+        //
+        // - its harness is a child process the process waits for;
+        // - its absolute deadline is a timer of hours, and a timer keeps the
+        //   process running until it fires. The timer is cancelled only when
+        //   the watch sees the session's exit, so a session that exits just as
+        //   the controller retires the runner keeps it too.
+        //
+        // The watch above is still running here, which is what lets the
+        // shutdown wait for each exit and cancel its timers. After the stop
+        // signal's own shutdown there is nothing left for this one to stop.
+        Effect.ensuring(sessions.shutdown("runner_restart")),
+      );
     }),
   );

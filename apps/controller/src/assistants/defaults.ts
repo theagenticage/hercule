@@ -4,11 +4,14 @@
  * Setup, the web app's onboarding and the CLI all create an assistant from a
  * name alone, so the defaults live in this one place and cannot drift apart.
  * Two defaults are not constants and are read when an assistant is created:
- * the provider instance (the oldest one whose provider this build carries)
+ * the Provider Account (the oldest one whose default harness this build carries)
  * and the permission profile (the shipped `assistant` profile).
  */
 import type { AccessMode, DisallowedTool } from "@hercule/protocol";
 import type { AssistantReply, Heartbeat, Rotation } from "@hercule/contract";
+
+/** The name of the assistant created when none exists yet. */
+export const DEFAULT_ASSISTANT_NAME = "Hercule";
 
 /** The name of the shipped permission profile an assistant's sessions run under. */
 export const DEFAULT_PROFILE_NAME = "assistant";

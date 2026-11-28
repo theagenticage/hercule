@@ -14,6 +14,12 @@ import { migrations } from "./index";
 /** The migrations before the one under test. */
 const BEFORE = migrations.filter(([id]) => id < 90);
 
+/**
+ * The migrations up to the one under test. Migration 131 drops the index
+ * again, so the test stops at 90.
+ */
+const UP_TO = migrations.filter(([id]) => id <= 90);
+
 const at = "2026-10-20T00:00:00.000Z";
 
 describe("the handoff run migration", () => {
@@ -32,7 +38,7 @@ describe("the handoff run migration", () => {
         yield* sql`
           INSERT INTO task_provenance (id, task_id, run_id, at, actor)
           VALUES (x'a2', x'01', x'0c', ${at}, 'user')`;
-        yield* runMigrations();
+        yield* runMigrations(UP_TO);
         const indexes = yield* sql<{ readonly sql: string }>`
           SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'task_provenance_handoff_run'`;
         const entries = yield* sql<{ readonly run: string }>`

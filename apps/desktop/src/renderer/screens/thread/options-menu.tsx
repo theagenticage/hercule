@@ -9,7 +9,7 @@ import type { ModelOption } from "@hercule/contract";
  *
  * `descriptors` are the options the model declares and `selected` the
  * values in use, picks included. `onPick` receives the option's id and the
- * value picked: a boolean for an off/on option, since the provider expects
+ * value picked: a boolean for an off/on option, since the harness expects
  * one, and the choice's value otherwise. A pick leaves the menu open, so
  * several options can be set in one visit.
  */

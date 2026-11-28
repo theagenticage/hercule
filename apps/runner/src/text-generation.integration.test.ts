@@ -25,10 +25,10 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
 import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
-import { claudeCode } from "./providers/claude-code";
-import { makePiAdapter } from "./providers/pi/adapter";
-import { spawnPi, STOP_GRACE } from "./providers/process";
-import { NO_CONTROLLER_UPLOADER } from "./providers/testing";
+import { claudeCode } from "./harnesses/claude-code";
+import { makePiAdapter } from "./harnesses/pi/adapter";
+import { spawnPi, STOP_GRACE } from "./harnesses/process";
+import { NO_CONTROLLER_UPLOADER } from "./harnesses/testing";
 import { makeTextGenerator } from "./text-generation";
 
 const HARNESS = join(import.meta.dirname, "text-generation-harness.fixture.ts");
@@ -37,10 +37,13 @@ const CLAUDE_HARNESS = join(import.meta.dirname, "text-generation-claude-harness
 const REQUEST: TextGenerationRequest = {
   _tag: "textGenerationRequest",
   requestId: "request-1",
-  instanceId: "instance-1",
-  providerId: "pi",
-  config: {},
-  secrets: {},
+  harnessId: "pi/pi",
+  harnessAccount: {
+    providerAccountId: "account-1",
+    harnessHome: "providers/account-1",
+    modelArgument: "fake/{model}",
+    credentialVariables: [],
+  },
   spec: {
     model: "fake-model",
     instructions: "Write a title.",
@@ -127,7 +130,8 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
       home: root,
       binary: "pi",
       env: { PATH: process.env["PATH"] ?? "" },
-      secrets: {},
+      modelArgument: "fake/{model}",
+      credentialVariables: [],
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
@@ -235,12 +239,13 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
         HARNESS_ANSWER: behaviour.answer,
         HARNESS_ON_STDIN_END: behaviour.onStdinEnd,
       },
-      secrets: {},
+      modelArgument: "{model}",
+      credentialVariables: [],
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
   });
-  const request: TextGenerationRequest = { ...REQUEST, providerId: "claude-code" };
+  const request: TextGenerationRequest = { ...REQUEST, harnessId: "claude-code/claude-code" };
 
   const startedAt = Date.now();
   const outcomes: Array<TextGenerationOutcome> = await Promise.all(
@@ -343,27 +348,23 @@ describe("a Claude Code text generation with the real SDK and a CLI that ignores
     expect(result.stillRunning).toEqual([]);
   });
 
-  it(
-    "starts the CLI in the call's scratch folder with the instance's config directory",
-    SLOW,
-    async () => {
-      const result = await generateWithClaude({
-        answer: "submit",
-        onStdinEnd: "exit",
-        deadlineMillis: 10_000,
-      });
+  it("starts the CLI in the call's scratch folder with the Harness Home", SLOW, async () => {
+    const result = await generateWithClaude({
+      answer: "submit",
+      onStdinEnd: "exit",
+      deadlineMillis: 10_000,
+    });
 
-      const launch = JSON.parse(
-        readFileSync(join(proofDir, `launch-${String(result.pids[0])}`), "utf8"),
-      ) as {
-        readonly cwd: string;
-        readonly configDir: string;
-        readonly autoMemoryDisabled: string;
-      };
-      expect(launch.configDir).toBe(root);
-      expect(launch.autoMemoryDisabled).toBe("1");
-      // `realpathSync` because macOS reports a temporary folder through /private.
-      expect(dirname(launch.cwd)).toBe(realpathSync(scratchDir));
-    },
-  );
+    const launch = JSON.parse(
+      readFileSync(join(proofDir, `launch-${String(result.pids[0])}`), "utf8"),
+    ) as {
+      readonly cwd: string;
+      readonly configDir: string;
+      readonly autoMemoryDisabled: string;
+    };
+    expect(launch.configDir).toBe(root);
+    expect(launch.autoMemoryDisabled).toBe("1");
+    // `realpathSync` because macOS reports a temporary folder through /private.
+    expect(dirname(launch.cwd)).toBe(realpathSync(scratchDir));
+  });
 });

@@ -15,8 +15,6 @@
  *
  * A known id alone is not enough to trust whatever key comes with it.
  */
-import { mkdirSync } from "node:fs";
-import { join as joinPath } from "node:path";
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -46,12 +44,17 @@ import {
   FILES_EDITED_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
+  MCP_SERVERS_CAPABILITY,
+  buildMcpServersCapability,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
   type ForwardingPointer,
+  type HarnessAccount,
   MAX_FACT_LENGTH,
   type InstallRequest,
   type LoginStart,
@@ -59,27 +62,30 @@ import {
   type ProbeResult,
   type RepositorySkillsInspection,
   type RunnerFacts,
-  type RunnerWatermark,
   MAX_MESSAGE_LENGTH,
   MAX_WORKSPACE_STEPS,
   type WorkspaceReport,
 } from "@hercule/protocol";
 import type { AttachmentCache, AttachmentUploader } from "./attachments";
 import type { CredentialRelay, GithubTokenCopies } from "./credentials";
+import type { DiskMeasurements } from "./disk-usage";
 import type { FileClock } from "./edit-marks";
 import { fitRepositorySkillsInspection } from "./frame-size";
 import { refreshFacts } from "./probe";
 import type { ControllerMove } from "./repoint";
 import { describeCause } from "./report";
 import {
+  adapters,
   findAdapter,
   describeMissingAdapter,
   buildFailedProbe,
+  limitProbeModels,
   type InstallOutcome,
-  type ProviderAdapter,
-  type ProviderRunnerContext,
-} from "./providers";
-import type { LoginAnswer, Logins } from "./providers/login";
+  type HarnessAdapter,
+  type HarnessRunnerContext,
+} from "./harnesses";
+import { createHarnessHome } from "./harnesses/account";
+import type { LoginAnswer, Logins } from "./harnesses/login";
 import { makeTextGenerator } from "./text-generation";
 import type { Supervising } from "./sessions";
 import {
@@ -87,7 +93,7 @@ import {
   previewRepositorySkills,
   type SessionSkillsFolders,
 } from "./skills";
-import { reportWatermark } from "./watermark";
+import { reportMetrics, type DiskAndMemory } from "./metrics";
 import { WORKSPACE_ACTION_IDS } from "./workspace-actions";
 import type { WorkspaceSteps } from "./workspace-steps";
 import type { Workspaces } from "./workspaces";
@@ -113,6 +119,15 @@ const NONCE_BYTES = 16;
  *   gives them to the session.
  * - `REPOSITORY_SKILLS_CAPABILITY`: this runner lists the skills in the
  *   checkouts of a workspace.
+ * - `ARCHIVED_SESSION_FILES_CAPABILITY`: this runner deletes the harness
+ *   files of the archived sessions a workspace dispose lists.
+ * - `DISK_USAGE_CAPABILITY`: this runner measures the disk usage of its
+ *   workspaces, repository caches and Harness Homes, and sends it in a
+ *   `DiskUsageReport`.
+ * - one for each harness whose adapter hands the MCP Gateway entry of a start
+ *   frame (`SessionSpec.mcpServers`) to its harness.
+ * - `MCP_SERVERS_CAPABILITY`, the retired plain form, so a controller of the
+ *   first MCP Gateway build still gives Claude Code the entry.
  */
 const CAPABILITIES: ReadonlyArray<string> = [
   ...WORKSPACE_ACTION_IDS.map(buildWorkspaceActionCapability),
@@ -124,6 +139,12 @@ const CAPABILITIES: ReadonlyArray<string> = [
   TEXT_GENERATION_CAPABILITY,
   SKILLS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
+  ARCHIVED_SESSION_FILES_CAPABILITY,
+  DISK_USAGE_CAPABILITY,
+  MCP_SERVERS_CAPABILITY,
+  ...adapters
+    .filter((adapter) => adapter.mapsMcpServers === true)
+    .map((adapter) => buildMcpServersCapability(adapter.harnessId)),
 ];
 
 const ED25519 = { name: "Ed25519" } as const;
@@ -153,13 +174,14 @@ export interface ConnectOptions {
   readonly pin: ControllerPin;
   readonly facts: RunnerFacts;
   readonly probe: Effect.Effect<RunnerFacts>;
-  readonly headroom: Effect.Effect<RunnerWatermark, Cause.UnknownError>;
+  readonly readDiskAndMemory: Effect.Effect<DiskAndMemory, Cause.UnknownError>;
   /**
-   * The directory that holds one config directory per provider instance on
-   * this machine. Each instance has its own, so two accounts of one harness
-   * never read each other's credentials, or the user's own.
+   * The runner's storage directory. A Harness Home is a path the controller
+   * names, joined to this directory. Each account has its own home, so two
+   * accounts of one harness never read each other's credentials, or the user's
+   * own.
    */
-  readonly providersDir: string;
+  readonly storageDir: string;
   /**
    * The directory that holds the empty working directory of each session
    * without a workspace. Each one is removed when its session exits
@@ -186,6 +208,14 @@ export interface ConnectOptions {
   readonly sessionSkillsFolders: SessionSkillsFolders;
   /** The workspaces on this machine. Creates new ones when the controller asks. */
   readonly workspaces: Workspaces;
+  /**
+   * Signalled when a workspace removal ends, so the metrics report goes out
+   * soon after it. It outlives this connection. Tests that remove no
+   * workspaces leave it out.
+   */
+  readonly workspaceRemovals?: Queue.Dequeue<void>;
+  /** The disk usage of those workspaces. It outlives this connection. */
+  readonly diskMeasurements: Pick<DiskMeasurements, "reportTo">;
   /** The workspace steps on this machine. They outlive this connection. */
   readonly workspaceSteps: WorkspaceSteps;
   /** The socket this machine's credential helper asks for tokens on. */
@@ -194,8 +224,8 @@ export interface ConnectOptions {
   readonly credentials: CredentialRelay;
   /** The GitHub tokens this machine holds for its sessions. They outlive this connection. */
   readonly githubTokenCopies: GithubTokenCopies;
-  /** The provider logins on this machine. They outlive this connection. */
-  readonly providerLogins: Logins;
+  /** The harness logins on this machine. They outlive this connection. */
+  readonly harnessLogins: Logins;
   /**
    * The sessions on this machine. They outlive this connection, and the
    * caller has forked their `watch` already.
@@ -204,7 +234,7 @@ export interface ConnectOptions {
   /** `<home>/runner/bin`, holding the `hercule` symlink every session gets on `PATH`. */
   readonly binDir: string;
   /** How sessions call Hercule as a tool, resolved once at runner start (spec 06 section 9.3). */
-  readonly herculeTool: ProviderRunnerContext["herculeTool"];
+  readonly herculeTool: HarnessRunnerContext["herculeTool"];
   /**
    * Follows a forwarding pointer from a controller that moved. Returns
    * `accepted` when the runner rewrote its controller URL, and this
@@ -389,7 +419,10 @@ export const connect = (
     let facts = options.facts;
     // Completed by the hello that proves the controller's identity, with the
     // part of its capabilities the session supervisor needs.
-    const proven = Deferred.makeUnsafe<{ readonly controllerReadsFilesEdited: boolean }>();
+    const proven = Deferred.makeUnsafe<{
+      readonly controllerReadsFilesEdited: boolean;
+      readonly controllerReadsDiskUsage: boolean;
+    }>();
     // The proof deadline starts when the socket opens. It limits how long the
     // peer takes to respond, not how long the network takes to connect.
     // Otherwise a slow connect could leave a valid controller no time to
@@ -417,20 +450,18 @@ export const connect = (
     );
 
     const findBinaryPath = (binaryName: string): string | undefined =>
-      facts.providers.find((provider) => provider.name === binaryName && provider.present)?.path;
+      facts.harnesses.find((harness) => harness.name === binaryName && harness.present)?.path;
 
     /**
-     * Builds the context for a probe, login or install of one provider
-     * instance. Creates the instance's private directory, where the harness
-     * keeps its credentials.
+     * Builds the context for a probe, login or text generation of one Provider
+     * Account in one harness. Creates the account's Harness Home, the private
+     * folder where the harness keeps its credentials.
      */
     const buildContext = (
-      adapter: ProviderAdapter,
-      instanceId: string,
-      secrets: Readonly<Record<string, string>>,
-    ): ProviderRunnerContext => {
-      const home = joinPath(options.providersDir, instanceId);
-      mkdirSync(home, { recursive: true, mode: 0o700 });
+      adapter: HarnessAdapter,
+      harnessAccount: HarnessAccount,
+    ): HarnessRunnerContext => {
+      const home = createHarnessHome(options.storageDir, harnessAccount.harnessHome);
       // Probes, logins and installs have no working directory. Only sessions
       // have one, and the session supervisor builds its own context
       // (spec 06 section 4.2).
@@ -439,7 +470,11 @@ export const connect = (
         home,
         binary: findBinaryPath(adapter.binaryName),
         env: process.env,
-        secrets,
+        modelArgument: harnessAccount.modelArgument,
+        credentialVariables: harnessAccount.credentialVariables,
+        ...(harnessAccount.credential === undefined
+          ? {}
+          : { credential: harnessAccount.credential }),
         // Required by the shared context type, although a probe, an install and
         // a login never load the skill.
         herculeTool: options.herculeTool,
@@ -458,7 +493,7 @@ export const connect = (
       runnerId: pin.runnerId,
       workspaceSteps: options.workspaceSteps,
       machine: {
-        providersDir: options.providersDir,
+        storageDir: options.storageDir,
         scratchDir: options.scratchDir,
         attachmentsDir: options.attachmentsDir,
         editMarksDir: options.editMarksDir,
@@ -546,18 +581,20 @@ export const connect = (
           encodeFrameText({
             _tag: "probeReport",
             requestId: request.requestId,
-            instanceId: request.instanceId,
+            providerAccountId: request.harnessAccount.providerAccountId,
             result,
           }),
         );
       return Effect.gen(function* () {
-        const adapter = findAdapter(request.providerId);
+        const adapter = findAdapter(request.harnessId);
         return yield* sendProbeReport(
           adapter === undefined
-            ? buildFailedProbe(null, describeMissingAdapter(request.providerId))
-            : yield* adapter.probe(
-                buildContext(adapter, request.instanceId, request.secrets),
-                request.config,
+            ? buildFailedProbe(null, describeMissingAdapter(request.harnessId))
+            : yield* limitProbeModels(
+                request.harnessId,
+                yield* adapter.probe(buildContext(adapter, request.harnessAccount), {
+                  readUsage: request.readUsage,
+                }),
               ),
         );
       }).pipe(
@@ -621,11 +658,11 @@ export const connect = (
           }),
         );
       return Effect.gen(function* () {
-        const install = findAdapter(request.providerId)?.install;
+        const install = findAdapter(request.harnessId)?.install;
         if (install === undefined) {
           return yield* sendInstallResult({
             ok: false,
-            message: describeMissingAdapter(request.providerId),
+            message: describeMissingAdapter(request.harnessId),
           });
         }
         const outcome = yield* install(process.env);
@@ -666,19 +703,20 @@ export const connect = (
 
     const startLogin = (request: LoginStart): Effect.Effect<LoginAnswer> =>
       Effect.suspend(() => {
-        const adapter = findAdapter(request.providerId);
+        const adapter = findAdapter(request.harnessId);
         return adapter === undefined
           ? Effect.succeed<LoginAnswer>({
               _tag: "loginFailed",
-              message: describeMissingAdapter(request.providerId),
+              message: describeMissingAdapter(request.harnessId),
             })
-          : options.providerLogins.start(
+          : options.harnessLogins.start(
               request.requestId,
-              request.instanceId,
+              request.harnessAccount.providerAccountId,
               adapter,
               // A login is the harness writing its own credential on this
-              // machine, so the instance's stored secrets are not passed in.
-              buildContext(adapter, request.instanceId, {}),
+              // machine. The login command never reads the account's key.
+              buildContext(adapter, request.harnessAccount),
+              request.method,
             );
       });
 
@@ -777,7 +815,7 @@ export const connect = (
           // read, so the end of a device login is reported only to a
           // controller that lists the frame.
           if (message.capabilities.includes(LOGIN_ENDED_CAPABILITY)) {
-            yield* options.providerLogins
+            yield* options.harnessLogins
               .attachConnection((frame) => write(encodeFrameText(frame)))
               .pipe(Scope.provide(connection));
           }
@@ -796,6 +834,7 @@ export const connect = (
             proven,
             Effect.succeed({
               controllerReadsFilesEdited: message.capabilities.includes(FILES_EDITED_CAPABILITY),
+              controllerReadsDiskUsage: message.capabilities.includes(DISK_USAGE_CAPABILITY),
             }),
           );
           return;
@@ -837,7 +876,7 @@ export const connect = (
               Effect.forkIn(
                 answerLogin(
                   message.requestId,
-                  options.providerLogins.submit(message.instanceId, message.code),
+                  options.harnessLogins.submit(message.providerAccountId, message.code),
                 ),
                 connection,
               ),
@@ -1066,7 +1105,9 @@ export const connect = (
       // connection was attached, but the ones produced then are lost on the
       // way to the controller: the runner has no outbox yet that keeps events
       // for replay (spec 03 section 2.3).
-      yield* supervisor.attach(proved).pipe(Scope.provide(connection));
+      yield* supervisor
+        .attach({ controllerReadsFilesEdited: proved.controllerReadsFilesEdited })
+        .pipe(Scope.provide(connection));
       yield* supervisor.report;
       // Like the sessions report: the controller settles every listed step
       // whose record ended while this runner was away. One frame holds at
@@ -1082,10 +1123,18 @@ export const connect = (
       }
       yield* Effect.all(
         [
-          reportWatermark({
-            read: options.headroom,
-            send: (watermark) => write(encodeFrameText({ _tag: "watermarkReport", watermark })),
+          reportMetrics({
+            readDiskAndMemory: options.readDiskAndMemory,
+            send: (metrics) => write(encodeFrameText({ _tag: "watermarkReport", metrics })),
+            ...(options.workspaceRemovals === undefined
+              ? {}
+              : { workspaceRemovals: options.workspaceRemovals }),
           }),
+          // An older controller closes the connection on a frame it cannot
+          // read, so the disk usage is reported only when the hello lists it.
+          proved.controllerReadsDiskUsage
+            ? options.diskMeasurements.reportTo((diskUsage) => write(encodeFrameText(diskUsage)))
+            : Effect.never,
           refreshFacts({
             probe: reportFacts,
             reported: options.facts,

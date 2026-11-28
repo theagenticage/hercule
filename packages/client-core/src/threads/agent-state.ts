@@ -32,6 +32,13 @@ export interface AgentState {
   readonly openRequests: readonly SessionRequest[];
   /** The model shown for a turn whose rows do not name one. */
   readonly model: string;
+  /**
+   * Whether this is a subagent. Only the session's own agent has a first
+   * message that can hold a context block: the controller appends one when it
+   * spawns the session. A subagent's brief is written by its parent agent, so
+   * it keeps its whole text.
+   */
+  readonly isSubagent: boolean;
 }
 
 /**
@@ -43,6 +50,7 @@ export const buildSessionAgentState = (session: Session): AgentState => ({
   mayBeRunningTurn: mayBeRunningTurn(session.status),
   openRequests: session.openRequests.filter((request) => request.subagentId === undefined),
   model: session.modelSelection.model,
+  isSubagent: false,
 });
 
 /**
@@ -65,4 +73,5 @@ export const buildSubagentAgentState = (subagent: Subagent, session: Session): A
   mayBeRunningTurn: subagent.status === "running" && mayBeRunningTurn(session.status),
   openRequests: session.openRequests.filter((request) => request.subagentId === subagent.id),
   model: subagent.model ?? session.modelSelection.model,
+  isSubagent: true,
 });

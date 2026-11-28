@@ -18,7 +18,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect, Fiber } from "effect";
 import type {
-  ProviderEvent,
+  HarnessEvent,
   SessionInterrupt as SessionInterruptFrame,
   SessionRespondToApprovalRequest,
   SessionStart,
@@ -42,7 +42,7 @@ import {
 } from "../conversations/testing";
 import {
   at,
-  findInstanceId,
+  findProviderAccountId,
   listFrames,
   readApprovalNotifications,
   readSession,
@@ -74,7 +74,7 @@ const buildAssistantMessage = (
   itemId: string,
   text: string,
   subagentId?: string,
-): ReadonlyArray<ProviderEvent> => [
+): ReadonlyArray<HarnessEvent> => [
   {
     ...buildBase(sessionId, subagentId),
     _tag: "item.started",
@@ -105,7 +105,7 @@ const buildApprovalRequest = (
   sessionId: string,
   requestId: string,
   subagentId?: string,
-): ProviderEvent => ({
+): HarnessEvent => ({
   ...buildBase(sessionId, subagentId),
   _tag: "request.opened",
   request: {
@@ -122,7 +122,7 @@ const buildResolved = (
   sessionId: string,
   requestId: string,
   subagentId?: string,
-): ProviderEvent => ({
+): HarnessEvent => ({
   ...buildBase(sessionId, subagentId),
   _tag: "request.resolved",
   requestId,
@@ -136,7 +136,7 @@ const buildResolved = (
 const reportEvents = (
   arranged: Arranged,
   seq: number,
-  events: ReadonlyArray<ProviderEvent>,
+  events: ReadonlyArray<HarnessEvent>,
 ): number => {
   events.forEach((event, index) => reportEvent(arranged.wire, seq + index, event));
   return seq + events.length;
@@ -219,10 +219,14 @@ const readNotificationStatuses = async (
   );
 };
 
-/** Returns a session without the fields that differ between any two sessions: the id and the times. */
+/**
+ * Returns a session without the fields that differ between any two sessions:
+ * the id, the Task the Thread got and the times.
+ */
 const omitIdentity = (session: Session) => ({
   ...session,
   id: undefined,
+  taskId: undefined,
   createdAt: undefined,
   startedAt: undefined,
   lastActivityAt: undefined,
@@ -233,10 +237,10 @@ describe("the one rule: the session reads only its own agent", () => {
     await withAgentFleet(async (arranged) => {
       const alone = await startSession(arranged);
       const helped = await startSession(arranged);
-      const mainStart = (id: string): ReadonlyArray<ProviderEvent> => [
+      const mainStart = (id: string): ReadonlyArray<HarnessEvent> => [
         { ...buildBase(id), _tag: "turn.started", turnId: "t1" },
       ];
-      const mainEnd = (id: string): ReadonlyArray<ProviderEvent> => [
+      const mainEnd = (id: string): ReadonlyArray<HarnessEvent> => [
         ...buildAssistantMessage(id, "t1", "main-text", "Done."),
         {
           ...buildBase(id),
@@ -287,6 +291,44 @@ describe("the one rule: the session reads only its own agent", () => {
       ]);
       expect(omitIdentity(helpedAfter)).toEqual(omitIdentity(aloneAfter));
       expect(helpedAfter.usage).toEqual({ inputTokens: 10, outputTokens: 2 });
+    });
+  });
+
+  it("records the end of the session's own turn, and not activity or a subagent's turn", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startSession(arranged);
+      const id = session.id;
+      const readTurnEndedAt = async (): Promise<string | null | undefined> =>
+        (
+          await Effect.runPromise(
+            Effect.orDie(
+              arranged.harness.sql<{ readonly last_turn_ended_at: string | null }>`
+                SELECT last_turn_ended_at FROM sessions WHERE id = unhex(replace(${id}, '-', ''))`,
+            ),
+          )
+        )[0]?.last_turn_ended_at;
+
+      const seq = reportEvents(arranged, 2, [
+        { ...buildBase(id), _tag: "turn.started", turnId: "t1" },
+        ...buildAssistantMessage(id, "t1", "main-text", "Working."),
+        {
+          ...buildBase(id),
+          _tag: "subagent.started",
+          subagentId: "a1",
+          itemId: "call-1",
+          description: "Review the diff",
+        },
+        { ...buildBase(id, "a1"), _tag: "turn.started", turnId: "s1", model: "sonnet" },
+        { ...buildBase(id, "a1"), _tag: "turn.completed", turnId: "s1", state: "completed" },
+      ]);
+      await waitForSubagent(arranged, id, "a1", (one) => one.status === "completed");
+      expect(await readTurnEndedAt()).toBeNull();
+
+      reportEvents(arranged, seq, [
+        { ...buildBase(id), _tag: "turn.completed", turnId: "t1", state: "completed" },
+      ]);
+      await waitForSession(arranged, id, (one) => one.status === "idle");
+      expect(await readTurnEndedAt()).toEqual(expect.any(String));
     });
   });
 
@@ -674,13 +716,13 @@ describe("a subagent's spawn link", () => {
     await withAgentFleet(async (arranged) => {
       const session = await startSession(arranged);
       const id = session.id;
-      const call = (itemId: string): ProviderEvent => ({
+      const call = (itemId: string): HarnessEvent => ({
         ...buildBase(id),
         _tag: "item.started",
         turnId: "t1",
         itemId,
         kind: "subagent",
-        // A provider can list anything; only string ids name a subagent.
+        // A harness can list anything; only string ids name a subagent.
         detail: { subagentIds: ["a1", 7] },
       });
       reportEvents(arranged, 2, [
@@ -717,7 +759,7 @@ describe("a subagent's description", () => {
     await withAgentFleet(async (arranged) => {
       const session = await startSession(arranged);
       const id = session.id;
-      const userMessage = (subagentId: string, turnId: string, text: string): ProviderEvent => ({
+      const userMessage = (subagentId: string, turnId: string, text: string): HarnessEvent => ({
         ...buildBase(id, subagentId),
         _tag: "item.started",
         turnId,
@@ -763,7 +805,7 @@ describe("a subagent the session's end stops", () => {
     await withAgentFleet(async (arranged) => {
       const session = await startSession(arranged);
       const id = session.id;
-      const turn = (subagentId: string, turnId: string, ended: boolean): ProviderEvent =>
+      const turn = (subagentId: string, turnId: string, ended: boolean): HarnessEvent =>
         ended
           ? { ...buildBase(id, subagentId), _tag: "turn.completed", turnId, state: "completed" }
           : { ...buildBase(id, subagentId), _tag: "turn.started", turnId };
@@ -827,7 +869,7 @@ describe("transcript.read of one agent", () => {
       ]);
       await waitForSession(arranged, id, (one) => one.status === "idle");
       type Page = {
-        readonly items: ReadonlyArray<{ readonly event: ProviderEvent }>;
+        readonly items: ReadonlyArray<{ readonly event: HarnessEvent }>;
         readonly nextCursor?: string;
       };
       const readPage = async (query: string): Promise<Page> => {
@@ -891,7 +933,7 @@ describe("Token Usage across a resume", () => {
       const session = await startSession(arranged);
       const id = session.id;
       const lastUsageReport = {
-        source: "test.provider",
+        source: "test.harness",
         payload: { nativeCounts: [1000, 900, 10], thread: "a1" },
       };
       reportEvents(arranged, 2, [
@@ -917,7 +959,7 @@ describe("Token Usage across a resume", () => {
           {
             sessionId: id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "full-provider"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           },
         ],
       });
@@ -934,13 +976,13 @@ describe("Token Usage across a resume", () => {
         ...buildBase(id, "a1"),
         _tag: "session.usage.updated",
         usage: { inputTokens: 999, outputTokens: 99 },
-        raw: { source: "test.provider", payload: { nativeCounts: [9999, 0, 99] } },
+        raw: { source: "test.harness", payload: { nativeCounts: [9999, 0, 99] } },
       } as const;
       reportEvent(arranged.wire, 7, lateEvent);
       await waitUntil("stored late usage report", async () => {
         const response = await readTranscript(arranged, id, "?subagentId=a1");
         const page = (await response.json()) as {
-          readonly items: ReadonlyArray<{ readonly event: ProviderEvent }>;
+          readonly items: ReadonlyArray<{ readonly event: HarnessEvent }>;
         };
         return page.items.some((row) => row.event.eventId === lateEvent.eventId) ? true : undefined;
       });
@@ -997,7 +1039,7 @@ describe("incomplete token accounting across controller persistence and public p
   it("preserves known counts over a resume while omitting exact-looking legacy usage", async () => {
     await withAgentFleet(async (arranged) => {
       const { id } = await startSession(arranged);
-      const report = (subagentId: string | undefined, inputTokens: number): ProviderEvent => ({
+      const report = (subagentId: string | undefined, inputTokens: number): HarnessEvent => ({
         ...buildBase(id, subagentId),
         _tag: "session.usage.updated",
         usageReport: {
@@ -1039,7 +1081,7 @@ describe("incomplete token accounting across controller persistence and public p
       expect(partialSubagent).not.toHaveProperty("usage");
       expect(partialSubagent.usageReport?.counts.inputTokens).toBe(50);
       const transcript = await readTranscript(arranged, id, "?subagentId=a1");
-      const rows = (await transcript.json()) as { items: Array<{ event: ProviderEvent }> };
+      const rows = (await transcript.json()) as { items: Array<{ event: HarnessEvent }> };
       const incomplete = rows.items.find(
         ({ event }) => event._tag === "session.usage.updated" && event.usageReport !== undefined,
       )?.event;
@@ -1052,7 +1094,7 @@ describe("incomplete token accounting across controller persistence and public p
           {
             sessionId: id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "full-provider"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           },
         ],
       });

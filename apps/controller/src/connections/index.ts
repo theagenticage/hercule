@@ -6,6 +6,7 @@
 export { githubTokens, GithubTokenUnavailable, type GithubToken } from "./github";
 export { CALLBACK_PATH, OAUTH_TOKENS } from "./oauth";
 export { ActivePlugins } from "./active-plugins";
+export { ConnectionEntityFacts } from "./entity-facts";
 export { ConnectionObserver } from "./observer";
 export { PluginConfigs } from "./plugin-configs";
 export { ConnectionReferences, type ConnectionReference } from "./references";
@@ -16,7 +17,16 @@ export {
   type StoredConnection,
 } from "./repository";
 export { OAuthCallbackRouteLayer } from "./route";
-export { ConnectionTypes, ConnectionTypesLayer, type RegisteredConnectionType } from "./runtime";
+export {
+  computeCredentialsIdentity,
+  ConnectionCannotRefresh,
+  ConnectionCredentialsUnavailable,
+  ConnectionTypes,
+  ConnectionTypesLayer,
+  type ConnectionCredentialsForUse,
+  type RefreshGuard,
+  type RegisteredConnectionType,
+} from "./runtime";
 export {
   ConnectionService,
   ConnectionServiceLayer,
@@ -27,6 +37,7 @@ export {
 } from "./service";
 export {
   assertConnectionIngesting,
+  canConnectionPoll,
   ConnectionNotIngesting,
   connectionStateRepository,
   INGESTING_STATUSES,

@@ -2,25 +2,27 @@ import { useCallback, useEffect, useState, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Outlet, redirect, useNavigate } from "@tanstack/react-router";
 import { listUrgentSignals } from "@hercule/client-core";
-import { DoneMovesProvider } from "../../app/done-moves";
+import { CleanupProvider } from "../../app/cleanup";
+import { DoneMovesProvider, useDoneMoves } from "../../app/done-moves";
 import { LOGIN_PATH } from "../../app/entry-guard";
 import { useLiveConnection } from "../../app/live";
 import { useSendOnChange } from "../../app/send-on-change";
 import { SessionPresentationProvider } from "../../app/session-presentation";
-import { SnoozeTimer } from "../../app/snooze-timer";
-import { ensureShellData, pluginsQuery, signalsToDoQuery } from "../../app/queries";
+import { ensureShellData, openSignalsQuery, pluginsQuery, userQuery } from "../../app/queries";
 import { useWaiting } from "../../app/waiting";
 import { DRAFT_MESSAGE_ID } from "../../screens/new-thread/draft-composer";
 import { Shell } from "../../shell";
 import { buildWaitingRequest, useOpenDestination } from "./-destinations";
 import { NewThreadDialogs, type NewThreadDialog } from "./-new-thread-dialogs";
+import { useUndoAnywhere } from "./-undo-anywhere";
 
 /**
  * The shell's layout route. Every screen inside the app is a child of this
  * route, so the sidebar is mounted once and stays mounted across navigation.
  *
  * Its loader reads everything the sidebar shows before the shell renders, so
- * the first frame holds the whole sidebar and nothing in it waits. While the
+ * the first frame holds the whole sidebar and nothing in it waits. It also
+ * opens the account scope of the signed-in user (see `AccountScope`). While the
  * shell is mounted, the live connection runs and keeps those reads current.
  *
  * The shell also owns the project picker, which File > New Thread (⌘N) and
@@ -28,8 +30,9 @@ import { NewThreadDialogs, type NewThreadDialog } from "./-new-thread-dialogs";
  * picker's last row opens. A project added there opens a Draft Thread in it.
  * Go > Office (⌘⇧O) opens the Office, and Settings… (⌘,) opens Settings.
  *
- * The shell runs the snooze timer, which brings a snoozed signal back to
- * To do when its snooze runs out, whichever screen shows.
+ * The shell listens for Undo (⌘Z) on the screens that have no gestures of
+ * their own, so a dismissal or a move is undone from any view
+ * (`useUndoAnywhere`).
  *
  * While the user is signed in, the shell sends main the threads and the
  * assistants waiting on the user whenever that list changes, for the dock
@@ -42,6 +45,10 @@ export const Route = createFileRoute("/_connected/_shell")({
     const { client } = controller;
     try {
       await ensureShellData(queryClient, client);
+      // The shell now knows the user, so the window can hold what is theirs.
+      // Opening is idempotent: the loader runs again on later navigations.
+      const { username } = await queryClient.ensureQueryData(userQuery(client));
+      controller.accountScopes.open(username);
     } catch (error) {
       // The entry guard only checks that a token is saved. When the
       // controller rejects it, such as a token revoked from another device,
@@ -61,15 +68,18 @@ export const Route = createFileRoute("/_connected/_shell")({
 });
 
 /**
- * Prepares the session presentation and the Done moves for everything in the
- * shell, which reads them with `useSessionPresentation` and `useDoneMoves`.
+ * Prepares the session presentation, the Done moves and the cleanup progress
+ * for everything in the shell, which reads them with
+ * `useSessionPresentation`, `useDoneMoves` and `useCleanupStore`.
  */
 function ShellLayout(): JSX.Element {
   const { client } = Route.useRouteContext().controller;
   return (
     <SessionPresentationProvider>
       <DoneMovesProvider client={client}>
-        <ShellScreen />
+        <CleanupProvider client={client}>
+          <ShellScreen />
+        </CleanupProvider>
       </DoneMovesProvider>
     </SessionPresentationProvider>
   );
@@ -79,6 +89,14 @@ function ShellScreen(): JSX.Element {
   const { bridge, controller, queryClient } = Route.useRouteContext();
   const navigate = useNavigate();
   useLiveConnection(controller.live, queryClient);
+  const { toasts } = useDoneMoves();
+  useUndoAnywhere({
+    client: controller.client,
+    queryClient,
+    undoStack: controller.accountScopes.read().undoStack,
+    toasts,
+    platform: bridge.platform,
+  });
   const waiting = useWaiting();
   const openDestination = useOpenDestination();
   const [dialog, setDialog] = useState<NewThreadDialog | null>(null);
@@ -110,10 +128,10 @@ function ShellScreen(): JSX.Element {
     "Could not update the dock badge and the notifications:",
   );
 
-  // Main notifies each new Now signal, but only the page holds the To do
-  // list. The shell sends it, not Intake, so a Now signal notifies while
-  // Intake is closed.
-  const signals = useSuspenseQuery(signalsToDoQuery(controller.client)).data;
+  // Main notifies each new urgent signal, but only the page holds the open
+  // signals. The shell sends them, so an urgent signal notifies on every
+  // screen.
+  const signals = useSuspenseQuery(openSignalsQuery(controller.client)).data;
   const plugins = useSuspenseQuery(pluginsQuery(controller.client)).data;
   useSendOnChange(
     listUrgentSignals(signals, plugins),
@@ -121,10 +139,10 @@ function ShellScreen(): JSX.Element {
     "Could not update the urgent signal notifications:",
   );
 
-  // Only a signed-in user can start a thread, open the Office, Intake,
+  // Only a signed-in user can start a thread, open the Office, Inbox,
   // Workflows or Settings, so only the shell listens for File > New Thread,
-  // Go > Office, Go > Intake, Go > Workflows and the app menu's Settings. The
-  // Office, Intake, Workflows and Settings, like a thread opened from the
+  // Go > Office, Go > Inbox, Go > Workflows and the app menu's Settings. The
+  // Office, Inbox, Workflows and Settings, like a thread opened from the
   // menu, replace whatever the user was doing, the project picker included.
   useEffect(
     () =>
@@ -134,9 +152,9 @@ function ShellScreen(): JSX.Element {
           setDialog(null);
           void navigate({ to: "/office" });
         }
-        if (command === "openIntake") {
+        if (command === "openInbox") {
           setDialog(null);
-          void navigate({ to: "/intake" });
+          void navigate({ to: "/inbox" });
         }
         if (command === "openWorkflows") {
           setDialog(null);
@@ -167,7 +185,6 @@ function ShellScreen(): JSX.Element {
         <Outlet />
       </Shell>
       <NewThreadDialogs dialog={dialog} setDialog={setDialog} onDraft={openDraft} />
-      <SnoozeTimer client={controller.client} />
     </>
   );
 }

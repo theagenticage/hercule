@@ -83,11 +83,20 @@ describe("a launch", () => {
     expect(router.state.location.pathname).toBe(threadPath);
   });
 
-  it("opens Intake stored as the last screen", async () => {
-    storeScreen("/intake");
+  it("opens Work stored as the last screen, which Where I left off covers like any other", async () => {
+    storeScreen("/work");
     const { router } = await launch();
-    expect(router.state.location.pathname).toBe("/intake");
+    expect(router.state.location.pathname).toBe("/work");
   });
+
+  it.each(["/intake", "/intake?view=done"])(
+    "opens the Inbox for %s, which an older build stored as the last screen",
+    async (path) => {
+      storeScreen(path);
+      const { router } = await launch();
+      expect(router.state.location.pathname).toBe("/inbox");
+    },
+  );
 
   it("opens a subagent's page stored as the last screen", async () => {
     const path = `/threads/${FIXTURE_SUBAGENT.sessionId}/subagents/${FIXTURE_SUBAGENT.id}`;
@@ -133,7 +142,7 @@ describe("a launch", () => {
   );
 
   it.each([
-    ["a screen this build does not have", "/inbox"],
+    ["a screen this build does not have", "/calendar"],
     ["Settings", "/settings/appearance"],
     ["sign-in", "/login"],
     ["a path past a screen's own", "/office/old"],

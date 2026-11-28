@@ -1,23 +1,33 @@
 /**
- * Works out which provider instance and model text generations run on now,
- * from the `textGeneration.model` setting, and which runners could make the
- * call there.
+ * Works out which Provider Account, harness and model text generations run on
+ * now, from the `textGeneration.model` setting, and which runners could make
+ * the call there.
  *
  * - `off`: nothing runs.
- * - A chosen instance and model: exactly that. It is never replaced by
- *   another provider, so a user who chose Codex never has a call quietly go
- *   to Claude.
- * - `automatic` (the default when the setting is unset): the first provider in
- *   `AUTOMATIC_PROVIDER_ORDER` that has an instance logged in on a runner
- *   that could make the call, whose model list there holds the provider's
- *   suggested text generation model. Choosing the model is visible, not
- *   hidden: Settings shows what `automatic` resolves to.
+ * - A chosen account and model: exactly that, in the chosen harness or else
+ *   the account's default harness. If that harness cannot make text
+ *   generations, nothing runs. It is never replaced by another account
+ *   or harness, so a user who chose OpenAI never has a call quietly go to
+ *   Anthropic.
+ * - `automatic` (the default when the setting is unset): the oldest account
+ *   (in the order they were added) that meets all of these:
+ *   - its default harness is carried by this build, the account can run in it,
+ *     and it makes text generations (as `decideTextGenerationHarness`
+ *     decides);
+ *   - its provider names a suggested text generation model that the
+ *     account's Model Catalog holds;
+ *   - it can run now on a runner able to make the call.
+ *
+ *   Choosing the model is visible, not hidden: Settings shows what
+ *   `automatic` resolves to.
  *
  * A runner could make the call when it is placeable (online, active, not
- * reserved), has negotiated the text generation capability, has the instance
- * logged in, and lists the model for that instance. Resolution and the
- * runner choice share this one rule, so `automatic` never picks a model that
- * no runner can run.
+ * reserved), has negotiated the text generation capability, and can run the
+ * account in the harness (`ProviderAccountRunners`). Which model to offer is a
+ * question about the account, not about a runner: `automatic` picks a model
+ * that the account's stored Model Catalog holds, and the runner choice then
+ * ignores models. A catalog that was never read holds none, so an account is
+ * skipped until its first read ends.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -26,37 +36,33 @@ import * as Option from "effect/Option";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { TEXT_GENERATION_CAPABILITY } from "@hercule/protocol";
-import { PluginHost } from "../plugins";
+import { decideTextGenerationHarness, PluginHost, type RegisteredProvider } from "../plugins";
 import {
-  isLoggedIn,
-  providerRepository,
-  type StoredInstance,
-  type StoredSnapshot,
-} from "../providers";
+  describeProviderAccount,
+  ModelCatalogs,
+  ProviderAccountRunners,
+  providerAccountRepository,
+  type StoredProviderAccount,
+} from "../provider-accounts";
 import { runnerRepository, type PlacementCandidate } from "../runners";
 import { Settings } from "../settings";
-
-/**
- * The providers `automatic` tries, best first. The order is a decision of the
- * controller, not of a provider, so a plugin cannot move itself to the front.
- * Each provider names its own suggested model on its definition.
- */
-const AUTOMATIC_PROVIDER_ORDER: ReadonlyArray<string> = ["codex", "pi", "claude-code"];
 
 /**
  * What the setting resolves to now:
  *
  * - `off`: text generation is switched off.
- * - `resolved`: calls run on this instance and model. `runnerIds` lists the
- *   runners that could make the call, in no particular order. It is empty
- *   when a chosen model is offered by no such runner.
+ * - `resolved`: calls run on this account, harness and model. `runnerIds`
+ *   lists the runners that could make the call, in no particular order. It is
+ *   empty when a chosen model is offered by no such runner. `providerAccountName` is
+ *   how a message names the account, such as "Anthropic · work".
  * - `unresolved`: no model can be used, and `message` explains why in words a
  *   user can act on. For example `automatic` found no match.
  *
  * Every variant carries `failureKey`, which names the setting value and what
  * it resolved to. The last failure is stored under it and shown only under
  * the same key. So a failure is hidden when the user chooses another model,
- * and also when `automatic` starts resolving to another instance or model.
+ * and also when `automatic` starts resolving to another account, harness or
+ * model.
  */
 export type TextGenerationTarget = { readonly failureKey: string } & TextGenerationChoice;
 
@@ -65,15 +71,33 @@ type TextGenerationChoice =
   | { readonly _tag: "off" }
   | {
       readonly _tag: "resolved";
-      readonly instance: StoredInstance;
+      readonly providerAccountId: string;
+      readonly providerAccountName: string;
+      readonly harnessId: string;
       readonly model: string;
       readonly runnerIds: ReadonlyArray<string>;
     }
   | { readonly _tag: "unresolved"; readonly message: string };
 
-const NO_AUTOMATIC_MATCH = "no up-to-date runner is logged in to a suggested model";
+/**
+ * Returns why `automatic` found no model, naming the small models of the
+ * providers that suggest one (such as "OpenAI's, Z.ai's or Anthropic's small
+ * model") so the user knows which account to add.
+ */
+const buildNoAutomaticMatchMessage = (providers: ReadonlyArray<RegisteredProvider>): string => {
+  const owners = providers
+    .filter((provider) => provider.suggestedTextGenerationModel !== undefined)
+    .map((provider) => `${provider.displayName}'s`);
+  if (owners.length === 0) {
+    return "Automatic finds no model, because no provider names a small model for it; pick a model in Settings › System";
+  }
+  const ownerList =
+    owners.length === 1 ? owners[0]! : `${owners.slice(0, -1).join(", ")} or ${owners.at(-1)!}`;
+  return `Automatic finds no model; add an account that offers ${ownerList} small model and can run on an up-to-date runner`;
+};
 
-const CHOSEN_INSTANCE_GONE = "the provider instance chosen for text generation no longer exists";
+const CHOSEN_ACCOUNT_GONE =
+  "the provider account chosen for text generation was deleted; choose another in Settings";
 
 const TEXT_GENERATION_OFF_REASON = "text generation is off in Settings";
 
@@ -83,8 +107,8 @@ const TEXT_GENERATION_OFF_REASON = "text generation is off in Settings";
  *
  * - for `off`: that text generation is switched off in Settings;
  * - for `unresolved`: the target's own message;
- * - for `resolved`: that no runner able to take the call is logged in to the
- *   instance with the model. So call it for a resolved target only when its
+ * - for `resolved`: that no runner able to take the call can run the
+ *   account with the model. So call it for a resolved target only when its
  *   `runnerIds` is empty.
  */
 export const explainTextGenerationUnavailable = (target: TextGenerationTarget): string => {
@@ -94,7 +118,7 @@ export const explainTextGenerationUnavailable = (target: TextGenerationTarget): 
     case "unresolved":
       return target.message;
     case "resolved":
-      return `no up-to-date runner is logged in to the provider instance ${target.instance.name} with the model ${target.model}`;
+      return `no up-to-date runner can run ${target.providerAccountName} with the model ${target.model}`;
   }
 };
 
@@ -122,32 +146,13 @@ export const buildTextGenerationUnavailableReason = (
 const canTakeTextGeneration = (candidate: PlacementCandidate): boolean =>
   candidate.placeable && candidate.capabilities.includes(TEXT_GENERATION_CAPABILITY);
 
-/**
- * Lists the runners among `capable` whose stored snapshot of the instance
- * shows it logged in and listing `model`. Never probes a runner.
- */
-const listRunnersOffering = (
-  capable: ReadonlySet<string>,
-  snapshots: ReadonlyArray<StoredSnapshot>,
-  instanceId: string,
-  model: string,
-): ReadonlyArray<string> =>
-  snapshots
-    .filter(
-      (snapshot) =>
-        snapshot.instanceId === instanceId &&
-        capable.has(snapshot.runnerId) &&
-        isLoggedIn(snapshot) &&
-        snapshot.models.some((one) => one.slug === model),
-    )
-    .map((snapshot) => snapshot.runnerId);
-
 const make = Effect.gen(function* () {
   const settings = yield* Settings;
-  const instances = yield* providerRepository;
+  const accounts = yield* providerAccountRepository;
+  const catalogs = yield* ModelCatalogs;
   const runners = yield* runnerRepository;
+  const accountRunners = yield* ProviderAccountRunners;
   const host = yield* PluginHost;
-
   /** Reads the ids of the runners that can be asked for a text generation. */
   const readCapableRunnerIds = Effect.map(
     runners.listPlacementCandidates(),
@@ -155,37 +160,103 @@ const make = Effect.gen(function* () {
   );
 
   /**
-   * Finds the first instance, in provider order, that a runner able to make
-   * the call has logged in with its provider's suggested model.
+   * Keeps the runners where the account can run (`runnerIds`) that can also be
+   * asked for a text generation.
+   */
+  const filterCapableRunners = (
+    runnerIds: ReadonlyArray<string>,
+    capable: ReadonlySet<string>,
+  ): ReadonlyArray<string> => runnerIds.filter((runnerId) => capable.has(runnerId));
+
+  /**
+   * Resolves one account in one harness (the account's default when
+   * `harnessId` is absent) and a model to a target. An account that cannot
+   * make text generations in the harness (it cannot run there, or the harness
+   * makes no text generations) is `unresolved`, with the reason in the message.
+   */
+  const resolveProviderAccountModel = (
+    account: StoredProviderAccount,
+    harnessId: string | undefined,
+    model: string,
+  ): Effect.Effect<TextGenerationChoice, SqlError> =>
+    Effect.gen(function* () {
+      const providers = yield* host.providers();
+      const providerAccountName = describeProviderAccount(account, providers);
+      const choice = decideTextGenerationHarness(
+        providers,
+        yield* host.harnesses(),
+        account,
+        harnessId,
+      );
+      if (choice._tag === "refused") {
+        return {
+          _tag: "unresolved",
+          message: `${providerAccountName} cannot be the text generation model: ${choice.reason}`,
+        } as const;
+      }
+      const [available] = yield* accountRunners.listMany([
+        { providerAccountId: account.id, harnessId: choice.harness.id },
+      ]);
+      return {
+        _tag: "resolved",
+        providerAccountId: account.id,
+        providerAccountName,
+        harnessId: choice.harness.id,
+        model,
+        runnerIds: filterCapableRunners(available!.runnerIds, yield* readCapableRunnerIds),
+      } as const;
+    });
+
+  /**
+   * Finds the first account, oldest first, that meets the `automatic` rule in
+   * the file header. An account that fails any part of it is skipped.
+   *
+   * Reads the accounts, the catalogs and the runners once, then decides in
+   * memory, so the number of queries does not grow with the number of
+   * accounts.
    */
   const resolveAutomatic: Effect.Effect<TextGenerationChoice, SqlError> = Effect.gen(function* () {
-    const capable = yield* readCapableRunnerIds;
-    const definitions = yield* host.providers();
-    const all = yield* instances.list();
-    const snapshots = yield* instances.snapshots();
-    for (const providerId of AUTOMATIC_PROVIDER_ORDER) {
-      const model = definitions.find((one) => one.id === providerId)?.suggestedTextGenerationModel;
+    const providers = yield* host.providers();
+    const harnesses = yield* host.harnesses();
+    const candidates = [];
+    for (const account of yield* accounts.list()) {
+      const choice = decideTextGenerationHarness(providers, harnesses, account);
+      if (choice._tag === "refused") continue;
+      const model = choice.provider.suggestedTextGenerationModel;
       if (model === undefined) continue;
-      for (const instance of all.filter((one) => one.providerId === providerId)) {
-        const runnerIds = listRunnersOffering(capable, snapshots, instance.id, model);
-        if (runnerIds.length > 0) return { _tag: "resolved", instance, model, runnerIds } as const;
-      }
+      candidates.push({ account, harnessId: choice.harness.id, model });
     }
-    return { _tag: "unresolved", message: NO_AUTOMATIC_MATCH } as const;
-  }).pipe(
-    // A stored row that no longer decodes is corruption, not a state the
-    // caller can act on.
-    Effect.catchTag("SchemaError", Effect.die),
-  );
+    const available = yield* accountRunners.listMany(
+      candidates.map(({ account, harnessId }) => ({ providerAccountId: account.id, harnessId })),
+    );
+    const stored = yield* catalogs.listCatalogs();
+    const capable = yield* readCapableRunnerIds;
+    for (const [index, { account, harnessId, model }] of candidates.entries()) {
+      const offered = stored
+        .find((one) => one.providerAccountId === account.id)
+        ?.models.some((one) => one.slug === model);
+      const runnerIds = filterCapableRunners(available[index]!.runnerIds, capable);
+      if (offered !== true || runnerIds.length === 0) continue;
+      return {
+        _tag: "resolved",
+        providerAccountId: account.id,
+        providerAccountName: describeProviderAccount(account, providers),
+        harnessId,
+        model,
+        runnerIds,
+      } as const;
+    }
+    return { _tag: "unresolved", message: buildNoAutomaticMatchMessage(providers) } as const;
+  });
 
   return {
     /**
      * Resolves the setting to what text generations run on now. A resolved
-     * target carries the instance row and the runners that could make the
-     * call, so the caller does not read them again. Reads the stored
-     * snapshots and never probes a runner, so a login that expired since the
-     * last probe still resolves; the call then fails with an explanation.
-     * Fails only when the database cannot be read.
+     * target carries the account, the harness and the runners that could
+     * make the call, so the caller does not read them again. Reads the
+     * stored snapshots and never probes a runner, so a sign-in that expired
+     * since the last probe still resolves; the call then fails with an
+     * explanation. Fails only when the database cannot be read.
      */
     resolve: (): Effect.Effect<TextGenerationTarget, SqlError> =>
       Effect.gen(function* () {
@@ -193,30 +264,19 @@ const make = Effect.gen(function* () {
         const choice: TextGenerationChoice = yield* Effect.gen(function* () {
           if (setting === "off") return { _tag: "off" } as const;
           if (setting === "automatic") return yield* resolveAutomatic;
-          const found = yield* Effect.catchTag(
-            instances.one(setting.instanceId),
-            "SchemaError",
-            Effect.die,
-          );
-          if (Option.isNone(found)) {
-            return { _tag: "unresolved", message: CHOSEN_INSTANCE_GONE } as const;
+          const chosen = yield* accounts.one(setting.providerAccountId);
+          if (Option.isNone(chosen)) {
+            return { _tag: "unresolved", message: CHOSEN_ACCOUNT_GONE } as const;
           }
-          const capable = yield* readCapableRunnerIds;
-          const snapshots = yield* Effect.catchTag(
-            instances.listSnapshots(found.value.id),
-            "SchemaError",
-            Effect.die,
-          );
-          return {
-            _tag: "resolved",
-            instance: found.value,
-            model: setting.model,
-            runnerIds: listRunnersOffering(capable, snapshots, found.value.id, setting.model),
-          } as const;
+          return yield* resolveProviderAccountModel(chosen.value, setting.harnessId, setting.model);
         });
         const ran =
           choice._tag === "resolved"
-            ? { instanceId: choice.instance.id, model: choice.model }
+            ? {
+                providerAccountId: choice.providerAccountId,
+                harnessId: choice.harnessId,
+                model: choice.model,
+              }
             : null;
         return { ...choice, failureKey: JSON.stringify({ setting, ran }) };
       }),
@@ -232,5 +292,5 @@ export class TextGenerationModels extends Context.Service<
 export const TextGenerationModelsLayer: Layer.Layer<
   TextGenerationModels,
   never,
-  SqlClient.SqlClient | Settings | PluginHost
+  SqlClient.SqlClient | Settings | PluginHost | ProviderAccountRunners | ModelCatalogs
 > = Layer.effect(TextGenerationModels)(make);

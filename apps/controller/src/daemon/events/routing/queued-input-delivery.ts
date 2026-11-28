@@ -22,7 +22,7 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { inputRepository } from "../../../sessions";
 import type { Delivery } from "../event-router";
-import { forkAndAbsorbFailures } from "../../absorbing";
+import { forkAndAbsorbFailures } from "../../../absorbing";
 import { Live } from "../../sessions";
 
 export const queuedInputDelivery: Effect.Effect<Delivery, never, SqlClient.SqlClient | Live> =

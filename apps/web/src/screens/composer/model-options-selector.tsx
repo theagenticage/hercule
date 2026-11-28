@@ -10,7 +10,7 @@ const HEADER = "Model options";
 /**
  * The selector for the model's options: one labelled segmented control per
  * option the model declares, shown as declared. There is no free-text entry,
- * because the provider defines the choices.
+ * because the harness defines the choices.
  *
  * The trigger shows the current value (`high ⚡`) rather than a name, at a
  * fixed minimum width, so the model pill beside it does not move when the

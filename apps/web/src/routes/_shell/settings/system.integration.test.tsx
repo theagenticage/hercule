@@ -14,7 +14,13 @@
 import { describe, expect, it } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ControllerInfo, ProviderInstance } from "@hercule/contract";
+import type { ControllerInfo, ProviderAccount } from "@hercule/contract";
+import {
+  OPENAI_IDENTITY,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+} from "@hercule/client-core/testing";
 import {
   buildErrorBody,
   readPageText,
@@ -26,31 +32,21 @@ import {
 
 const RUNNER_ID = "01a06d02-beff-7037-9f5b-042822015952";
 
-const CODEX: ProviderInstance = {
+const CODEX: ProviderAccount = {
   id: "01a06d02-1000-7000-8000-000000000001",
-  providerId: "codex",
-  name: "Codex",
-  config: {},
-  displayName: "Codex",
-  binaryName: "codex",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
-  secretFields: [],
+  providerId: "openai/openai",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: "rogier@example.com",
+  planLabel: "Plus",
+  defaultHarnessId: "codex/codex",
+  expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: [
     {
       runnerId: RUNNER_ID,
+      harnessId: "codex/codex",
       probedAt: "2026-09-05T09:14:00.000Z",
       harnessVersion: "1.0.0",
       versionVerdict: "ok",
@@ -61,12 +57,28 @@ const CODEX: ProviderInstance = {
       ],
     },
   ],
+  modelCount: 2,
+  catalogReadAt: "2026-09-05T09:14:00.000Z",
+  catalogError: null,
+  readiness: [{ harnessId: "codex/codex", runnerId: RUNNER_ID, state: "ready" }],
   createdAt: "2026-09-05T09:00:00.000Z",
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
+/** The one Model Profile: the Codex account with both of its models. */
+const CODEX_IDENTITY = { ...OPENAI_IDENTITY, id: CODEX.id };
+const MAIN = buildModelProfile(
+  [
+    buildProfileSection(CODEX_IDENTITY, [
+      buildProfileEntry(CODEX_IDENTITY, "gpt-6-luna", { name: "GPT-6 Luna" }),
+      buildProfileEntry(CODEX_IDENTITY, "gpt-6", { name: "GPT-6" }),
+    ]),
+  ],
+  { id: "01a06d02-4000-7000-8000-000000000001" },
+);
+
 const AUTOMATIC_PICK: ControllerInfo["textGeneration"] = {
-  model: { instanceId: CODEX.id, model: "gpt-6-luna" },
+  model: { providerAccountId: CODEX.id, harnessId: "codex/codex", model: "gpt-6-luna" },
   lastFailure: null,
   unavailableReason: null,
 };
@@ -96,7 +108,8 @@ const buildController = (
         },
       },
     }),
-    "GET /api/v1/providers": { body: [CODEX] },
+    "GET /api/v1/provider-accounts": { body: [CODEX] },
+    "GET /api/v1/model-profiles": { body: [MAIN] },
     "GET /api/v1/controller": {
       body: {
         id: "01a06d02-a000-7000-8000-000000000001",
@@ -135,7 +148,7 @@ describe("Settings > System: the access-mode fallback policy", () => {
     // than a setting. Both are checked as whole sentences, so half a sentence
     // cannot pass.
     expect(text).toContain(
-      "A thread asking for a mode its provider does not support runs at the nearest less permissive mode that provider does support.",
+      "A thread asking for a mode its harness does not support runs at the nearest less permissive mode that harness does support.",
     );
     expect(text).toContain(
       "The substitution never goes the other way: a thread never runs more permissively than it asked for.",
@@ -187,18 +200,18 @@ const listWrites = (api: { readonly calls: readonly Call[] }) =>
 const findModelField = () => screen.findByLabelText<HTMLSelectElement>("Model");
 
 describe("Settings > System: text generation", () => {
-  it("offers Automatic with the model it resolves to, every logged-in model, and Off", async () => {
+  it("offers Automatic with the model it resolves to, every signed-in model, and Off", async () => {
     await openApp();
 
     const field = await findModelField();
 
     expect([...field.options].map((option) => option.textContent)).toEqual([
-      "Automatic - currently Codex · GPT-6 Luna",
-      "Codex · GPT-6 Luna",
-      "Codex · GPT-6",
+      "Automatic - currently OpenAI · GPT-6 Luna",
+      "OpenAI · GPT-6 Luna",
+      "OpenAI · GPT-6",
       "Off",
     ]);
-    expect(field.selectedOptions[0]?.textContent).toBe("Automatic - currently Codex · GPT-6 Luna");
+    expect(field.selectedOptions[0]?.textContent).toBe("Automatic - currently OpenAI · GPT-6 Luna");
   });
 
   it("shows Automatic with no model when none is available", async () => {
@@ -219,16 +232,16 @@ describe("Settings > System: text generation", () => {
     );
   });
 
-  it("writes the chosen instance and model to textGeneration.model", async () => {
+  it("writes the chosen account and model to textGeneration.model", async () => {
     const user = userEvent.setup();
     const { api } = await openApp();
 
-    await user.selectOptions(await findModelField(), "Codex · GPT-6");
+    await user.selectOptions(await findModelField(), "OpenAI · GPT-6");
 
     expect(await screen.findByRole("status")).toBeDefined();
     expect(listWrites(api)).toHaveLength(1);
     expect(listWrites(api)[0]?.body).toEqual({
-      controller: { "textGeneration.model": { instanceId: CODEX.id, model: "gpt-6" } },
+      controller: { "textGeneration.model": { providerAccountId: CODEX.id, model: "gpt-6" } },
     });
   });
 
@@ -249,9 +262,9 @@ describe("Settings > System: text generation", () => {
 
   it("shows the stored choice as selected", async () => {
     await openApp({
-      stored: { instanceId: CODEX.id, model: "gpt-6" },
+      stored: { providerAccountId: CODEX.id, model: "gpt-6" },
       textGeneration: {
-        model: { instanceId: CODEX.id, model: "gpt-6" },
+        model: { providerAccountId: CODEX.id, harnessId: "codex/codex", model: "gpt-6" },
         lastFailure: null,
         unavailableReason: null,
       },
@@ -259,7 +272,7 @@ describe("Settings > System: text generation", () => {
 
     const field = await findModelField();
 
-    expect(field.selectedOptions[0]?.textContent).toBe("Codex · GPT-6");
+    expect(field.selectedOptions[0]?.textContent).toBe("OpenAI · GPT-6");
   });
 
   it("reads the model that was picked from the controller again after a save", async () => {
@@ -329,6 +342,20 @@ describe("Settings > System: text generation", () => {
       expect(readPageText()).toContain(
         "Last failure 2 minutes ago - failed: The harness exited with code 1.",
       );
+    });
+
+    it("shows why text generation cannot run, before any call has failed", async () => {
+      await openApp({
+        textGeneration: {
+          model: null,
+          lastFailure: null,
+          unavailableReason: "Automatic finds no model",
+        },
+      });
+
+      await findModelField();
+
+      expect(readPageText()).toContain("Unavailable: Automatic finds no model");
     });
 
     it("shows nothing when there has been no failure", async () => {

@@ -25,9 +25,9 @@ import { findOpenItem } from "../threads/open-item";
 import { describePose, type Pose } from "../threads/pose";
 import { formatDayStamp } from "../time-context";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemStatus = Extract<ProviderEvent, { _tag: "item.completed" }>["status"];
-type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
+type HarnessEvent = TranscriptRow["event"];
+type ItemStatus = Extract<HarnessEvent, { _tag: "item.completed" }>["status"];
+type TurnEndState = Extract<HarnessEvent, { _tag: "turn.completed" }>["state"];
 
 /** The day stamp above the first message of each day: "Today", "Yesterday", "4 Sep" or "4 Sep 2025". */
 export interface DayStampBlock {
@@ -466,6 +466,18 @@ export const buildConversationBlocks = (input: {
   }
   return blocks;
 };
+
+/**
+ * Checks whether a message comes after the block at `index` in `blocks`: a
+ * stored message, a notice, the open reply or any other block that is not a
+ * day stamp. A notice with a message after it is in the past, so the desktop
+ * draws it quietly; only the newest notice is drawn filled. The check reads
+ * the blocks' order only, never their text.
+ */
+export const hasMessageAfter = (
+  blocks: readonly { readonly kind: string }[],
+  index: number,
+): boolean => blocks.some((block, position) => position > index && block.kind !== "stamp");
 
 /**
  * Returns the words beside the assistant's name on the open reply, where a

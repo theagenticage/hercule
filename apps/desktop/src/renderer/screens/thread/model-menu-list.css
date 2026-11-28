@@ -1,0 +1,200 @@
+/* The model menu's list. The composer's menu is a flex column of the filter,
+   this list, and for a thread that has started, its foot; the list scrolls
+   inside it, so the filter stays in view, and the whole menu is at most 60%
+   of the window's height (spec 17 §The composer). In the composer, the
+   popover around it is a flex column too, which never scrolls itself
+   (menus.css), so the menu also shrinks to the space above the composer and
+   the list is the one place that scrolls.
+
+   `overscroll-behavior` keeps a scroll that reaches the end of the list from
+   moving the thread behind the popover. */
+.model-menu {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 60vh;
+}
+.model-menu-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* With one profile unfolded, the heads stay in view and only the unfolded
+   profile's rows scroll. Each profile's box gives way (`display: contents`),
+   so its head and its body are items of the list itself: a head keeps its
+   height, and only bodies shrink to what the heads leave free. Were the
+   profile's box the item, a profile folding away would shrink below its own
+   head, which would slide over the head under it and then jump back when the
+   fold ends.
+
+   The body ends 4px above the head under it, so its rows never run into the
+   head's rule. That space folds with the body (below). */
+.model-menu-list.pins-heads > .ac {
+  display: contents;
+}
+.pins-heads .ac-head {
+  flex: none;
+}
+.pins-heads .ac-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.pins-heads .ac-body {
+  margin-bottom: 4px;
+}
+/* The rule between the filter and the list that follows it. */
+.pop-sec:has(> .menu-filter) + .model-menu-list {
+  border-top: 1px solid var(--divider);
+}
+
+/* A Model Profile's head: its face, its name in the UI body size, the number
+   of entries and a chevron that points down while the profile is unfolded. It
+   is Bureau's lane label (`.q-h`) made a button and set larger, because it
+   stands one level above the lanes. The book draws no accordion, so this
+   follows the prototype's `.ac-h` (r3.css), which is 34px high and sets the
+   profiles apart with a rule between them. What an unfolded profile holds is
+   indented by 10px, as the prototype's `.ac-b` is, so the lanes read as its
+   children. The rule is drawn on the head, because the profile's own box
+   gives way while the heads stay in view (above). */
+.ac + .ac > .ac-head {
+  border-top: 1px solid var(--divider);
+}
+.ac-head {
+  padding: 2px 8px;
+}
+.ac-head .q-h {
+  gap: 8px;
+  width: 100%;
+  min-height: 30px;
+  padding-block: 0;
+  border-radius: var(--r-md);
+  font-size: var(--t-13);
+  text-align: left;
+}
+.ac-head .q-h:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.ac-head .q-h[aria-expanded="true"] {
+  color: var(--ink);
+}
+.ac-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The number of entries sits at the right, before the chevron. */
+.ac-count {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--t-12);
+  font-weight: var(--w-regular);
+  font-variant-numeric: tabular-nums;
+}
+.ac-head .q-h > svg {
+  flex: none;
+  /* Lines the chevron's tip up with the check mark of the rows below. */
+  margin-right: -1px;
+  color: var(--faint);
+  transition: transform var(--dur-2) var(--ease-out);
+}
+.ac-head .q-h[aria-expanded="true"] > svg {
+  transform: rotate(90deg);
+}
+/* Under its head, the first section needs no rule above it, and sits 3px
+   lower, which puts its label 12px under the head as the prototype's does. */
+.ac-body > .pop-sec:first-child {
+  padding-top: 3px;
+}
+.ac-body {
+  margin-left: 10px;
+}
+
+/* Switching profiles: the profile that was open folds away while the clicked
+   one unfolds, in the same time, so the heads between them glide to their new
+   places and the menu's edge follows. Each body fades as it goes and comes.
+   `interpolate-size` lets the height move to and from `auto`. Under Reduce
+   motion the menu switches at once, and no profile folds (`ModelMenu`).
+
+   While the two change places, their scroll bars are drawn clear rather than
+   switched off. A scroll bar that takes room (a mouse is attached) then keeps
+   its room, so the rows keep their width and are never laid out again when
+   the switch ends; only the bar's colour comes back.
+
+   Height is a layout property, which spec 17's motion rule lets transition
+   only where a measurement shows it is cheap (§Measured, "The model menu's
+   fold"): the popover sits in the top layer, so a frame lays out only the
+   menu, never the page behind it. */
+@media (prefers-reduced-motion: no-preference) {
+  .model-menu-list {
+    interpolate-size: allow-keywords;
+  }
+  .ac-body {
+    transition:
+      height var(--dur-2) var(--ease-out),
+      margin-bottom var(--dur-2) var(--ease-out),
+      opacity var(--dur-2) var(--ease-out);
+  }
+  .ac-body.is-folding {
+    height: 0;
+    margin-bottom: 0;
+    opacity: 0;
+  }
+  .ac-body:is(.is-folding, .is-unfolding) {
+    scrollbar-color: transparent transparent;
+  }
+  @starting-style {
+    .ac-body.is-unfolding {
+      height: 0;
+      margin-bottom: 0;
+      opacity: 0;
+    }
+  }
+}
+
+/* Not in the book. A lane that a screen outside the composer lights, such as
+   the Providers page's preview when the pointer is on an account card. */
+.pop-sec.is-lit {
+  background: var(--hover);
+}
+
+/* Not in the book, which has no announced models. The row of a model the
+   controller announced as new. It is a plain `.line`, so its height, padding
+   and type are those of the rows around it, but not a button: it has no
+   hover, because clicking its body does nothing. Its Add link and its ×
+   are the only things on it that act. The row's gap is 10px, which the pill's
+   negative margin shortens to the prototype's 6px before the name. */
+.line--new .new-pill {
+  margin-right: -4px;
+}
+/* The ×, 16px square so that it never makes the row taller than the 17px
+   line of text in the rows around it. */
+.line-dismiss {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: -2px;
+  border-radius: var(--r-xs);
+  color: var(--faint);
+}
+.line-dismiss:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+/* A button whose row is being saved keeps the focus (`aria-disabled`), as the
+   repo's other busy buttons do, and takes no hover or press. */
+.line--new button[data-unready] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+/* Why a save of a New row was refused, under the lane's rows. */
+.menu-note--fail {
+  color: var(--fail-ink);
+}

@@ -3,18 +3,23 @@ import { Effect, Layer } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { VERSION } from "@hercule/home/version";
 import { CurrentActor, type Actor } from "../actor";
-import { nowIso, withTransaction } from "../db";
+import { withTransaction } from "../db";
 import { ControllerIdentity, controllerIdentityLayer } from "../identity";
+import { PluginHost } from "../plugins";
 import { buildPluginStack } from "../plugins/testing";
-import { providerRepository } from "../providers";
+import { ModelCatalogsLayer, ProviderAccountRunnersLayer } from "../provider-accounts";
+import { inertMembership } from "../provider-accounts/testing";
 import { LocalRunnerId } from "../runners";
+import { Secrets } from "../secrets";
 import { Settings, SettingsLayer } from "../settings";
+import { AccountUsageLayer } from "../usage";
 import {
   LastTextGenerationFailure,
   LastTextGenerationFailureLayer,
   TextGenerationModels,
   TextGenerationModelsLayer,
 } from "../text-generation";
+import { addFixtureAccount, buildTextGenerationPlugins } from "../text-generation/testing";
 import { Controller, ControllerLayer } from "./service";
 
 const USER: Actor = {
@@ -26,6 +31,10 @@ const USER: Actor = {
 const buildStack = () =>
   ControllerLayer.pipe(
     Layer.provideMerge(Layer.mergeAll(TextGenerationModelsLayer, LastTextGenerationFailureLayer)),
+    Layer.provideMerge(ModelCatalogsLayer),
+    Layer.provideMerge(inertMembership),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(Layer.mergeAll(controllerIdentityLayer, SettingsLayer)),
     Layer.provideMerge(buildPluginStack()),
   );
@@ -44,6 +53,8 @@ const withIdentity = <A, E>(
     | Settings
     | LastTextGenerationFailure
     | TextGenerationModels
+    | PluginHost
+    | Secrets
     | SqlClient.SqlClient
   >,
   actor: Actor | null = USER,
@@ -134,7 +145,8 @@ describe("controller.read text generation", () => {
 
     expect(result.textGeneration).toEqual({
       model: null,
-      unavailableReason: expect.stringContaining("no up-to-date runner") as unknown,
+      unavailableReason:
+        "Automatic finds no model, because no provider names a small model for it; pick a model in Settings › System",
       lastFailure: null,
     });
   });
@@ -145,22 +157,14 @@ describe("controller.read text generation", () => {
         const controller = yield* Controller;
         const settings = yield* Settings;
         const failures = yield* LastTextGenerationFailure;
-        const instances = yield* providerRepository;
         const sql = yield* SqlClient.SqlClient;
-        const instance = yield* withTransaction(
+        yield* Effect.flatMap(PluginHost, (host) => host.boot(buildTextGenerationPlugins()));
+        const account = yield* addFixtureAccount("openai");
+        yield* withTransaction(
           sql,
-          Effect.gen(function* () {
-            const inserted = yield* instances.insert({
-              providerId: "codex",
-              name: "Codex",
-              config: {},
-              at: yield* nowIso,
-            });
-            yield* settings.set("textGeneration.model", {
-              instanceId: inserted.id,
-              model: "mini",
-            });
-            return inserted;
+          settings.set("textGeneration.model", {
+            providerAccountId: account.id,
+            model: "mini",
           }),
         );
         const before = yield* controller.read();
@@ -173,16 +177,18 @@ describe("controller.read text generation", () => {
         const failed = yield* controller.read();
         yield* failures.clear();
         const cleared = yield* controller.read();
-        return { instanceId: instance.id, before, failed, cleared };
+        return { providerAccountId: account.id, before, failed, cleared };
       }),
     );
 
     expect(result.before.textGeneration).toEqual({
-      model: { instanceId: result.instanceId, model: "mini" },
-      // No runner has the instance logged in, so the reason names it.
-      unavailableReason: expect.stringContaining(
-        "provider instance Codex with the model mini",
-      ) as unknown,
+      model: {
+        providerAccountId: result.providerAccountId,
+        harnessId: "codex/codex",
+        model: "mini",
+      },
+      // No runner has the account signed in, so the reason names it.
+      unavailableReason: expect.stringContaining("OpenAI with the model mini") as unknown,
       lastFailure: null,
     });
     expect(result.failed.textGeneration.lastFailure).toEqual({

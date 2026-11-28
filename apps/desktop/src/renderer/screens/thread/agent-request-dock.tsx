@@ -27,6 +27,8 @@ import { RequestPager } from "../session/request-pager";
  * - `pageSubagentId` is the subagent whose page this is, whose own Requests
  *   are the only ones paged; undefined on the main agent's page, which
  *   pages through every open Request of the session.
+ * - `composerBelow` is true on the main agent's page, whose composer answers
+ *   a question, and false on a subagent's page, which has none.
  *
  * The pager line is drawn when `buildRequestDock` says so: when several
  * Requests are open, or when a subagent asked the one shown. Paging is kept
@@ -36,9 +38,12 @@ import { RequestPager } from "../session/request-pager";
 export function AgentRequestDock({
   sessionId,
   pageSubagentId,
+  composerBelow,
 }: {
   readonly sessionId: string;
   readonly pageSubagentId: string | undefined;
+  /** Whether the thread's composer is drawn under the dock, which then answers a question that is not secret. */
+  readonly composerBelow: boolean;
 }): JSX.Element | null {
   const { controller } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
@@ -66,6 +71,8 @@ export function AgentRequestDock({
         sessionId={sessionId}
         look={buildLook(sessionId)}
         request={dock.request}
+        composerBelow={composerBelow}
+        messageDraftKey={sessionId}
       />
     </>
   );

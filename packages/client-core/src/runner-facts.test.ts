@@ -13,7 +13,8 @@ const SILENT: Runner = {
   version: null,
   labels: [],
   facts: null,
-  watermark: null,
+  metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 1,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: null,
@@ -32,15 +33,15 @@ const REPORTED: Runner = {
       { name: "git", version: "2.50.1", path: "/usr/bin/git" },
       { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
     ],
-    providers: [
+    harnesses: [
       { name: "claude", present: true },
       { name: "codex", present: false },
       { name: "pi", present: true },
     ],
-    adapters: ["claude-code"],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
-  watermark: {
+  metrics: {
     diskFreeBytes: 128 * GIB,
     availableMemoryBytes: 32 * GIB,
   },
@@ -53,7 +54,7 @@ describe("describeRunnerFacts", () => {
       memory: "64 GiB",
       diskFree: "128 GiB",
       toolchains: "git 2.50.1 · gh 2.99.0",
-      providers: "claude · pi",
+      harnesses: "claude · pi",
       docker: "installed",
       binary: "0.4.2",
     });
@@ -65,16 +66,16 @@ describe("describeRunnerFacts", () => {
       memory: null,
       diskFree: null,
       toolchains: null,
-      providers: null,
+      harnesses: null,
       docker: null,
       binary: null,
     });
   });
 
-  it("tells a runner that found no provider apart from one that has not reported", () => {
-    const none = { ...REPORTED, facts: { ...REPORTED.facts!, providers: [] } };
-    expect(describeRunnerFacts(none).providers).toBe("none installed");
-    expect(describeRunnerFacts(SILENT).providers).toBeNull();
+  it("tells a runner that found no harness apart from one that has not reported", () => {
+    const none = { ...REPORTED, facts: { ...REPORTED.facts!, harnesses: [] } };
+    expect(describeRunnerFacts(none).harnesses).toBe("none installed");
+    expect(describeRunnerFacts(SILENT).harnesses).toBeNull();
   });
 
   it("shows when Docker is not installed", () => {
@@ -90,8 +91,8 @@ describe("describeRunnerFacts", () => {
     ).toBeNull();
   });
 
-  it("reads free disk space from the watermark, which is reported separately from the facts", () => {
-    expect(describeRunnerFacts({ ...REPORTED, watermark: null }).diskFree).toBeNull();
-    expect(describeRunnerFacts({ ...REPORTED, watermark: null }).memory).toBe("64 GiB");
+  it("reads free disk space from the metrics, which is reported separately from the facts", () => {
+    expect(describeRunnerFacts({ ...REPORTED, metrics: null }).diskFree).toBeNull();
+    expect(describeRunnerFacts({ ...REPORTED, metrics: null }).memory).toBe("64 GiB");
   });
 });

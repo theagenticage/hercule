@@ -519,7 +519,7 @@ export const describeRunnerWait = (
 export interface TextGenerationWait {
   /** The ids of the text generation steps with a pending or running record. */
   readonly stepIds: ReadonlySet<string>;
-  /** Why no text generation can run now, such as "No runner has Codex logged in". */
+  /** Why no text generation can run now, such as "No runner has Codex signed in". */
   readonly reason: string;
 }
 

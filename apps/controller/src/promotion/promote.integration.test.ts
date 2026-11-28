@@ -19,7 +19,8 @@ import { openDatabase } from "../db";
 import { completeSetup, get, post, readErrorBody, withServer } from "../http/testing";
 import { SWITCH_PATH, TRANSFER_PATH } from "./exchange";
 import { promote, type PromoteOptions } from "./promote";
-import { createPromotionToken, findFreePort } from "./testing";
+import { findFreePort } from "../../../../scripts/controller-process";
+import { createPromotionToken } from "./testing";
 
 const homes: Array<string> = [];
 

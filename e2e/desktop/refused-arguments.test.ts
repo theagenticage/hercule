@@ -16,8 +16,11 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { describe, expect, it } from "vitest";
-import { buildAppArgs, findExecutable } from "../../apps/desktop/scripts/packaged-app";
-import { buildAppEnv } from "../../apps/desktop/scripts/processes";
+import {
+  buildAppArgs,
+  buildPackageEnv,
+  findExecutable,
+} from "../../apps/desktop/scripts/packaged-app";
 import { createUserDataDirForTest, waitForExit } from "./harness";
 
 describe("the release package", () => {
@@ -48,7 +51,7 @@ describe("the release package", () => {
       findExecutable("release"),
       [...buildAppArgs(createUserDataDirForTest()), ...args],
       {
-        env: buildAppEnv(),
+        env: buildPackageEnv("release"),
         // `--remote-debugging-pipe` talks over file descriptors 3 and 4, so
         // they are pipes, as they would be for a program that used the switch.
         stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],

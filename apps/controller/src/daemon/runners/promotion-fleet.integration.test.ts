@@ -85,7 +85,7 @@ const buildHello = (overrides: Partial<RunnerHello> = {}): RunnerHello => ({
     totalMemoryBytes: 1,
     docker: false,
     toolchains: [],
-    providers: [],
+    harnesses: [],
     adapters: [],
     identityPort: 4939,
   },
@@ -227,9 +227,10 @@ describe("promotion switch", () => {
   it("announces the new address to a connected runner and serves a forwarding pointer afterwards", async () => {
     await withServer(async (harness) => {
       const user = await completeSetup(harness.base);
+      // With no account to probe, the runner is sent no probe request after its hello.
       await Effect.runPromise(
         Effect.orDie(
-          withTransaction(harness.sql, harness.sql.unsafe(`DELETE FROM provider_instances`)),
+          withTransaction(harness.sql, harness.sql.unsafe(`DELETE FROM provider_accounts`)),
         ),
       );
       const joined = await enlist(harness.base, await harness.joinToken());

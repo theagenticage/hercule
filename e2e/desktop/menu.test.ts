@@ -2,9 +2,9 @@
  * Tests the menu bar in the packaged app (spec 17, §Native behaviour):
  *
  * - the menus stand in the order macOS users expect; while signed out, View
- *   holds a dimmed Threads and Hercule, and Go a dimmed Office, Intake,
+ *   holds a dimmed Threads and Hercule, and Go a dimmed Office, Inbox,
  *   Workflows and "No Threads";
- * - Go lists the sidebar's threads under Office, Intake and Workflows, top
+ * - Go lists the sidebar's threads under Office, Inbox and Workflows, top
  *   to bottom, with ⌘1 and on, and choosing one opens it;
  * - Thread > Send sends what the open thread's composer holds;
  * - Edit > Undo and Edit > Redo step through the edits of the thread's
@@ -17,7 +17,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Page } from "playwright";
 import { describe, expect, it } from "vitest";
-import { isWindowVisible } from "../../apps/desktop/scripts/packaged-app";
+import { isWindowVisible, RUNS_ON_MAC } from "../../apps/desktop/scripts/packaged-app";
 import {
   arrangeFleet,
   chooseMenuItem,
@@ -27,6 +27,7 @@ import {
   hideWindow,
   keepWindowOnTop,
   launchForTest,
+  ON_HOSTED_MAC,
   openSignedIn,
   openThread,
   readFieldText,
@@ -74,18 +75,18 @@ describe("the menu bar", () => {
     ]);
     expect(await readMenuItems(app, "View")).toEqual([
       { label: "Threads", accelerator: "Alt+CmdOrCtrl+1", enabled: false },
-      { label: "Hercule", accelerator: "Alt+CmdOrCtrl+2", enabled: false },
+      { label: "Work", accelerator: "Alt+CmdOrCtrl+2", enabled: false },
       { label: "Toggle Sidebar", accelerator: "CmdOrCtrl+B", enabled: false },
     ]);
     expect(await readMenuItems(app, "Go")).toEqual([
       { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: false },
-      { label: "Intake", accelerator: "CmdOrCtrl+Shift+I", enabled: false },
+      { label: "Inbox", accelerator: "CmdOrCtrl+Shift+I", enabled: false },
       { label: "Workflows", accelerator: "CmdOrCtrl+Shift+W", enabled: false },
       { label: "No Threads", accelerator: null, enabled: false },
     ]);
   });
 
-  it("lists the sidebar's threads in Go under Office, Intake and Workflows, top to bottom, and opens the one chosen", async () => {
+  it("lists the sidebar's threads in Go under Office, Inbox and Workflows, top to bottom, and opens the one chosen", async () => {
     const { url, fleet, waitForStatus } = await arrangeFleet();
     const runner = await fleet.enlistRunner("studio");
     const threads = await fleet.spawnThreads(2, { runner });
@@ -98,7 +99,7 @@ describe("the menu bar", () => {
       .poll(() => readMenuItems(app, "Go"))
       .toEqual([
         { label: "Office", accelerator: "CmdOrCtrl+Shift+O", enabled: true },
-        { label: "Intake", accelerator: "CmdOrCtrl+Shift+I", enabled: true },
+        { label: "Inbox", accelerator: "CmdOrCtrl+Shift+I", enabled: true },
         { label: "Workflows", accelerator: "CmdOrCtrl+Shift+W", enabled: true },
         ...titles.map((label, index) => ({
           label,
@@ -134,51 +135,64 @@ describe("the menu bar", () => {
     await fleet.waitForTurn(thread.id, 2, "running");
   });
 
-  it("undoes and redoes typing in the thread's composer with Edit > Undo and Edit > Redo", async () => {
-    const { app, field } = await openThreadComposer();
-    await field.click();
-    await field.pressSequentially("Add a retry");
-    expect(await readFieldText(field)).toBe("Add a retry");
+  // The three tests that undo and redo, and the pair after them, give the
+  // window the keyboard focus first, which a hosted Mac's virtual screen
+  // never grants (see `ON_HOSTED_MAC`).
+  it.skipIf(ON_HOSTED_MAC)(
+    "undoes and redoes typing in the thread's composer with Edit > Undo and Edit > Redo",
+    async () => {
+      const { app, field } = await openThreadComposer();
+      await field.click();
+      await field.pressSequentially("Add a retry");
+      expect(await readFieldText(field)).toBe("Add a retry");
 
-    await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
-    await expect.poll(() => readFieldText(field)).toBe("");
-    await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
-    await expect.poll(() => readFieldText(field)).toBe("Add a retry");
-  });
+      await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
+      await expect.poll(() => readFieldText(field)).toBe("");
+      await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
+      await expect.poll(() => readFieldText(field)).toBe("Add a retry");
+    },
+  );
 
-  it("undoes and redoes a paste into the thread's composer with Edit > Undo and Edit > Redo", async () => {
-    const { app, page, field } = await openThreadComposer();
-    await field.click();
-    await copyToClipboard(app, "Add a retry");
-    await page.keyboard.press("Meta+V");
-    await expect.poll(() => readFieldText(field)).toBe("Add a retry");
+  it.skipIf(ON_HOSTED_MAC)(
+    "undoes and redoes a paste into the thread's composer with Edit > Undo and Edit > Redo",
+    async () => {
+      const { app, page, field } = await openThreadComposer();
+      await field.click();
+      await copyToClipboard(app, "Add a retry");
+      await page.keyboard.press("ControlOrMeta+V");
+      await expect.poll(() => readFieldText(field)).toBe("Add a retry");
 
-    await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
-    await expect.poll(() => readFieldText(field)).toBe("");
-    await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
-    await expect.poll(() => readFieldText(field)).toBe("Add a retry");
-  });
+      await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
+      await expect.poll(() => readFieldText(field)).toBe("");
+      await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
+      await expect.poll(() => readFieldText(field)).toBe("Add a retry");
+    },
+  );
 
-  it("undoes and redoes typing in a plain text field with Edit > Undo and Edit > Redo", async () => {
-    const { app, page } = await launchForTest();
-    await page.getByRole("button", { name: "Connect to it" }).click();
-    await focusWindow(app);
-    const address = page.getByRole("textbox", { name: "Address", exact: true });
-    await address.click();
-    await address.pressSequentially("http://127.0.0.1:4937");
+  it.skipIf(ON_HOSTED_MAC)(
+    "undoes and redoes typing in a plain text field with Edit > Undo and Edit > Redo",
+    async () => {
+      const { app, page } = await launchForTest();
+      await page.getByRole("button", { name: "Connect to it" }).click();
+      await focusWindow(app);
+      const address = page.getByRole("textbox", { name: "Address", exact: true });
+      await address.click();
+      await address.pressSequentially("http://127.0.0.1:4937");
 
-    await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
-    await expect.poll(() => address.inputValue()).toBe("");
-    await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
-    await expect.poll(() => address.inputValue()).toBe("http://127.0.0.1:4937");
-  });
+      await chooseMenuItemWithPageFocused(app, "Edit", "Undo");
+      await expect.poll(() => address.inputValue()).toBe("");
+      await chooseMenuItemWithPageFocused(app, "Edit", "Redo");
+      await expect.poll(() => address.inputValue()).toBe("http://127.0.0.1:4937");
+    },
+  );
 
-  it.each([
+  // Only macOS has a first responder to send an action to: Electron's
+  // `Menu.sendActionToFirstResponder` does not exist on Linux.
+  describe.skipIf(!RUNS_ON_MAC || ON_HOSTED_MAC).each([
     ["Undo", "undo:"],
     ["Redo", "redo:"],
-  ])(
-    "sends Edit > %s to the native control that has the focus, such as the folder sheet's field",
-    async (label, action) => {
+  ])("Edit > %s", (label, action) => {
+    it("is sent to the native control that has the focus, such as the folder sheet's field", async () => {
       const { app } = await launchForTest();
       await focusWindow(app);
       // The sheet's fields cannot be typed into from a test, so main's call
@@ -206,8 +220,8 @@ describe("the menu bar", () => {
           ),
         )
         .toEqual([action]);
-    },
-  );
+    });
+  });
 
   it.each(["Undo", "Redo"])(
     "keeps a hidden window hidden when Edit > %s is chosen",

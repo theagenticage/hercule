@@ -1,0 +1,121 @@
+/* The selection bar: one small bar at the foot of the list that counts the selection and
+   clears it. The drawing's `.selbar`. Its parent is the positioned box of the list, so the
+   bar is centred on the list. */
+.ib-selbar {
+  position: absolute;
+  z-index: 20;
+  left: 50%;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  max-width: calc(100% - 24px);
+  padding: 0 6px 0 14px;
+  border-radius: var(--r-md);
+  background: var(--raised);
+  box-shadow:
+    inset 0 0 0 1px var(--rim),
+    var(--shadow-3);
+  white-space: nowrap;
+  /* `translate` is its own property, so the sink and the rise below (`transform`) leave it alone. */
+  translate: -50% 0;
+  -webkit-app-region: no-drag;
+  /* Out: it sinks and fades over --m-quick, and takes neither the pointer nor the focus (the
+     component also makes it inert). */
+  transform: translateY(4px) scale(0.97);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--m-quick) var(--m-ease-in),
+    opacity var(--m-quick) var(--m-ease-in);
+}
+/* In: from 6px low and a little small. */
+.ib-selbar[data-shown] {
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    transform var(--m-base) var(--m-ease),
+    opacity var(--m-base) var(--m-ease);
+}
+@starting-style {
+  .ib-selbar[data-shown] {
+    transform: translateY(6px) scale(0.96);
+    opacity: 0;
+  }
+}
+.ib-selbar-n {
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.ib-selbar-n b {
+  color: var(--ink);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}
+.ib-selbar-line {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--divider);
+}
+.ib-selbar-clear {
+  width: 28px;
+  height: 28px;
+  color: var(--muted);
+}
+.ib-selbar-clear:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ib-selbar,
+  .ib-selbar[data-shown] {
+    transition: none;
+  }
+}
+
+/* ---------- Where the Inbox puts the undo line ---------- */
+/* The line is the app's shared one (`desk/undo-line`). Its containing block is the list column
+   (`.ib-list`), so the line is centred on the list by pinning both sides and letting the margins
+   share what its content leaves. It is as wide as its content, up to the list less 12px a side;
+   the shared line's `left: 50%` would leave it only the right half of the column. Hidden, it waits
+   10px under the place it shows, so it only rises and sinks straight. Its height (`bottom`)
+   changes at once, never in a transition: a line that appears as the selection bar leaves would
+   otherwise drop into place. So a line already showing jumps when the bar or the pane under it
+   comes or goes. */
+.ib .undo-line {
+  left: 0;
+  right: 0;
+  width: fit-content;
+  max-width: calc(100% - 24px);
+  margin-inline: auto;
+  transform: translateY(10px);
+}
+.ib .undo-line.is-on {
+  transform: none;
+}
+/* The line never covers what it sits beside: it rises over the selection bar, and under 1032px
+   over the pane's moves while the pane lies over the list. The bar comes first in the markup so a
+   sibling selector finds it: a `:has()` on `.ib` would make the browser style the whole page again
+   each time anything in the Inbox changes. */
+.ib .ib-selbar[data-shown] ~ .undo-line {
+  bottom: 66px;
+}
+@media (max-width: 1031px) {
+  .ib.is-pane-open .undo-line {
+    bottom: 66px;
+  }
+}
+/* A line with nothing to press, such as a refusal, wraps rather than losing its instruction. */
+.ib .undo-line.is-wrap {
+  height: auto;
+  min-height: 36px;
+  padding-block: 8px;
+  white-space: normal;
+}
+.ib .undo-line.is-wrap .undo-text {
+  overflow: visible;
+}

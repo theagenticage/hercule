@@ -32,6 +32,7 @@ import {
 import {
   createDecodeValidationError,
   createInvalidStateError,
+  createValidationError,
   findNearestSupportedAccessMode,
   Id,
   InvalidState,
@@ -45,18 +46,30 @@ import {
   SessionInterruptInput,
   type Forbidden,
   type Session,
+  type SessionIdsInput,
   type SessionInputOutcome,
   type SessionSelection,
   type Unauthenticated,
   type Validation,
 } from "@hercule/contract";
-import { CurrentActor, currentStamp, currentStampOrSystem, requireGrant } from "../../actor";
+import {
+  CurrentActor,
+  currentStamp,
+  currentStampOrSystem,
+  requireGrant,
+  requireUserActor,
+} from "../../actor";
 import { agentRepository } from "../../agents";
 import { nowIso, withTransaction } from "../../db";
 import { AuditLog } from "../../events";
-import type { PluginHost } from "../../plugins";
+import { mcpServerListRule, requireMcpManage } from "../../mcp-servers";
+import { PluginHost, type RegisteredHarness } from "../../plugins";
 import { PromotionState } from "../../promotion";
-import { providerRepository, resolvedInstance } from "../../providers";
+import {
+  findModels,
+  ProviderAccountRunners,
+  providerAccountRepository,
+} from "../../provider-accounts";
 import { RunnerConnections } from "../../runners";
 import {
   buildContinuingSpec,
@@ -64,6 +77,7 @@ import {
   inputRepository,
   isResumeHeld,
   readSessionOrFail,
+  refuseArchived,
   sessionRecordComposer,
   SessionService,
   sessionRepository,
@@ -75,6 +89,7 @@ import {
   type StoredSession,
 } from "../../sessions";
 import { Settings, type SettingError } from "../../settings";
+import { sessionTaint } from "../../taint";
 import type { WorkspaceService } from "../../workspaces";
 import { makeForkAfterCommit } from "./after-commit";
 import { Dispatch } from "./dispatch";
@@ -127,6 +142,21 @@ export const SessionInputDeadline = Context.Reference<Duration.Duration>(
 
 const HAS_EXITED = "that session has exited";
 
+/**
+ * The refusal of `session.update` with a non-empty `mcpServerIds` on a
+ * session that is not a Thread. Only a Thread has MCP servers until Agents can
+ * have them.
+ */
+const THREAD_ONLY_MCP_SERVERS =
+  "only a Thread can have MCP servers for now (#222); an agent's, a workflow step's and an assistant's session cannot, so send an empty mcpServerIds or leave it out";
+
+/**
+ * The refusal of `session.archive` for a session or a run, which holds the
+ * grant yet may not use it, so the message says why holding it does not help.
+ */
+const ONLY_THE_USER_ARCHIVES =
+  "a session cannot archive: archiving cannot be undone, and an agent that archived a thread could make the user's work unresumable without the user seeing it; the user archives from the app or the CLI";
+
 const GONE = "that session's runner is no longer connected";
 
 const NOT_WAITING =
@@ -149,6 +179,12 @@ const USE_CONVERSATION_SEND =
 const CONVERSATION_DELETED =
   "this session answered an assistant's conversation that was deleted; " +
   "it is kept as history and takes no input";
+
+/**
+ * The details of the refusals that mean the Request is not open, so a client
+ * that sent an answer before can tell them from a runner that is away.
+ */
+const REQUEST_CLOSED = { reason: "request-closed" } as const;
 
 const NO_OPEN_REQUEST = "that session is not waiting on a request";
 
@@ -193,9 +229,11 @@ const make = Effect.gen(function* () {
   const readSession = readSessionOrFail(yield* sessionRepository);
   const recordComposer = yield* sessionRecordComposer;
   const inputs = yield* inputRepository;
+  const taint = yield* sessionTaint;
   const dedupKeys = yield* dedupKeyRepository;
-  const instances = yield* providerRepository;
-  const resolved = yield* resolvedInstance;
+  const providerAccounts = yield* providerAccountRepository;
+  const mcpServerLists = yield* mcpServerListRule;
+  const host = yield* PluginHost;
   const resumableNativeSession = yield* resumable;
   const connections = yield* RunnerConnections;
   const settings = yield* Settings;
@@ -211,14 +249,32 @@ const make = Effect.gen(function* () {
   const answersOnTheirWay = new Set<string>();
 
   /**
+   * Returns the definition of the harness a session runs in. Fails with a
+   * validation error when this build carries no such harness.
+   */
+  const readHarness = (harnessId: string): Effect.Effect<RegisteredHarness, Validation> =>
+    Effect.flatMap(host.harnesses(), (registered) => {
+      const found = registered.find((candidate) => candidate.id === harnessId);
+      return found === undefined
+        ? Effect.fail(
+            createValidationError([
+              { path: ["harnessId"], message: `this build carries no ${harnessId} harness` },
+            ]),
+          )
+        : Effect.succeed(found);
+    });
+
+  /**
    * Returns the model selection to use: the given model, or the session's
    * current one, with the given options merged over the current options.
    * Current options are kept only when the model does not change. Fails with
    * a validation error if the runner's catalog does not offer an option.
    *
-   * The catalog is read only when options are given. Without options there is
-   * nothing to validate, and a plain turn should not wait on a lookup. The
-   * read is one snapshot row, so it can stay inside the caller's transaction.
+   * The model list is the session's runner's, else the newest any runner
+   * reported (`findModels`). It is read only when options are given. Without
+   * options there is nothing to validate, and a plain turn should not wait on
+   * a lookup. The read is a few snapshot rows, so it can stay inside the
+   * caller's transaction.
    */
   const resolveModelSelection = (
     session: StoredSession,
@@ -228,9 +284,11 @@ const make = Effect.gen(function* () {
       const model = given.model ?? session.modelSelection.model;
       const picks = given.options ?? {};
       if (Object.keys(picks).length > 0) {
-        const snapshots = yield* instances.listSnapshots(session.instanceId);
-        const snapshot = snapshots.find((one) => one.runnerId === session.runnerId);
-        yield* validateOptions(snapshot?.models ?? [], model, picks);
+        const snapshots = yield* providerAccounts.listHarnessSnapshots(
+          session.providerAccountId,
+          session.harnessId,
+        );
+        yield* validateOptions(findModels(snapshots, session.runnerId), model, picks);
       }
       const carried = model === session.modelSelection.model ? session.modelSelection.options : {};
       return { model, options: { ...carried, ...picks } };
@@ -274,10 +332,14 @@ const make = Effect.gen(function* () {
       // changed since the input was stored.
       const refusal = yield* findAttachmentRefusal({
         runnerId: session.runnerId,
-        instanceId: session.instanceId,
+        providerAccountId: session.providerAccountId,
+        harnessId: session.harnessId,
         model: session.modelSelection.model,
         attachments: row.attachments,
-      }).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+      }).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.provideService(PluginHost, host),
+      );
       if (refusal !== undefined) {
         yield* sessions.refuseClaimedInput(row, refusal);
         return yield* Effect.fail(createInvalidStateError(refusal));
@@ -357,7 +419,7 @@ const make = Effect.gen(function* () {
    * A running harness cannot change its access mode, which is why the change
    * waits for the resume.
    *
-   * Fails with `InvalidState` when the provider supports no access mode at or
+   * Fails with `InvalidState` when the harness supports no access mode at or
    * below the assistant's, as a new session would.
    */
   const buildConversationResumeSpec = (
@@ -376,7 +438,7 @@ const make = Effect.gen(function* () {
       if (Option.isNone(found))
         return yield* Effect.die("a conversation's session has no assistant");
       const assistant = found.value;
-      const { definition } = yield* resolved(session.instanceId);
+      const definition = yield* readHarness(session.harnessId);
       const accessMode = findNearestSupportedAccessMode(
         assistant.accessMode,
         definition.declared.accessModes,
@@ -520,7 +582,7 @@ const make = Effect.gen(function* () {
         ).pipe(
           Effect.catchIf(
             (error): error is InvalidState => error instanceof InvalidState,
-            // The assistant's access mode has no match in the provider any
+            // The assistant's access mode has no match in the harness any
             // more, so the session cannot be resumed as the assistant now is.
             (refused) =>
               Effect.as(sessions.dropUnresumableInputs(sessionId, refused.error.message), false),
@@ -581,7 +643,8 @@ const make = Effect.gen(function* () {
    * transaction or in one of its own. Returns the session as it was read and
    * the stored row. Sends nothing: the caller delivers the row once the write
    * has committed. The caller has checked the `session.input` grant and
-   * decoded the input.
+   * decoded the input. Fails with `InvalidState`, and writes nothing, when
+   * the session is archived.
    *
    * - An idle session will not change to idle again, so no flush would send
    *   its input. The row is stored already claimed, so a cancel or a flush
@@ -591,7 +654,7 @@ const make = Effect.gen(function* () {
    *   turn that input opens sends it.
    * - A session with any other status gets the input queued.
    * - An exited session whose transcript can be resumed goes back on the
-   *   queue, with a spec that holds its provider-native session id, and the
+   *   queue, with a spec that holds its harness-native session id, and the
    *   row is stored as waiting. The caller dispatches the session.
    *
    * Reading the session, validating the options and both writes share one
@@ -615,6 +678,7 @@ const make = Effect.gen(function* () {
           if (session.conversationId !== null) {
             return yield* Effect.fail(createInvalidStateError(USE_CONVERSATION_SEND));
           }
+          yield* refuseArchived(session);
           const nativeSessionId =
             session.status === "exited" ? yield* resumableNativeSession(session) : undefined;
           const modelSelection = yield* resolveModelSelection(session, picks);
@@ -638,19 +702,23 @@ const make = Effect.gen(function* () {
 
   /**
    * Reads the session `id` and finds `requestId` among the Requests it waits
-   * on. Fails with `InvalidState` when the session has exited, waits on no
-   * Request, or does not wait on this one, and with `NotFound` when there is
-   * no such session.
+   * on. Fails with `InvalidState` when the session is archived, has exited,
+   * waits on no Request, or does not wait on this one, and with `NotFound`
+   * when there is no such session. The three refusals that mean the Request
+   * is not open carry `{ reason: "request-closed" }`, so a client can tell
+   * them from other `InvalidState` refusals.
    */
   const readOpenRequest = (id: Id, requestId: string) =>
     Effect.gen(function* () {
       const session = yield* readSession(id);
+      yield* refuseArchived(session);
       if (session.status === "exited")
-        return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
+        return yield* Effect.fail(createInvalidStateError(HAS_EXITED, REQUEST_CLOSED));
       if (session.openRequests.length === 0)
-        return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST));
+        return yield* Effect.fail(createInvalidStateError(NO_OPEN_REQUEST, REQUEST_CLOSED));
       const open = session.openRequests.find((request) => request.requestId === requestId);
-      if (open === undefined) return yield* Effect.fail(createInvalidStateError(STALE_REQUEST));
+      if (open === undefined)
+        return yield* Effect.fail(createInvalidStateError(STALE_REQUEST, REQUEST_CLOSED));
       return { session, open };
     });
 
@@ -713,7 +781,7 @@ const make = Effect.gen(function* () {
     subagentId?: SubagentId,
   ): Effect.Effect<void, InvalidState | SqlError> =>
     Effect.gen(function* () {
-      // Steering a Discussion Input into a provider that cannot steer natively
+      // Steering a Discussion Input into a harness that cannot steer natively
       // interrupts the turn on the system's own account, with no actor behind
       // the request, so that interrupt is stamped `system`.
       const actor = yield* currentStampOrSystem;
@@ -738,11 +806,11 @@ const make = Effect.gen(function* () {
 
   /**
    * Gets a waiting input into the turn a busy session is running. Steering is
-   * a guarantee every session gives, whatever its provider:
+   * a guarantee every session gives, whatever its harness:
    *
-   * - a provider that steers natively is sent the input now, and the result
+   * - a harness that steers natively is sent the input now, and the result
    *   comes from the runner;
-   * - any other provider has its running turn interrupted, and the input
+   * - any other harness has its running turn interrupted, and the input
    *   stays waiting. The flush that follows the turn's end sends it as the
    *   next turn, and the result is `queued`.
    *
@@ -750,7 +818,7 @@ const make = Effect.gen(function* () {
    * flush at the end of the turn, so each caller decides what that means for
    * it. When the runner cannot fold the input into the running turn, the
    * input waits for the turn's end and the result is `queued`, as for a
-   * provider that does not steer natively. Fails with `InvalidState` when the
+   * harness that does not steer natively. Fails with `InvalidState` when the
    * runner failed the input in any other way or is not connected.
    *
    * A native steer cannot race the flush: the claim is one conditional write,
@@ -769,7 +837,7 @@ const make = Effect.gen(function* () {
     InvalidState | NotFound | Validation | SqlError | Schema.SchemaError
   > =>
     Effect.gen(function* () {
-      const { definition } = yield* resolved(session.instanceId);
+      const definition = yield* readHarness(session.harnessId);
       if (definition.declared.steering !== "native") {
         const stillWaiting = yield* sessions.queuedInput(session.id, row.id).pipe(
           Effect.as(true),
@@ -892,6 +960,39 @@ const make = Effect.gen(function* () {
     });
 
   /**
+   * Writes the `session.stopped` audit entry and withdraws the approval
+   * notifications about the session's open Requests, then tells the session's
+   * runner to stop its harness once the surrounding transaction commits.
+   * Returns `told`, or `unreachable` when the runner is not connected, in
+   * which case nothing was written or sent. Joins the caller's transaction.
+   */
+  const tellRunnerToStop = (
+    session: StoredSession,
+  ): Effect.Effect<"told" | "unreachable", SqlError> =>
+    Effect.gen(function* () {
+      const actor = yield* currentStamp;
+      return yield* writeThenTellRunner(
+        session.runnerId,
+        sessions.stopping(session.id),
+        Effect.gen(function* () {
+          yield* audit.append({
+            kind: "session.stopped",
+            actor,
+            payload: { sessionId: session.id, runnerId: session.runnerId },
+            at: yield* nowIso,
+          });
+          yield* sessions.withdrawApprovalNotifications(session.id, "stopped", undefined);
+        }),
+      ).pipe(
+        Effect.as("told" as const),
+        Effect.catchIf(
+          (error): error is InvalidState => error instanceof InvalidState,
+          () => Effect.succeed("unreachable" as const),
+        ),
+      );
+    });
+
+  /**
    * Stops a session that has not exited, as the actor behind the current
    * request, and writes the `session.stopped` audit entry. Also withdraws the
    * approval notifications about every Request the session waits on.
@@ -944,20 +1045,7 @@ const make = Effect.gen(function* () {
           );
           if (ended !== undefined) return ended;
         }
-        return yield* writeThenTellRunner(
-          session.runnerId,
-          sessions.stopping(session.id),
-          Effect.gen(function* () {
-            yield* audit.append({ kind: "session.stopped", actor, payload, at: yield* nowIso });
-            yield* sessions.withdrawApprovalNotifications(session.id, "stopped", undefined);
-          }),
-        ).pipe(
-          Effect.as("told" as const),
-          Effect.catchIf(
-            (error): error is InvalidState => error instanceof InvalidState,
-            () => Effect.succeed("unreachable" as const),
-          ),
-        );
+        return yield* tellRunnerToStop(session);
       }),
     );
 
@@ -979,7 +1067,7 @@ const make = Effect.gen(function* () {
      * - a session that has exited but can be resumed goes back on the queue
      *   in place, with a resume spec, in the same transaction, whatever made
      *   it exit. It resumes under the assistant's current access mode and
-     *   permission profile, and fails with `InvalidState` when the provider
+     *   permission profile, and fails with `InvalidState` when the harness
      *   supports no access mode at or below the assistant's;
      * - a busy session has the input steered into its running turn;
      * - any other session gets the input when it is next idle.
@@ -1072,13 +1160,23 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Changes the model selection the session uses from its next turn on.
-     * Returns the updated session. Fails if the session has exited or an
-     * option is not offered.
+     * Changes the model selection the session uses from its next turn on,
+     * and replaces its list of MCP Servers when the call gives `mcpServerIds`.
+     * Returns the updated session. Fails if the session is archived, or if a
+     * call that changes the model finds the session exited or an option not
+     * offered.
      *
      * The stored `spec` does not change: it is what the runner was started
      * with, and a resume or a fork reads the session's `modelSelection`
      * instead.
+     *
+     * A call with `mcpServerIds` also needs `mcp.manage`, and works on an
+     * exited Thread, because the list is read again at the next start. It
+     * leaves the model selection alone unless it gives `model` or `options`.
+     * The list is checked like a spawn's, and a non-empty one is refused with
+     * `Validation` on a session that is not a Thread. Entries that stay keep
+     * what the last start recorded, and the session is announced, which is
+     * what tells the gateway that the list changed.
      */
     update: (input: UpdateInput): Effect.Effect<Session, InputError> =>
       Effect.gen(function* () {
@@ -1087,15 +1185,34 @@ const make = Effect.gen(function* () {
           decodeUpdate(input),
           createDecodeValidationError,
         );
+        if (given.mcpServerIds !== undefined) yield* requireMcpManage;
+        // A call that gives only a list leaves the model selection alone.
+        const touchesModel =
+          given.mcpServerIds === undefined ||
+          given.model !== undefined ||
+          given.options !== undefined;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const session = yield* readSession(id);
-            if (session.status === "exited")
+            yield* refuseArchived(session);
+            if (touchesModel && session.status === "exited")
               return yield* Effect.fail(createInvalidStateError(HAS_EXITED));
-            const modelSelection = yield* resolveModelSelection(session, given);
-            yield* sessions.setSelection(id, modelSelection);
-            return (yield* recordComposer)({ ...session, modelSelection });
+            if (given.mcpServerIds !== undefined) {
+              if (session.agentId !== null && given.mcpServerIds.length > 0) {
+                return yield* Effect.fail(
+                  createValidationError([
+                    { path: ["mcpServerIds"], message: THREAD_ONLY_MCP_SERVERS },
+                  ]),
+                );
+              }
+              yield* mcpServerLists.checkList(given.mcpServerIds, ["mcpServerIds"]);
+              yield* sessions.setMcpServers(id, given.mcpServerIds);
+            }
+            if (touchesModel) {
+              yield* sessions.setSelection(id, yield* resolveModelSelection(session, given));
+            }
+            return (yield* recordComposer)(yield* readSession(id));
           }),
         );
       }),
@@ -1108,7 +1225,7 @@ const make = Effect.gen(function* () {
      * - an idle session with no input on the wire is sent the input here;
      * - a busy session, when the input is steered, gets it in its running
      *   turn (`steerInto`), as `input.steer` would do for a queued input. The
-     *   result is `queued` when the provider does not steer natively, when
+     *   result is `queued` when the harness does not steer natively, when
      *   the flush at the turn's end sent the input first, or when the steer
      *   did not go through (see below);
      * - a session with any other status, or an idle one whose earlier input
@@ -1122,7 +1239,7 @@ const make = Effect.gen(function* () {
      * it, and queued for any other caller. A session that sends a message to
      * a peer wants it read while it still matters, and a queue of messages
      * the peer reads minutes late is worse than an interruption. A session
-     * that sends to itself queues: on a provider that cannot steer natively,
+     * that sends to itself queues: on a harness that cannot steer natively,
      * steering interrupts the running turn, which would cut off the command
      * that sent the message. An explicit `steer` always wins.
      *
@@ -1171,7 +1288,12 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             if (dedupKey !== undefined) {
               const inputId = yield* dedupKeys.findResultId("session.input", dedupKey);
-              if (inputId !== undefined) return { _tag: "existing" as const, inputId };
+              if (inputId !== undefined) {
+                // A repeat is refused like any input once the session is
+                // archived, even though the first call was accepted.
+                yield* refuseArchived(yield* readSession(input.id));
+                return { _tag: "existing" as const, inputId };
+              }
             }
             const { session, row } = yield* storeInput(input);
             if (dedupKey !== undefined) {
@@ -1255,10 +1377,11 @@ const make = Effect.gen(function* () {
 
     /**
      * Gets a queued input into the turn a busy session is running
-     * (`steerInto`): sent now to a provider that steers natively, or, for any
-     * other provider, the running turn is interrupted and the input is sent
+     * (`steerInto`): sent now to a harness that steers natively, or, for any
+     * other harness, the running turn is interrupted and the input is sent
      * as the next turn. Fails before anything is sent when:
      *
+     * - the session is archived;
      * - the input belongs to another session, or is no longer queued;
      * - the session is not busy.
      */
@@ -1266,6 +1389,7 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         yield* requireGrant("input.steer");
         const session = yield* readSession(sessionId);
+        yield* refuseArchived(session);
         // Look the row up before checking the session's status, so an input id
         // from another session fails with not_found, whatever this session's
         // status is.
@@ -1317,7 +1441,7 @@ const make = Effect.gen(function* () {
      * decision applied to the wrong request is the one mistake this operation
      * must never make. It fails when:
      *
-     * - the session has exited;
+     * - the session is archived or has exited;
      * - the session waits on no Request, or not on this one;
      * - the request is a question, or does not offer the decision (see
      *   `validateDecision`);
@@ -1347,6 +1471,8 @@ const make = Effect.gen(function* () {
           session.runnerId,
           sessions.respondingToApprovalRequest(id, requestId, decision),
           Effect.gen(function* () {
+            // The session may have been archived since it was read above.
+            yield* refuseArchived(yield* readSession(id));
             yield* audit.append({
               kind: "session.responded",
               actor,
@@ -1370,7 +1496,7 @@ const make = Effect.gen(function* () {
      *
      * Every check runs before anything is sent to the runner. It fails when:
      *
-     * - the session has exited;
+     * - the session is archived or has exited;
      * - the session waits on no Request, or not on this one;
      * - the request is an approval, or the answers do not fit its questions
      *   (see `validateAnswers`);
@@ -1417,6 +1543,8 @@ const make = Effect.gen(function* () {
               yield* withTransaction(
                 sql,
                 Effect.gen(function* () {
+                  // The session may have been archived since it was read above.
+                  yield* refuseArchived(yield* readSession(id));
                   if (!(yield* connections.holdsConnection(session.runnerId))) {
                     return yield* Effect.fail(createInvalidStateError(GONE));
                   }
@@ -1429,6 +1557,10 @@ const make = Effect.gen(function* () {
                     payload: { sessionId: id, runnerId: session.runnerId, requestId },
                     at: yield* nowIso,
                   });
+                  // An answer from a tainted session taints its reader. The
+                  // flag commits here, before the answer frame is sent, so the
+                  // recipient is never clean while it holds the text.
+                  yield* taint.passOn(id);
                 }),
               );
               const sent = yield* connections.sendRequest(
@@ -1475,6 +1607,39 @@ const make = Effect.gen(function* () {
         return (yield* recordComposer)(yield* readSession(id));
       }),
 
+    /**
+     * Archives Threads for good: the domain move of `archiveThreads`, then a
+     * stop for each archived session that is `idle`, as `stop` would. Returns
+     * the Threads after the move, in the order given.
+     *
+     * Only the user may call it. A session or a run is refused with
+     * `Forbidden` whatever its profile holds, because an agent that archived a
+     * Thread could make the user's work unresumable without the user seeing
+     * it.
+     *
+     * The move and the stops are one transaction, and each runner is told
+     * once it commits. A runner that is not connected does not fail the
+     * archive: the session stays live on it until it reports in again, and
+     * the controller stops it then.
+     */
+    archive: (
+      input: SessionIdsInput,
+    ): Effect.Effect<
+      ReadonlyArray<Session>,
+      Exclude<ReadError | NotFound | InvalidState, Validation>
+    > =>
+      Effect.gen(function* () {
+        yield* requireUserActor("session.archive", ONLY_THE_USER_ARCHIVES);
+        return yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const { threads, sessionsToStop } = yield* sessions.archiveThreads(input);
+            for (const session of sessionsToStop) yield* tellRunnerToStop(session);
+            return threads;
+          }),
+        );
+      }),
+
     stopSession,
   };
 });
@@ -1484,7 +1649,7 @@ const make = Effect.gen(function* () {
  * one where the other belongs is a mistake nothing else would catch:
  *
  * - `update`, `input`, `steer`, `interrupt`, `respondToApprovalRequest`,
- *   `respondToQuestion` and `stop` are operations. Each checks its own grant and decodes its own input, and a
+ *   `respondToQuestion`, `stop` and `archive` are operations. Each checks its own grant and decodes its own input, and a
  *   route handler calls it directly. `queueInput` checks its grant and
  *   decodes its input too, but it stores the input in the caller's
  *   transaction, so it is for a caller inside the controller, not a route.
@@ -1518,4 +1683,5 @@ export const LiveLayer: Layer.Layer<
   | AuditLog
   | Dispatch
   | PromotionState
+  | ProviderAccountRunners
 > = Layer.effect(Live)(make);

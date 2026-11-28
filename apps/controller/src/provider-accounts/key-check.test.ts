@@ -1,0 +1,256 @@
+/**
+ * Tests the key check through its service interface, with the provider's API
+ * replaced at the `HttpClient` seam.
+ */
+import { describe, expect, it } from "vitest";
+import { Duration, Effect, Layer, Redacted } from "effect";
+import * as HttpClient from "effect/http/HttpClient";
+import type { AccountKind } from "@hercule/plugin-host";
+import type { RegisteredProvider } from "../plugins";
+import {
+  ProviderKeyRequests,
+  ProviderKeyRequestsLayer,
+  ProviderKeyRequestTimeout,
+} from "./provider-key-requests";
+import { buildFakeProviderApi, type FakeProviderAnswer } from "./testing";
+
+const PROVIDER = { id: "acme/acme", displayName: "Acme" } as RegisteredProvider;
+
+const KIND: AccountKind = {
+  id: "api-key",
+  title: "API key",
+  description: "A key for Acme.",
+  setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+  keyCheck: {
+    url: "https://api.acme.test/v1/models",
+    headers: { authorization: "Bearer {apiKey}", "x-version": "1" },
+  },
+  harnesses: [],
+};
+
+/** Checks `key` against a fake provider that answers as `answer` says, and returns the outcome and the requests. */
+const checkKey = async (
+  key: string,
+  answer: () => FakeProviderAnswer,
+  timeout?: Duration.Duration,
+) => {
+  const api = buildFakeProviderApi(answer);
+  const outcome = await Effect.runPromise(
+    Effect.gen(function* () {
+      const keyRequests = yield* ProviderKeyRequests;
+      return yield* Effect.exit(keyRequests.check(PROVIDER, KIND, Redacted.make(key)));
+    }).pipe(
+      Effect.provide(
+        ProviderKeyRequestsLayer.pipe(
+          Layer.provide(Layer.succeed(HttpClient.HttpClient, api.client)),
+        ),
+      ),
+      timeout === undefined
+        ? (effect) => effect
+        : Effect.provideService(ProviderKeyRequestTimeout, timeout),
+    ),
+  );
+  return { outcome, requests: api.requests };
+};
+
+/** Returns the error a failed check ended with. */
+const readFailure = (outcome: Awaited<ReturnType<typeof checkKey>>["outcome"]): unknown => {
+  if (outcome._tag !== "Failure") throw new Error("the check was expected to fail");
+  const failure = outcome.cause.reasons.find((reason) => reason._tag === "Fail");
+  return failure?.error;
+};
+
+describe("ProviderKeyRequests.check", () => {
+  it("accepts a key the provider answers with a 2xx status, sending the declared headers with the key in them", async () => {
+    // A `$&` in a key must reach the provider as it is, not as a replacement pattern.
+    const { outcome, requests } = await checkKey("sk-$&-1", () => new Response("{}"));
+
+    expect(outcome._tag).toBe("Success");
+    expect(requests).toEqual([
+      {
+        url: "https://api.acme.test/v1/models",
+        headers: { authorization: "Bearer sk-$&-1", "x-version": "1" },
+        redirect: "manual",
+      },
+    ]);
+  });
+
+  it.each([
+    {
+      name: "a 401",
+      status: 401,
+      body: { error: { type: "auth", message: "invalid  x-api-key\nsee docs" } },
+      message: "invalid x-api-key see docs",
+    },
+    {
+      name: "a 403",
+      status: 403,
+      body: { error: { type: "auth", message: "invalid  x-api-key\nsee docs" } },
+      message: "invalid x-api-key see docs",
+    },
+    // OpenCode Go's usage endpoint for a key without a Go subscription. The body
+    // is built from the source of OpenCode's route, not recorded from a live call
+    // (2026-10-31). Its top-level `type` field is one the others do not have.
+    {
+      name: "OpenCode's 403 for a key without Go",
+      status: 403,
+      body: {
+        type: "error",
+        error: { type: "EntitlementError", message: "OpenCode Go subscription required." },
+      },
+      message: "OpenCode Go subscription required.",
+    },
+    // MiniMax's answer to a bogus key, recorded live on 2026-10-31. Its error
+    // has an `http_code`, and the body a `request_id`, that the others do not.
+    {
+      name: "MiniMax's 401",
+      status: 401,
+      body: {
+        type: "error",
+        error: {
+          type: "authorized_error",
+          message:
+            "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)",
+          http_code: "401",
+        },
+        request_id: "x",
+      },
+      message:
+        "login fail: Please carry the API secret key in the 'Authorization' field of the request header (1004)",
+    },
+  ])(
+    "refuses the key with Validation carrying the provider's own words on $name",
+    async ({ status, body, message }) => {
+      const { outcome } = await checkKey(
+        "sk-bad",
+        () => new Response(JSON.stringify(body), { status }),
+      );
+
+      expect(readFailure(outcome)).toMatchObject({ error: { code: "validation", message } });
+    },
+  );
+
+  it("bounds the provider's words to 500 characters", async () => {
+    const { outcome } = await checkKey(
+      "sk-bad",
+      () => new Response(JSON.stringify({ error: { message: "x".repeat(900) } }), { status: 401 }),
+    );
+
+    const failure = readFailure(outcome) as { error: { message: string } };
+    expect(failure.error.message).toHaveLength(500);
+  });
+
+  it("strips control characters from the provider's words, so an escape sequence reaches no terminal", async () => {
+    const { outcome } = await checkKey(
+      "sk-bad",
+      () =>
+        new Response(
+          JSON.stringify({ error: { message: "bad\u001b[31m key\u0007\u007f\u0000!" } }),
+          { status: 401 },
+        ),
+    );
+
+    expect(readFailure(outcome)).toMatchObject({
+      error: { code: "validation", message: "bad[31m key!" },
+    });
+  });
+
+  it("reads a bounded part of a refusal body, so a body that never ends cannot hold the check", async () => {
+    const chunk = new TextEncoder().encode("x".repeat(16 * 1024));
+    const { outcome } = await checkKey(
+      "sk-bad",
+      () =>
+        new Response(new ReadableStream({ pull: (controller) => controller.enqueue(chunk) }), {
+          status: 401,
+        }),
+      Duration.seconds(5),
+    );
+
+    // Not the "could not reach" of a timeout: the check answered with the status text.
+    expect(readFailure(outcome)).toMatchObject({
+      error: { code: "validation", message: "Unauthorized" },
+    });
+  });
+
+  it("uses the status text when the refusal has no message in its body", async () => {
+    const { outcome: unauthorized } = await checkKey(
+      "sk-bad",
+      () => new Response("not json", { status: 401 }),
+    );
+    const { outcome: forbidden } = await checkKey(
+      "sk-bad",
+      () => new Response("{}", { status: 403 }),
+    );
+
+    expect(readFailure(unauthorized)).toMatchObject({ error: { message: "Unauthorized" } });
+    expect(readFailure(forbidden)).toMatchObject({ error: { message: "Forbidden" } });
+  });
+
+  it("fails InvalidState, asking to try again, when the provider cannot be reached", async () => {
+    const { outcome } = await checkKey("sk-1", () => "unreachable");
+
+    expect(readFailure(outcome)).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: "Could not reach Acme to check the key. Try again.",
+      },
+    });
+  });
+
+  it("fails InvalidState when the provider does not answer in time", async () => {
+    const { outcome } = await checkKey("sk-1", () => "silent", Duration.millis(30));
+
+    expect(readFailure(outcome)).toMatchObject({
+      error: {
+        code: "invalid_state",
+        message: "Could not reach Acme to check the key. Try again.",
+      },
+    });
+  });
+
+  it.each([429, 500, 404])(
+    "fails InvalidState naming the status when the provider answers %s",
+    async (status) => {
+      const { outcome } = await checkKey("sk-1", () => new Response("busy", { status }));
+
+      expect(readFailure(outcome)).toMatchObject({
+        error: {
+          code: "invalid_state",
+          message: `Acme could not check the key (HTTP ${status}). Try again.`,
+        },
+      });
+    },
+  );
+
+  it("does not follow a redirect, which would carry the key to another host", async () => {
+    const { outcome, requests } = await checkKey(
+      "sk-1",
+      () => new Response(null, { status: 302, headers: { location: "https://evil.test/" } }),
+    );
+
+    expect(readFailure(outcome)).toMatchObject({
+      error: { code: "invalid_state", message: expect.stringContaining("HTTP 302") as unknown },
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.redirect).toBe("manual");
+  });
+
+  it("refuses a key with a line break without sending anything", async () => {
+    const { outcome, requests } = await checkKey("sk-1\nx-evil: 1", () => new Response("{}"));
+
+    expect(readFailure(outcome)).toMatchObject({ error: { code: "validation" } });
+    expect(requests).toEqual([]);
+  });
+
+  it("never puts the key in an error", async () => {
+    const failures = await Promise.all([
+      checkKey("sk-very-secret", () => "unreachable"),
+      checkKey("sk-very-secret", () => new Response("{}", { status: 500 })),
+      checkKey("sk-very-secret", () => new Response("{}", { status: 401 })),
+    ]);
+
+    for (const { outcome } of failures) {
+      expect(JSON.stringify(readFailure(outcome))).not.toContain("sk-very-secret");
+    }
+  });
+});

@@ -9,9 +9,10 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { RunnerCapabilities, RunnerFacts, RunnerWatermark } from "@hercule/contract";
+import { RunnerCapabilities, RunnerFacts, RunnerMetrics } from "@hercule/contract";
 import type {
   Runner,
+  RunnerDiskUsage,
   RunnerConnectivity,
   RunnerDetail,
   RunnerLifecycle,
@@ -90,14 +91,17 @@ interface RunnerRow {
   readonly protocol_version: number | null;
   readonly negotiated_capabilities: string | null;
   readonly facts: string | null;
-  readonly watermark: string | null;
+  readonly metrics: string | null;
+  readonly repository_cache_bytes: number | null;
+  readonly harness_home_bytes: number | null;
+  readonly disk_usage_measured_at: string | null;
   readonly last_seen_at: string | null;
 }
 
 const COLUMNS =
   "id, name, connectivity, lifecycle, reserved, labels, max_concurrent_sessions, " +
   "disk_watermark_bytes, binary_version, protocol_version, negotiated_capabilities, " +
-  "facts, watermark, last_seen_at";
+  "facts, metrics, repository_cache_bytes, harness_home_bytes, disk_usage_measured_at, last_seen_at";
 
 /**
  * The memory one session is assumed to need. A runner's default session cap
@@ -156,7 +160,7 @@ const buildDocumentDecoder = <S extends Schema.ConstraintDecoder<unknown>>(
 };
 
 const decodeFacts = buildDocumentDecoder(RunnerFacts, "facts");
-const decodeWatermark = buildDocumentDecoder(RunnerWatermark, "watermark");
+const decodeMetrics = buildDocumentDecoder(RunnerMetrics, "metrics");
 const decodeCapabilities = buildDocumentDecoder(RunnerCapabilities, "negotiated capabilities");
 
 const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
@@ -172,7 +176,17 @@ const toRunner = (row: RunnerRow): Effect.Effect<Runner> =>
       version: row.binary_version,
       labels: JSON.parse(row.labels) as ReadonlyArray<string>,
       facts,
-      watermark: yield* decodeWatermark(id, row.watermark),
+      metrics: yield* decodeMetrics(id, row.metrics),
+      diskUsage:
+        row.repository_cache_bytes === null ||
+        row.harness_home_bytes === null ||
+        row.disk_usage_measured_at === null
+          ? null
+          : {
+              repositoryCacheBytes: row.repository_cache_bytes,
+              harnessHomeBytes: row.harness_home_bytes,
+              measuredAt: row.disk_usage_measured_at,
+            },
       maxConcurrentSessions: computeEffectiveCap(row.max_concurrent_sessions, facts),
       diskWatermarkBytes: computeEffectiveWatermark(row.disk_watermark_bytes),
       lastSeenAt: row.last_seen_at,
@@ -279,6 +293,24 @@ const make = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the id and name of every runner that can receive frames now:
+     * online and not draining or retired (`buildOnlineClause`). A reserved
+     * runner is included, because it still runs work that names it. Sorted by
+     * name.
+     */
+    listOnline: (): Effect.Effect<
+      ReadonlyArray<{ readonly id: string; readonly name: string }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array; readonly name: string }>`
+          SELECT id, name FROM runners WHERE ${sql.literal(buildOnlineClause("runners"))}
+          ORDER BY name, id
+        `,
+        (rows) => rows.map((row) => ({ id: uuidToString(row.id), name: row.name })),
+      ),
+
+    /**
      * Returns the runners a placement that names no runner may choose: online,
      * active, and not reserved.
      *
@@ -339,6 +371,38 @@ const make = Effect.gen(function* () {
       sql<{ readonly name: string; readonly connectivity: RunnerConnectivity }>`
         SELECT name, connectivity FROM runners WHERE lifecycle <> 'retired' ORDER BY name
       `,
+
+    /**
+     * Returns the id, the name and the reported facts of every runner in the
+     * fleet, in the order the runners were added. A retired runner is left
+     * out: it has left the fleet. `facts` is null for a runner that has not
+     * said hello.
+     */
+    listFacts: (): Effect.Effect<
+      ReadonlyArray<{
+        readonly id: string;
+        readonly name: string;
+        readonly facts: RunnerFacts | null;
+      }>,
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{
+          readonly id: Uint8Array;
+          readonly name: string;
+          readonly facts: string | null;
+        }>`
+          SELECT id, name, facts FROM runners WHERE lifecycle <> 'retired' ORDER BY created_at, id
+        `;
+        return yield* Effect.forEach(rows, (row) => {
+          const id = uuidToString(row.id);
+          return Effect.map(decodeFacts(id, row.facts), (facts) => ({
+            id,
+            name: row.name,
+            facts,
+          }));
+        });
+      }),
 
     /** Returns every runner name, so a joining runner can get a free one. */
     names: (): Effect.Effect<ReadonlySet<string>, SqlError> =>
@@ -404,41 +468,76 @@ const make = Effect.gen(function* () {
         WHERE id = ${uuidFromString(id)}
       `),
 
-    /** Replaces the runner's facts with the latest report; older reports are not kept. */
-    recordFacts: (id: string, facts: RunnerFacts, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(
-        sql`UPDATE runners SET facts = ${JSON.stringify(facts)}, updated_at = ${at}
-            WHERE id = ${uuidFromString(id)}`,
-      ),
+    /**
+     * Replaces the runner's facts with the latest report; older reports are not
+     * kept. Returns the facts it replaced, or null when the runner had none
+     * (or none this build can read), so the caller can tell what changed.
+     */
+    recordFacts: (
+      id: string,
+      facts: RunnerFacts,
+      at: string,
+    ): Effect.Effect<RunnerFacts | null, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly facts: string | null }>`
+          SELECT facts FROM runners WHERE id = ${uuidFromString(id)}
+        `;
+        const previous = yield* decodeFacts(id, rows[0]?.facts ?? null);
+        yield* sql`UPDATE runners SET facts = ${JSON.stringify(facts)}, updated_at = ${at}
+                   WHERE id = ${uuidFromString(id)}`;
+        return previous;
+      }),
 
     /**
-     * Stores the runner's latest watermark report. Returns whether the runner
-     * now accepts work (enough free disk for the effective watermark), and
+     * Stores the runner's latest Runner Metrics. Returns whether the runner
+     * now accepts work (enough free disk for the effective disk watermark), and
      * whether that changed since the last report; only a change is acted on.
      * The old report is decoded the same tolerant way as for the API, so an
      * unreadable column does not break the connection. A runner with no
      * earlier report counts as accepting work.
      */
-    recordWatermark: (
+    recordMetrics: (
       id: string,
-      watermark: RunnerWatermark,
+      metrics: RunnerMetrics,
       at: string,
     ): Effect.Effect<{ readonly crossed: boolean; readonly accepting: boolean }, SqlError> =>
       Effect.gen(function* () {
         const key = uuidFromString(id);
         const rows = yield* sql<{
-          readonly watermark: string | null;
+          readonly metrics: string | null;
           readonly disk_watermark_bytes: number | null;
-        }>`SELECT watermark, disk_watermark_bytes FROM runners WHERE id = ${key}`;
-        const was = yield* decodeWatermark(id, rows[0]?.watermark ?? null);
+        }>`SELECT metrics, disk_watermark_bytes FROM runners WHERE id = ${key}`;
+        const was = yield* decodeMetrics(id, rows[0]?.metrics ?? null);
         const effective = computeEffectiveWatermark(rows[0]?.disk_watermark_bytes ?? null);
         yield* sql`UPDATE runners
-                   SET watermark = ${JSON.stringify(watermark)}, updated_at = ${at}
+                   SET metrics = ${JSON.stringify(metrics)}, updated_at = ${at}
                    WHERE id = ${key}`;
         const wasAccepting = was === null ? true : was.diskFreeBytes >= effective;
-        const accepting = watermark.diskFreeBytes >= effective;
+        const accepting = metrics.diskFreeBytes >= effective;
         return { crossed: wasAccepting !== accepting, accepting };
       }),
+
+    /**
+     * Stores what a runner measured outside its workspaces. Writes nothing
+     * when the stored values are the same, so a repeated report leaves the row
+     * as it was.
+     */
+    recordDiskUsage: (
+      id: string,
+      usage: RunnerDiskUsage,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE runners
+        SET repository_cache_bytes = ${usage.repositoryCacheBytes},
+            harness_home_bytes = ${usage.harnessHomeBytes},
+            disk_usage_measured_at = ${usage.measuredAt},
+            updated_at = ${at}
+        WHERE id = ${uuidFromString(id)}
+          AND (repository_cache_bytes IS NOT ${usage.repositoryCacheBytes}
+            OR harness_home_bytes IS NOT ${usage.harnessHomeBytes}
+            OR disk_usage_measured_at IS NOT ${usage.measuredAt})
+      `),
 
     touch: (id: string, at: string): Effect.Effect<void, SqlError> =>
       Effect.asVoid(

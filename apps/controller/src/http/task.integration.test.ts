@@ -12,7 +12,7 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpApiClient from "effect/http-api/HttpApiClient";
 import { api, type Task, type TaskPriority } from "@hercule/contract";
-import { completeSetup, get, post, send, withServer } from "./testing";
+import { completeSetup, del, get, post, send, withServer } from "./testing";
 
 interface TaskPage {
   readonly items: ReadonlyArray<Task>;
@@ -341,6 +341,129 @@ describe("what a request cannot choose when it creates a task", () => {
       expect(task.id).not.toBe(chosenId);
       expect(task.status).toBe("open");
       expect(refused.status).toBe(400);
+    });
+  });
+});
+
+describe("linking a thing to a task by hand", () => {
+  const REF = "github:pr:acme/webshop#87";
+
+  it("links with the ref in the body, and unlinks it again, answering the task each time", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const created = await createTask(base, token, { title: "Refund button" });
+
+      const linked = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/link`,
+        { ref: REF },
+        token,
+      );
+      expect(linked.status).toBe(200);
+      const linkedResult = (await linked.json()) as { task: Task; changed: boolean };
+      expect(linkedResult.changed).toBe(true);
+      expect(linkedResult.task.id).toBe(created.id);
+      expect(linkedResult.task.provenance.map((entry) => entry.ref)).toEqual([REF]);
+
+      // A second link finds nothing to do, and says so.
+      const linkedAgain = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/link`,
+        { ref: REF },
+        token,
+      );
+      expect(((await linkedAgain.json()) as { changed: boolean }).changed).toBe(false);
+
+      const unlinked = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/unlink`,
+        { ref: REF },
+        token,
+      );
+      expect(unlinked.status).toBe(200);
+      const unlinkedResult = (await unlinked.json()) as { task: Task; changed: boolean };
+      expect(unlinkedResult.changed).toBe(true);
+      expect(unlinkedResult.task.provenance.map((entry) => entry.ref)).toEqual([REF]);
+
+      const unlinkedAgain = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/unlink`,
+        { ref: REF },
+        token,
+      );
+      expect(((await unlinkedAgain.json()) as { changed: boolean }).changed).toBe(false);
+    });
+  });
+
+  it("refuses a ref that is not an external ref, and a task that is not there", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const created = await createTask(base, token, { title: "Refund button" });
+
+      const invalid = await post(
+        base,
+        `/api/v1/tasks/${created.id}/entities/link`,
+        { ref: "a pull request" },
+        token,
+      );
+      expect(invalid.status).toBe(400);
+
+      const missing = await post(
+        base,
+        "/api/v1/tasks/0199e0e7-0004-7000-8000-0000000000ff/entities/unlink",
+        { ref: REF },
+        token,
+      );
+      expect(missing.status).toBe(404);
+    });
+  });
+});
+
+describe("blockers over the API", () => {
+  it("adds and removes a blocker, refuses a loop with its reason, and checks a merge", async () => {
+    await withServer(async ({ base }) => {
+      const token = await completeSetup(base);
+      const waiting = await createTask(base, token, { title: "Ship refund emails" });
+      const blocker = await createTask(base, token, { title: "Add a refund button" });
+
+      const added = await post(
+        base,
+        `/api/v1/tasks/${waiting.id}/blockers`,
+        { blockedByTaskId: blocker.id },
+        token,
+      );
+      expect(added.status).toBe(200);
+      const addedResult = (await added.json()) as { task: Task; changed: boolean };
+      expect(addedResult.changed).toBe(true);
+      expect(addedResult.task.id).toBe(waiting.id);
+
+      const loop = await post(
+        base,
+        `/api/v1/tasks/${blocker.id}/blockers`,
+        { blockedByTaskId: waiting.id },
+        token,
+      );
+      expect(loop.status).toBe(409);
+      expect(await loop.json()).toMatchObject({
+        error: {
+          code: "invalid_state",
+          message: "Ship refund emails already waits on this Task.",
+          details: { reason: "blocker-cycle" },
+        },
+      });
+
+      // The two Tasks are tied by an edge only, which a merge drops.
+      const check = await get(
+        base,
+        `/api/v1/tasks/${waiting.id}/merge-check?intoTaskId=${blocker.id}`,
+        token,
+      );
+      expect(check.status).toBe(200);
+      expect(await check.json()).toEqual({});
+
+      const removed = await del(base, `/api/v1/tasks/${waiting.id}/blockers/${blocker.id}`, token);
+      expect(removed.status).toBe(200);
+      expect(((await removed.json()) as { changed: boolean }).changed).toBe(true);
     });
   });
 });

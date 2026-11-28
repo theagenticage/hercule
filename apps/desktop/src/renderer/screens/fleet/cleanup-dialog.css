@@ -1,0 +1,201 @@
+/* The cleanup dialog of the Fleet screen, on glass. The pixel reference is the
+   Fleet prototype's dialog (680px wide, rows 44px tall). The prototype's
+   third group, checking step, file chips and "Show more" are not built. */
+.cleanup-dialog {
+  width: 680px;
+}
+.cleanup-head {
+  padding: 16px 18px 12px;
+}
+.cleanup-head b {
+  font-size: var(--t-14);
+}
+.cleanup-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 18px 8px;
+}
+.cleanup-empty,
+.cleanup-result {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.cleanup-error {
+  margin: 0 0 14px;
+  color: var(--fail-ink);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.cleanup-group + .cleanup-group {
+  margin-top: 18px;
+}
+/* The head and the rows reach 8px past the text on each side, so their hover
+   is a tablet that surrounds it. */
+.cleanup-group-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border-radius: var(--r-sm);
+}
+.cleanup-group-head:hover {
+  background: var(--hover);
+}
+.cleanup-group-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.cleanup-group-title b {
+  font-weight: var(--w-bold);
+}
+.cleanup-group-title span {
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.cleanup-group-summary {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+/* The rows sit under the head's title: the checkbox, 14px, and the gap, 12px. */
+.cleanup-rows {
+  margin: 4px 0 0 26px;
+  padding: 0;
+  list-style: none;
+}
+.cleanup-row {
+  position: relative;
+  height: 44px;
+  padding: 0 8px;
+  margin: 0 -8px;
+  border-radius: var(--r-sm);
+}
+.cleanup-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 8px auto;
+  border-top: 1px solid var(--divider);
+}
+.cleanup-row:hover {
+  background: var(--hover);
+}
+.cleanup-row:hover::before,
+.cleanup-row:hover + .cleanup-row::before {
+  border-top-color: transparent;
+}
+/* The label fills the row, padding included, so a press anywhere on it ticks. */
+.cleanup-row > label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  padding: 0 8px;
+  margin: 0 -8px;
+}
+.cleanup-name {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.cleanup-name b,
+.cleanup-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cleanup-name b {
+  font-weight: var(--w-medium);
+}
+.cleanup-name span {
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.cleanup-age {
+  flex: none;
+  width: 84px;
+  color: var(--faint);
+  font-size: var(--t-12);
+  text-align: right;
+}
+.cleanup-frees {
+  flex: none;
+  width: 58px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Not in the book, whose checkbox has no mixed state. A group's checkbox is
+   mixed while some of its rows are ticked: ink like a checked box, with a dash
+   in the field's colour in place of the tick. */
+.cleanup-box input:indeterminate {
+  background: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+.cleanup-dash {
+  position: absolute;
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--field);
+  opacity: 0;
+  pointer-events: none;
+}
+.cleanup-box input:indeterminate ~ .cleanup-dash {
+  opacity: 1;
+}
+
+/* The progress: the same rows without a checkbox, with where each stands. */
+.cleanup-rows--progress {
+  margin-left: 0;
+}
+/* The first row has nothing above it to divide from, since the head's text
+   is not a row. */
+.cleanup-rows--progress > .cleanup-row:first-child::before {
+  border-top-color: transparent;
+}
+.cleanup-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.cleanup-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.cleanup-name .is-refusal {
+  color: var(--fail-ink);
+  white-space: normal;
+}
+
+/* Two rows: the line on what removing does, which takes the dialog's whole
+   width so it does not wrap beside the buttons, then the buttons. */
+.cleanup-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 12px 18px;
+  border-top: 1px solid var(--divider);
+}
+.cleanup-foot-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.cleanup-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--t-12);
+  line-height: 1.4;
+}
+.cleanup-note.is-warning {
+  color: var(--fail-ink);
+}

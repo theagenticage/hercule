@@ -21,7 +21,7 @@
  * current day, so every block draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { Fragment, memo, type JSX } from "react";
+import { Fragment, memo, type JSX, type ReactNode } from "react";
 import {
   buildWorkRows,
   describeMessageMeta,
@@ -52,7 +52,7 @@ import { WorkRowList } from "./work-rows";
  *
  * - `look` is the face's look, from `buildLook`.
  * - `agent` is the first part of the meta line, before the time: the
- *   provider and the model.
+ *   harness and the model.
  * - `pose` is the face's pose: the session's pose while this message holds
  *   the working face, else `idle`.
  * - `text` is the text the transcript's rows hold. While the message is
@@ -296,7 +296,7 @@ const RUNTIME_NOTE_CLASS: Record<RuntimeNoteKind, string> = {
 };
 
 /**
- * Renders a note the runner, the harness or the provider reported about the
+ * Renders a note the runner or the harness reported about the
  * agent's work: a marker in the first column, the `message` as the runner wrote
  * it, and its time. The three `kind`s share the layout and differ in colour and
  * marker, so a note of any kind starts its words at the same edge:
@@ -305,7 +305,7 @@ const RUNTIME_NOTE_CLASS: Record<RuntimeNoteKind, string> = {
  *   whole. It is quiet, because the work went on: the dot and the message are in
  *   the muted ink, not in tomato, which means something failed. The dot is named
  *   "Warning".
- * - `runtime-notice` is something the provider reported that is neither a warning
+ * - `runtime-notice` is something the harness reported that is neither a warning
  *   nor an error, such as "Conversation was cleared" or "Recalled 3 memories".
  *   It is the warning's neutral sibling, with the 14px info icon in the dot's
  *   column. The icon is named "Notice".
@@ -315,6 +315,11 @@ const RUNTIME_NOTE_CLASS: Record<RuntimeNoteKind, string> = {
  *   failure ink, and the time in the muted ink. The dot is named "Error".
  *
  * The marker is named so a screen reader says what kind of note this is.
+ *
+ * `failing` draws the note in the failure colours whatever its kind, as an
+ * `error` is drawn, while the marker keeps the kind's name: a warning the user
+ * must act on. `actions`, such as the buttons that fix what the note says,
+ * are drawn after the message and before the time.
  *
  * A command the runner wrote between backticks, such as the one that installs a missing
  * harness, is drawn as inline code in a note of any kind. A word of the command stays
@@ -328,16 +333,20 @@ export const RuntimeNote = memo(function RuntimeNote({
   at,
   timezone,
   today,
+  failing,
+  actions,
 }: {
   readonly kind: RuntimeNoteKind;
   readonly message: string;
   readonly at: string;
   readonly timezone: string;
   readonly today: number;
+  readonly failing?: boolean | undefined;
+  readonly actions?: ReactNode;
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
   return (
-    <div className={RUNTIME_NOTE_CLASS[kind]}>
+    <div className={failing === true ? RUNTIME_NOTE_CLASS.error : RUNTIME_NOTE_CLASS[kind]}>
       {kind === "runtime-notice" ? (
         <span className="runtime-notice-icon" role="img" aria-label="Notice">
           <InfoIcon size={14} />
@@ -364,6 +373,7 @@ export const RuntimeNote = memo(function RuntimeNote({
             part.text
           ),
         )}
+        {actions === undefined ? null : <span className="note-actions">{actions}</span>}
         {time === undefined ? null : <span className="time">{time}</span>}
       </p>
     </div>

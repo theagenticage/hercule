@@ -111,30 +111,6 @@ export type RunOutcome =
       readonly failedStepId?: string;
     };
 
-/**
- * The newest completed step record of a run, with what the run's plan says of
- * its step. `name` and `action` are absent when the step does not set them
- * (`action` is only an action step's).
- */
-export interface LastCompletedStep {
-  readonly kind: "action" | "agent" | "text-generation";
-  readonly name: string | undefined;
-  readonly action: string | undefined;
-}
-
-/**
- * The newest completed record of an agent step of a run, with its output and
- * the `outputSchema` its step declares in the run's plan.
- */
-export interface LastCompletedAgentStep {
-  readonly stepId: string;
-  readonly name: string | undefined;
-  /** The session that ran the step, or undefined when the record has none. */
-  readonly sessionId: string | undefined;
-  readonly output: Schema.Json;
-  readonly outputSchema: { readonly [name: string]: Schema.Json } | undefined;
-}
-
 /** One step record of a run: its step and its iteration. */
 export interface StepRecordId {
   readonly stepId: string;
@@ -215,28 +191,6 @@ interface RunRow {
   readonly finished_at: string | null;
 }
 
-/**
- * The leg that starts at a handoff's run: the run and every run that re-runs
- * it, however many re-runs deep, on the same Task.
- */
-export interface RunLeg {
-  /** The handoff's run. */
-  readonly runId: string;
-  /** The workflow id of the handoff's run. */
-  readonly workflowId: string | null;
-  /** The name of the workflow of the handoff's run, as it was when that run started. */
-  readonly workflowName: string;
-  /** The runs of the leg other than the handoff's run. */
-  readonly rerunCount: number;
-  /**
-   * The newest run of the leg, the handoff's run included. It is only the id
-   * and the status, which is all a leg reports of it.
-   */
-  readonly latestRun: { readonly id: string; readonly status: RunStatus };
-  /** The leg's pending and running runs, newest first, capped. */
-  readonly liveRunIds: ReadonlyArray<string>;
-}
-
 /** One page of the run list: how many, where to start, and the filters. */
 export interface RunPageRequest extends PageRequest, RunFilter {}
 
@@ -268,6 +222,13 @@ interface ActiveStepRow {
   readonly step_id: string;
   readonly status: "running" | "pending";
 }
+
+/**
+ * The SQL condition for a live run: one that is pending or running, the same
+ * statuses `isUnfinished` accepts. Every read of "the live runs" shares it,
+ * and its `status` is the column of `runs`.
+ */
+const LIVE_RUN_CONDITION = "status IN ('pending', 'running')";
 
 /**
  * The actor that started a run, as SQL over the `origin` column:
@@ -562,6 +523,27 @@ const parseSummaryRow = (
       : (JSON.parse(row.triggers) as WorkflowDefinition["triggers"]);
   return { ...fields, ...status, ...buildRunningFields(activeRecords, triggers) };
 };
+
+/**
+ * An SQL expression, over a row of `runs`, for what went wrong in a failed
+ * run: its `failure_message`, else the error message of the latest failed
+ * record of the step it failed at. It is null when the run records neither.
+ */
+const FAILURE_MESSAGE = `COALESCE(failure_message,
+  (SELECT json_extract(s.error, '$.message') FROM run_steps s
+   WHERE s.run_id = runs.id AND s.step_id = runs.failed_step_id
+     AND s.status = 'failed'
+   ORDER BY s.iteration DESC LIMIT 1))`;
+
+/** Why one run failed. */
+export interface RunFailure {
+  readonly runId: string;
+  /** The name of the run's workflow as it was when the run started. */
+  readonly workflowName: string;
+  readonly reason: FailureReason;
+  /** What went wrong, when the run says so. */
+  readonly message: string | undefined;
+}
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -875,50 +857,57 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns, for the Tasks `taskIds`, each Task's newest run and the newest
-     * pending or running run of each Task that has one, as summaries. Newest
-     * is the latest `created_at`, then the greatest id. A Task with no run
-     * has neither.
+     * Returns, for each of the Tasks `taskIds` that has one, the workflows
+     * with a live run on it, by Task id: newest run first, each workflow once
+     * (by its newest live run), at most `perTask` for each Task. A workflow
+     * is named as its live run was planned. A run that was not started from a
+     * stored workflow is left out, since no workflow stands behind it.
      *
-     * Two statements, whatever the number of Tasks and runs:
-     *
-     * - the newest run: one lookup per Task on `runs_task_id`, which holds the
-     *   runs of a Task newest first, so a Task's history is never read;
-     * - the live runs: the pending and running runs on `runs_unfinished`,
-     *   which are few, kept to these Tasks.
-     *
-     * The ids reach SQLite as one JSON text, so the statement does not grow
-     * with the number of Tasks.
+     * One statement, whatever the number of Tasks: the live runs come from
+     * `runs_unfinished`, which holds few, kept to these Tasks. The ids reach
+     * SQLite as one JSON text, so the statement does not grow with them.
      */
-    listLatestOfTasks: (
+    listLiveWorkflowsOfTasks: (
       taskIds: ReadonlyArray<string>,
+      perTask: number,
     ): Effect.Effect<
-      { readonly latest: ReadonlyArray<RunSummary>; readonly live: ReadonlyArray<RunSummary> },
+      ReadonlyMap<string, ReadonlyArray<{ readonly workflowId: string; readonly name: string }>>,
       SqlError
     > =>
-      Effect.gen(function* () {
-        if (taskIds.length === 0) return { latest: [], live: [] };
-        const hexIds = JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")));
-        const latestRows = yield* sql<SummaryRow>`
-          SELECT ${sql.literal(SUMMARY_COLUMNS)}
-          FROM (SELECT (SELECT id FROM runs WHERE task_id = unhex(value)
-                        ORDER BY created_at DESC, id DESC LIMIT 1) AS latest_id
-                FROM json_each(${hexIds}))
-          CROSS JOIN runs ON runs.id = latest_id`;
-        const liveRows = yield* sql<SummaryRow>`
-          SELECT ${sql.literal(SUMMARY_COLUMNS)} FROM runs
-          WHERE status IN ('pending', 'running')
-            AND task_id IN (SELECT unhex(value) FROM json_each(${hexIds}))
-          ORDER BY created_at DESC, id DESC`;
-        const records = yield* listActiveStepRecords(
-          [...latestRows, ...liveRows]
-            .filter((row) => row.status === "running")
-            .map((row) => row.id),
-        );
-        const parse = (row: SummaryRow): RunSummary =>
-          parseSummaryRow(row, records.get(uuidToString(row.id)) ?? []);
-        return { latest: latestRows.map(parse), live: liveRows.map(parse) };
-      }),
+      taskIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{
+              readonly task_id: Uint8Array;
+              readonly workflow_id: Uint8Array;
+              readonly name: string;
+            }>`
+              SELECT task_id, workflow_id, name FROM (
+                SELECT task_id, workflow_id, name,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY task_id ORDER BY newest DESC, workflow_id DESC) AS position
+                FROM (
+                  SELECT task_id, workflow_id, json_extract(plan, '$.name') AS name,
+                    MAX(created_at) AS newest
+                  FROM runs
+                  WHERE ${sql.literal(LIVE_RUN_CONDITION)} AND workflow_id IS NOT NULL
+                    AND task_id IN (SELECT unhex(value)
+                                    FROM json_each(${JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")))}))
+                  GROUP BY task_id, workflow_id))
+              WHERE position <= ${perTask}
+              ORDER BY task_id, position`,
+            (rows) => {
+              const found = new Map<string, Array<{ workflowId: string; name: string }>>();
+              for (const row of rows) {
+                const taskId = uuidToString(row.task_id);
+                const workflow = { workflowId: uuidToString(row.workflow_id), name: row.name };
+                const list = found.get(taskId);
+                if (list === undefined) found.set(taskId, [workflow]);
+                else list.push(workflow);
+              }
+              return found;
+            },
+          ),
 
     /**
      * Returns what went wrong in each failed run of `runIds` that says so, by
@@ -934,11 +923,7 @@ const make = Effect.gen(function* () {
         ? Effect.succeed(new Map())
         : Effect.map(
             sql<{ readonly id: Uint8Array; readonly message: string | null }>`
-              SELECT id, COALESCE(failure_message,
-                (SELECT json_extract(s.error, '$.message') FROM run_steps s
-                 WHERE s.run_id = runs.id AND s.step_id = runs.failed_step_id
-                   AND s.status = 'failed'
-                 ORDER BY s.iteration DESC LIMIT 1)) AS message
+              SELECT id, ${sql.literal(FAILURE_MESSAGE)} AS message
               FROM runs WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}`,
             (rows) =>
               new Map(
@@ -947,6 +932,116 @@ const make = Effect.gen(function* () {
                 ),
               ),
           ),
+
+    /**
+     * Returns why each run of `runIds` failed: the name of its workflow as it
+     * was when the run started, its failure reason, and what went wrong when
+     * the run says so (see `listFailureMessages`). A run that does not exist,
+     * or did not fail, is left out. One statement, whatever the number of
+     * runs.
+     */
+    listFailures: (
+      runIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<RunFailure>, SqlError> =>
+      runIds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{
+              readonly id: Uint8Array;
+              readonly workflow_name: string;
+              readonly failure_reason: FailureReason;
+              readonly message: string | null;
+            }>`
+              SELECT id, json_extract(plan, '$.name') AS workflow_name, failure_reason,
+                     ${sql.literal(FAILURE_MESSAGE)} AS message
+              FROM runs
+              WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}
+                AND status = 'failed'`,
+            (rows) =>
+              rows.map((row) => ({
+                runId: uuidToString(row.id),
+                workflowName: row.workflow_name,
+                reason: row.failure_reason,
+                message: row.message ?? undefined,
+              })),
+          ),
+
+    /**
+     * Returns, for each of the Tasks `taskIds` that has a run that ended, when
+     * the latest of its runs ended, by Task id. One statement over the runs of
+     * those Tasks, found on `runs_task_id`.
+     */
+    listLastEndings: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly task_id: Uint8Array; readonly last_finished_at: string }>`
+          SELECT task_id, MAX(finished_at) AS last_finished_at FROM runs
+          WHERE task_id IN (SELECT unhex(value) FROM json_each(${JSON.stringify(
+            taskIds.map((id) => id.replaceAll("-", "")),
+          )}))
+            AND finished_at IS NOT NULL
+          GROUP BY task_id`,
+        (rows) =>
+          new Map(rows.map((row) => [uuidToString(row.task_id), row.last_finished_at] as const)),
+      ),
+
+    /**
+     * Returns how many runs the Task has. One count on `runs_task_id`, which
+     * reads the index entries of the Task and no run row.
+     */
+    countOfTask: (taskId: string): Effect.Effect<number, SqlError> =>
+      Effect.map(
+        sql<{ readonly total: number }>`
+          SELECT COUNT(*) AS total FROM runs WHERE task_id = ${uuidFromString(taskId)}`,
+        (rows) => rows[0]!.total,
+      ),
+
+    /**
+     * Returns the id of a pending or running run of the stored workflow
+     * `workflowId` on the Task, or none when it has no such run. One lookup on
+     * `runs_task_id`, which reads only the runs of the Task.
+     */
+    findLiveRunIdOnTask: (
+      taskId: string,
+      workflowId: string,
+    ): Effect.Effect<Option.Option<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          SELECT id FROM runs
+          WHERE task_id = ${uuidFromString(taskId)}
+            AND workflow_id = ${uuidFromString(workflowId)}
+            AND ${sql.literal(LIVE_RUN_CONDITION)}
+          LIMIT 1`,
+        (rows) => Option.map(Option.fromNullishOr(rows[0]), (row) => uuidToString(row.id)),
+      ),
+
+    /**
+     * Returns true when anything of the run has been handed to an executor:
+     * a step record that is not `pending`, or a session. A running action may
+     * already have changed the source, and a session may already have acted,
+     * long before any step completes, so only a run where this is false can
+     * be taken back as if it never started.
+     */
+    hasDispatchedWork: (runId: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly dispatched: number }>`
+          SELECT EXISTS (SELECT 1 FROM run_steps
+                         WHERE run_id = ${uuidFromString(runId)} AND status <> 'pending')
+              OR EXISTS (SELECT 1 FROM sessions WHERE run_id = ${uuidFromString(runId)})
+              AS dispatched`,
+        (rows) => rows[0]?.dispatched === 1,
+      ),
+
+    /**
+     * Points every run of the Task `sourceId` at the Task `targetId`, for a
+     * merge. One statement on `runs_task_id`.
+     */
+    moveTaskLinks: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE runs SET task_id = ${uuidFromString(targetId)}
+            WHERE task_id = ${uuidFromString(sourceId)}`,
+      ),
 
     /**
      * Returns the newest `limit` runs of the Task as summaries, newest first
@@ -967,158 +1062,6 @@ const make = Effect.gen(function* () {
           rows.filter((row) => row.status === "running").map((row) => row.id),
         );
         return rows.map((row) => parseSummaryRow(row, records.get(uuidToString(row.id)) ?? []));
-      }),
-
-    /**
-     * Returns the name of the workflow of a run, as it was when the run
-     * started, or none when no run has the id. One lookup of the run by its
-     * id.
-     */
-    readWorkflowName: (runId: string): Effect.Effect<Option.Option<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly workflow_name: string }>`
-          SELECT json_extract(plan, '$.name') AS workflow_name
-          FROM runs WHERE id = ${uuidFromString(runId)}`,
-        (rows) => Option.fromNullishOr(rows[0]?.workflow_name),
-      ),
-
-    /**
-     * Returns the Task each run of `runIds` works on, by run id. A run that
-     * works on no Task, or does not exist, is left out. One lookup of each run
-     * by its id.
-     */
-    listTaskIds: (
-      runIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
-      runIds.length === 0
-        ? Effect.succeed(new Map())
-        : Effect.map(
-            sql<{ readonly id: Uint8Array; readonly task_id: Uint8Array }>`
-              SELECT id, task_id FROM runs
-              WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}
-                AND task_id IS NOT NULL`,
-            (rows) =>
-              new Map(
-                rows.map((row) => [uuidToString(row.id), uuidToString(row.task_id)] as const),
-              ),
-          ),
-
-    /**
-     * Returns the name of the workflow of each run of `runIds`, as it was when
-     * the run started, by run id. A run that does not exist is left out. One
-     * lookup of each run by its id.
-     */
-    listWorkflowNames: (
-      runIds: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, string>, SqlError> =>
-      runIds.length === 0
-        ? Effect.succeed(new Map())
-        : Effect.map(
-            sql<{ readonly id: Uint8Array; readonly workflow_name: string }>`
-              SELECT id, json_extract(plan, '$.name') AS workflow_name FROM runs
-              WHERE id IN ${sql.in(runIds.map((id) => uuidFromString(id)))}`,
-            (rows) =>
-              new Map(rows.map((row) => [uuidToString(row.id), row.workflow_name] as const)),
-          ),
-
-    /**
-     * Returns, for each handoff's run `{ runId, taskId }`, the leg that starts
-     * at that run: the run and every run reachable from it through
-     * `original_run_id` (a re-run, a re-run of a re-run, and so on) that works
-     * on the same Task. `taskId` must be the Task the run itself works on, as
-     * `listTaskIds` reads it. A run that does not exist is left out. For each
-     * leg it returns:
-     *
-     * - the workflow id and name of the handoff's run;
-     * - the number of runs that re-run it (the leg without the handoff's run);
-     * - the newest run of the leg, the handoff's run included (latest
-     *   `created_at`, then greatest id), as its id and status;
-     * - the ids of the leg's pending or running runs, newest first, at most
-     *   `maxLiveRunIds`.
-     *
-     * One recursive statement for all the handoff runs. It walks them on the
-     * primary key and each run's re-runs on `runs_original_run_id`, so its
-     * work follows the runs of the legs asked for, never the Task's other
-     * runs. A wide fan-out of re-runs is therefore linear in its size. The
-     * unary `+` on the Task check keeps SQLite from walking `runs_task_id`,
-     * the Task's whole history, once for every run of a leg. It ranks the runs
-     * of each leg in memory (SQLite window functions) and reads the columns of
-     * only the handoff's run, the newest run and the capped live runs of each
-     * leg. The handoff runs reach SQLite as one JSON text, so the statement
-     * does not grow with their number.
-     */
-    listLegs: (
-      handoffRuns: ReadonlyArray<{ readonly runId: string; readonly taskId: string }>,
-      maxLiveRunIds: number,
-    ): Effect.Effect<ReadonlyArray<RunLeg>, SqlError> =>
-      Effect.gen(function* () {
-        if (handoffRuns.length === 0) return [];
-        const hexHandoffRuns = JSON.stringify(
-          handoffRuns.map((handoffRun) => [
-            handoffRun.runId.replaceAll("-", ""),
-            handoffRun.taskId.replaceAll("-", ""),
-          ]),
-        );
-        const rows = yield* sql<{
-          readonly id: Uint8Array;
-          readonly status: RunStatus;
-          readonly workflow_id: Uint8Array | null;
-          readonly workflow_name: string;
-          readonly handoff_run_id: Uint8Array;
-          readonly size: number;
-          readonly newest_rank: number;
-          readonly live_rank: number | null;
-          readonly is_handoff_run: number;
-        }>`
-          WITH RECURSIVE
-            handoff_runs(run_id, task_id) AS (
-              SELECT unhex(json_extract(value, '$[0]')), unhex(json_extract(value, '$[1]'))
-              FROM json_each(${hexHandoffRuns})),
-            members(handoff_run_id, member_id, task_id, created_at, is_live) AS (
-              SELECT handoff_runs.run_id, runs.id, handoff_runs.task_id, runs.created_at,
-                     runs.status IN ('pending', 'running')
-              FROM handoff_runs CROSS JOIN runs ON runs.id = handoff_runs.run_id
-              UNION ALL
-              SELECT members.handoff_run_id, runs.id, members.task_id, runs.created_at,
-                     runs.status IN ('pending', 'running')
-              FROM members CROSS JOIN runs ON runs.original_run_id = members.member_id
-                                          AND +runs.task_id = members.task_id),
-            ranked AS (
-              SELECT handoff_run_id, member_id, is_live,
-                     count(*) OVER (PARTITION BY handoff_run_id) AS size,
-                     row_number() OVER (PARTITION BY handoff_run_id
-                                        ORDER BY created_at DESC, member_id DESC) AS newest_rank,
-                     CASE WHEN is_live THEN
-                       row_number() OVER (PARTITION BY handoff_run_id, is_live
-                                          ORDER BY created_at DESC, member_id DESC) END AS live_rank
-              FROM members)
-          SELECT handoff_run_id, size, newest_rank, live_rank, member_id = handoff_run_id AS is_handoff_run,
-                 id, status, workflow_id, json_extract(plan, '$.name') AS workflow_name
-          FROM ranked CROSS JOIN runs ON runs.id = member_id
-          WHERE newest_rank = 1 OR member_id = handoff_run_id OR live_rank <= ${maxLiveRunIds}`;
-        const byHandoffRun = new Map<string, Array<(typeof rows)[number]>>();
-        for (const row of rows) {
-          const runId = uuidToString(row.handoff_run_id);
-          const ofLeg = byHandoffRun.get(runId);
-          if (ofLeg === undefined) byHandoffRun.set(runId, [row]);
-          else ofLeg.push(row);
-        }
-        return [...byHandoffRun].map(([runId, ofLeg]): RunLeg => {
-          const handoffRun = ofLeg.find((row) => row.is_handoff_run === 1)!;
-          const newest = ofLeg.find((row) => row.newest_rank === 1)!;
-          return {
-            runId,
-            workflowId:
-              handoffRun.workflow_id === null ? null : uuidToString(handoffRun.workflow_id),
-            workflowName: handoffRun.workflow_name,
-            rerunCount: handoffRun.size - 1,
-            latestRun: { id: uuidToString(newest.id), status: newest.status },
-            liveRunIds: ofLeg
-              .filter((row) => row.live_rank !== null && row.live_rank <= maxLiveRunIds)
-              .toSorted((a, b) => a.live_rank! - b.live_rank!)
-              .map((row) => uuidToString(row.id)),
-          };
-        });
       }),
 
     /**
@@ -1150,88 +1093,6 @@ const make = Effect.gen(function* () {
                 ),
               ),
           ),
-
-    /**
-     * Returns what a run's step records say about how it ended: its newest
-     * completed step record of any kind, and its newest completed record of
-     * an agent step with that record's output. "Newest" is the latest
-     * `finished_at`, then the latest record. Either is absent when the run
-     * has no such record.
-     *
-     * Two statements that each return one record. They walk the steps of the
-     * run's plan and look up each step's records on the primary key of
-     * `run_steps`, so the plan is read once whatever the number of records,
-     * and no output is read but the one.
-     */
-    readLastCompletedSteps: (
-      runId: string,
-    ): Effect.Effect<
-      {
-        readonly last: LastCompletedStep | undefined;
-        readonly agent: LastCompletedAgentStep | undefined;
-      },
-      SqlError
-    > =>
-      Effect.gen(function* () {
-        const id = uuidFromString(runId);
-        // `CROSS JOIN` keeps SQLite on the run, then its plan's steps, then each step's records,
-        // so the plan is read once, however many records the run has.
-        const lastRows = yield* sql<{
-          readonly kind: LastCompletedStep["kind"];
-          readonly name: string | null;
-          readonly action: string | null;
-        }>`
-          SELECT json_extract(step.value, '$.kind') AS kind,
-                 json_extract(step.value, '$.name') AS name,
-                 json_extract(step.value, '$.action') AS action
-          FROM runs
-          CROSS JOIN json_each(runs.plan, '$.steps') AS step
-          CROSS JOIN run_steps s
-            ON s.run_id = runs.id AND s.step_id = json_extract(step.value, '$.id')
-          WHERE runs.id = ${id} AND s.status = 'completed'
-          ORDER BY s.finished_at DESC, s.rowid DESC LIMIT 1`;
-        const agentRows = yield* sql<{
-          readonly step_id: string;
-          readonly name: string | null;
-          readonly session_id: Uint8Array | null;
-          readonly output: string | null;
-          readonly output_schema: string | null;
-        }>`
-          SELECT s.step_id, json_extract(step.value, '$.name') AS name, s.session_id, s.output,
-                 json_extract(step.value, '$.outputSchema') AS output_schema
-          FROM runs
-          CROSS JOIN json_each(runs.plan, '$.steps') AS step
-          CROSS JOIN run_steps s
-            ON s.run_id = runs.id AND s.step_id = json_extract(step.value, '$.id')
-          WHERE runs.id = ${id} AND s.status = 'completed'
-            AND json_extract(step.value, '$.kind') = 'agent'
-          ORDER BY s.finished_at DESC, s.rowid DESC LIMIT 1`;
-        const last = lastRows[0];
-        const agent = agentRows[0];
-        return {
-          last:
-            last === undefined
-              ? undefined
-              : {
-                  kind: last.kind,
-                  name: last.name ?? undefined,
-                  action: last.action ?? undefined,
-                },
-          agent:
-            agent === undefined
-              ? undefined
-              : {
-                  stepId: agent.step_id,
-                  name: agent.name ?? undefined,
-                  sessionId: agent.session_id === null ? undefined : uuidToString(agent.session_id),
-                  output: agent.output === null ? null : (JSON.parse(agent.output) as Schema.Json),
-                  outputSchema:
-                    agent.output_schema === null
-                      ? undefined
-                      : (JSON.parse(agent.output_schema) as { [name: string]: Schema.Json }),
-                },
-        };
-      }),
 
     /** Checks whether a run of the workflow is pending or running. */
     hasUnfinishedRun: (workflowId: string): Effect.Effect<boolean, SqlError> =>

@@ -55,6 +55,7 @@ describe("the shipped permission profiles", () => {
         "wiki.write",
         "skill.read",
         "skill.write",
+        "mcp.read",
         "event.read",
         "event.emit",
         "memory.read",
@@ -92,6 +93,8 @@ describe("the shipped permission profiles", () => {
         "discussion.write",
         "wiki.read",
         "wiki.write",
+        "mcp.read",
+        "mcp.use",
         "subscription.read",
         "subscription.write",
         "run.read",
@@ -107,12 +110,16 @@ describe("the shipped permission profiles", () => {
     expect(profile.grants).not.toContain("event.audit");
   });
 
-  it("seeds unrestricted with every grant but skill.write and skill.apply", async () => {
+  it("seeds unrestricted with every grant but skill.write, skill.apply and mcp.manage", async () => {
     const unrestricted = await run(Effect.flatMap(seed, () => readProfileByName("unrestricted")));
     expect([...unrestricted.grants].sort()).toEqual(
-      ALL_GRANTS.filter((grant) => grant !== "skill.write" && grant !== "skill.apply").sort(),
+      ALL_GRANTS.filter(
+        (grant) => grant !== "skill.write" && grant !== "skill.apply" && grant !== "mcp.manage",
+      ).sort(),
     );
     expect(unrestricted.grants).toContain("skill.read");
+    expect(unrestricted.grants).toContain("mcp.read");
+    expect(unrestricted.grants).toContain("mcp.use");
     expect(unrestricted.grants).toContain("secret.write");
     expect(unrestricted.grants).toContain("credential.write");
     expect(unrestricted.grants).toContain("infra.write");
@@ -151,6 +158,7 @@ describe("the controller settings defaults", () => {
             events: yield* settings.get("retention.events"),
             security: yield* settings.get("retention.security"),
             conversations: yield* settings.get("retention.conversations"),
+            runnerMetrics: yield* settings.get("retention.runnerMetrics"),
             time: yield* settings.get("backup.time"),
             keep: yield* settings.get("backup.keep"),
           };
@@ -161,6 +169,7 @@ describe("the controller settings defaults", () => {
       events: 90,
       security: 90,
       conversations: 90,
+      runnerMetrics: 14,
       time: "03:30",
       keep: 14,
     });
@@ -206,7 +215,7 @@ describe("seeding twice", () => {
     );
     expect(second).toEqual(first);
     expect(first.profiles).toHaveLength(3);
-    expect(first.settings).toHaveLength(5);
+    expect(first.settings).toHaveLength(6);
   });
 
   it("leaves an edited shipped profile and an edited setting alone", async () => {

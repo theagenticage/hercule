@@ -7,7 +7,8 @@ import { defineConfig } from "vite";
  * `out/preload/index.cjs`, because Electron runs a sandboxed window's preload
  * as a classic script with a small `require`, not as an ES module.
  *
- * The preload may import only `electron`, which stays external, and types.
+ * The preload may import only `electron`, which stays external, the files of
+ * `src/ipc/platform`, and types.
  */
 export default defineConfig({
   root: fileURLToPath(new URL(".", import.meta.url)),

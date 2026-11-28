@@ -11,16 +11,16 @@
  *   no assistant's session;
  * - `runner`, for the runners, whose connectivity draws a thread as away;
  * - `workspace`, for working files, observations and retained work;
- * - `provider`, for the providers, whose catalogs name each thread's model;
- * - `task`, for the open tasks a Draft Thread offers to start from, for the
- *   Tasks Tracking lists, whose waiting rows the To do count takes in, and for
- *   Intake's Done lists, whose rows show where a handoff's Task stands;
+ * - `provider`, for the Provider Accounts and the Model Profiles, whose entries
+ *   name each thread's model and say whether it can run;
+ * - `task`, for the planned tasks a Draft Thread offers to start from, the
+ *   sidebar's failed-run dot, and the Inbox's count, which a Task taken on or
+ *   finished changes;
  * - `connection`, for the GitHub Connection the New project form clones
  *   through, which may be made in the web app while this app runs;
  * - `assistant`, for the assistants the sidebar's Assistants section lists;
- * - `signal`, for Intake's To do list, whose count the Hercule segment shows
- *   and whose Now signals notify, so it stays subscribed while Intake is
- *   closed;
+ * - `signal`, for the open signals, whose urgent ones notify on every
+ *   screen, and the Inbox's count, which an open signal changes;
  * - `plugin`, for the plugins whose names label each signal's source.
  *
  * Each push invalidates the query keys it lists. The screens never deal with
@@ -34,83 +34,136 @@
  * names a record the cache does not hold (see `useRelatedReads`).
  */
 import { useEffect } from "react";
-import type { InfiniteData, QueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import {
-  findTrackingTasksAffectedByRunPush,
   invalidateWithoutCancelling,
-  isAnyLegAffectedByRunPush,
-  isAnyLegAffectedByTaskPush,
   queryKeys,
   type Live,
   type LiveInvalidatePush,
   type LiveQueryKey,
-  type TrackingRead,
 } from "@hercule/client-core";
-import type { HandoffLeg, MutableLiveTopic } from "@hercule/contract";
+import type { MutableLiveTopic } from "@hercule/contract";
 import { ageClock } from "./age-clock";
-import { isDoneListKey, isHandoffLegKey, type DoneSignalPage } from "./queries";
 import { useWindowVisible } from "./window-visibility";
 
 /**
- * Marks out of date the reads that hold handoff legs: every Done list the
- * cache holds, whichever source tab it is for, and every leg a Done pane
- * reads on its own (see `handoffLegQuery`). `isAffected` is given all the
- * legs they hold and decides whether the push can change any of them.
- *
- * - A read that is running is always marked, whatever the push is about. It
- *   may have been answered before the change the push reports, and it holds
- *   no leg yet to judge by (its first read), so the push cannot be dropped
- *   safely. It is read again once that read settles.
- * - Every other read is marked only when `isAffected` is true. When they hold
- *   no leg, no trip can have changed, so nothing is marked.
+ * The first segments of the keys whose reads are large and that several pushes
+ * of one change all name: the Inbox's outline, the sidebar's counts, the
+ * entity panes and the context cards. A signal's change pushes `signal`, then
+ * `externalEntity`, and a first push on each of five subscribed topics names
+ * them all. `invalidateForPush` reads each of these keys once for the pushes
+ * that arrive within `SHARED_READ_WINDOW_MS`, see `queueSharedReads`.
  */
-const invalidateLegReads = (
+const SHARED_READ_KEYS: ReadonlySet<string> = new Set([
+  queryKeys.inbox()[0],
+  queryKeys.inboxCount()[0],
+  queryKeys.externalEntity()[0],
+  queryKeys.entityCards()[0],
+] as string[]);
+
+/**
+ * How long the pushes that name a shared read's key are gathered before the
+ * read starts. One change is announced on several topics in a row, and the
+ * controller answers a new connection with a first push on every topic, so
+ * without a wait each push would cancel the read of the one before and send
+ * its request again: a page reload read the Inbox six times.
+ *
+ * A change is always followed by a read that starts after its push arrived:
+ * the read starts when the window ends, and a push that arrives after that
+ * opens a window of its own, which ends in another read. A push never joins a
+ * read that is already running, because that read may have been answered
+ * before the change the push reports.
+ */
+export const SHARED_READ_WINDOW_MS = 50;
+
+/**
+ * What the pushes of one window changed for the Inbox:
+ * - `inbox`: a push named the Inbox's keys, so any row may have changed;
+ * - `tasks`: only derived `task` pushes came, about `taskIds`. Such a push
+ *   (a session or a run of the Task changed status, its summary was written)
+ *   changes what a row on one of those Tasks shows, but never which rows the
+ *   list holds, and it comes for every turn of every Thread.
+ */
+export type InboxPushChange =
+  | { readonly kind: "inbox" }
+  | { readonly kind: "tasks"; readonly taskIds: ReadonlyArray<string> };
+
+type InboxPushListener = (change: InboxPushChange) => void;
+
+/** Who listens for the Inbox's pushes, by the query client the pushes reach. */
+const inboxPushListeners = new WeakMap<QueryClient, Set<InboxPushListener>>();
+
+/** What the pushes of one window have named, by the query client they reached. */
+interface GatheredPushes {
+  readonly keys: Map<string, LiveQueryKey>;
+  namesInbox: boolean;
+  readonly taskIds: Set<string>;
+}
+const gatheredPushes = new WeakMap<QueryClient, GatheredPushes>();
+
+/**
+ * Remembers that `keys` need a read, and that the Tasks `taskIds` changed,
+ * and starts one read of each key, and one call of each Inbox listener, when
+ * the window of `SHARED_READ_WINDOW_MS` that the first push opened ends.
+ */
+const queueSharedReads = (
   queryClient: QueryClient,
-  isAffected: (legs: ReadonlyArray<HandoffLeg>) => boolean,
+  keys: ReadonlyArray<LiveQueryKey>,
+  taskIds: ReadonlyArray<string> = [],
 ): void => {
-  const reads = queryClient.getQueryCache().findAll({
-    predicate: (query) => isDoneListKey(query.queryKey) || isHandoffLegKey(query.queryKey),
-  });
-  const legs = reads.flatMap((read) =>
-    isDoneListKey(read.queryKey)
-      ? ((read.state.data as InfiniteData<DoneSignalPage> | undefined)?.pages.flatMap(
-          (page) => page.legs,
-        ) ?? [])
-      : ((read.state.data as HandoffLeg | null | undefined) ?? []),
-  );
-  const affected = legs.length > 0 && isAffected(legs);
-  for (const read of reads) {
-    if (affected || read.state.fetchStatus !== "idle") {
-      invalidateWithoutCancelling(queryClient, read.queryKey);
-    }
+  let gathered = gatheredPushes.get(queryClient);
+  if (gathered === undefined) {
+    const opened: GatheredPushes = { keys: new Map(), namesInbox: false, taskIds: new Set() };
+    gathered = opened;
+    gatheredPushes.set(queryClient, opened);
+    setTimeout(() => {
+      gatheredPushes.delete(queryClient);
+      const change: InboxPushChange | undefined = opened.namesInbox
+        ? { kind: "inbox" }
+        : opened.taskIds.size > 0
+          ? { kind: "tasks", taskIds: [...opened.taskIds] }
+          : undefined;
+      if (change !== undefined) {
+        for (const listener of [...(inboxPushListeners.get(queryClient) ?? [])]) listener(change);
+      }
+      for (const queryKey of opened.keys.values()) {
+        void queryClient.invalidateQueries({ queryKey, refetchType: "active" });
+      }
+    }, SHARED_READ_WINDOW_MS);
   }
+  for (const queryKey of keys) {
+    gathered.keys.set(JSON.stringify(queryKey), queryKey);
+    if (queryKey[0] === queryKeys.inbox()[0]) gathered.namesInbox = true;
+  }
+  for (const taskId of taskIds) gathered.taskIds.add(taskId);
+};
+
+/**
+ * Calls `listener` once for the pushes of one window (`SHARED_READ_WINDOW_MS`)
+ * that change the Inbox, on any topic, as the shell and the screens deliver
+ * them to `invalidateForPush`, with what they changed (`InboxPushChange`).
+ * Returns a function that stops. The Inbox visit listens through this
+ * instead of subscribing to topics itself: a new subscription is answered
+ * with a first push that would read the list again right after it opened.
+ */
+export const listenForInboxPushes = (
+  queryClient: QueryClient,
+  listener: InboxPushListener,
+): (() => void) => {
+  const listeners = inboxPushListeners.get(queryClient) ?? new Set<InboxPushListener>();
+  inboxPushListeners.set(queryClient, listeners);
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 };
 
 /**
  * Reads again every query a push on `topic` makes stale: the queries under
- * `keys`, and for a `run` push, Tracking and the Tracking details of the Tasks
- * the push can change (see `findTrackingTasksAffectedByRunPush`). A `run` push
- * is about every run, such as the ones cron fires start, and Tracking holds
- * only the runs of its Tasks, so most of them leave it as it is.
- *
- * A push that names runs marks out of date the details of the Tasks that hold
- * those runs only, so a push about one Task's run never re-reads the open pane
- * of another. A detail lists up to twenty runs of its Task and Tracking only
- * its newest ones, but a run that has ended never changes again, so an older
- * run in a detail cannot be what a push is about. What can change is the Task's
- * newest run and its live runs, and the rule covers those. A push that lists no
- * ids, or creates a run, may reach any Task, so it marks every detail out of
- * date. Only the open pane's detail is read again; the others are read when
- * their pane opens.
- *
- * Intake's Done lists hold the leg of each handoff on their pages, and a Done
- * pane may read one leg on its own. A `task` push reads them again only when
- * it can change a leg they hold (see `isAnyLegAffectedByTaskPush`), and so
- * does a `run` push (see `isAnyLegAffectedByRunPush`). A read that is running
- * when either arrives is always read again, so no push is lost to the answer
- * of a read that started before it. A `signal` push already reads the Done
- * lists through its keys.
+ * `keys`. The large reads that several pushes of one change name are read
+ * once per window (see `queueSharedReads`), and derived `task` pushes tell
+ * the Inbox which Tasks changed (see `InboxPushChange`).
  */
 export const invalidateForPush = (
   queryClient: QueryClient,
@@ -118,23 +171,15 @@ export const invalidateForPush = (
   keys: ReadonlyArray<LiveQueryKey>,
   push: LiveInvalidatePush,
 ): void => {
-  for (const queryKey of keys) invalidateWithoutCancelling(queryClient, queryKey);
-  if (topic === "task") {
-    invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByTaskPush(legs, push));
+  const sharedKeys = keys.filter((queryKey) => SHARED_READ_KEYS.has(queryKey[0] as string));
+  const changedTaskIds = topic === "task" && push.derived ? push.ids : [];
+  if (sharedKeys.length > 0 || changedTaskIds.length > 0) {
+    queueSharedReads(queryClient, sharedKeys, changedTaskIds);
   }
-  if (topic !== "run") return;
-  invalidateLegReads(queryClient, (legs) => isAnyLegAffectedByRunPush(legs, push));
-  const read = queryClient.getQueryData<TrackingRead>(queryKeys.tracking());
-  const affected =
-    read === undefined ? "every" : findTrackingTasksAffectedByRunPush(read.tasks, push);
-  if (affected !== "every" && affected.length === 0) return;
-  invalidateWithoutCancelling(queryClient, queryKeys.tracking());
-  if (affected === "every") {
-    invalidateWithoutCancelling(queryClient, queryKeys.trackingDetail());
-    return;
-  }
-  for (const taskId of affected) {
-    invalidateWithoutCancelling(queryClient, queryKeys.trackingDetail(taskId));
+  for (const queryKey of keys) {
+    if (!SHARED_READ_KEYS.has(queryKey[0] as string)) {
+      invalidateWithoutCancelling(queryClient, queryKey);
+    }
   }
 };
 
@@ -149,6 +194,7 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
   "assistant",
   "signal",
   "plugin",
+  "externalEntity",
 ];
 
 /**
@@ -174,8 +220,8 @@ const SHELL_TOPICS: readonly MutableLiveTopic[] = [
  */
 export const useLiveConnection = (live: Live, queryClient: QueryClient): void => {
   const router = useRouter();
-  // The runs, for Tracking's count, while the window is visible. This is the
-  // only `run` subscription: the screens that read runs rely on it.
+  // The runs, while the window is visible. This is the only `run`
+  // subscription: the screens that read runs rely on it.
   useScreenTopicsLive(live, queryClient, RUN_TOPICS);
 
   useEffect(() => {
@@ -242,9 +288,9 @@ export const useSubagentsLive = (
 export const WORKFLOW_TOPICS: readonly MutableLiveTopic[] = ["workflow"];
 
 /**
- * The topic the shell holds while the window is visible: the runs. Tracking's
- * count takes in the Tasks' runs on every screen, and the Workflows pages, a
- * run's page and the Office read the runs too. It is one subscription, so a
+ * The topic the shell holds while the window is visible: the runs. The
+ * Workflows pages, a run's page, Work and the Office read the runs. It is one
+ * subscription, held by the shell, so a
  * push arrives once. It is dropped while the window is hidden and read again
  * when it shows, as `useScreenTopicsLive` does for every screen's topics.
  */
@@ -256,8 +302,21 @@ export const DISCUSSION_TOPICS: readonly MutableLiveTopic[] = ["discussion"];
 /** The topic the Wiki pages hold. */
 export const WIKI_TOPICS: readonly MutableLiveTopic[] = ["wikiPage"];
 
+/**
+ * The topic the Work screen holds: the open Initiatives, which draw the
+ * board's rows, lanes and flags. Only Work reads them, so the shell does not
+ * hold the topic.
+ */
+export const INITIATIVE_TOPICS: readonly MutableLiveTopic[] = ["initiative"];
+
 /** The topic Settings > Skills holds, on its list and on a skill's page. */
 export const SKILL_TOPICS: readonly MutableLiveTopic[] = ["skill"];
+
+/**
+ * The topic Settings > MCP servers holds, on its list and on a server's page,
+ * and Settings > Connections holds for its "agent tools" note.
+ */
+export const MCP_SERVER_TOPICS: readonly MutableLiveTopic[] = ["mcpServer"];
 
 /**
  * Keeps a screen's reads current while the calling component is mounted and

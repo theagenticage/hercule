@@ -27,13 +27,18 @@
  * behaviour is tested with intervals of tens of milliseconds passed to the
  * harness, because a real Bun server cannot run on a `TestClock`.
  */
+import { randomBytes } from "node:crypto";
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
+import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Option, Stream } from "effect";
+import { Duration, Effect, Fiber, Option, Redacted, Stream } from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
 import {
   FILES_EDITED_CAPABILITY,
+  buildMcpServersCapability,
   GITHUB_TOKEN_CAPABILITY,
   LOGIN_ENDED_CAPABILITY,
   MAX_FRAME_BYTES,
@@ -50,11 +55,12 @@ import {
   type ProbeResult,
   type RunnerFacts,
   type RunnerHello,
-  type RunnerToController as RunnerMessage,
 } from "@hercule/protocol";
-import type { RunnerDetail } from "@hercule/contract";
-import { uuidFromString, withTransaction } from "../db";
+import type { LiveMessage, RunnerDetail, RunnerMetricsPoint } from "@hercule/contract";
+import { nowIso, uuidFromString, withTransaction } from "../db";
 import { registry } from "../plugins";
+import { modelCatalogRepository, providerAccountRepository } from "../provider-accounts";
+import { buildProviderAccountOwner } from "../secrets";
 import {
   awaitHeldWork,
   freezeController,
@@ -63,7 +69,19 @@ import {
   sealController,
   QUIET_LOOP_TIMINGS,
 } from "../promotion/testing";
-import { completeSetup, get, send, withServer, type ServerHarness } from "../http/testing";
+import {
+  collectPushes,
+  completeSetup,
+  expectHeld,
+  fetchTicket,
+  get,
+  onSocket,
+  send,
+  waitForLiveToSettle,
+  waitWithin,
+  withServer,
+  type ServerHarness,
+} from "../http/testing";
 // The two default durations are imported from the socket module, so the test
 // checks the values the controller actually uses.
 import { RUNNER_PING_INTERVAL, RUNNER_SILENCE_LIMIT } from "./socket";
@@ -72,24 +90,24 @@ import {
   dialRunnerSocket,
   RUNNER_SOCKET_PATH,
   type RunnerSocket,
+  type RunnerWireFrame,
 } from "./testing";
 
 /**
- * Completes setup, then deletes every provider instance, and returns the login
+ * Completes setup, then deletes every Provider Account, and returns the login
  * token setup returned.
  *
- * Setup needs a provider instance, because it creates the default assistant
- * on one. But the controller probes every provider instance on each runner
- * that connects, and a probe request is a frame these tests would read where
- * they expect another. With no instance left, a connecting runner is sent no
- * probe, so every frame a test reads is one the test caused.
+ * Setup needs a Provider Account, because it creates the default assistant
+ * on one. But the controller probes every account on each runner that
+ * connects, and a probe request is a frame these tests would read where they
+ * expect another. With no account left, a connecting runner is sent no probe,
+ * so every frame a test reads is one the test caused. The rows are deleted
+ * directly: the service refuses to delete the account of the default assistant.
  */
-const completeSetupWithNoProviderInstance = async (harness: ServerHarness): Promise<string> => {
+const completeSetupWithNoProviderAccount = async (harness: ServerHarness): Promise<string> => {
   const token = await completeSetup(harness.base);
   await Effect.runPromise(
-    Effect.orDie(
-      withTransaction(harness.sql, harness.sql.unsafe(`DELETE FROM provider_instances`)),
-    ),
+    Effect.orDie(withTransaction(harness.sql, harness.sql.unsafe(`DELETE FROM provider_accounts`))),
   );
   return token;
 };
@@ -115,8 +133,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
-  adapters: ["claude-code"],
+  harnesses: [{ name: "claude", present: true, path: "/usr/local/bin/claude" }],
+  adapters: ["claude-code/claude-code"],
   identityPort: 4939,
 };
 
@@ -331,7 +349,7 @@ describe("opening the runner socket", () => {
 
   it("rejects every credential that is not an active runner's, and opens no socket", async () => {
     await withServer(async (harness) => {
-      const user = await completeSetupWithNoProviderInstance(harness);
+      const user = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const headers: ReadonlyArray<[string, string | undefined]> = [
         ["missing", undefined],
@@ -373,7 +391,7 @@ describe("opening the runner socket", () => {
 describe("the hello exchange", () => {
   it("replies with a signature over the runner's nonce and marks the runner online", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
 
       const { wire, sent, answer } = await greet(harness.base, joined.credential, {
@@ -425,7 +443,7 @@ describe("the hello exchange", () => {
 
   it("brings a runner with a different binary version online anyway", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
 
       const { wire } = await greet(harness.base, joined.credential, {
@@ -448,7 +466,7 @@ describe("the hello exchange", () => {
 
   it("closes the connection on a hello with another protocol version, with a reason, and leaves the row unchanged", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
 
       const wire = await dialRunnerSocket(harness.base, joined.credential);
@@ -469,7 +487,7 @@ describe("the hello exchange", () => {
 
   it("refuses a runner on protocol version 1, whose start would drop the input it carries, and says to upgrade it", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
 
       const wire = await dialRunnerSocket(harness.base, joined.credential);
@@ -484,20 +502,20 @@ describe("the hello exchange", () => {
     });
   });
 
-  // Version 13 changed the shape of the item events (the wait and image_generation item kinds), which
-  // a version 12 controller cannot decode and would close the socket on. So versions 12 and 13
-  // refuse each other at hello; this is the version 13 controller refusing a version 12 runner.
-  it("refuses a runner on protocol version 12 and says to upgrade it", async () => {
+  // Version 19 added the catalog models a session start carries, which a version 18 runner would
+  // drop. So versions 18 and 19 refuse each other at hello; this is the version 19 controller
+  // refusing a version 18 runner.
+  it("refuses a runner on protocol version 18 and says to upgrade it", async () => {
     await withServer(async (harness) => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
-      wire.send(buildHello({ protocolVersion: 12 }));
+      wire.send(buildHello({ protocolVersion: 18 }));
 
       const ending = await wire.closed();
-      expect(PROTOCOL_VERSION).toBe(13);
+      expect(PROTOCOL_VERSION).toBe(19);
       expect(ending.reason).toBe(
-        "this controller uses runner protocol version 13 and the runner does not; " +
-          "upgrade the runner to a build that uses version 13",
+        "this controller uses runner protocol version 19 and the runner does not; " +
+          "upgrade the runner to a build that uses version 19",
       );
       expect(wire.frames).toEqual([]);
     });
@@ -515,7 +533,7 @@ describe("the hello exchange", () => {
         _tag: "runnerHello",
         protocolVersion: PROTOCOL_VERSION + 1,
         somethingLater: true,
-      } as unknown as RunnerMessage);
+      } as unknown as RunnerWireFrame);
 
       const ending = await wire.closed();
       expect(ending.reason).toContain(String(PROTOCOL_VERSION));
@@ -528,7 +546,7 @@ describe("what a connection leaves behind", () => {
   it("marks a runner unreachable when the controller closed its connection", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         expect(
@@ -544,7 +562,7 @@ describe("what a connection leaves behind", () => {
 
         // A frame this build cannot read, like a newer runner sending a frame
         // type this protocol version does not have.
-        wire.send({ _tag: "nonsense" } as unknown as RunnerMessage);
+        wire.send({ _tag: "nonsense" } as unknown as RunnerWireFrame);
         const ending = await wire.closed();
         expect(ending.code, "the frame was rejected, not the runner retired").toBe(PROTOCOL_ERROR);
         expect(ending.reason).not.toBe("");
@@ -567,7 +585,7 @@ describe("what a connection leaves behind", () => {
   it("closes the connection of a runner that sends a frame larger than MAX_FRAME_BYTES", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         await waitForRunner(
@@ -581,7 +599,7 @@ describe("what a connection leaves behind", () => {
         // it ignores, padded one byte past the limit.
         const pong = JSON.stringify({ _tag: "pong", padding: "" });
         const padding = "x".repeat(MAX_FRAME_BYTES - Buffer.byteLength(pong) + 1);
-        wire.send({ _tag: "pong", padding } as unknown as RunnerMessage);
+        wire.send({ _tag: "pong", padding } as unknown as RunnerWireFrame);
 
         const ending = await wire.closed();
         expect(ending.code, "the transport rejected the frame").toBe(MESSAGE_TOO_BIG);
@@ -623,7 +641,7 @@ describe("what a connection leaves behind", () => {
   it("closes the older connection as going away when a runner connects again", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
 
         const older = await greet(harness.base, joined.credential);
@@ -664,7 +682,7 @@ describe("the liveness check", () => {
   it("pings on the interval, and every pong updates the runner's last-seen time", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -704,7 +722,7 @@ describe("the liveness check", () => {
   it("keeps a runner that answers online, for longer than the silence limit", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -734,7 +752,7 @@ describe("the liveness check", () => {
   it("marks a runner that stops answering unreachable, with the system as the actor", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -767,7 +785,7 @@ describe("the liveness check", () => {
   it("marks a runner that sent a goodbye offline, and one that vanished unreachable", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
 
         const announced = await greet(harness.base, joined.credential);
@@ -857,17 +875,135 @@ describe("the liveness check", () => {
   });
 });
 
+describe("what the controller logs when a connection closes", () => {
+  it("logs no error for a runner that closes without naming a code", async () => {
+    // The controller logs through Effect's default logger, which writes to the
+    // console. The test reads what reaches it.
+    const written: string[] = [];
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        written.push(args.map(String).join(" "));
+      }),
+    );
+    try {
+      await withServer(async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        // `close()` with no code arrives at the controller as 1005.
+        wire.send({ _tag: "goodbye" });
+        wire.close();
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "offline",
+        );
+      });
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+
+    expect(written.filter((line) => line.includes("connection ended in an error"))).toEqual([]);
+  });
+});
+
+describe("a goodbye that is still queued when the close arrives", () => {
+  /**
+   * Returns one masked WebSocket frame. The mask key is all zeros, which is
+   * valid and leaves the payload as it is, so the bytes are easy to build.
+   */
+  const buildClientFrame = (opcode: number, payload: Buffer): Buffer => {
+    const length =
+      payload.length < 126
+        ? Buffer.from([payload.length | 0x80])
+        : Buffer.from([126 | 0x80, payload.length >> 8, payload.length & 0xff]);
+    return Buffer.concat([Buffer.from([0x80 | opcode]), length, Buffer.alloc(4), payload]);
+  };
+
+  it("marks the runner offline, never unreachable", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+
+        // A runner that leaves sends its reports, then its goodbye, then
+        // closes. The controller handles frames one at a time, so when it
+        // reads the close it may not have reached the goodbye yet. A client
+        // library cannot send all of it in one write, so this test writes the
+        // bytes itself: enough reports that the controller is still handling
+        // them when the close is read. Each report is a database write, so 40
+        // keep it busy for far longer than reading the close takes, and stay
+        // well inside the 5 seconds the controller gives queued frames on a
+        // slow CI machine (300 did not).
+        const tcp = connect(Number(new URL(harness.base).port), "127.0.0.1");
+        await once(tcp, "connect");
+        tcp.write(
+          [
+            "GET /api/v1/runners/socket HTTP/1.1",
+            `Host: ${new URL(harness.base).host}`,
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            `Sec-WebSocket-Key: ${randomBytes(16).toString("base64")}`,
+            "Sec-WebSocket-Version: 13",
+            `Authorization: Bearer ${joined.credential}`,
+            "\r\n",
+          ].join("\r\n"),
+        );
+        const upgrade = await new Promise<Buffer>((resolve) => tcp.once("data", resolve));
+        expect(upgrade.toString()).toContain("101");
+        tcp.write(buildClientFrame(0x1, Buffer.from(JSON.stringify(buildHello()))));
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        const report = buildClientFrame(
+          0x1,
+          Buffer.from(JSON.stringify({ _tag: "factsReport", facts: FACTS })),
+        );
+        tcp.write(
+          Buffer.concat([
+            ...Array.from({ length: 40 }, () => report),
+            buildClientFrame(0x1, Buffer.from(JSON.stringify({ _tag: "goodbye" }))),
+            buildClientFrame(0x8, Buffer.from([0x03, 0xe8])),
+          ]),
+        );
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity !== "online",
+        );
+
+        expect(await readStateTransitions(harness)).toEqual(["online", "offline"]);
+        tcp.destroy();
+      },
+      { pings: FAST },
+    );
+  });
+});
+
 describe("what a runner reports about its machine", () => {
-  /** Builds a watermark report, with the free disk the test wants. */
+  /** Builds a report of the Runner Metrics, with the free disk the test wants. */
   const buildResourceReport = (diskFreeBytes: number) => ({
     diskFreeBytes,
     availableMemoryBytes: 16 * 1024 * 1024 * 1024,
   });
 
-  it("stores the watermark a runner reports and returns it on the runner", async () => {
+  it("stores the metrics a runner reports and returns it on the runner", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -879,7 +1015,7 @@ describe("what a runner reports about its machine", () => {
         );
         // A runner that has only just sent its hello has not reported its
         // disk space yet.
-        expect(online.watermark).toBeNull();
+        expect(online.metrics).toBeNull();
 
         // Above the default ten-gibibyte watermark, so the runner is still
         // accepting work.
@@ -888,9 +1024,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark !== null,
+          (one) => one.metrics !== null,
         );
-        expect(stored.watermark).toEqual(buildResourceReport(200 * GIB));
+        expect(stored.metrics).toEqual(buildResourceReport(200 * GIB));
 
         const before = await harness.audit("runner.placementsChanged");
         // A runner with no earlier report counts as accepting work, so a
@@ -906,9 +1042,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark?.diskFreeBytes === 150 * GIB,
+          (one) => one.metrics?.diskFreeBytes === 150 * GIB,
         );
-        expect(again.watermark).toEqual(buildResourceReport(150 * GIB));
+        expect(again.metrics).toEqual(buildResourceReport(150 * GIB));
         expect(
           await harness.audit("runner.placementsChanged"),
           "nothing about placement changed",
@@ -921,9 +1057,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark?.diskFreeBytes === 4 * GIB,
+          (one) => one.metrics?.diskFreeBytes === 4 * GIB,
         );
-        expect(short.watermark).toEqual(buildResourceReport(4 * GIB));
+        expect(short.metrics).toEqual(buildResourceReport(4 * GIB));
 
         const after = await harness.audit("runner.placementsChanged");
         expect(after).toHaveLength(before.length + 1);
@@ -955,10 +1091,135 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
+  it("adds each report to the history and nudges the runnerMetrics subscribers, not the runner ones", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+        // The hello and the setup also announce runners. Subscribing after they
+        // settle leaves only what the report causes.
+        await waitForLiveToSettle();
+        const ticket = await fetchTicket(harness.base, token);
+
+        let metricsPushes: ReadonlyArray<LiveMessage> = [];
+        let runnerPushes: ReadonlyArray<LiveMessage> = [];
+        await onSocket(harness.base, (client) =>
+          Effect.gen(function* () {
+            yield* client.hello({ v: 1, ticket });
+            const metrics = yield* collectPushes(client, "runnerMetrics");
+            const runner = yield* collectPushes(client, "runner");
+            yield* Effect.promise(() => expectHeld(harness.live, 1, "runnerMetrics"));
+            yield* Effect.promise(() => expectHeld(harness.live, 1, "runner"));
+
+            wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(200 * GIB) });
+            const arrived = yield* Effect.promise(() =>
+              waitWithin(2000, () => metrics.received.length > 0),
+            );
+            expect(arrived).toBe(true);
+            // Long enough for a push on `runner` to have arrived, had there been one.
+            yield* Effect.promise(waitForLiveToSettle);
+
+            metricsPushes = metrics.received;
+            runnerPushes = runner.received;
+            yield* Fiber.interrupt(metrics.fiber);
+            yield* Fiber.interrupt(runner.fiber);
+          }),
+        );
+
+        expect(metricsPushes).toHaveLength(1);
+        expect((metricsPushes[0] as { ids: ReadonlyArray<string> }).ids).toEqual([joined.runnerId]);
+        expect(runnerPushes, "a routine report is not news about the runner record").toEqual([]);
+
+        const since = new Date(Date.now() - 60 * 60_000).toISOString();
+        const response = await get(
+          harness.base,
+          `/api/v1/runner-metrics?runnerId=${joined.runnerId}&since=${since}&resolution=fiveMinutes`,
+          token,
+        );
+        expect(response.status).toBe(200);
+        const history = (await response.json()) as { items: ReadonlyArray<RunnerMetricsPoint> };
+        expect(history.items).toHaveLength(1);
+        expect(history.items[0]).toMatchObject({
+          runnerId: joined.runnerId,
+          minutes: 1,
+          diskFreeBytes: 200 * GIB,
+          sessionsRunning: 0,
+          sessionsQueued: 0,
+        });
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
+  it("returns the CPU of the metrics and the disk size of the facts as reported", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        // `null` is not the same as an absent `cpu`: it says the runner reads
+        // CPU and has no minute yet, so it must survive the store.
+        wire.send({
+          _tag: "watermarkReport",
+          watermark: { ...buildResourceReport(200 * GIB), cpu: null },
+        });
+        const first = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.metrics !== null,
+        );
+        expect(first.metrics).toEqual({ ...buildResourceReport(200 * GIB), cpu: null });
+
+        const cpu = { averagePercent: 21, peakPercent: 80 };
+        wire.send({
+          _tag: "watermarkReport",
+          watermark: { ...buildResourceReport(150 * GIB), cpu },
+        });
+        const minute = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.metrics?.diskFreeBytes === 150 * GIB,
+        );
+        expect(minute.metrics).toEqual({ ...buildResourceReport(150 * GIB), cpu });
+
+        const withDisk: RunnerFacts = { ...FACTS, diskTotalBytes: 1024 * GIB };
+        wire.send({ _tag: "factsReport", facts: withDisk });
+        const grown = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.facts?.diskTotalBytes !== undefined,
+        );
+        expect(grown.facts).toEqual(withDisk);
+
+        wire.close();
+      },
+      { pings: FAST },
+    );
+  });
+
   it("records a runner whose first report shows no room left", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         await waitForRunner(
@@ -972,7 +1233,7 @@ describe("what a runner reports about its machine", () => {
         // but a runner that cannot take work is a change worth recording
         // either way.
         wire.send({ _tag: "watermarkReport", watermark: buildResourceReport(4 * GIB) });
-        await waitForRunner(harness.base, token, joined.runnerId, (one) => one.watermark !== null);
+        await waitForRunner(harness.base, token, joined.runnerId, (one) => one.metrics !== null);
 
         const entries = await harness.audit("runner.placementsChanged");
         expect(entries).toHaveLength(1);
@@ -988,7 +1249,7 @@ describe("what a runner reports about its machine", () => {
   it("stores facts a runner reports after its hello", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -1029,7 +1290,7 @@ describe("what a runner reports about its machine", () => {
   it("caps sessions at one per 2 GiB until the owner sets a cap", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         // The cap can only be computed once the runner has reported its
         // memory, which it does in its hello.
@@ -1078,10 +1339,10 @@ describe("what a runner reports about its machine", () => {
     );
   });
 
-  it("keeps the runner readable when its stored watermark cannot be decoded", async () => {
+  it("keeps the runner readable when its stored metrics cannot be decoded", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         await waitForRunner(
@@ -1098,7 +1359,7 @@ describe("what a runner reports about its machine", () => {
           Effect.orDie(
             withTransaction(
               harness.sql,
-              harness.sql`UPDATE runners SET watermark = 'not json at all'
+              harness.sql`UPDATE runners SET metrics = 'not json at all'
                         WHERE id = ${uuidFromString(joined.runnerId)}`,
             ),
           ),
@@ -1109,9 +1370,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark !== null,
+          (one) => one.metrics !== null,
         );
-        expect(stored.watermark).toEqual(buildResourceReport(200 * GIB));
+        expect(stored.metrics).toEqual(buildResourceReport(200 * GIB));
         expect(stored.connectivity).toBe("online");
 
         wire.close();
@@ -1123,7 +1384,7 @@ describe("what a runner reports about its machine", () => {
   it("stores nothing a connection reports before its hello", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         // A credential proves a runner joined, not that this connection is
         // that runner speaking the protocol. Until the hello arrives, a report
@@ -1140,7 +1401,7 @@ describe("what a runner reports about its machine", () => {
 
         const row = await readRunner(harness.base, token, joined.runnerId);
         expect(row.connectivity).toBe("offline");
-        expect(row.watermark).toBeNull();
+        expect(row.metrics).toBeNull();
         expect(row.facts).toBeNull();
       },
       { pings: FAST },
@@ -1150,7 +1411,7 @@ describe("what a runner reports about its machine", () => {
   it("ignores pongs from a connection that never sends a hello, and closes it", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         // A credential, a socket, and no hello. It answers every ping, which is
         // the only way a connection could look alive without a hello.
@@ -1176,7 +1437,7 @@ describe("what a runner reports about its machine", () => {
   it("does not update the last-seen time on a report; only a pong does", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
 
@@ -1200,9 +1461,9 @@ describe("what a runner reports about its machine", () => {
           harness.base,
           token,
           joined.runnerId,
-          (one) => one.watermark !== null && one.facts?.docker === true,
+          (one) => one.metrics !== null && one.facts?.docker === true,
         );
-        expect(reported.watermark, "the report never landed").not.toBeNull();
+        expect(reported.metrics, "the report never landed").not.toBeNull();
         expect(reported.facts?.docker, "the report never landed").toBe(true);
         // Only the ping and pong decide liveness. A runner could send reports
         // while unable to answer a ping, and the row must treat that as
@@ -1224,7 +1485,7 @@ describe("what the controller stopping does to its local runner", () => {
   it("marks the runner offline, never unreachable, when the child is asked to stop", async () => {
     const home = mkdtempSync(join(tmpdir(), "hercule-local-child-"));
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const child = Bun.spawn(
         [process.execPath, "run", HERCULE, "runner", "--local", "--home", home],
         { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
@@ -1297,7 +1558,7 @@ describe("retiring a runner with an open connection", () => {
 
   it("closes the open connection with the reason that the runner was retired", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const { wire } = await greet(harness.base, joined.credential);
       expect(
@@ -1324,7 +1585,7 @@ describe("retiring a runner with an open connection", () => {
 
   it("rejects the retired credential at the upgrade, and says it was retired", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
 
       expect((await retireRunner(harness.base, token, joined.runnerId)).status).toBe(200);
@@ -1373,7 +1634,7 @@ describe("refreshing a runner's facts on demand", () => {
 
   it("asks the online runner, and returns the runner with the facts it reported", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const { wire } = await greet(harness.base, joined.credential);
       try {
@@ -1406,7 +1667,7 @@ describe("refreshing a runner's facts on demand", () => {
 
   it("returns on a report with nothing new, rather than waiting for a change", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const { wire } = await greet(harness.base, joined.credential);
       try {
@@ -1436,7 +1697,7 @@ describe("refreshing a runner's facts on demand", () => {
   it("is not answered by a probe report whose request id guesses the facts key", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         try {
@@ -1455,8 +1716,13 @@ describe("refreshing a runner's facts on demand", () => {
           wire.send({
             _tag: "probeReport",
             requestId: "facts",
-            instanceId: "instance-claude-code",
-            result: { harnessVersion: null, auth: { status: "unauthenticated" }, models: [] },
+            providerAccountId: "0199e0e7-0000-7000-8000-0000000000c1",
+            result: {
+              harnessVersion: null,
+              auth: { status: "unauthenticated" },
+              models: [],
+              usage: null,
+            },
           });
 
           expect((await pending).status).toBe(409);
@@ -1470,7 +1736,7 @@ describe("refreshing a runner's facts on demand", () => {
 
   it("rejects a runner that is not online, and sends that connection nothing", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       // A credential and a socket, but no hello: a connection exists, but the
       // other end is not yet a runner the controller can ask anything.
@@ -1499,7 +1765,7 @@ describe("refreshing a runner's facts on demand", () => {
     // report past the deadline failed the test with a 409.
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         try {
@@ -1538,7 +1804,7 @@ describe("refreshing a runner's facts on demand", () => {
   it("sends a new request after one that was never answered, and the next report arrives", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         try {
@@ -1576,7 +1842,7 @@ describe("refreshing a runner's facts on demand", () => {
   it("fails for a runner that never reports, and says how long it waited", async () => {
     await withServer(
       async (harness) => {
-        const token = await completeSetupWithNoProviderInstance(harness);
+        const token = await completeSetupWithNoProviderAccount(harness);
         const joined = await enlist(harness);
         const { wire } = await greet(harness.base, joined.credential);
         try {
@@ -1611,19 +1877,87 @@ describe("refreshing a runner's facts on demand", () => {
 });
 
 /**
+ * The accounts a user would have added by now, one per built-in harness. The
+ * test controller creates the first of them by itself, so the others are
+ * added here. The Z.ai account holds a key, as an account of its kind must.
+ */
+const ADDED_ACCOUNTS = [
+  {
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    defaultHarnessId: "claude-code/claude-code",
+  },
+  {
+    providerId: "openai/openai",
+    kind: "subscription-per-machine",
+    defaultHarnessId: "codex/codex",
+  },
+  { providerId: "zai/zai", kind: "api-key", defaultHarnessId: "pi/pi" },
+] as const;
+
+/** Adds the accounts of `ADDED_ACCOUNTS` that the controller does not have yet. */
+const addMissingAccounts = (harness: ServerHarness): Promise<void> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const accounts = yield* providerAccountRepository;
+      const present = new Set((yield* accounts.list()).map((account) => account.providerId));
+      for (const account of ADDED_ACCOUNTS) {
+        if (present.has(account.providerId)) continue;
+        yield* withTransaction(
+          harness.sql,
+          Effect.gen(function* () {
+            const added = yield* accounts.insert({ ...account, label: null, at: yield* nowIso });
+            if (account.kind !== "api-key") return;
+            yield* harness.secrets.set(
+              buildProviderAccountOwner(added.id),
+              "apiKey",
+              Redacted.make("sk-test"),
+            );
+          }),
+        );
+      }
+    }).pipe(Effect.provideService(SqlClient.SqlClient, harness.sql), Effect.orDie),
+  );
+
+/**
+ * Gives every account a Model Catalog that was just read. The tests that use
+ * it count the probes the controller sends, and a catalog that was never read
+ * is due, which makes the controller send a probe for the read as well.
+ */
+const markCatalogsRead = (harness: ServerHarness): Promise<void> =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const accounts = yield* providerAccountRepository;
+      const catalogs = yield* modelCatalogRepository;
+      const at = yield* nowIso;
+      for (const account of yield* accounts.list()) {
+        yield* withTransaction(harness.sql, catalogs.recordSuccess(account.id, [], at, at));
+      }
+    }).pipe(Effect.provideService(SqlClient.SqlClient, harness.sql), Effect.orDie),
+  );
+
+/**
  * Runs `body` against a server with the real plugin registry, so "one request
- * per instance" covers the three providers the binary really includes. The
- * probe deadline and interval are passed in like the ping interval, because a
- * real Bun server cannot run on a `TestClock`.
+ * per account" covers the three harnesses that have a runner adapter, each
+ * with an account. The probe deadline and interval are passed in like the ping
+ * interval, because a real Bun server cannot run on a `TestClock`.
  */
 const withRegistry = (
   body: (harness: ServerHarness) => Promise<void>,
   options: Parameters<typeof withServer>[1] = {},
-): Promise<void> => withServer(body, { ...options, plugins: registry });
+): Promise<void> =>
+  withServer(
+    async (harness) => {
+      await addMissingAccounts(harness);
+      await markCatalogsRead(harness);
+      await body(harness);
+    },
+    { ...options, plugins: registry },
+  );
 
-interface Instance {
+interface Account {
   readonly id: string;
-  readonly providerId: string;
+  readonly defaultHarnessId: string;
   readonly snapshots: ReadonlyArray<{
     readonly runnerId: string;
     readonly harnessVersion: string | null;
@@ -1632,19 +1966,15 @@ interface Instance {
   }>;
 }
 
-const listInstances = async (base: string, token: string): Promise<ReadonlyArray<Instance>> => {
-  const response = await get(base, "/api/v1/providers", token);
+const listAccounts = async (base: string, token: string): Promise<ReadonlyArray<Account>> => {
+  const response = await get(base, "/api/v1/provider-accounts", token);
   expect(response.status, await response.clone().text()).toBe(200);
-  return (await response.json()) as ReadonlyArray<Instance>;
+  return (await response.json()) as ReadonlyArray<Account>;
 };
 
-const findInstanceFor = async (
-  base: string,
-  token: string,
-  providerId: string,
-): Promise<Instance> => {
-  const found = (await listInstances(base, token)).find((one) => one.providerId === providerId);
-  expect(found, `no instance for ${providerId}`).toBeDefined();
+const findAccountFor = async (base: string, token: string, harnessId: string): Promise<Account> => {
+  const found = (await listAccounts(base, token)).find((one) => one.defaultHarnessId === harnessId);
+  expect(found, `no account for ${harnessId}`).toBeDefined();
   return found!;
 };
 
@@ -1657,19 +1987,20 @@ const buildProbeResult = (version: string): ProbeResult => ({
     backend: "firstParty",
   },
   models: [{ slug: "default", name: "Default", imageInput: { maxBytes: null }, options: [] }],
+  usage: null,
 });
 
-describe("probing a runner's provider instances", () => {
+describe("probing a runner's provider accounts", () => {
   const readSnapshot = (
     base: string,
     token: string,
-    instanceId: string,
+    providerAccountId: string,
     runnerId: string,
-  ): Promise<Instance["snapshots"][number]> =>
-    waitUntil(`recorded a snapshot of ${instanceId}`, async () => {
-      const response = await get(base, `/api/v1/providers/${instanceId}`, token);
+  ): Promise<Account["snapshots"][number]> =>
+    waitUntil(`recorded a snapshot of ${providerAccountId}`, async () => {
+      const response = await get(base, `/api/v1/provider-accounts/${providerAccountId}`, token);
       expect(response.status, await response.clone().text()).toBe(200);
-      const one = (await response.json()) as Instance;
+      const one = (await response.json()) as Account;
       return one.snapshots.find((each) => each.runnerId === runnerId);
     });
 
@@ -1682,99 +2013,179 @@ describe("probing a runner's provider instances", () => {
       return asked.length >= count ? asked : undefined;
     });
 
-  const buildNoAdapterResult = (providerId: string): ProbeResult => ({
-    harnessVersion: null,
-    auth: { status: "error", message: `no adapter for ${providerId} in this runner build` },
-    models: [],
-  });
+  /**
+   * Answers every probe request as it arrives, except those for the account
+   * `hold`, until `isDone` accepts the requests sent so far. Returns those
+   * requests. A sweep sends a runner at most two probes at once, so a test
+   * that waits for more than two has to answer the ones it does not care
+   * about.
+   */
+  const answerProbeRequestsUntil = (
+    wire: RunnerSocket,
+    description: string,
+    isDone: (asked: ReadonlyArray<ProbeRequest>) => boolean,
+    hold?: string,
+  ): Promise<ReadonlyArray<ProbeRequest>> => {
+    const answered = new Set<string>();
+    return waitUntil(description, () => {
+      const asked = listProbeRequests(wire);
+      for (const request of asked) {
+        const { providerAccountId } = request.harnessAccount;
+        if (answered.has(request.requestId) || providerAccountId === hold) continue;
+        answered.add(request.requestId);
+        wire.send({
+          _tag: "probeReport",
+          requestId: request.requestId,
+          providerAccountId,
+          result: buildProbeResult("2.1.263"),
+        });
+      }
+      return isDone(asked) ? asked : undefined;
+    });
+  };
 
-  const probeNow = (base: string, token: string, id: string, instanceId: string) =>
-    send("POST", base, `/api/v1/runners/${id}/probe`, { body: { instanceId }, token });
+  /** Waits until the controller has sent `count` probe requests, answering them as `answerProbeRequestsUntil` does. */
+  const answerProbeRequests = (
+    wire: RunnerSocket,
+    count: number,
+    hold?: string,
+  ): Promise<ReadonlyArray<ProbeRequest>> =>
+    answerProbeRequestsUntil(
+      wire,
+      `asked for ${String(count)} probes`,
+      (asked) => asked.length >= count,
+      hold,
+    );
 
-  const patchInstance = (base: string, token: string, id: string, body: unknown) =>
-    send("PATCH", base, `/api/v1/providers/${id}`, { body, token });
+  /**
+   * The facts of a runner that could run the three harnesses that have a
+   * runner adapter: an adapter for each, and each binary on the machine. A runner that lacks either is not
+   * probed for that harness.
+   */
+  const EVERY_HARNESS: RunnerFacts = {
+    ...FACTS,
+    harnesses: [
+      { name: "claude", present: true, path: "/usr/local/bin/claude" },
+      { name: "codex", present: true, path: "/usr/local/bin/codex" },
+      { name: "pi", present: true, path: "/usr/local/bin/pi" },
+    ],
+    adapters: ["claude-code/claude-code", "codex/codex", "pi/pi"],
+  };
+
+  const greetEveryHarness = (base: string, credential: string) =>
+    greet(base, credential, { facts: EVERY_HARNESS });
+
+  const probeNow = (base: string, token: string, id: string, providerAccountId: string) =>
+    send("POST", base, `/api/v1/runners/${id}/probe`, { body: { providerAccountId }, token });
+
+  const patchAccount = (base: string, token: string, id: string, body: unknown) =>
+    send("PATCH", base, `/api/v1/provider-accounts/${id}`, { body, token });
 
   /** A probe deadline short enough for a test to wait for. */
   const PROBE_DEADLINE = Duration.millis(200);
 
-  it("probes every instance as soon as the runner sends its hello, and stores the answers", async () => {
+  it("probes the accounts of the harnesses a runner can run as soon as it sends its hello, and stores the answers", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const all = await listInstances(harness.base, token);
-      // The three built-in providers, each with the instance the boot created.
-      expect(all.map((one) => one.providerId).sort()).toEqual(["claude-code", "codex", "pi"]);
+      const all = await listAccounts(harness.base, token);
+      // The three built-in harnesses, each with the account the boot created.
+      expect(all.map((one) => one.defaultHarnessId).sort()).toEqual([
+        "claude-code/claude-code",
+        "codex/codex",
+        "pi/pi",
+      ]);
 
-      const { wire } = await greet(harness.base, joined.credential);
+      const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
-        const asked = await waitForProbeRequests(wire, all.length);
-        // One request per instance, keyed by instance id, never provider id:
-        // one provider can have several accounts.
-        expect([...asked].map((request) => request.instanceId).sort()).toEqual(
-          [...all].map((one) => one.id).sort(),
-        );
+        const asked = await answerProbeRequests(wire, all.length);
+        // One request per account, keyed by account id, never harness id:
+        // one harness can have several accounts.
+        expect(
+          [...asked].map((request) => request.harnessAccount.providerAccountId).sort(),
+        ).toEqual([...all].map((one) => one.id).sort());
         for (const request of asked) {
-          const instance = all.find((one) => one.id === request.instanceId);
-          expect(request.providerId).toBe(instance?.providerId);
+          const account = all.find((one) => one.id === request.harnessAccount.providerAccountId);
+          expect(request.harnessId).toBe(account?.defaultHarnessId);
         }
 
-        for (const request of asked) {
-          const instance = all.find((one) => one.id === request.instanceId)!;
-          wire.send({
-            _tag: "probeReport",
-            requestId: request.requestId,
-            instanceId: request.instanceId,
-            result:
-              instance.providerId === "claude-code"
-                ? buildProbeResult("2.1.263")
-                : buildNoAdapterResult(instance.providerId),
-          });
-        }
-
-        const claude = await findInstanceFor(harness.base, token, "claude-code");
+        const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
         const snapshot = await readSnapshot(harness.base, token, claude.id, joined.runnerId);
         expect(snapshot.harnessVersion).toBe("2.1.263");
         expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
         expect(snapshot.models.map((model) => model.slug)).toEqual(["default"]);
-
-        // A provider this runner build has no adapter for still gets a
-        // snapshot, which shows why, instead of staying blank forever.
-        const codex = await findInstanceFor(harness.base, token, "codex");
-        const refused = await readSnapshot(harness.base, token, codex.id, joined.runnerId);
-        expect(refused.auth.status).toBe("error");
-        expect(refused.auth.message).toBe("no adapter for codex in this runner build");
       } finally {
         wire.close();
       }
     });
   });
 
-  it("probes every online runner again when an instance's config changes", async () => {
+  it("sends no probe, and so no key, to a runner without the adapter or the binary of a harness", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const all = await listAccounts(harness.base, token);
+      // The runner has an adapter for Claude Code and pi, but only Claude
+      // Code's binary is on the machine. It has no adapter for Codex at all.
+      const facts: RunnerFacts = {
+        ...EVERY_HARNESS,
+        harnesses: [
+          { name: "claude", present: true, path: "/usr/local/bin/claude" },
+          { name: "codex", present: true, path: "/usr/local/bin/codex" },
+          { name: "pi", present: false },
+        ],
+        adapters: ["claude-code/claude-code", "pi/pi"],
+      };
+
+      const { wire } = await greet(harness.base, joined.credential, { facts });
+      try {
+        const asked = await waitForProbeRequests(wire, 1);
+        const claude = all.find((one) => one.defaultHarnessId === "claude-code/claude-code")!;
+        expect(asked.map((request) => request.harnessAccount.providerAccountId)).toEqual([
+          claude.id,
+        ]);
+
+        // The sweep probes its accounts together, so a second request would
+        // have arrived with the first.
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(listProbeRequests(wire)).toHaveLength(1);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("probes every online runner again when an account's key changes", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const first = await enlist(harness);
       const second = await enlist(harness);
-      const all = await listInstances(harness.base, token);
-      const claude = all.find((one) => one.providerId === "claude-code")!;
+      const all = await listAccounts(harness.base, token);
+      const zai = all.find((one) => one.defaultHarnessId === "pi/pi")!;
 
-      const one = await greet(harness.base, first.credential);
-      const two = await greet(harness.base, second.credential);
+      const one = await greetEveryHarness(harness.base, first.credential);
+      const two = await greetEveryHarness(harness.base, second.credential);
       try {
-        await waitForProbeRequests(one.wire, all.length);
-        await waitForProbeRequests(two.wire, all.length);
+        await answerProbeRequests(one.wire, all.length);
+        await answerProbeRequests(two.wire, all.length);
         const before = [listProbeRequests(one.wire).length, listProbeRequests(two.wire).length];
 
-        const patched = await patchInstance(harness.base, token, claude.id, {
-          name: "work account",
+        const patched = await patchAccount(harness.base, token, zai.id, {
+          credentials: { apiKey: "a-new-key" },
         });
         expect(patched.status, await patched.clone().text()).toBe(200);
 
-        // The probe runs with the config, so every snapshot of the instance is
-        // now out of date.
+        // The stored snapshots were taken with the old key, so every one of
+        // the account's snapshots is now out of date.
         await waitForProbeRequests(one.wire, before[0]! + 1);
         await waitForProbeRequests(two.wire, before[1]! + 1);
         for (const wire of [one.wire, two.wire]) {
-          expect(listProbeRequests(wire).at(-1)?.instanceId).toBe(claude.id);
+          const asked = listProbeRequests(wire).at(-1)!;
+          expect(asked.harnessAccount.providerAccountId).toBe(zai.id);
+          expect(asked.harnessAccount.credential).toEqual({
+            variable: "ZAI_API_KEY",
+            value: "a-new-key",
+          });
         }
       } finally {
         one.wire.close();
@@ -1787,26 +2198,26 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const { wire } = await greet(harness.base, joined.credential);
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
-        const opening = await waitForProbeRequests(wire, 3);
+        const opening = await answerProbeRequests(wire, 3);
         const already = opening.length;
 
         const pending = probeNow(harness.base, token, joined.runnerId, claude.id);
         const asked = await waitForProbeRequests(wire, already + 1);
         const request = asked.at(-1)!;
-        expect(request.instanceId).toBe(claude.id);
+        expect(request.harnessAccount.providerAccountId).toBe(claude.id);
         wire.send({
           _tag: "probeReport",
           requestId: request.requestId,
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           result: buildProbeResult("2.1.300"),
         });
 
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
-        const answered = (await response.json()) as Instance["snapshots"][number];
+        const answered = (await response.json()) as Account["snapshots"][number];
         expect(answered.runnerId).toBe(joined.runnerId);
         expect(answered.harnessVersion).toBe("2.1.300");
       } finally {
@@ -1819,7 +2230,7 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       // A socket with no hello: it has not identified itself as a runner yet.
       const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
@@ -1838,8 +2249,8 @@ describe("probing a runner's provider instances", () => {
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        const claude = await findInstanceFor(harness.base, token, "claude-code");
-        const { wire } = await greet(harness.base, joined.credential);
+        const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+        const { wire } = await greetEveryHarness(harness.base, joined.credential);
         try {
           const already = (await waitForProbeRequests(wire, 3)).length;
 
@@ -1862,18 +2273,20 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const { wire } = await greet(harness.base, joined.credential);
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
-        const asked = await waitForProbeRequests(wire, 3);
-        const mine = asked.find((request) => request.instanceId === claude.id)!;
+        const asked = await answerProbeRequests(wire, 3, claude.id);
+        const mine = asked.find(
+          (request) => request.harnessAccount.providerAccountId === claude.id,
+        )!;
 
         // A request id this controller never sent. Storing it would let a
-        // runner write any instance's snapshot at any time.
+        // runner write any account's snapshot at any time.
         wire.send({
           _tag: "probeReport",
           requestId: "01999999-0000-7000-8000-00000000dead",
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           result: buildProbeResult("0.0.0-unasked"),
         });
         // Then the real answer, so the test waits for an event rather than for
@@ -1881,7 +2294,7 @@ describe("probing a runner's provider instances", () => {
         wire.send({
           _tag: "probeReport",
           requestId: mine.requestId,
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           result: buildProbeResult("2.1.263"),
         });
 
@@ -1897,26 +2310,30 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const first = await greet(harness.base, joined.credential);
-      const asked = await waitForProbeRequests(first.wire, 3);
-      const stale = asked.find((request) => request.instanceId === claude.id)!;
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const first = await greetEveryHarness(harness.base, joined.credential);
+      const asked = await answerProbeRequests(first.wire, 3, claude.id);
+      const stale = asked.find(
+        (request) => request.harnessAccount.providerAccountId === claude.id,
+      )!;
 
-      const second = await greet(harness.base, joined.credential);
+      const second = await greetEveryHarness(harness.base, joined.credential);
       try {
         first.wire.send({
           _tag: "probeReport",
           requestId: stale.requestId,
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           result: buildProbeResult("0.0.0-superseded"),
         });
 
-        const fresh = await waitForProbeRequests(second.wire, 3);
-        const current = fresh.find((request) => request.instanceId === claude.id)!;
+        const fresh = await answerProbeRequests(second.wire, 3, claude.id);
+        const current = fresh.find(
+          (request) => request.harnessAccount.providerAccountId === claude.id,
+        )!;
         second.wire.send({
           _tag: "probeReport",
           requestId: current.requestId,
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           result: buildProbeResult("2.1.263"),
         });
 
@@ -1933,27 +2350,27 @@ describe("probing a runner's provider instances", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const { wire } = await greet(harness.base, joined.credential);
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const { wire } = await greetEveryHarness(harness.base, joined.credential);
       try {
-        const asked = await waitForProbeRequests(wire, 3);
-        const request = asked.find((one) => one.instanceId === claude.id)!;
+        const asked = await answerProbeRequests(wire, 3, claude.id);
+        const request = asked.find((one) => one.harnessAccount.providerAccountId === claude.id)!;
 
-        // The probes are unanswered, and their deadline is the default 20
-        // seconds. The freeze must not wait for them.
+        // Claude Code's probe is unanswered, and its deadline is the default
+        // 20 seconds. The freeze must not wait for it.
         const promotionToken = await freezeController(harness.base, token);
 
         await sendAndAwaitHeld(harness, "the probe's answer", () =>
           wire.send({
             _tag: "probeReport",
             requestId: request.requestId,
-            instanceId: claude.id,
+            providerAccountId: claude.id,
             result: buildProbeResult("2.1.263"),
           }),
         );
         const frozen = (await (
-          await get(harness.base, `/api/v1/providers/${claude.id}`, token)
-        ).json()) as Instance;
+          await get(harness.base, `/api/v1/provider-accounts/${claude.id}`, token)
+        ).json()) as Account;
         expect(frozen.snapshots, "a frozen controller stores no snapshot").toEqual([]);
 
         await thaw(harness.base, promotionToken);
@@ -1965,21 +2382,30 @@ describe("probing a runner's provider instances", () => {
     }, QUIET_LOOP_TIMINGS);
   });
 
-  it("probes every instance of every online runner again on the interval", async () => {
+  it("probes every account of every online runner again on the interval", async () => {
     const INTERVAL = Duration.millis(150);
     await withRegistry(
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        const all = await listInstances(harness.base, token);
-        const { wire } = await greet(harness.base, joined.credential);
+        const all = await listAccounts(harness.base, token);
+        const { wire } = await greetEveryHarness(harness.base, joined.credential);
         try {
-          // The probes after the hello, then the tick's: every instance again,
-          // not just the one somebody last looked at.
-          await waitForProbeRequests(wire, all.length * 2);
-          const second = listProbeRequests(wire).slice(all.length, all.length * 2);
-          expect([...second].map((request) => request.instanceId).sort()).toEqual(
-            [...all].map((one) => one.id).sort(),
+          // The probes the hello causes and the tick's overlap in time, and
+          // the hello's catalog reads are probes too, so no position in the
+          // list belongs to one round. The hello asks each account at most
+          // twice: once in its sweep, once to read its Model Catalog. An
+          // account asked a third time was probed again by the tick.
+          const PROBES_FROM_HELLO = 2;
+          await answerProbeRequestsUntil(
+            wire,
+            "asked every account again after the hello",
+            (requests) =>
+              all.every(
+                (account) =>
+                  requests.filter((one) => one.harnessAccount.providerAccountId === account.id)
+                    .length > PROBES_FROM_HELLO,
+              ),
           );
         } finally {
           wire.close();
@@ -1993,7 +2419,7 @@ describe("probing a runner's provider instances", () => {
 describe("installing a harness on a runner", () => {
   const BARE: RunnerFacts = {
     ...FACTS,
-    providers: [
+    harnesses: [
       { name: "claude", present: false },
       { name: "codex", present: false },
       { name: "pi", present: false },
@@ -2002,15 +2428,15 @@ describe("installing a harness on a runner", () => {
 
   const INSTALLED: RunnerFacts = {
     ...BARE,
-    providers: [
+    harnesses: [
       { name: "claude", present: true, path: "/root/.local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: false },
     ],
   };
 
-  const installHarness = (base: string, token: string, id: string, providerId: string) =>
-    send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { providerId }, token });
+  const installHarness = (base: string, token: string, id: string, harnessId: string) =>
+    send("POST", base, `/api/v1/runners/${id}/install-harness`, { body: { harnessId }, token });
 
   it("runs the installer, stores the facts the runner then reports, and probes the harness", async () => {
     await withRegistry(async (harness) => {
@@ -2024,18 +2450,23 @@ describe("installing a harness on a runner", () => {
           joined.runnerId,
           (one) => one.connectivity === "online",
         );
-        const providers = await get(harness.base, "/api/v1/providers", token);
+        const providers = await get(harness.base, "/api/v1/provider-accounts", token);
         const claude = (
           (await providers.json()) as ReadonlyArray<{
             id: string;
-            providerId: string;
+            defaultHarnessId: string;
           }>
-        ).find((one) => one.providerId === "claude-code")!;
+        ).find((one) => one.defaultHarnessId === "claude-code/claude-code")!;
         const before = listProbeRequests(wire).length;
 
-        const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
+        const pending = installHarness(
+          harness.base,
+          token,
+          joined.runnerId,
+          "claude-code/claude-code",
+        );
         const request = await waitForFrame<InstallRequest>(wire, "installRequest");
-        expect(request.providerId).toBe("claude-code");
+        expect(request.harnessId).toBe("claude-code/claude-code");
         // The runner reports its new facts, then reports that the install
         // finished: the response must not show the machine as it was before.
         wire.send({ _tag: "factsReport", facts: INSTALLED });
@@ -2044,15 +2475,86 @@ describe("installing a harness on a runner", () => {
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
         const row = (await response.json()) as RunnerDetail;
-        expect(row.facts?.providers).toEqual(INSTALLED.providers);
+        expect(row.facts?.harnesses).toEqual(INSTALLED.harnesses);
 
         // A harness that was just installed has never been probed.
         await waitUntil("probed after the install", () => listProbeRequests(wire)[before]);
         expect(
           listProbeRequests(wire)
             .slice(before)
-            .map((one) => one.instanceId),
+            .map((one) => one.harnessAccount.providerAccountId),
         ).toContain(claude.id);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("probes the runner's accounts after an update, which changes nothing the facts report shows", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: INSTALLED });
+      try {
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+        await waitUntil("probed after the greeting", () => listProbeRequests(wire)[0]);
+        const before = listProbeRequests(wire).length;
+
+        const pending = installHarness(
+          harness.base,
+          token,
+          joined.runnerId,
+          "claude-code/claude-code",
+        );
+        const request = await waitForFrame<InstallRequest>(wire, "installRequest");
+        // The same path and the same presence: only the version behind it is new.
+        wire.send({ _tag: "factsReport", facts: INSTALLED });
+        wire.send({ _tag: "installResult", requestId: request.requestId, ok: true });
+        expect((await pending).status).toBe(200);
+
+        await waitUntil("probed after the update", () => listProbeRequests(wire)[before]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("probes the runner's accounts when a facts report changes its harnesses, and not when it changes nothing about them", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: BARE });
+      try {
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+        await delay(300);
+        const before = listProbeRequests(wire).length;
+
+        wire.send({ _tag: "factsReport", facts: INSTALLED });
+        await waitUntil("probed after the harness appeared", () => listProbeRequests(wire)[before]);
+        await delay(300);
+        const afterChange = listProbeRequests(wire).length;
+
+        // The same harnesses again, with other facts changed: stored, not probed.
+        wire.send({ _tag: "factsReport", facts: INSTALLED });
+        wire.send({ _tag: "factsReport", facts: { ...INSTALLED, docker: !INSTALLED.docker } });
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.facts?.docker === !INSTALLED.docker,
+        );
+        await delay(300);
+        expect(listProbeRequests(wire)).toHaveLength(afterChange);
       } finally {
         wire.close();
       }
@@ -2072,7 +2574,12 @@ describe("installing a harness on a runner", () => {
           (one) => one.connectivity === "online",
         );
 
-        const pending = installHarness(harness.base, token, joined.runnerId, "claude-code");
+        const pending = installHarness(
+          harness.base,
+          token,
+          joined.runnerId,
+          "claude-code/claude-code",
+        );
         const request = await waitForFrame<InstallRequest>(wire, "installRequest");
         wire.send({
           _tag: "installResult",
@@ -2108,10 +2615,53 @@ describe("installing a harness on a runner", () => {
           (one) => one.connectivity === "online",
         );
 
-        const response = await installHarness(harness.base, token, joined.runnerId, "codex");
+        const response = await installHarness(harness.base, token, joined.runnerId, "codex/codex");
         expect(response.status, await response.clone().text()).toBe(400);
-        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+        expect(await response.json()).toMatchObject({
+          error: {
+            code: "validation",
+            details: {
+              issues: [
+                {
+                  path: ["harnessId"],
+                  message: "Hercule on atlas cannot run Codex; update Hercule on that machine",
+                },
+              ],
+            },
+          },
+        });
         // The runner's hello already listed the adapters its build has.
+        expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
+  it("names the registered harnesses when an install uses a bare harness name, whatever the runner's build", async () => {
+    await withRegistry(async (harness) => {
+      const token = await completeSetup(harness.base);
+      const joined = await enlist(harness);
+      const { wire } = await greet(harness.base, joined.credential, { facts: BARE });
+      try {
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        const response = await installHarness(harness.base, token, joined.runnerId, "claude-code");
+        expect(response.status, await response.clone().text()).toBe(400);
+        const refusal = (await response.json()) as {
+          error: { code: string; details?: unknown };
+        };
+        expect(refusal.error.code).toBe("validation");
+        // The refusal is about the id, not about the runner's build.
+        const details = JSON.stringify(refusal.error.details);
+        expect(details).toContain("no plugin registered the harness claude-code;");
+        expect(details).toContain("claude-code/claude-code");
+        expect(details).not.toContain("runner build");
         expect(wire.frames.filter((frame) => frame._tag === "installRequest")).toEqual([]);
       } finally {
         wire.close();
@@ -2125,7 +2675,12 @@ describe("installing a harness on a runner", () => {
       const joined = await enlist(harness);
       const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
-        const response = await installHarness(harness.base, token, joined.runnerId, "claude-code");
+        const response = await installHarness(
+          harness.base,
+          token,
+          joined.runnerId,
+          "claude-code/claude-code",
+        );
         expect(response.status, await response.clone().text()).toBe(409);
         expect(await response.json()).toMatchObject({ error: { code: "invalid_state" } });
         expect(wire.frames).toEqual([]);
@@ -2141,28 +2696,36 @@ describe("installing a harness on a runner", () => {
  * login's URL), so these tests check the frames and the errors, not a stored
  * record.
  */
-describe("logging a runner's provider instance in", () => {
-  const startLogin = (base: string, token: string, instanceId: string, runnerId: string) =>
-    send("POST", base, `/api/v1/providers/${instanceId}/login`, { body: { runnerId }, token });
+describe("signing a runner in to a provider account", () => {
+  const startLogin = (base: string, token: string, providerAccountId: string, runnerId: string) =>
+    send("POST", base, `/api/v1/provider-accounts/${providerAccountId}/sign-in`, {
+      body: { runnerId },
+      token,
+    });
 
   const submitCode = (
     base: string,
     token: string,
-    instanceId: string,
+    providerAccountId: string,
     body: { readonly runnerId: string; readonly code: string },
-  ) => send("POST", base, `/api/v1/providers/${instanceId}/login-code`, { body, token });
+  ) =>
+    send("POST", base, `/api/v1/provider-accounts/${providerAccountId}/sign-in-code`, {
+      body,
+      token,
+    });
 
   const waitForProbe = (
     wire: RunnerSocket,
-    instanceId: string,
+    providerAccountId: string,
     after: number,
   ): Promise<ProbeRequest> =>
-    waitUntil(`probed ${instanceId}`, () =>
+    waitUntil(`probed ${providerAccountId}`, () =>
       wire.frames
         .slice(after)
         .find(
           (frame): frame is ProbeRequest =>
-            frame._tag === "probeRequest" && frame.instanceId === instanceId,
+            frame._tag === "probeRequest" &&
+            frame.harnessAccount.providerAccountId === providerAccountId,
         ),
     );
 
@@ -2177,15 +2740,15 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
         const request = await waitForFrame<LoginStart>(wire, "loginStart");
-        // Keyed by instance, because the credential is stored in the
-        // instance's own config directory.
-        expect(request.instanceId).toBe(claude.id);
-        expect(request.providerId).toBe("claude-code");
+        // Keyed by account, because the credential is stored in the
+        // account's own home.
+        expect(request.harnessAccount.providerAccountId).toBe(claude.id);
+        expect(request.harnessId).toBe("claude-code/claude-code");
         wire.send({ _tag: "loginUrl", requestId: request.requestId, url: AUTHORIZE_URL });
 
         const response = await pending;
@@ -2201,7 +2764,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2228,7 +2791,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2292,6 +2855,24 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
+  it("offers the MCP Servers capability of each registered harness at hello", async () => {
+    await withRegistry(async (harness) => {
+      const joined = await enlist(harness);
+      const { wire, answer } = await greet(harness.base, joined.credential);
+      try {
+        expect(answer.capabilities).toEqual(
+          expect.arrayContaining(
+            ["claude-code/claude-code", "codex/codex", "pi/pi"].map(buildMcpServersCapability),
+          ),
+        );
+        // The retired plain form stays, for a runner of the first MCP Gateway build.
+        expect(answer.capabilities).toContain("mcpServers");
+      } finally {
+        wire.close();
+      }
+    });
+  });
+
   /**
    * Starts a device login on the runner, answers it the way the runner does,
    * and returns the login's request id once the controller answered the
@@ -2301,10 +2882,14 @@ describe("logging a runner's provider instance in", () => {
   const startDeviceLogin = async (
     harness: ServerHarness,
     token: string,
-    login: { readonly instanceId: string; readonly runnerId: string; readonly wire: RunnerSocket },
+    login: {
+      readonly providerAccountId: string;
+      readonly runnerId: string;
+      readonly wire: RunnerSocket;
+    },
     nth = 0,
   ): Promise<string> => {
-    const pending = startLogin(harness.base, token, login.instanceId, login.runnerId);
+    const pending = startLogin(harness.base, token, login.providerAccountId, login.runnerId);
     const request = await waitForFrame<LoginStart>(login.wire, "loginStart", nth);
     login.wire.send({
       _tag: "loginUrl",
@@ -2321,56 +2906,63 @@ describe("logging a runner's provider instance in", () => {
     wire.send({
       _tag: "probeReport",
       requestId: probe.requestId,
-      instanceId: probe.instanceId,
+      providerAccountId: probe.harnessAccount.providerAccountId,
       result: buildProbeResult("2.1.263"),
     });
   };
 
-  const countProbes = (wire: RunnerSocket, instanceId: string): number =>
-    wire.frames.filter((frame) => frame._tag === "probeRequest" && frame.instanceId === instanceId)
-      .length;
+  const countProbes = (wire: RunnerSocket, providerAccountId: string): number =>
+    wire.frames.filter(
+      (frame) =>
+        frame._tag === "probeRequest" &&
+        frame.harnessAccount.providerAccountId === providerAccountId,
+    ).length;
 
-  /** A runner that can drive Codex too, whose instance serves as a second, independent login. */
+  /** A runner that can drive Codex too, whose account serves as a second, independent login. */
   const TWO_ADAPTERS: Partial<RunnerHello> = {
     facts: {
       ...FACTS,
-      providers: [
-        ...FACTS.providers,
+      harnesses: [
+        ...FACTS.harnesses,
         { name: "codex", present: true, path: "/usr/local/bin/codex" },
       ],
-      adapters: ["claude-code", "codex"],
+      adapters: ["claude-code/claude-code", "codex/codex"],
     },
   };
 
   /**
-   * Runs a device login on the Codex instance to its end and waits for the
+   * Runs a device login on the Codex account to its end and waits for the
    * probe that end causes. The frames the controller handled before it have
    * then been handled, so a probe they would have caused has been sent.
    */
   const settleCodexLogin = async (
     harness: ServerHarness,
     token: string,
-    login: { readonly instanceId: string; readonly runnerId: string; readonly wire: RunnerSocket },
+    login: {
+      readonly providerAccountId: string;
+      readonly runnerId: string;
+      readonly wire: RunnerSocket;
+    },
     nth: number,
   ): Promise<void> => {
     const before = login.wire.frames.length;
     const requestId = await startDeviceLogin(harness, token, login, nth);
     login.wire.send({ _tag: "loginEnded", requestId });
-    answerProbe(login.wire, await waitForProbe(login.wire, login.instanceId, before));
+    answerProbe(login.wire, await waitForProbe(login.wire, login.providerAccountId, before));
   };
 
-  it("probes the instance again on that runner when a device login ends", async () => {
+  it("probes the account again on that runner when a device login ends", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         // Let the probe every connection starts go out first, so the one
         // awaited below can only be the one the frame caused.
         await waitForProbe(wire, claude.id, 0);
         const requestId = await startDeviceLogin(harness, token, {
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           runnerId: joined.runnerId,
           wire,
         });
@@ -2381,9 +2973,9 @@ describe("logging a runner's provider instance in", () => {
         answerProbe(wire, await waitForProbe(wire, claude.id, before));
         // The probe stores the snapshot, which announces it on the provider
         // topic; a screen waiting on the login reads it from there.
-        await waitUntil("recorded the logged-in snapshot", async () => {
-          const response = await get(harness.base, `/api/v1/providers/${claude.id}`, token);
-          const one = (await response.json()) as Instance;
+        await waitUntil("recorded the signed-in snapshot", async () => {
+          const response = await get(harness.base, `/api/v1/provider-accounts/${claude.id}`, token);
+          const one = (await response.json()) as Account;
           return one.snapshots.find(
             (each) => each.runnerId === joined.runnerId && each.auth.status === "ok",
           );
@@ -2398,8 +2990,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findAccountFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
@@ -2411,7 +3003,7 @@ describe("logging a runner's provider instance in", () => {
         await settleCodexLogin(
           harness,
           token,
-          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          { providerAccountId: codex.id, runnerId: joined.runnerId, wire },
           0,
         );
 
@@ -2427,14 +3019,14 @@ describe("logging a runner's provider instance in", () => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
       const other = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       const intruder = await greet(harness.base, other.credential);
       try {
         await waitForProbe(wire, claude.id, 0);
         await waitForProbe(intruder.wire, claude.id, 0);
         const requestId = await startDeviceLogin(harness, token, {
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           runnerId: joined.runnerId,
           wire,
         });
@@ -2459,13 +3051,13 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findAccountFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
         const requestId = await startDeviceLogin(harness, token, {
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           runnerId: joined.runnerId,
           wire,
         });
@@ -2477,7 +3069,7 @@ describe("logging a runner's provider instance in", () => {
         await settleCodexLogin(
           harness,
           token,
-          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          { providerAccountId: codex.id, runnerId: joined.runnerId, wire },
           1,
         );
 
@@ -2489,15 +3081,15 @@ describe("logging a runner's provider instance in", () => {
     });
   });
 
-  it("runs one probe at a time per instance, and one more for a login that ended during it", async () => {
+  it("runs one probe at a time per account, and one more for a login that ended during it", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findAccountFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
-      const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
-      const sentinel = { instanceId: codex.id, runnerId: joined.runnerId, wire };
+      const login = { providerAccountId: claude.id, runnerId: joined.runnerId, wire };
+      const sentinel = { providerAccountId: codex.id, runnerId: joined.runnerId, wire };
       try {
         await waitForProbe(wire, claude.id, 0);
         const firstLogin = await startDeviceLogin(harness, token, login, 0);
@@ -2529,8 +3121,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findAccountFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
@@ -2564,7 +3156,7 @@ describe("logging a runner's provider instance in", () => {
         await settleCodexLogin(
           harness,
           token,
-          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          { providerAccountId: codex.id, runnerId: joined.runnerId, wire },
           2,
         );
         // The probe every connection starts, and the one the second login's end caused.
@@ -2579,9 +3171,9 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
-      const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
+      const login = { providerAccountId: claude.id, runnerId: joined.runnerId, wire };
       try {
         await waitForProbe(wire, claude.id, 0);
         const requestId = await startDeviceLogin(harness, token, login, 0);
@@ -2612,9 +3204,9 @@ describe("logging a runner's provider instance in", () => {
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        const claude = await findInstanceFor(harness.base, token, "claude-code");
+        const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
         const { wire } = await greet(harness.base, joined.credential);
-        const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
+        const login = { providerAccountId: claude.id, runnerId: joined.runnerId, wire };
         try {
           await waitForProbe(wire, claude.id, 0);
           const requestId = await startDeviceLogin(harness, token, login, 0);
@@ -2639,10 +3231,10 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findAccountFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
-      const login = { instanceId: claude.id, runnerId: joined.runnerId, wire };
+      const login = { providerAccountId: claude.id, runnerId: joined.runnerId, wire };
       try {
         await waitForProbe(wire, claude.id, 0);
         const first = await startDeviceLogin(harness, token, login, 0);
@@ -2657,7 +3249,7 @@ describe("logging a runner's provider instance in", () => {
         await settleCodexLogin(
           harness,
           token,
-          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          { providerAccountId: codex.id, runnerId: joined.runnerId, wire },
           3,
         );
         expect(countProbes(wire, claude.id)).toBe(1);
@@ -2675,15 +3267,15 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findAccountFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
         const replaced = await startDeviceLogin(
           harness,
           token,
-          { instanceId: claude.id, runnerId: joined.runnerId, wire },
+          { providerAccountId: claude.id, runnerId: joined.runnerId, wire },
           0,
         );
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2696,7 +3288,7 @@ describe("logging a runner's provider instance in", () => {
         await settleCodexLogin(
           harness,
           token,
-          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          { providerAccountId: codex.id, runnerId: joined.runnerId, wire },
           2,
         );
 
@@ -2711,8 +3303,8 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
+      const codex = await findAccountFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential, TWO_ADAPTERS);
       try {
         await waitForProbe(wire, claude.id, 0);
@@ -2726,7 +3318,7 @@ describe("logging a runner's provider instance in", () => {
         await settleCodexLogin(
           harness,
           token,
-          { instanceId: codex.id, runnerId: joined.runnerId, wire },
+          { providerAccountId: codex.id, runnerId: joined.runnerId, wire },
           1,
         );
 
@@ -2741,10 +3333,10 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const first = await greet(harness.base, joined.credential);
       const requestId = await startDeviceLogin(harness, token, {
-        instanceId: claude.id,
+        providerAccountId: claude.id,
         runnerId: joined.runnerId,
         wire: first.wire,
       });
@@ -2776,7 +3368,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2805,7 +3397,7 @@ describe("logging a runner's provider instance in", () => {
       async (harness) => {
         const token = await completeSetup(harness.base);
         const joined = await enlist(harness);
-        const claude = await findInstanceFor(harness.base, token, "claude-code");
+        const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
         const { wire } = await greet(harness.base, joined.credential);
         try {
           const response = await startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2823,16 +3415,28 @@ describe("logging a runner's provider instance in", () => {
     );
   });
 
-  it("rejects a provider this runner build has no adapter for, before asking the runner", async () => {
+  it("rejects a harness this runner build has no adapter for, before asking the runner", async () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const codex = await findInstanceFor(harness.base, token, "codex");
+      const codex = await findAccountFor(harness.base, token, "codex/codex");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const response = await startLogin(harness.base, token, codex.id, joined.runnerId);
         expect(response.status, await response.clone().text()).toBe(400);
-        expect(await response.json()).toMatchObject({ error: { code: "validation" } });
+        expect(await response.json()).toMatchObject({
+          error: {
+            code: "validation",
+            details: {
+              issues: [
+                {
+                  path: ["runnerId"],
+                  message: "Hercule on atlas cannot run Codex; update Hercule on that machine",
+                },
+              ],
+            },
+          },
+        });
         expect(wire.frames.filter((frame) => frame._tag === "loginStart")).toEqual([]);
       } finally {
         wire.close();
@@ -2844,7 +3448,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const wire = await dialRunnerSocket(harness.base, joined.credential);
       try {
         const response = await startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2861,7 +3465,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const starting = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2875,31 +3479,36 @@ describe("logging a runner's provider instance in", () => {
           code: "the-pasted-code",
         });
         const sent = await waitForFrame<LoginCode>(wire, "loginCode");
-        expect(sent.instanceId).toBe(claude.id);
+        expect(sent.providerAccountId).toBe(claude.id);
         expect(sent.code).toBe("the-pasted-code");
         wire.send({ _tag: "loginResult", requestId: sent.requestId, ok: true });
 
-        // A harness that was just logged in has not been probed for its
+        // A harness that was just signed in has not been probed for its
         // account yet, so the response is a new snapshot, not the old one.
         const probe = await waitForProbe(wire, claude.id, before);
         wire.send({
           _tag: "probeReport",
           requestId: probe.requestId,
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           result: buildProbeResult("2.1.263"),
         });
 
         const response = await pending;
         expect(response.status, await response.clone().text()).toBe(200);
-        const snapshot = (await response.json()) as Instance["snapshots"][number];
-        expect(snapshot.runnerId).toBe(joined.runnerId);
-        expect(snapshot.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
+        // The response is the account, with the snapshot the new probe stored.
+        const account = (await response.json()) as Account;
+        const snapshot = account.snapshots.find((one) => one.runnerId === joined.runnerId);
+        expect(snapshot?.auth).toMatchObject({ status: "ok", identity: "rogier@example.com" });
 
         // The code and the URL are valid for one exchange and are never
         // stored.
-        const logged = await harness.audit("provider.loggedIn");
+        const logged = await harness.audit("providerAccount.signedIn");
         expect(logged).toHaveLength(1);
-        expect(logged[0]?.payload).toEqual({ instanceId: claude.id, runnerId: joined.runnerId });
+        expect(logged[0]?.payload).toEqual({
+          providerAccountId: claude.id,
+          runnerId: joined.runnerId,
+          harnessId: "claude-code/claude-code",
+        });
         expect(logged[0]?.actor).toBe("user");
         expect(JSON.stringify(logged[0])).not.toContain("the-pasted-code");
       } finally {
@@ -2912,7 +3521,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const starting = startLogin(harness.base, token, claude.id, joined.runnerId);
@@ -2952,7 +3561,7 @@ describe("logging a runner's provider instance in", () => {
         wire.send({
           _tag: "probeReport",
           requestId: probe.requestId,
-          instanceId: claude.id,
+          providerAccountId: claude.id,
           result: buildProbeResult("2.1.263"),
         });
         expect((await accepted).status).toBe(200);
@@ -2966,7 +3575,7 @@ describe("logging a runner's provider instance in", () => {
     await withRegistry(async (harness) => {
       const token = await completeSetup(harness.base);
       const joined = await enlist(harness);
-      const claude = await findInstanceFor(harness.base, token, "claude-code");
+      const claude = await findAccountFor(harness.base, token, "claude-code/claude-code");
       const { wire } = await greet(harness.base, joined.credential);
       try {
         const pending = submitCode(harness.base, token, claude.id, {
@@ -3066,7 +3675,7 @@ const awaitHeldWorkToEnd = async (harness: ServerHarness, what: string): Promise
 describe("a runner connection during a promotion", () => {
   it("holds a hello that arrives while frozen, and answers it with the new address once sealed", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const promotionToken = await freezeController(harness.base, token);
 
@@ -3089,7 +3698,7 @@ describe("a runner connection during a promotion", () => {
 
   it("holds a hello that arrives while frozen, and answers it once the transfer is cancelled", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const promotionToken = await freezeController(harness.base, token);
 
@@ -3120,7 +3729,7 @@ describe("a runner connection during a promotion", () => {
   // state, which is the same whichever side of the thaw the close lands on.
   it("records a runner that disconnects while frozen as unreachable once the transfer is cancelled", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const { wire } = await greet(harness.base, joined.credential);
       await waitForRunner(
@@ -3145,7 +3754,7 @@ describe("a runner connection during a promotion", () => {
 
   it("keeps a runner online that disconnects and connects again while frozen", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const first = await greet(harness.base, joined.credential);
       await waitForRunner(
@@ -3174,7 +3783,7 @@ describe("a runner connection during a promotion", () => {
 
   it("drops a held hello when its runner hangs up, so the thaw does not bring a gone runner online", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const promotionToken = await freezeController(harness.base, token);
 
@@ -3191,7 +3800,7 @@ describe("a runner connection during a promotion", () => {
 
   it("keeps the newer connection of a runner whose older connection hung up with a held hello", async () => {
     await withServer(async (harness) => {
-      const token = await completeSetupWithNoProviderInstance(harness);
+      const token = await completeSetupWithNoProviderAccount(harness);
       const joined = await enlist(harness);
       const promotionToken = await freezeController(harness.base, token);
 

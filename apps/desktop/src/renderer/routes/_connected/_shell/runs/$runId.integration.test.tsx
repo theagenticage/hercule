@@ -183,7 +183,7 @@ const ASKING: Session = buildSession({
   stepId: "review",
   runnerId: RUNNER_ID,
   permissionProfileId: "01a06d02-7e00-7000-8000-000000000001",
-  instanceId: "01a06d02-7f00-7000-8000-000000000001",
+  providerAccountId: "01a06d02-7f00-7000-8000-000000000001",
   openRequests: [
     {
       requestId: "r-1",
@@ -313,7 +313,7 @@ describe("a run's page", () => {
   it("shows the Hercule face with Workflows selected, as the book draws it", async () => {
     await openRun();
 
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const nav = screen.getByRole("navigation", { name: "Work" });
     const workflows = within(nav).getByRole("link", { name: "Workflows" });
     expect(workflows.getAttribute("aria-current")).toBe("page");
     expect(workflows.classList.contains("is-on")).toBe(true);
@@ -356,7 +356,7 @@ describe("a run's page", () => {
 });
 
 describe("a run with a text generation step", () => {
-  const REASON = "No provider instance can generate text";
+  const REASON = "No account can generate text";
   /** The run at `screen`, a text generation step, running while its call waits for a runner. */
   const SCREENING: Run = {
     ...LIVE,

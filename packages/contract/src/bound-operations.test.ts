@@ -204,9 +204,11 @@ describe("BoundOperation", () => {
     ).toBe(true);
   });
 
-  it("refuses an id that is neither", () => {
-    expect(Exit.isFailure(decode({ op: "nothing.here", input: {} }))).toBe(true);
-    expect(Exit.isFailure(decode({ op: "Github/pr.merge", input: {} }))).toBe(true);
+  // The schema is in the API's declaration, so it must not read the operation
+  // table: that would put the table on the web app's first paint.
+  it("leaves it to the core to refuse an id that is neither, and the core does", () => {
+    expect(Exit.isSuccess(decode({ op: "nothing.here", input: {} }))).toBe(true);
+    expect(Exit.isFailure(check("nothing.here", {}))).toBe(true);
   });
 });
 

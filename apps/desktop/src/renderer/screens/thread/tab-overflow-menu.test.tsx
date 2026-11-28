@@ -45,7 +45,7 @@ const buildTab = (overrides: Partial<SessionTab> & { readonly sessionId: string 
   status: "age",
   activityAt: new Date().toISOString(),
   done: false,
-  providerId: null,
+  harnessId: "claude-code/claude-code",
   model: "Opus 5.5",
   ...overrides,
 });

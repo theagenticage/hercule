@@ -1,6 +1,9 @@
 import {
+  chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -17,7 +20,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { HOST_API, PluginError, type Plugin } from "@hercule/plugin-host";
 import { CurrentActor, type Actor } from "./actor";
 import { boot, bootWith, hashToken, buildSetupUrl, type BootOutcome } from "./bootstrap";
-import { uuidFromString, withTransaction } from "./db";
+import { runMigrations, uuidFromString, withTransaction } from "./db";
+import { openDatabaseWriter } from "./db/client";
+import { migrations } from "./db/migrations/index";
+import { encryptSecretValue } from "./secrets/cipher";
+import type { SecretOwner } from "./secrets";
 import { Plugins } from "./plugins";
 import { NOTE_APPEND_ACTION_ID, notesPlugin } from "./plugins/testing";
 import { PromotionState } from "./promotion";
@@ -114,6 +121,7 @@ describe("the first run", () => {
       "backup.time",
       "retention.conversations",
       "retention.events",
+      "retention.runnerMetrics",
       "retention.security",
     ]);
   });
@@ -250,7 +258,7 @@ describe("bootWith", () => {
 });
 
 /**
- * Builds a plugin with one provider that either starts or fails to start. That
+ * Builds a plugin with one harness that either starts or fails to start. That
  * is enough to test what a boot does with one of each; the catalog and the
  * plugin lifecycle are tested in their own modules.
  */
@@ -259,17 +267,16 @@ const buildBootPlugin = (id: string, failure?: string): Plugin => ({
     id,
     displayName: `Plugin ${id}`,
     hostApi: HOST_API,
-    capabilities: ["providers"],
+    capabilities: ["harnesses"],
     configSchema: Schema.Struct({}),
   },
   register: (host) =>
-    host.providers!.register({
-      id: `${id}-provider`,
-      displayName: `Provider ${id}`,
+    host.harnesses!.register({
+      id,
+      displayName: `Harness ${id}`,
       binaryName: "harness",
-      supportsMultipleInstances: true,
-      configSchema: Schema.Struct({}),
-      defaultConfig: {},
+      releaseSource: { kind: "npm", package: "harness" },
+      runs: [],
       declared: {
         steering: "native",
         fork: "native",
@@ -283,6 +290,7 @@ const buildBootPlugin = (id: string, failure?: string): Plugin => ({
         mcpPassthrough: "native",
         disallowedTools: "native",
         structuredOutput: "supported",
+        textGeneration: "supported",
       },
     }),
   activate: () =>
@@ -320,7 +328,7 @@ describe("a boot with a plugin that will not start", () => {
     });
     expect(details[1]?.status).toEqual({ _tag: "active" });
     // Registration ran before activation, so the failure did not undo it.
-    expect(details[0]?.contributions.map((c) => c.id)).toEqual(["broken-provider"]);
+    expect(details[0]?.contributions.map((c) => c.id)).toEqual(["broken/broken"]);
     // No user asked for this boot, so the entry's actor is the system rather
     // than whoever logged in last.
     expect(
@@ -340,8 +348,9 @@ describe("a boot after a plugin changed while the controller was stopped", () =>
         bootWith({ argv: ["--home", home], env: {}, masterKeyBackend: "file", plugins }, () => use),
       );
     const readMark = () =>
-      query<{ invalid_since: string | null }>("SELECT invalid_since FROM workflows")[0]
-        ?.invalid_since;
+      query<{ invalid_since: string | null }>(
+        "SELECT invalid_since FROM workflows WHERE definition ->> 'name' = 'Notes'",
+      )[0]?.invalid_since;
 
     // The workflow calls the action of the `notes` plugin, which is installed.
     await bootWithPlugins(
@@ -411,7 +420,26 @@ describe("a second boot", () => {
     await serve();
     await serve();
     expect(query("SELECT name FROM permission_profiles")).toHaveLength(3);
-    expect(query("SELECT key FROM settings")).toHaveLength(5);
+    expect(query("SELECT key FROM settings")).toHaveLength(6);
+  });
+
+  it("installs the shipped workflows on the first boot only", async () => {
+    const readShippedWorkflows = () =>
+      query<{ key: string; enabled: number }>(
+        `SELECT shipped_workflows.key, workflows.enabled FROM shipped_workflows
+         JOIN workflows ON workflows.id = shipped_workflows.workflow_id ORDER BY key`,
+      );
+
+    await serve();
+    const first = readShippedWorkflows();
+    await serve();
+
+    expect(first).toEqual([
+      { key: "card-in-review", enabled: 1 },
+      { key: "card-landed", enabled: 1 },
+    ]);
+    expect(readShippedWorkflows()).toEqual(first);
+    expect(query("SELECT id FROM workflows")).toHaveLength(2);
   });
 });
 
@@ -444,6 +472,62 @@ describe("the setup URL", () => {
   });
 });
 
+describe("a boot that upgrades a database with a Z.ai key", () => {
+  it("opens the existing master key first, so the migration can encrypt the key again", async () => {
+    const keyBytes = crypto.getRandomValues(new Uint8Array(32));
+    writeFileSync(join(home, "master.key"), `${Buffer.from(keyBytes).toString("base64")}\n`, {
+      mode: 0o600,
+    });
+    const key = await crypto.subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, [
+      "encrypt",
+      "decrypt",
+    ]);
+    // A database as the previous version left it: migrated up to 94, with a pi instance and its key.
+    const instance = uuidFromString("0199f0b7-0002-7000-8000-000000000000");
+    // The owner kind of the previous version, which `SecretOwner` no longer has.
+    const owner = {
+      kind: "provider-instance",
+      id: "0199f0b7-0002-7000-8000-000000000000",
+    } as const;
+    mkdirSync(join(home, "data"), { recursive: true });
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* runMigrations(migrations.filter(([id]) => id < 95));
+        const at = "2026-10-01T00:00:00.000Z";
+        yield* sql`INSERT INTO provider_instances (id, provider_id, name, config, created_at, updated_at)
+                   VALUES (${instance}, 'pi/pi', 'pi', '{}', ${at}, ${at})`;
+        const sealed = yield* encryptSecretValue(
+          key,
+          owner as unknown as SecretOwner,
+          "zaiApiKey",
+          "zai-secret-value",
+        );
+        yield* sql`INSERT INTO secrets (id, owner_kind, owner_id, name, nonce, ciphertext, created_at)
+                   VALUES (x'01', ${owner.kind}, ${owner.id}, 'zaiApiKey', ${sealed.nonce},
+                           ${sealed.ciphertext}, ${at})`;
+      }).pipe(
+        Effect.provide(
+          openDatabaseWriter({
+            databaseFile: join(home, "data", "hercule.db"),
+            controllerLockFile: join(home, "data", "seed.lock"),
+          }),
+        ),
+        Effect.scoped,
+        Effect.orDie,
+      ),
+    );
+
+    await serve();
+
+    expect(
+      query<{ owner_kind: string; owner_id: string; name: string }>(
+        "SELECT owner_kind, owner_id, name FROM secrets WHERE owner_kind <> 'core'",
+      ),
+    ).toEqual([{ owner_kind: "provider-account", owner_id: owner.id, name: "apiKey" }]);
+  });
+});
+
 describe("a boot that cannot start", () => {
   it("fails with the config error, and creates no database", async () => {
     const failure = await serveAndReadError(["-c", "bind.port=nope"]);
@@ -461,6 +545,22 @@ describe("a boot that cannot start", () => {
     expect(failure.message).toContain(join(home, "master.key"));
     expect(failure.message).toContain("1 encrypted secret row");
     expect(existsSync(join(home, "master.key"))).toBe(false);
+  });
+
+  it("stops before the migrations when the master key exists but cannot be opened", async () => {
+    await serve();
+    // Make migration 95 pending again, as it is on a database from the previous version.
+    const database = new Database(join(home, "data", "hercule.db"));
+    database.run("DELETE FROM effect_sql_migrations WHERE migration_id = 95");
+    database.close();
+    chmodSync(join(home, "master.key"), 0o644);
+
+    const failure = await serveAndReadError();
+
+    expect(failure._tag).toBe("MasterKeyError");
+    expect(failure.message).toContain("0644");
+    // The pre-migration copy is the first thing a pending migration causes.
+    expect(readdirSync(join(home, "backups"))).toEqual([]);
   });
 
   it("includes the file name when the database file is not a database", async () => {

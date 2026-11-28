@@ -60,7 +60,7 @@ const insertAssistant = (id: string) =>
     yield* withTransaction(
       sql,
       Effect.gen(function* () {
-        yield* sql`INSERT INTO agents (id, kind, name, system_prompt, instance_id, permission_profile_id,
+        yield* sql`INSERT INTO agents (id, kind, name, system_prompt, provider_account_id, permission_profile_id,
                                        access_mode, model_selection, disallowed_tools,
                                        created_at, updated_at)
           VALUES (unhex(${hex}), 'assistant', 'Hercule', '', unhex(${hex}), unhex(${hex}),

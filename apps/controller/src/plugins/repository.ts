@@ -41,6 +41,20 @@ export interface NewContribution {
   readonly definition: unknown;
 }
 
+/**
+ * One entity kind as the catalog stores it in an event source's definition:
+ * only what the tasks domain needs to classify a linked thing without the
+ * live plugin.
+ */
+export interface CatalogEntityKind {
+  /** The qualified kind, such as `github/pull-request`. */
+  readonly kind: string;
+  /** Every ref of this kind starts with it. */
+  readonly refPrefix: string;
+  /** `work` for a kind of work (a card), `context` for a kind of context (a place). */
+  readonly classification: "work" | "context";
+}
+
 /** The `config` and `definition` columns: JSON text holding a JSON value. */
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 
@@ -191,6 +205,37 @@ const make = Effect.gen(function* () {
         }
         return byOwner;
       }),
+
+    /**
+     * Returns the entity kinds that the catalog holds, in a fixed order,
+     * whether the plugin that declares them is enabled or not. A kind stays
+     * declared while its plugin is registered: disabling the plugin does not
+     * make a linked thing of that kind readable, so it must still count as
+     * work that is not finished. The catalog is rewritten at every boot, so
+     * the kinds of a plugin that was removed are gone.
+     */
+    listDeclaredEntityKinds: (): Effect.Effect<ReadonlyArray<CatalogEntityKind>, SqlError> =>
+      Effect.map(
+        sql<{
+          readonly kind: string;
+          readonly ref_prefix: string;
+          readonly classification: "work" | "context";
+        }>`
+          SELECT json_extract(k.value, '$.kind') AS kind,
+                 json_extract(k.value, '$.refPrefix') AS ref_prefix,
+                 json_extract(k.value, '$.classification') AS classification
+          FROM plugin_contributions c
+          JOIN json_each(c.definition, '$.entityKinds') k
+          WHERE c.extension_point = 'event-source'
+          ORDER BY kind
+        `,
+        (rows) =>
+          rows.map((row) => ({
+            kind: row.kind,
+            refPrefix: row.ref_prefix,
+            classification: row.classification,
+          })),
+      ),
 
     /** Returns one plugin's stored value under a key, or `none` when nothing is stored. */
     kvGet: (

@@ -32,7 +32,7 @@
  * the connection that is attached when it sends, so a connection that closes
  * or attaches never interrupts a listing.
  */
-import type { EditedFile, ProviderEvent, RunnerToController } from "@hercule/protocol";
+import type { EditedFile, HarnessEvent, RunnerToController } from "@hercule/protocol";
 import { MAX_EDITED_FILES } from "@hercule/protocol";
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
@@ -74,7 +74,7 @@ export interface EditWatch {
    * a Request that asks to run one, a Request's end, and an item that
    * started or completed. Logs an item that completed with no known start.
    */
-  readonly observeEvent: (event: ProviderEvent) => Effect.Effect<void>;
+  readonly observeEvent: (event: HarnessEvent) => Effect.Effect<void>;
   /**
    * Takes the start mark of the command or edit that a Request asks to run.
    * Call it right before an allow answer reaches the harness: the command

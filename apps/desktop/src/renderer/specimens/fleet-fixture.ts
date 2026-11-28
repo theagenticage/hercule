@@ -1,0 +1,1084 @@
+/**
+ * The records of the Fleet specimen (fleet.tsx): five machines in the states
+ * the Fleet page and a machine's page draw, as the controller would return
+ * them at the specimen's clock, Tuesday 29 September 2026, 09:41 UTC.
+ *
+ * The machines are listed in the order they joined, which is the order of
+ * their ids and the order of the cards:
+ *
+ * - atlas: a Mac with 64 GB, so a desktop. Online, a cap of 16 with 12
+ *   running, so its sessions draw as 16 cells, and 5 Threads waiting for a
+ *   slot, so its card offers Raise cap to 17. It runs a runner one release behind the
+ *   controller, and Codex 0.9.0, which is below the floor. Anthropic is signed
+ *   in on it and OpenAI is not.
+ * - beelink: a Linux server, and the controller's own machine. Online, a cap
+ *   of 24 with 9 running, so its sessions draw as 24 narrower cells. Healthy, but 85 % of
+ *   its memory is in use, which turns the memory marigold.
+ * - bosgame: a Linux server, online, whose free disk is below its limit, so
+ *   it takes no new sessions.
+ * - mini: a Mac laptop with 16 GB, offline since 09:12 today. Two of its
+ *   Threads are open.
+ * - studio: a Mac with 96 GB, online and set to take no new work. Its
+ *   disk is 87 % full, which is the one need its card shows.
+ *
+ * Software: atlas, beelink, bosgame and studio report the probed toolchains
+ * (bosgame lacks terraform and dotnet), and mini runs an older runner that
+ * looked for git and gh only, so the grid shows "Unknown" for the rest of its
+ * column. The latest Claude Code and pi are read, so the grid shows checks, an
+ * older version (atlas's runner, studio's Claude Code), a version below the
+ * floor (atlas's Codex), a dash, and Codex's last read failed after one
+ * succeeded ("checked 09:00").
+ *
+ * The sidebar's seven threads run on atlas, and are 7 of its 12 running
+ * sessions, so the sidebar and the Fleet page agree. They are the threads of
+ * every other shell specimen, with no session added, so the sidebar's foot
+ * reads "3 working · 2 waiting · 2 idle" here as it does on every other
+ * screen. Atlas's work is ten groups in Running here: the seven rows of the
+ * sidebar, a workflow run with two steps working and five waiting for a
+ * slot, a second run with two steps working, and Ada, an assistant.
+ */
+import {
+  DISK_USAGE_CAPABILITY,
+  PROBED_TOOLCHAINS,
+  type ControllerInfo,
+  type ListedEvent,
+  type Harness,
+  type HarnessLatestRelease,
+  type ProviderAccount,
+  type Run,
+  type Runner,
+  type RunnerFacts,
+  type Session,
+  type Workspace,
+} from "@hercule/contract";
+import type { RunnerMetricsHistory } from "@hercule/client-core/metrics-history";
+import { HARNESSES } from "@hercule/client-core/testing";
+import {
+  buildCheckout,
+  buildRepo,
+  buildSession,
+  buildWorkspace,
+} from "@hercule/client-core/threads/testing";
+import {
+  buildMachineMetrics,
+  interpolate,
+  driftWobble,
+  wobble,
+  workingDay,
+  type MachineMetrics,
+  type MachineStory,
+} from "./fleet-metrics-fixture";
+import { buildAtlasLog, buildJoinedLog } from "./fleet-activity-fixture";
+import { RUN_RECORDS } from "./run-fixture";
+import { ADA, buildAssistantSession } from "./assistant-states-fixture";
+import { SPECIMEN_ACCOUNTS, SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
+import type { CleanupAnswers } from "./fleet-cleanup-fixture";
+import type { SidebarRecords } from "./shell-page";
+
+const GIB = 1024 ** 3;
+const GB = 1e9;
+
+/** The release of the controller. */
+const CONTROLLER_VERSION = "0.4.2";
+
+/** The ten gibibytes a machine's disk limit is by default. */
+const DEFAULT_DISK_LIMIT_BYTES = 10 * GIB;
+
+/** Returns the ISO instant `minutes` before the specimen's clock. */
+const minutesAgo = (minutes: number): string =>
+  new Date(SPECIMEN_NOW - minutes * 60_000).toISOString();
+
+/** Returns the ISO instant `days` before the specimen's clock. */
+const daysAgo = (days: number): string => minutesAgo(days * 24 * 60);
+
+/** The ids of the five machines, which are UUIDv7-shaped so they sort in the order the machines joined. */
+const ATLAS_ID = "01a0f0c0-0000-7000-8000-000000000001";
+const BEELINK_ID = "01a0f0c0-0000-7000-8000-000000000002";
+const BOSGAME_ID = "01a0f0c0-0000-7000-8000-000000000003";
+const MINI_ID = "01a0f0c0-0000-7000-8000-000000000004";
+const STUDIO_ID = "01a0f0c0-0000-7000-8000-000000000005";
+
+/** What a machine has of one harness: the version it reports, or `null` when the harness is not installed. */
+type HarnessVersions = Readonly<Record<string, string | null>>;
+
+/** The one Codex version of the fixture that is below the oldest this Hercule works with. */
+const BELOW_FLOOR_VERSION = "0.9.0";
+
+/** The version of each probed toolchain a machine reports, by name. A toolchain the machine lacks has no entry. */
+type ToolchainVersions = Readonly<Partial<Record<(typeof PROBED_TOOLCHAINS)[number], string>>>;
+
+/**
+ * Returns the facts of a machine with a disk of `diskTotalBytes`, the harnesses
+ * of `versions` installed and the toolchains of `tools`, which the runner
+ * reports in the order of the probed list. `probedToolchains` is the list the
+ * runner says it looked for; an older runner reports none, so its facts leave
+ * the field out.
+ */
+const buildFacts = (
+  os: string,
+  arch: string,
+  totalMemoryBytes: number,
+  diskTotalBytes: number,
+  versions: HarnessVersions,
+  tools: ToolchainVersions,
+  probedToolchains: readonly string[] | undefined,
+): RunnerFacts => ({
+  os,
+  arch,
+  totalMemoryBytes,
+  diskTotalBytes,
+  docker: tools.docker !== undefined,
+  toolchains: PROBED_TOOLCHAINS.flatMap((name) => {
+    const version = tools[name];
+    return version === undefined ? [] : [{ name, version, path: `/usr/local/bin/${name}` }];
+  }),
+  ...(probedToolchains === undefined ? {} : { probedToolchains }),
+  harnesses: HARNESSES.map((harness) => ({
+    name: harness.binaryName,
+    present: versions[harness.id] !== null && versions[harness.id] !== undefined,
+    ...(versions[harness.id] ? { path: `/usr/local/bin/${harness.binaryName}` } : {}),
+  })),
+  adapters: ["claude-code/claude-code", "codex/codex", "pi/pi"],
+  identityPort: 4939,
+});
+
+/** Returns an online, active machine with the facts and the readings given, `cpu` being the last minute's mean and peak. */
+const buildMachine = (
+  id: string,
+  name: string,
+  over: Partial<Runner> & Pick<Runner, "facts" | "maxConcurrentSessions">,
+  diskFreeBytes: number,
+  availableMemoryBytes: number,
+  cpu: { readonly averagePercent: number; readonly peakPercent: number },
+): Runner => ({
+  id,
+  name,
+  connectivity: "online",
+  lifecycle: "active",
+  reserved: false,
+  version: CONTROLLER_VERSION,
+  labels: [],
+  metrics: { diskFreeBytes, availableMemoryBytes, cpu },
+  diskUsage: null,
+  diskWatermarkBytes: DEFAULT_DISK_LIMIT_BYTES,
+  lastSeenAt: minutesAgo(0.5),
+  ...over,
+});
+
+/**
+ * Returns what a runner measured outside its workspaces 20 minutes ago: its
+ * repository caches (`cacheGB`) and its Harness Homes (`sessionDataGB`).
+ */
+const buildRunnerDiskUsage = (cacheGB: number, sessionDataGB: number): Runner["diskUsage"] => ({
+  repositoryCacheBytes: cacheGB * GB,
+  harnessHomeBytes: sessionDataGB * GB,
+  measuredAt: minutesAgo(20),
+});
+
+/** The harness versions each machine reports, by harness id. */
+const ATLAS_VERSIONS: HarnessVersions = {
+  "claude-code/claude-code": "2.0.84",
+  "codex/codex": BELOW_FLOOR_VERSION,
+  "pi/pi": null,
+};
+const BEELINK_VERSIONS: HarnessVersions = {
+  "claude-code/claude-code": "2.0.84",
+  "codex/codex": "0.46.0",
+  "pi/pi": "0.9.2",
+};
+const BOSGAME_VERSIONS: HarnessVersions = {
+  "claude-code/claude-code": "2.0.84",
+  "codex/codex": null,
+  "pi/pi": null,
+};
+const MINI_VERSIONS: HarnessVersions = {
+  "claude-code/claude-code": "2.0.78",
+  "codex/codex": "0.46.0",
+  "pi/pi": null,
+};
+const STUDIO_VERSIONS: HarnessVersions = {
+  "claude-code/claude-code": "2.0.80",
+  "codex/codex": "0.46.0",
+  "pi/pi": "0.9.2",
+};
+
+/**
+ * The toolchains each machine reports. Atlas, beelink and studio have all
+ * twelve; bosgame lacks terraform and dotnet; mini runs an older runner that
+ * looked for git and gh only, so it reports no probed list.
+ */
+const ATLAS_TOOLS: ToolchainVersions = {
+  git: "2.51.0",
+  gh: "2.78.0",
+  node: "24.8.0",
+  pnpm: "10.17.1",
+  bun: "1.2.23",
+  go: "1.25.1",
+  rustc: "1.90.0",
+  python3: "3.13.7",
+  uv: "0.8.17",
+  docker: "28.4.0",
+  terraform: "1.13.3",
+  dotnet: "9.0.305",
+};
+const BEELINK_TOOLS: ToolchainVersions = {
+  git: "2.43.0",
+  gh: "2.45.0",
+  node: "22.19.0",
+  pnpm: "10.17.1",
+  bun: "1.2.21",
+  go: "1.24.6",
+  rustc: "1.89.0",
+  python3: "3.12.3",
+  uv: "0.8.15",
+  docker: "27.5.1",
+  terraform: "1.12.2",
+  dotnet: "8.0.414",
+};
+const BOSGAME_TOOLS: ToolchainVersions = {
+  git: "2.43.0",
+  gh: "2.45.0",
+  node: "22.19.0",
+  pnpm: "9.15.4",
+  bun: "1.2.21",
+  go: "1.24.6",
+  rustc: "1.89.0",
+  python3: "3.12.3",
+  uv: "0.8.15",
+  docker: "27.5.1",
+};
+const MINI_TOOLS: ToolchainVersions = {
+  git: "2.50.1",
+  gh: "2.76.2",
+};
+const STUDIO_TOOLS: ToolchainVersions = {
+  git: "2.51.0",
+  gh: "2.80.0",
+  node: "24.8.0",
+  pnpm: "10.17.1",
+  bun: "1.2.23",
+  go: "1.25.1",
+  rustc: "1.90.0",
+  python3: "3.13.7",
+  uv: "0.8.17",
+  docker: "28.3.3",
+  terraform: "1.13.3",
+  dotnet: "9.0.304",
+};
+
+/** Atlas: a Mac with 64 GB and a 1,000 GB disk, one release behind, with 12 sessions running of a cap of 16. */
+export const ATLAS: Runner = buildMachine(
+  ATLAS_ID,
+  "atlas",
+  {
+    facts: buildFacts(
+      "darwin",
+      "arm64",
+      64 * GIB,
+      1000 * GB,
+      ATLAS_VERSIONS,
+      ATLAS_TOOLS,
+      PROBED_TOOLCHAINS,
+    ),
+    maxConcurrentSessions: 16,
+    version: "0.4.1",
+    labels: ["macos", "xcode"],
+    diskUsage: buildRunnerDiskUsage(64, 23),
+  },
+  412 * GB,
+  29 * GIB,
+  { averagePercent: 34, peakPercent: 71 },
+);
+
+/** Beelink: a Linux server with 128 GB, 85 % of it in use, with a cap of 24. */
+export const BEELINK: Runner = buildMachine(
+  BEELINK_ID,
+  "beelink",
+  {
+    facts: buildFacts(
+      "linux",
+      "x64",
+      128 * GIB,
+      4000 * GB,
+      BEELINK_VERSIONS,
+      BEELINK_TOOLS,
+      PROBED_TOOLCHAINS,
+    ),
+    maxConcurrentSessions: 24,
+    labels: ["linux", "docker"],
+    diskUsage: buildRunnerDiskUsage(120, 64),
+  },
+  1900 * GB,
+  19 * GIB,
+  { averagePercent: 18, peakPercent: 52 },
+);
+
+/** Bosgame: a Linux server whose free disk, 6.2 GB, is below its limit of 10.7 GB. */
+export const BOSGAME: Runner = buildMachine(
+  BOSGAME_ID,
+  "bosgame",
+  {
+    facts: buildFacts(
+      "linux",
+      "x64",
+      32 * GIB,
+      500 * GB,
+      BOSGAME_VERSIONS,
+      BOSGAME_TOOLS,
+      PROBED_TOOLCHAINS,
+    ),
+    maxConcurrentSessions: 8,
+    labels: ["linux"],
+    diskUsage: buildRunnerDiskUsage(52, 14),
+  },
+  6.2 * GB,
+  21 * GIB,
+  { averagePercent: 7, peakPercent: 22 },
+);
+
+/** Mini: a Mac laptop with 16 GB, offline since 09:12 today. Its readings are the last it sent. */
+export const MINI: Runner = buildMachine(
+  MINI_ID,
+  "mini",
+  {
+    facts: buildFacts("darwin", "arm64", 16 * GIB, 500 * GB, MINI_VERSIONS, MINI_TOOLS, undefined),
+    maxConcurrentSessions: 4,
+    connectivity: "offline",
+    lastSeenAt: "2026-09-29T09:12:00.000Z",
+  },
+  98 * GB,
+  5.1 * GIB,
+  { averagePercent: 12, peakPercent: 30 },
+);
+
+/** Studio: a Mac with 96 GB and a 4,000 GB disk that is 87 % full, online and told to take no new work. */
+export const STUDIO: Runner = buildMachine(
+  STUDIO_ID,
+  "studio",
+  {
+    facts: buildFacts(
+      "darwin",
+      "arm64",
+      96 * GIB,
+      4000 * GB,
+      STUDIO_VERSIONS,
+      STUDIO_TOOLS,
+      PROBED_TOOLCHAINS,
+    ),
+    maxConcurrentSessions: 8,
+    lifecycle: "draining",
+    diskUsage: buildRunnerDiskUsage(85, 31),
+  },
+  500 * GB,
+  70 * GIB,
+  { averagePercent: 4, peakPercent: 15 },
+);
+
+/**
+ * The five machines in the order they joined, each with the harness versions
+ * it reports. Kept as pairs so a machine and its versions cannot drift apart.
+ */
+const FLEET_MACHINES: ReadonlyArray<{
+  readonly runner: Runner;
+  readonly versions: HarnessVersions;
+}> = [
+  { runner: ATLAS, versions: ATLAS_VERSIONS },
+  { runner: BEELINK, versions: BEELINK_VERSIONS },
+  { runner: BOSGAME, versions: BOSGAME_VERSIONS },
+  { runner: MINI, versions: MINI_VERSIONS },
+  { runner: STUDIO, versions: STUDIO_VERSIONS },
+];
+
+const FLEET_RUNNERS: ReadonlyArray<Runner> = FLEET_MACHINES.map(({ runner }) => runner);
+
+/**
+ * The latest release of each harness, as the controller last read it at 09:00:
+ *
+ * - Claude Code: read at 09:00, so a machine on 2.0.80 is older.
+ * - Codex: read at 09:00, and the read after it failed, so the grid shows the
+ *   last good version with "checked 09:00".
+ * - pi: read at 09:00.
+ */
+const CHECKED_AT = minutesAgo(41);
+const LATEST_RELEASES: Readonly<Record<string, HarnessLatestRelease>> = {
+  "claude-code/claude-code": {
+    lastGoodRead: { version: "2.0.84", checkedAt: CHECKED_AT },
+    error: null,
+  },
+  "codex/codex": {
+    lastGoodRead: { version: "0.46.0", checkedAt: CHECKED_AT },
+    error: "The npm registry did not answer in time.",
+  },
+  "pi/pi": { lastGoodRead: { version: "0.9.2", checkedAt: CHECKED_AT }, error: null },
+};
+
+/** The shipped harnesses with what each machine reports of them and their latest releases. */
+const FLEET_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => ({
+  ...harness,
+  latestRelease: LATEST_RELEASES[harness.id] ?? { lastGoodRead: null, error: null },
+  runners: FLEET_MACHINES.map(({ runner, versions }) => {
+    const version = versions[harness.id] ?? null;
+    return {
+      runnerId: runner.id,
+      installed: version !== null,
+      version,
+      versionVerdict:
+        version === null
+          ? ("unknown" as const)
+          : version === BELOW_FLOOR_VERSION
+            ? ("below-floor" as const)
+            : ("ok" as const),
+    };
+  }),
+}));
+
+/** The accounts' snapshot of one machine, signed in as `identity` or not signed in. */
+const buildSnapshot = (
+  account: ProviderAccount,
+  runner: Runner,
+  identity: string | null,
+): ProviderAccount["snapshots"][number] => ({
+  runnerId: runner.id,
+  harnessId: account.defaultHarnessId,
+  probedAt: minutesAgo(3),
+  harnessVersion: null,
+  versionVerdict: "unknown",
+  auth:
+    identity === null
+      ? { status: "unauthenticated" }
+      : { status: "ok", identity, planLabel: "Max" },
+  models: account.snapshots[0]?.models ?? [],
+});
+
+/**
+ * Returns the sidebar's account `account` as a per-machine account of the
+ * fleet: signed in as `identity` on the machines of `signedInOn`, and not
+ * signed in on the other machines that have its harness.
+ */
+const spreadAccount = (
+  account: ProviderAccount,
+  identity: string,
+  signedInOn: ReadonlyArray<Runner>,
+  notSignedInOn: ReadonlyArray<Runner>,
+): ProviderAccount => {
+  const snapshots = [
+    ...signedInOn.map((runner) => buildSnapshot(account, runner, identity)),
+    ...notSignedInOn.map((runner) => buildSnapshot(account, runner, null)),
+  ];
+  return {
+    ...account,
+    identity,
+    planLabel: "Max",
+    snapshots,
+    readiness: snapshots.map((snapshot) => ({
+      harnessId: snapshot.harnessId,
+      runnerId: snapshot.runnerId,
+      state: snapshot.auth.status === "ok" ? "ready" : "not-signed-in",
+    })),
+  };
+};
+
+/**
+ * The two Provider Accounts that sign in on each machine. Anthropic is
+ * signed in on atlas, beelink, bosgame and studio; OpenAI only on beelink and
+ * studio, so on atlas it offers Sign in.
+ */
+const FLEET_ACCOUNTS: ReadonlyArray<ProviderAccount> = [
+  spreadAccount(
+    SPECIMEN_ACCOUNTS[0]!,
+    "rogier@acme.com",
+    [ATLAS, BEELINK, BOSGAME, STUDIO],
+    [MINI],
+  ),
+  spreadAccount(SPECIMEN_ACCOUNTS[1]!, "rogier@acme.com", [BEELINK, STUDIO], [ATLAS, MINI]),
+];
+
+/**
+ * Returns a session on `runnerId`, created `minutes` before the clock. A
+ * queued session has not started, as the controller records it. The kind of a
+ * session follows from its ids (`buildSession`): an agent id alone makes an
+ * Agent session, and a run id with it makes a run's step session.
+ */
+const buildFleetSession = (
+  id: string,
+  runnerId: string,
+  status: Session["status"],
+  kind: "thread" | "agent" | "run",
+  title: string,
+  minutes: number,
+  over: Partial<Session> = {},
+): Session =>
+  buildSession({
+    id,
+    title,
+    runnerId,
+    status,
+    ...(kind === "thread" ? {} : { agentId: "agent-triage" }),
+    ...(kind === "run" ? { runId: NIGHTLY_RUN_ID, stepId: "build" } : {}),
+    createdAt: minutesAgo(minutes),
+    startedAt: status === "queued" ? null : minutesAgo(minutes),
+    lastActivityAt: minutesAgo(minutes),
+    ...over,
+  });
+
+/** Returns `count` busy sessions of agents and runs on `runnerId`, newest first. */
+const buildBusySessions = (runnerId: string, prefix: string, count: number): Session[] =>
+  Array.from({ length: count }, (_, index) => {
+    const kind = index % 2 === 0 ? "agent" : "run";
+    return buildFleetSession(
+      `${prefix}-${String(index + 1)}`,
+      runnerId,
+      "busy",
+      kind,
+      // A run's step session is titled "<workflow name> · <step id>".
+      kind === "run"
+        ? `${NIGHTLY_WORKFLOW_NAME} · build`
+        : `${prefix} session ${String(index + 1)}`,
+      10 + index * 7,
+    );
+  });
+
+/** The id of the workflow run most of the fixture's step sessions belong to, which is running. */
+const NIGHTLY_RUN_ID = "01a0f0c0-0000-7000-8000-0000000000a1";
+
+/** The name of the workflow the running run belongs to, which is what a machine's Running here names the run by. */
+const NIGHTLY_WORKFLOW_NAME = "Nightly build";
+
+/** The id of a second running run, of the Dependency check workflow, whose two steps work on atlas. */
+const DEPENDENCY_RUN_ID = "01a0f0c0-0000-7000-8000-0000000000a2";
+
+/** The workspace of the Payout row, which holds its Thread. */
+const PAYOUT_WORKSPACE_ID = "ws-payout";
+
+/** The repository the Payout row works in, and its worktree on atlas, where the Thread works. */
+const PAYMENTS_REPO = buildRepo(
+  "res-payments-api",
+  "git@github.com:acme/payments-api.git",
+  "github.com/acme/payments-api",
+  ["p-payments-api"],
+);
+const PAYOUT_WORKSPACE = buildWorkspace({
+  id: PAYOUT_WORKSPACE_ID,
+  runnerId: ATLAS_ID,
+  kind: "ephemeral",
+  checkouts: [{ ...buildCheckout(PAYMENTS_REPO.id, "rogier/payout-report"), form: "worktree" }],
+  sessionIds: ["s-payout"],
+  diskUsage: { sizeBytes: 17 * GB, freesBytes: 16.2 * GB, measuredAt: minutesAgo(12) },
+});
+
+/**
+ * The sidebar's seven threads, which run on atlas. The Payout thread works in
+ * its own worktree on atlas. A thread started when it was created, which is
+ * the minutes ago its record says.
+ */
+const ATLAS_THREADS: ReadonlyArray<Session> = SPECIMEN_RECORDS.threads.map((thread) => ({
+  ...thread,
+  runnerId: ATLAS_ID,
+  startedAt: thread.createdAt,
+  ...(thread.id === "s-payout" ? { workspaceId: PAYOUT_WORKSPACE_ID } : {}),
+}));
+
+/**
+ * Atlas's sessions that are not Threads of the sidebar: Ada's, the Nightly
+ * build's seven steps and the Dependency check's two. None is an Agent
+ * session: the sidebar would list it and count it in its foot, which must
+ * read as it does on every other shell specimen.
+ */
+const ATLAS_OTHER_SESSIONS: ReadonlyArray<Session> = [
+  buildAssistantSession(ADA, {
+    minutesAgo: 9,
+    status: "busy",
+    runnerId: ATLAS_ID,
+    startedAt: minutesAgo(9),
+  }),
+  buildFleetSession("atlas-run-lint", ATLAS_ID, "busy", "run", "Nightly build · lint", 30, {
+    stepId: "lint",
+  }),
+  buildFleetSession(
+    "atlas-run-typecheck",
+    ATLAS_ID,
+    "busy",
+    "run",
+    "Nightly build · typecheck",
+    28,
+    {
+      stepId: "typecheck",
+    },
+  ),
+  buildFleetSession("atlas-check-audit", ATLAS_ID, "busy", "run", "Dependency check · audit", 4, {
+    runId: DEPENDENCY_RUN_ID,
+    stepId: "audit",
+  }),
+  buildFleetSession(
+    "atlas-check-outdated",
+    ATLAS_ID,
+    "busy",
+    "run",
+    "Dependency check · outdated",
+    4,
+    { runId: DEPENDENCY_RUN_ID, stepId: "outdated" },
+  ),
+  ...Array.from({ length: 5 }, (_, index) =>
+    buildFleetSession(
+      `atlas-run-test-${String(index + 1)}`,
+      ATLAS_ID,
+      "queued",
+      "run",
+      `Nightly build · test-${String(index + 1)}`,
+      7 - index,
+      { stepId: `test-${String(index + 1)}` },
+    ),
+  ),
+];
+
+/**
+ * Every session that has not exited: atlas runs 12 (the seven threads,
+ * Ada's session, two steps of the Nightly build and two of the Dependency
+ * check) and has 5 steps waiting for a slot; beelink runs 9, bosgame 3 and
+ * studio 2; mini holds 2 open Threads from before it went offline.
+ */
+const FLEET_SESSIONS: ReadonlyArray<Session> = [
+  ...ATLAS_THREADS,
+  ...ATLAS_OTHER_SESSIONS,
+  ...buildBusySessions(BEELINK_ID, "beelink", 9),
+  ...buildBusySessions(BOSGAME_ID, "bosgame", 3),
+  buildFleetSession("mini-thread-1", MINI_ID, "idle", "thread", "Draft the release notes", 40),
+  buildFleetSession("mini-thread-2", MINI_ID, "idle", "thread", "Review the ops runbook", 95),
+  ...buildBusySessions(STUDIO_ID, "studio", 2),
+];
+
+/**
+ * One idle workspace of a machine, with the Thread that used it. The Thread
+ * is the workspace's sidebar row and gives it its name. It exited long ago.
+ */
+interface IdleWorkspaceRecord {
+  readonly workspace: Workspace;
+  readonly thread: Session;
+}
+
+/**
+ * Returns a canonical UUIDv7 for the idle workspace or Thread numbered
+ * `number`. The cleanup specimen's fetch answers with these records, and the
+ * client decodes every answer, so none of their ids may be a plain label.
+ */
+const buildIdleRecordId = (group: "workspace" | "thread", number: number): string =>
+  `01a0f0c0-${group === "workspace" ? "1000" : "1100"}-7000-8000-${String(number).padStart(12, "0")}`;
+
+/**
+ * Returns the idle workspace numbered `number` on the machine `runnerId`, last
+ * used `idleDays` ago by a Thread called `title`, which is Done when `isDone`.
+ * `usage` is what the runner measured, `sizeGB` on disk of which removing it
+ * frees `freesGB`, or `null` for a workspace never measured. `diskUsageError`
+ * is why the newest measuring failed.
+ */
+const buildIdleWorkspace = (
+  number: number,
+  runnerId: string,
+  idleDays: number,
+  title: string,
+  isDone: boolean,
+  usage: {
+    readonly sizeGB: number;
+    readonly freesGB: number;
+    readonly measuredDaysAgo: number;
+  } | null,
+  diskUsageError: string | null = null,
+): IdleWorkspaceRecord => {
+  const id = buildIdleRecordId("workspace", number);
+  return {
+    workspace: buildWorkspace({
+      id,
+      runnerId,
+      kind: "ephemeral",
+      sessionIds: [],
+      createdAt: daysAgo(idleDays + 2),
+      lastUsedAt: daysAgo(idleDays),
+      diskUsage:
+        usage === null
+          ? null
+          : {
+              sizeBytes: Math.round(usage.sizeGB * GB),
+              freesBytes: Math.round(usage.freesGB * GB),
+              measuredAt: daysAgo(usage.measuredDaysAgo),
+            },
+      diskUsageError,
+    }),
+    thread: buildSession({
+      id: buildIdleRecordId("thread", number),
+      permissionProfileId: buildIdleRecordId("thread", 900),
+      providerAccountId: buildIdleRecordId("thread", 901),
+      title,
+      runnerId,
+      workspaceId: id,
+      status: "exited",
+      createdAt: daysAgo(idleDays + 2),
+      startedAt: daysAgo(idleDays + 2),
+      exitedAt: daysAgo(idleDays),
+      lastActivityAt: daysAgo(idleDays),
+      ...(isDone ? { done: { at: daysAgo(idleDays), by: "user" as const } } : {}),
+    }),
+  };
+};
+
+/**
+ * The idle workspaces of atlas, bosgame and studio. Atlas has nine: eight
+ * measured, where removing the first and the fourth frees less than they take
+ * (their packages are linked to a store that stays), the fifth's newest
+ * measuring failed three days after its last good one, and one never measured.
+ * Bosgame, whose disk is full, has three.
+ */
+const ATLAS_AND_BOSGAME_IDLE_RECORDS: ReadonlyArray<IdleWorkspaceRecord> = [
+  buildIdleWorkspace(1, ATLAS_ID, 38, "Move the checkout to Stripe Elements", true, {
+    sizeGB: 62,
+    freesGB: 25,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace(2, ATLAS_ID, 22, "Rebuild the search index", true, {
+    sizeGB: 41,
+    freesGB: 40,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace(3, ATLAS_ID, 16, "Fix the flaky payout test", true, {
+    sizeGB: 28,
+    freesGB: 27,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace(4, ATLAS_ID, 52, "Spike: move the cron jobs to a queue", true, {
+    sizeGB: 22,
+    freesGB: 9,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace(
+    5,
+    ATLAS_ID,
+    12,
+    "Draft the Q3 ops runbook",
+    false,
+    { sizeGB: 15, freesGB: 14.6, measuredDaysAgo: 3 },
+    "Measuring took longer than 10 minutes",
+  ),
+  buildIdleWorkspace(6, ATLAS_ID, 9, "Bump the Terraform provider", true, {
+    sizeGB: 10,
+    freesGB: 9.5,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace(7, ATLAS_ID, 27, "Try the new dashboard layout", false, {
+    sizeGB: 8.4,
+    freesGB: 3.4,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace(8, ATLAS_ID, 8, "Update the onboarding copy", true, {
+    sizeGB: 3.2,
+    freesGB: 3.2,
+    measuredDaysAgo: 1,
+  }),
+  buildIdleWorkspace(9, ATLAS_ID, 31, "Sketch the invoice export", false, null),
+  buildIdleWorkspace(10, BOSGAME_ID, 19, "Rework the ingest pipeline", true, {
+    sizeGB: 96,
+    freesGB: 88,
+    measuredDaysAgo: 0,
+  }),
+  buildIdleWorkspace(11, BOSGAME_ID, 44, "Profile the nightly import", true, {
+    sizeGB: 61,
+    freesGB: 58,
+    measuredDaysAgo: 0,
+  }),
+  buildIdleWorkspace(12, BOSGAME_ID, 13, "Try Postgres 17", true, {
+    sizeGB: 12,
+    freesGB: 12,
+    measuredDaysAgo: 0,
+  }),
+];
+
+/**
+ * Studio's nine idle workspaces, for the cleanup dialog (see
+ * fleet-cleanup-fixture.ts): six whose Threads are all Done and three that
+ * still have a Thread that is not. One has a name too long for its row, and
+ * one was never measured. Removing each frees 80% of what it takes.
+ */
+export const STUDIO_IDLE_RECORDS: ReadonlyArray<IdleWorkspaceRecord> = (
+  [
+    {
+      title: "Migrate the payout report to the new ledger",
+      freesGB: 14.2,
+      idleDays: 12,
+      isDone: true,
+    },
+    { title: "Fix the flaky checkout test", freesGB: 9.8, idleDays: 19, isDone: true },
+    {
+      title: "Upgrade the search index to the new analyzer and re-run every fixture",
+      freesGB: 7.4,
+      idleDays: 8,
+      isDone: false,
+    },
+    {
+      title: "Spike: stream invoices over the websocket",
+      freesGB: 6.1,
+      idleDays: 24,
+      isDone: true,
+    },
+    { title: "Draft the 2026 pricing page", freesGB: 3.3, idleDays: 31, isDone: true },
+    { title: "Investigate the slow dashboard query", freesGB: 2.6, idleDays: 15, isDone: false },
+    { title: "Rename the billing module", freesGB: 1.2, idleDays: 40, isDone: true },
+    { title: "Try the new date picker", freesGB: 0.48, idleDays: 22, isDone: true },
+    { title: "Backfill the audit log", freesGB: null, idleDays: 10, isDone: false },
+  ] as const
+).map(({ title, freesGB, idleDays, isDone }, index) =>
+  buildIdleWorkspace(
+    13 + index,
+    STUDIO_ID,
+    idleDays,
+    title,
+    isDone,
+    freesGB === null ? null : { sizeGB: freesGB * 1.25, freesGB, measuredDaysAgo: 1 },
+  ),
+);
+
+const IDLE_WORKSPACE_RECORDS: ReadonlyArray<IdleWorkspaceRecord> = [
+  ...ATLAS_AND_BOSGAME_IDLE_RECORDS,
+  ...STUDIO_IDLE_RECORDS,
+];
+
+/**
+ * What each machine negotiated with the controller, by runner id. Mini runs a
+ * runner from before storage was measured, so its capabilities lack disk
+ * usage and its Storage section says it is too old.
+ */
+const FLEET_NEGOTIATED_CAPABILITIES: Readonly<Record<string, readonly string[] | null>> = {
+  [ATLAS_ID]: [DISK_USAGE_CAPABILITY],
+  [BEELINK_ID]: [DISK_USAGE_CAPABILITY],
+  [BOSGAME_ID]: [DISK_USAGE_CAPABILITY],
+  [MINI_ID]: [],
+  [STUDIO_ID]: [DISK_USAGE_CAPABILITY],
+};
+
+/** What the controller says of itself: version 0.4.2, running on beelink. */
+const FLEET_CONTROLLER: ControllerInfo = {
+  id: "01a0f0c0-0000-7000-8000-0000000000c0",
+  publicKey: "controller-key",
+  version: CONTROLLER_VERSION,
+  defaultRunnerId: ATLAS_ID,
+  localRunnerId: BEELINK_ID,
+  textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+};
+
+/** How busy a working day is at the specimen's clock, which the quiet machines' numbers are scaled by. */
+const BUSYNESS_NOW = workingDay(0);
+
+/** Returns a story of `runner` whose numbers at the specimen's clock are the ones its record holds. */
+const buildQuietStory = (
+  runner: Runner,
+  running: number,
+  diskGrowthBytesPerDay: number,
+  silentForHours: number,
+): MachineStory => {
+  const { facts, metrics } = runner;
+  if (facts === null || metrics === null || metrics.cpu === undefined || metrics.cpu === null) {
+    throw new Error(`The Fleet specimen needs ${runner.name} to report its facts and its CPU.`);
+  }
+  const totalMemoryBytes = facts.totalMemoryBytes;
+  const diskTotalBytes = facts.diskTotalBytes ?? 0;
+  const { averagePercent, peakPercent } = metrics.cpu;
+  const memoryShareNow = 1 - metrics.availableMemoryBytes / totalMemoryBytes;
+  const diskInUseNow = diskTotalBytes - metrics.diskFreeBytes;
+  const busyness = (hoursAgo: number): number => workingDay(hoursAgo) / BUSYNESS_NOW;
+  const cpuAverage = (hoursAgo: number): number =>
+    averagePercent * (0.5 + 0.5 * busyness(hoursAgo)) * (1 + 0.25 * wobble(hoursAgo, 1));
+  return {
+    runnerId: runner.id,
+    totalMemoryBytes,
+    diskTotalBytes,
+    sessionsRunning: (hoursAgo) => running * (0.4 + 0.6 * Math.min(1, busyness(hoursAgo))),
+    sessionsQueued: () => 0,
+    cpuAveragePercent: cpuAverage,
+    cpuPeakPercent: (hoursAgo) =>
+      cpuAverage(hoursAgo) + (peakPercent - averagePercent) * (0.6 + 0.4 * wobble(hoursAgo, 2)),
+    memoryInUseShare: (hoursAgo) =>
+      memoryShareNow + 0.02 * wobble(hoursAgo, 5) + 0.03 * (workingDay(hoursAgo) - BUSYNESS_NOW),
+    diskInUseBytes: (hoursAgo) =>
+      diskInUseNow - (diskGrowthBytesPerDay * hoursAgo) / 24 + 0.5 * GB * driftWobble(hoursAgo, 3),
+    gaps: [],
+    silentForHours,
+  };
+};
+
+/**
+ * Atlas's last 7 days. Yesterday from 14:00 to 16:30 it ran at its cap of 16
+ * with 3 to 6 Threads waiting, and its CPU peaked near 100 %. From 16:40 to
+ * 21:40 its memory stood near 80 %. Between 22:00 and 23:00 it sent nothing,
+ * so every graph has a gap there. Its disk has filled by 33 GB a day, so the
+ * limit is about 12 days away. At the clock it runs 12 sessions with 5
+ * waiting.
+ */
+const ATLAS_STORY: MachineStory = (() => {
+  const isWaiting = (hoursAgo: number): boolean => hoursAgo >= 17.2 && hoursAgo <= 19.7;
+  const cpuAverage = (hoursAgo: number): number =>
+    hoursAgo < 0.05
+      ? 34
+      : 6 + 30 * workingDay(hoursAgo) + 6 * wobble(hoursAgo, 1) + (isWaiting(hoursAgo) ? 28 : 0);
+  return {
+    runnerId: ATLAS_ID,
+    totalMemoryBytes: 64 * GIB,
+    diskTotalBytes: 1000 * GB,
+    sessionsRunning: (hoursAgo) =>
+      hoursAgo < 0.5 ? 12 : isWaiting(hoursAgo) ? 16 : 2 + 13 * workingDay(hoursAgo),
+    sessionsQueued: (hoursAgo) =>
+      hoursAgo < 0.55 ? 5 : isWaiting(hoursAgo) ? 4.5 + 1.5 * wobble(hoursAgo, 7) : 0,
+    cpuAveragePercent: cpuAverage,
+    cpuPeakPercent: (hoursAgo) =>
+      hoursAgo < 0.05
+        ? 71
+        : cpuAverage(hoursAgo) +
+          12 +
+          30 * (0.5 + 0.5 * wobble(hoursAgo, 2)) +
+          (isWaiting(hoursAgo) ? 8 : 0),
+    memoryInUseShare: (hoursAgo) =>
+      interpolate(
+        [
+          [0, 0.547],
+          [0.5, 0.55],
+          [3, 0.52],
+          [9, 0.5],
+          [12, 0.78],
+          [13, 0.81],
+          [16, 0.8],
+          [17, 0.82],
+          [18.5, 0.6],
+          [24, 0.46],
+          [400, 0.5],
+        ],
+        hoursAgo,
+      ) +
+      0.012 * wobble(hoursAgo, 6),
+    diskInUseBytes: (hoursAgo) =>
+      588 * GB - (33 * GB * hoursAgo) / 24 + 1.2 * GB * driftWobble(hoursAgo, 3),
+    gaps: [[11.7, 10.7]],
+    silentForHours: 0,
+  };
+})();
+
+/** The histories of the five machines, by runner id. Mini went offline at 09:12 and sent nothing since. */
+const FLEET_METRICS_BY_RUNNER: Readonly<Record<string, MachineMetrics>> = Object.fromEntries(
+  (
+    [
+      ATLAS_STORY,
+      buildQuietStory(BEELINK, 9, 8 * GB, 0),
+      buildQuietStory(BOSGAME, 3, 0.4 * GB, 0),
+      buildQuietStory(
+        MINI,
+        2,
+        1 * GB,
+        (SPECIMEN_NOW - Date.parse(MINI.lastSeenAt ?? "")) / 3_600_000,
+      ),
+      buildQuietStory(STUDIO, 2, 0, 0),
+    ] as const
+  ).map((story) => [story.runnerId, buildMachineMetrics(story)]),
+);
+
+/** The Runner Metrics the Fleet page and a machine's page read. */
+export interface FleetMetricsRecords {
+  /** A machine's five-minute points of the last 24 hours, by runner id. */
+  readonly fiveMinutesByRunner: Readonly<Record<string, RunnerMetricsHistory>>;
+  /** Every machine's hour points of the last 7 days, which the Fleet page forecasts from. */
+  readonly fleetHours: RunnerMetricsHistory;
+}
+
+const FLEET_METRICS: FleetMetricsRecords = {
+  fiveMinutesByRunner: Object.fromEntries(
+    Object.entries(FLEET_METRICS_BY_RUNNER).map(([id, metrics]) => [id, metrics.fiveMinutes]),
+  ),
+  fleetHours: {
+    points: Object.values(FLEET_METRICS_BY_RUNNER).flatMap(({ hourPoints }) => hourPoints),
+    readAt: SPECIMEN_NOW,
+  },
+};
+
+/**
+ * The audit log of each machine, newest first, as `event.query { runnerId }`
+ * returns it. Atlas has five days of activity; the others only joined.
+ */
+const FLEET_ACTIVITY: Readonly<Record<string, ReadonlyArray<ListedEvent>>> = {
+  [ATLAS_ID]: buildAtlasLog({
+    providerAccountId: SPECIMEN_ACCOUNTS[0]!.id,
+    runId: RUN_RECORDS.waiting.run.id,
+    // The sidebar's seven threads, the sessions the page can name without a read of its own.
+    sessionIds: ATLAS_THREADS.map((thread) => thread.id),
+  }),
+  [BEELINK_ID]: buildJoinedLog("2026-09-25T13:58:00.000Z"),
+  [BOSGAME_ID]: buildJoinedLog("2026-09-26T08:12:00.000Z"),
+  [MINI_ID]: buildJoinedLog("2026-09-26T08:20:00.000Z"),
+  [STUDIO_ID]: buildJoinedLog("2026-09-27T10:05:00.000Z"),
+};
+
+/** What the Fleet page and a machine's page read besides the shell's lists. */
+export interface FleetRecords {
+  /** The harnesses with what each machine reports of them. */
+  readonly harnesses: ReadonlyArray<Harness>;
+  /** Every session that has not exited, which the machines' counts are made from. */
+  readonly sessions: ReadonlyArray<Session>;
+  /** The name of each run's workflow, by run id, as `run.read` gives it. A machine's Running here names its runs by these. */
+  readonly workflowNames: Readonly<Record<string, string>>;
+  readonly controller: ControllerInfo;
+  /** The Runner Metrics history the graphs and the forecasts are drawn from. */
+  readonly metrics: FleetMetricsRecords;
+  /** Each machine's audit log, newest first, by runner id. */
+  readonly activity: Readonly<Record<string, ReadonlyArray<ListedEvent>>>;
+  /** The runs that spawned sessions on a machine, which name the workflow in an entry's sentence. */
+  readonly runs: ReadonlyArray<Run>;
+  /** The capabilities each machine negotiated, by runner id, as `runner.read` gives them. */
+  readonly negotiatedCapabilities: Readonly<Record<string, readonly string[] | null>>;
+  /** The Threads that used the idle workspaces, which Storage's "Largest idle workspaces" are named by. */
+  readonly cleanupThreads: ReadonlyArray<Session>;
+  /**
+   * The controller's answers to a cleanup of studio, when the specimen has
+   * idle workspaces to clean up (see fleet-cleanup-fixture.ts).
+   */
+  readonly cleanupAnswers?: CleanupAnswers;
+}
+
+export const FLEET_RECORDS: FleetRecords = {
+  harnesses: FLEET_HARNESSES,
+  sessions: FLEET_SESSIONS,
+  workflowNames: {
+    [NIGHTLY_RUN_ID]: NIGHTLY_WORKFLOW_NAME,
+    [DEPENDENCY_RUN_ID]: "Dependency check",
+  },
+  controller: FLEET_CONTROLLER,
+  metrics: FLEET_METRICS,
+  activity: FLEET_ACTIVITY,
+  runs: [RUN_RECORDS.waiting.run],
+  negotiatedCapabilities: FLEET_NEGOTIATED_CAPABILITIES,
+  cleanupThreads: IDLE_WORKSPACE_RECORDS.map(({ thread }) => thread),
+};
+
+/**
+ * The sidebar's lists with the five machines and their accounts, for a
+ * specimen that opens Fleet. The sidebar lists Threads and Agent sessions,
+ * and holds Ada, whose session runs on atlas.
+ */
+export const FLEET_SIDEBAR_RECORDS: SidebarRecords = {
+  ...SPECIMEN_RECORDS,
+  workspaces: [PAYOUT_WORKSPACE, ...IDLE_WORKSPACE_RECORDS.map(({ workspace }) => workspace)],
+  resources: [PAYMENTS_REPO],
+  threads: ATLAS_THREADS,
+  assistants: [
+    {
+      assistant: ADA,
+      currentSession: ATLAS_OTHER_SESSIONS.find(({ kind }) => kind === "assistant") ?? null,
+    },
+  ],
+  runners: FLEET_RUNNERS,
+  accounts: FLEET_ACCOUNTS,
+};
+
+/**
+ * The sidebar's lists for an empty fleet: beelink, the controller's own
+ * machine, is the only one online, so the page adds the dashed card that
+ * invites the user to add a machine under the machines' cards.
+ */
+export const FLEET_ALONE_SIDEBAR_RECORDS: SidebarRecords = {
+  ...FLEET_SIDEBAR_RECORDS,
+  runners: FLEET_RUNNERS.map((runner) =>
+    runner.id === BEELINK_ID ? runner : { ...runner, connectivity: "offline" },
+  ),
+};

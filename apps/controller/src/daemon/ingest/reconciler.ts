@@ -29,7 +29,7 @@ import {
   type RegisteredEventSource,
 } from "../../plugins";
 import { PromotionState } from "../../promotion";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * How often the Ingest Reconciler compares the open handles with the
@@ -99,7 +99,7 @@ export const runIngestReconciler: Effect.Effect<
       }
     }
     for (const [id, { source, connection }] of wanted) {
-      if (!keptOpen.has(id)) yield* ingest.open(source, connection);
+      if (!keptOpen.has(id)) yield* ingest.open(source, connection, host.listActiveEventSources);
     }
   });
 

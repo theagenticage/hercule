@@ -2,60 +2,23 @@
  * One agent's page on the thread, as the Bureau book's session page draws
  * it: the header floating over the transcript, and the composer floating
  * over its bottom. The agent is the session's own agent, or one of its
- * subagents. A subagent takes no messages, so its page has no composer.
+ * subagents. A subagent takes no messages, so its page has no composer, and
+ * neither has an archived Thread's page.
  */
-import { useRef, useState, type JSX, type ReactNode } from "react";
-import { useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { Navigate, notFound, useLocation, useRouteContext } from "@tanstack/react-router";
-import {
-  appendSendingMessages,
-  buildSessionAgentState,
-  buildSubagentAgentState,
-  buildThreadBlocks,
-  decideSubagentPose,
-  decideThreadPose,
-  describeAgent,
-  isNotFound,
-  isSubagentWaiting,
-  queryKeys,
-  splitQueuedInputs,
-  splitSubagentBrief,
-  type ThreadBlock,
-} from "@hercule/client-core";
+import { useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { Navigate, notFound, useLocation } from "@tanstack/react-router";
 import type { Session, Subagent } from "@hercule/contract";
 import { isOpenedAtLaunch } from "../../app/last-screen";
-import {
-  forgetGoneThread,
-  providersQuery,
-  queuedInputsQuery,
-  runnersQuery,
-  sessionQuery,
-  subagentsQuery,
-  transcriptQuery,
-} from "../../app/queries";
+import { ArchivedNotice } from "./archived-notice";
 import { ThreadComposer } from "./composer";
+import { ThreadServersProvider } from "./thread-servers";
+import { useHasMcpLine } from "./use-has-mcp-line";
 import { ThreadHeader } from "./thread-header";
 import { Transcript, type TranscriptHandle } from "./transcript";
 import { SpawnLines } from "../subagents/spawn-lines";
-import { buildAgentFaceSeed } from "../subagents/subagent-face";
-import { UNREADABLE_STREAM_MESSAGE } from "../session/unreadable-stream";
-import { useSessionLive } from "../session/use-session-live";
+import { useLiveThreadBlocks } from "./use-live-thread-blocks";
 import "../session/transcript.css";
 import "./thread.css";
-
-/**
- * Returns the error that closes a transcript whose stream the app cannot read,
- * from the moment (an ISO time) the stream became unreadable. `RuntimeNote`
- * draws that time like the time of any other note.
- */
-const buildUnreadableStreamBlock = (
-  streamUnreadableAt: string,
-): Extract<ThreadBlock, { readonly kind: "error" }> => ({
-  kind: "error",
-  key: "stream-unreadable",
-  message: UNREADABLE_STREAM_MESSAGE,
-  at: streamUnreadableAt,
-});
 
 /** What a subagent's page draws of its own, from the records the page reads. */
 export interface SubagentParts {
@@ -84,7 +47,8 @@ export type DrawSubagentParts = (records: {
  * agent when `subagentId` is undefined, else that subagent.
  *
  * - The session's own agent's page has the header, the transcript and the
- *   composer.
+ *   composer. When the Thread is archived, a line with a New thread button
+ *   takes the composer's place (`ArchivedNotice`).
  * - A subagent's page has its transcript, with faces seeded
  *   `<sessionId>:<subagentId>`, and the parts `drawSubagentParts` returns:
  *   its own header, the brief above the transcript and the status card in
@@ -138,71 +102,27 @@ export function AgentPage({
       readonly drawSubagentParts: DrawSubagentParts;
     }
 )): JSX.Element {
-  const { controller } = useRouteContext({ from: "/_connected" });
-  const { client, live } = controller;
-  const queryClient = useQueryClient();
   // Only the flag is read, so a navigation does not draw the page again.
   const isAtLaunch = useLocation({ select: isOpenedAtLaunch });
-  const session = useSuspenseQuery(sessionQuery(client, sessionId)).data;
-  const transcript = useSuspenseQuery(transcriptQuery(client, sessionId, subagentId));
-  const rows = transcript.data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
-  const runners = useSuspenseQuery(runnersQuery(client)).data;
-  const subagents = useSuspenseQuery(subagentsQuery(client, sessionId)).data;
-  const subagent =
-    subagentId === undefined ? undefined : subagents.find((each) => each.id === subagentId);
-  // The subagent route's loader has checked that the subagent exists, and a
-  // subagent record is never deleted, so this only guards the type. The
-  // router acts on a thrown `notFound`, which is a plain descriptor rather
-  // than an Error.
-  // oxlint-disable-next-line typescript/only-throw-error
-  if (subagentId !== undefined && subagent === undefined) throw notFound();
-  // `agent` is built in this read's `select`. Query hands back the same
-  // `agent` object while its value is equal, so a session update that changes
-  // nothing it holds, such as Token Usage or the tool call count, keeps the
-  // blocks' `select` below the same function, and Query does not build the
-  // blocks again over the whole transcript. A `useMemo` on `session` would not
-  // do this: every read of the session is a new object. The compiler caches
-  // the blocks' `select` on `agent`, so a stable `agent` keeps it the same
-  // function.
-  const agent = useSuspenseQuery({
-    ...sessionQuery(client, sessionId),
-    select: (current) =>
-      subagent === undefined
-        ? buildSessionAgentState(current)
-        : buildSubagentAgentState(subagent, current),
-  }).data;
-  // The blocks are built in this read's `select`, not from `rows` above.
-  // Query compares the new blocks with the previous ones and returns each
-  // block that is equal as the same object, so the memoized blocks skip it.
-  // Building them in render would make every block new on each stored row.
-  // `rows` is the same read without `select`, because `useSessionLive` needs
-  // the rows themselves. Query compares by position in the list: when a block
-  // appears or disappears earlier in the list (a waiting block once its
-  // Request closes), the blocks after it draw once more.
-  const threadBlocks = useSuspenseQuery({
-    ...transcriptQuery(client, sessionId, subagentId),
-    select: (transcriptRows) => buildThreadBlocks(transcriptRows, agent),
-  }).data;
-  // The messages on their way into the session, drawn from their queued
-  // inputs, close the session's own transcript. A subagent takes no
-  // messages, so its page reads none. Not suspended: the composer below
-  // reads the same inputs, and the drawer's loader does not load them.
-  const queued = useQuery({
-    ...queuedInputsQuery(client, sessionId),
-    enabled: subagentId === undefined,
-  }).data;
-  const { attachOpenParagraph, streamUnreadableAt } = useSessionLive({
-    live,
-    queryClient,
-    sessionId,
-    subagentId,
-    rowsKey: queryKeys.transcript(sessionId, subagentId),
-    rows,
-    onGone: () => {
-      void forgetGoneThread(queryClient, client, controller.threadCopies, sessionId);
-    },
-  });
+  const {
+    session,
+    subagent,
+    subagents,
+    brief,
+    blocks,
+    pose,
+    faceSeed,
+    describeAgent,
+    attachOpenParagraph,
+    isGone,
+  } = useLiveThreadBlocks(sessionId, subagentId);
+  // A subagent's page reads no servers, so it looks for no line about them.
+  const hasMcpLine = useHasMcpLine(subagentId === undefined ? sessionId : null, blocks);
+  // Kept as it is while only the transcript changes, so what the provider shares does not change per streamed row.
+  const openThread = useMemo(
+    () => ({ kind: "started", session, hasMcpLine }) as const,
+    [session, hasMcpLine],
+  );
   // The transcript sizes its bottom padding from the composer's stack. The
   // stack is held as state, not a ref, because the composer mounts after the
   // transcript: its element exists only once the transcript's effects ran,
@@ -211,29 +131,14 @@ export function AgentPage({
   const transcriptRef = useRef<TranscriptHandle>(null);
   // The composer shrinks while the reader is away from the bottom of the
   // transcript, unless the focus is in the composer. A subagent's status
-  // card never shrinks, so the transcript always clears it.
+  // card and an archived Thread's line never shrink, so the transcript always
+  // clears them.
   const [atBottom, setAtBottom] = useState(true);
   const [composerFocused, setComposerFocused] = useState(false);
-  const shrunk = subagent === undefined && !atBottom && !composerFocused;
+  const shrunk =
+    subagent === undefined && session.archived === undefined && !atBottom && !composerFocused;
 
-  // On a subagent's page, the user message that opens the transcript is the
-  // brief its parent gave it, drawn as the brief card rather than as a
-  // message nobody typed.
-  const { brief, blocks } =
-    subagent === undefined
-      ? {
-          brief: undefined,
-          blocks: appendSendingMessages(
-            threadBlocks,
-            splitQueuedInputs(session, queued ?? []).sending,
-          ),
-        }
-      : splitSubagentBrief(threadBlocks);
-  const shownBlocks =
-    streamUnreadableAt === undefined
-      ? blocks
-      : [...blocks, buildUnreadableStreamBlock(streamUnreadableAt)];
-  if (inThreadRoute && isNotFound(transcript.error)) {
+  if (inThreadRoute && isGone) {
     // The transcript read found that the thread no longer exists, which the saved
     // copy could not know. Show what the thread's loader shows for it, see
     // `throwScreenNotFound`. A redirect cannot be thrown from a component.
@@ -245,28 +150,21 @@ export function AgentPage({
       subagentId === undefined ? { routeId: "/_connected/_shell/threads/$sessionId" } : undefined,
     );
   }
-  const runner =
-    session.runnerId === null ? undefined : runners.find((each) => each.id === session.runnerId);
-  const instance = instances.find((each) => each.id === session.instanceId);
   const subagentParts =
     subagent === undefined || drawSubagentParts === undefined
       ? undefined
       : drawSubagentParts({ session, subagent, subagents, brief });
 
-  return (
+  const page = (
     <>
       {subagentParts === undefined ? <ThreadHeader session={session} /> : subagentParts.header}
       <Transcript
         sessionId={sessionId}
-        faceSeed={buildAgentFaceSeed(sessionId, subagentId)}
-        blocks={shownBlocks}
+        faceSeed={faceSeed}
+        blocks={blocks}
         lead={subagentParts?.lead}
-        pose={
-          subagent === undefined
-            ? decideThreadPose(session, runner)
-            : decideSubagentPose(subagent.status, isSubagentWaiting(subagent, session.openRequests))
-        }
-        describeAgent={(model) => describeAgent(instance, model)}
+        pose={pose}
+        describeAgent={describeAgent}
         attachOpenParagraph={attachOpenParagraph}
         composerStack={shrunk ? null : composerStack}
         onBottomChange={setAtBottom}
@@ -280,7 +178,18 @@ export function AgentPage({
         )}
         ref={transcriptRef}
       />
-      {subagentParts === undefined ? (
+      {subagentParts !== undefined ? (
+        // A subagent takes no messages, so its status card takes the
+        // composer's place. The stack is passed to `setComposerStack`, so the
+        // transcript's last line clears the card and what sits on it.
+        <div className="composer-wrap">
+          <div className="composer" ref={setComposerStack}>
+            {subagentParts.bottom}
+          </div>
+        </div>
+      ) : session.archived !== undefined ? (
+        <ArchivedNotice session={session} ref={setComposerStack} />
+      ) : (
         <ThreadComposer
           sessionId={sessionId}
           shrunk={shrunk}
@@ -290,16 +199,13 @@ export function AgentPage({
           }}
           ref={setComposerStack}
         />
-      ) : (
-        // A subagent takes no messages, so its status card takes the
-        // composer's place. The stack is passed to `setComposerStack`, so the
-        // transcript's last line clears the card and what sits on it.
-        <div className="composer-wrap">
-          <div className="composer" ref={setComposerStack}>
-            {subagentParts.bottom}
-          </div>
-        </div>
       )}
     </>
+  );
+  // A subagent's page reads no servers: its lines draw no button.
+  return subagentId === undefined ? (
+    <ThreadServersProvider thread={openThread}>{page}</ThreadServersProvider>
+  ) : (
+    page
   );
 }

@@ -1,5 +1,6 @@
 import { useMemo, type JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
 import type { HerculeClient } from "@hercule/client-core";
 import { buildGraphDrawing, buildRunOverlay } from "@hercule/client-core/graph-model";
 import { buildRunNodeCard } from "@hercule/client-core/node-details";
@@ -7,7 +8,7 @@ import type { Run, Session, Workflow } from "@hercule/contract";
 import {
   agentsQuery,
   pluginsQuery,
-  providersQuery,
+  providerAccountsQuery,
   triggersQuery,
   workflowActionsQuery,
 } from "../../../../app/queries";
@@ -21,7 +22,7 @@ import { WorkflowGraph } from "../../../../screens/workflows/workflow-graph";
  * fires next only while the workflow is enabled and valid. Open thread on a
  * card calls `onOpenSession`.
  *
- * The route's loader reads the triggers, the provider instances, the
+ * The route's loader reads the triggers, the Provider Accounts, the
  * plugins, the Agents and the workflow actions.
  */
 export function RunGraph({
@@ -39,8 +40,9 @@ export function RunGraph({
   readonly timezone: string;
   readonly onOpenSession: (sessionId: string) => void;
 }): JSX.Element {
+  const { bridge } = useRouteContext({ from: "/_connected" });
   const { data: everyTrigger } = useSuspenseQuery(triggersQuery(client));
-  const { data: instances } = useSuspenseQuery(providersQuery(client));
+  const { data: accounts } = useSuspenseQuery(providerAccountsQuery(client));
   const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
   const { data: agents } = useSuspenseQuery(agentsQuery(client));
   const { data: actions } = useSuspenseQuery(workflowActionsQuery(client));
@@ -60,7 +62,7 @@ export function RunGraph({
           triggers,
           agents,
           actions,
-          instances,
+          accounts,
           workflow,
           run,
           sessions,
@@ -68,6 +70,7 @@ export function RunGraph({
         })
       }
       overlay={overlay}
+      platform={bridge.platform}
       plugins={plugins}
       timezone={timezone}
       label={`The steps of ${run.plan.name}`}

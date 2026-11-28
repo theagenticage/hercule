@@ -1,0 +1,316 @@
+/**
+ * Converts what Antigravity's `agy` asks the user (an approval or a form of
+ * questions) into the decisions and questions Hercule shows, and converts the
+ * user's decision or answers back into the ACP reply `agy` expects. Spec 06
+ * section 6.5 ("Antigravity's Requests") owns the rules.
+ */
+import type { NonEmptyReadonlyArray } from "effect/Array";
+import type {
+  ApprovalOption,
+  ApprovalOutcome,
+  ElicitationField,
+  ElicitationReply,
+  ElicitationRequest,
+} from "@hercule/acp";
+import {
+  MAX_FACT_ITEMS,
+  MAX_FRAME_BYTES,
+  type ApprovalDecision,
+  type Question,
+  type QuestionAnswers,
+} from "@hercule/protocol";
+import { buildAnswerNotDelivered } from "../adapter-error-builders";
+import { truncateFact, truncateMessage } from "../text";
+
+/** The reply to an approval Request that nobody can decide: `agy` does not run the call. */
+export const CANCELLED_APPROVAL: ApprovalOutcome = { outcome: "cancelled" };
+
+/**
+ * The reply to a question Request that nobody can answer. It is `decline`, not
+ * `cancel`: `agy` was recorded taking `decline` (the model reads "User Skipped"
+ * and the turn goes on), while `cancel` was never recorded (spec 06 section 6.5).
+ */
+export const CANCELLED_QUESTION: ElicitationReply = { action: "decline" };
+
+/** Returns the failure of an answer to a question that is not open anymore. */
+export const buildQuestionNotOpen = () =>
+  buildAnswerNotDelivered("This question is not open anymore. Nothing was sent to Antigravity.");
+
+/** Returns the warning for a Request that no running Turn owns. `what` completes "Antigravity asked ...", such as "a question". */
+export const buildOrphanMessage = (what: string): string =>
+  `Antigravity asked ${what} that no running turn owns, so Hercule cancelled it.`;
+
+const ALLOW_ONCE = "allow_once";
+const REJECT_ONCE = "reject_once";
+
+/**
+ * Returns the decisions a request with these options offers, in the order
+ * allow, deny, cancel. `allow` is there only when an option of kind
+ * `allow_once` exists. `deny` and `cancel` are always there, so every surface
+ * can refuse. `allow_always` is never offered, because nothing yet confirms
+ * that `agy` forgets such an answer when its process ends.
+ */
+export const buildApprovalDecisions = (
+  options: ReadonlyArray<ApprovalOption>,
+): NonEmptyReadonlyArray<ApprovalDecision> =>
+  options.some((option) => option.kind === ALLOW_ONCE)
+    ? ["allow", "deny", "cancel"]
+    : ["deny", "cancel"];
+
+/**
+ * Returns the ACP reply for a decision. The option is chosen by its `kind`,
+ * never by its id or its label, and the first of that kind wins.
+ *
+ * - `allow` selects the first `allow_once` option. A request with none offers
+ *   no `allow`, so asking for it anyway answers `cancelled`: no call runs.
+ * - `deny` selects the first `reject_once` option, or answers `cancelled` when
+ *   there is none. Either way the call does not run.
+ * - `cancel` and `allow_always` (never offered) answer `cancelled`.
+ */
+export const buildApprovalOutcome = (
+  options: ReadonlyArray<ApprovalOption>,
+  decision: ApprovalDecision,
+): ApprovalOutcome => {
+  const kind = decision === "allow" ? ALLOW_ONCE : decision === "deny" ? REJECT_ONCE : undefined;
+  const option = options.find((candidate) => candidate.kind === kind);
+  return option === undefined
+    ? { outcome: "cancelled" }
+    : { outcome: "selected", optionId: option.optionId };
+};
+
+/** One option of a question as the user sees it, with the value `agy` expects when it is chosen. */
+interface FormChoice {
+  readonly label: string;
+  readonly value: string;
+}
+
+/** One question of the form: its form field names and its choices. */
+interface FormQuestion {
+  readonly header: string;
+  readonly field: string;
+  /** The name of the field that carries a typed answer, when the form has one. */
+  readonly otherField: string | undefined;
+  /** Whether the field takes a list of choices (`qN` is an array) rather than one. */
+  readonly multiSelect: boolean;
+  readonly choices: ReadonlyArray<FormChoice>;
+}
+
+/**
+ * A form read into Hercule's questions, with what is needed to turn the
+ * answers back into the form's own field names and values.
+ */
+export interface QuestionForm {
+  readonly questions: NonEmptyReadonlyArray<Question>;
+  readonly mapping: ReadonlyArray<FormQuestion>;
+}
+
+/**
+ * The most questions a form may hold, and the most choices one question may
+ * hold. The protocol bounds neither list. Its own limit is on the answers: a
+ * set of answers holds at most `MAX_FACT_ITEMS` headers, so a form with more
+ * questions could not be answered in full. The same number bounds the choices,
+ * as it bounds every other list of facts.
+ */
+const MAX_FORM_ITEMS = MAX_FACT_ITEMS;
+
+/**
+ * The most characters the questions, headers and labels of one form may hold
+ * together. `request.opened` must fit one frame of `MAX_FRAME_BYTES`, and one
+ * character takes at most six bytes of JSON (`\u00e9`). An eighth of the frame
+ * in characters therefore stays under three quarters of it, which leaves room
+ * for everything else the event holds. A form over it cannot be shown whole.
+ */
+const MAX_FORM_CHARACTERS = Math.floor(MAX_FRAME_BYTES / 8);
+
+/**
+ * Reads the titled choices of one field. A single-select field is a string
+ * with `oneOf`; a multi-select field is an array whose `items.anyOf` lists the
+ * choices. Returns `undefined` when the field is neither, when its list is empty,
+ * or when it has more than `MAX_FORM_ITEMS` choices. Otherwise returns the
+ * choices and whether the field is a multi-select. Two options are left out of
+ * the question:
+ *
+ * - one with an empty title, because it could not be shown;
+ * - one whose title repeats an earlier option's, because the answer is sent
+ *   back as the label and two options with one label could not be told apart
+ *   (spec 06 section 6.5, as for Claude Code and Codex). The user can still
+ *   type that option's text when the form has a `qN_other` field.
+ */
+const readChoices = (
+  field: ElicitationField,
+): { readonly choices: ReadonlyArray<FormChoice>; readonly multiSelect: boolean } | undefined => {
+  if (field.enum) return undefined;
+  let list: ReadonlyArray<unknown> | undefined;
+  let multiSelect = false;
+  if (field.type === "string" && field.oneOf && !field.items) {
+    list = field.oneOf;
+  } else if (field.type === "array" && !field.oneOf) {
+    const anyOf = field.items?.["anyOf"];
+    list = Array.isArray(anyOf) ? anyOf : undefined;
+    multiSelect = true;
+  }
+  if (list === undefined || list.length > MAX_FORM_ITEMS) return undefined;
+  const labels = new Set<string>();
+  const choices: Array<FormChoice> = [];
+  for (const choice of list) {
+    if (typeof choice !== "object" || choice === null) return undefined;
+    const { const: value, title } = choice as { const?: unknown; title?: unknown };
+    if (typeof value !== "string" || typeof title !== "string") return undefined;
+    if (title === "") continue;
+    const label = truncateFact(title);
+    if (labels.has(label)) continue;
+    labels.add(label);
+    choices.push({ label, value });
+  }
+  return choices.length === 0 ? undefined : { choices, multiSelect };
+};
+
+/**
+ * Reads the form `agy` sent into questions. Returns `undefined` when the form
+ * cannot be read, and the caller then answers `{ action: "decline" }` with a
+ * warning. A form is unreadable when:
+ *
+ * - a property is neither `qN` nor `qN_other`;
+ * - a `qN` has no title, or is not a single-select string with `oneOf` or a
+ *   multi-select array with `items.anyOf` (another type is not recorded);
+ * - it holds more than `MAX_FORM_ITEMS` questions, or a question more than
+ *   `MAX_FORM_ITEMS` choices, or all of it more than `MAX_FORM_CHARACTERS`
+ *   characters of text. The protocol bounds none of these, and a card it
+ *   refuses would leave `agy` waiting for an answer that cannot be given;
+ * - a `qN_other` is not a string field;
+ * - it holds no question (a `qN_other` with no `qN` beside it is ignored).
+ */
+export const parseQuestionForm = (request: ElicitationRequest): QuestionForm | undefined => {
+  const properties = Object.entries(request.requestedSchema.properties ?? {});
+  const questionFields: Array<{ readonly name: string; readonly field: ElicitationField }> = [];
+  const otherFields = new Set<string>();
+  for (const [name, field] of properties) {
+    const other = /^(q\d+)_other$/.exec(name);
+    if (other?.[1] !== undefined) {
+      if (field.type !== "string") return undefined;
+      otherFields.add(other[1]);
+    } else if (/^q\d+$/.test(name)) {
+      questionFields.push({ name, field });
+    } else {
+      return undefined;
+    }
+  }
+
+  if (questionFields.length > MAX_FORM_ITEMS) return undefined;
+
+  let characters = 0;
+  const mapping: Array<FormQuestion> = [];
+  const questions: Array<Question> = [];
+  for (const [index, { name, field }] of questionFields.entries()) {
+    const read = readChoices(field);
+    if (read === undefined || !field.title) return undefined;
+    const { choices, multiSelect } = read;
+    const header = questionFields.length === 1 ? "Question" : `Question ${String(index + 1)}`;
+    mapping.push({
+      header,
+      field: name,
+      otherField: otherFields.has(name) ? `${name}_other` : undefined,
+      multiSelect,
+      choices,
+    });
+    const question = truncateMessage(field.title);
+    characters +=
+      question.length +
+      header.length +
+      choices.reduce((sum, choice) => sum + choice.label.length, 0);
+    if (characters > MAX_FORM_CHARACTERS) return undefined;
+    questions.push({
+      question,
+      header,
+      options: choices.map((choice) => ({ label: choice.label })),
+      multiSelect,
+    });
+  }
+  const [first, ...rest] = questions;
+  return first === undefined ? undefined : { questions: [first, ...rest], mapping };
+};
+
+/** The result of turning answers into a reply: the reply, or why the answers cannot be sent. */
+type ElicitationAnswerResult =
+  | { readonly kind: "reply"; readonly reply: ElicitationReply }
+  | { readonly kind: "refused"; readonly message: string };
+
+const refuse = (message: string): ElicitationAnswerResult => ({ kind: "refused", message });
+
+/**
+ * Builds the reply to the form from the user's answers, keyed by header, or
+ * refuses them. Nothing is dropped or changed silently: an answer that cannot
+ * be delivered as given is refused, with a message that tells the user what to
+ * do, so the question can stay open for another try.
+ *
+ * Single-choice question:
+ * - An answer equal to an option's label is sent as that option's own value in
+ *   `qN`. The label is the one the question showed.
+ * - Any other text is a typed answer. It goes in `qN_other` alone, never with
+ *   `qN`, because `agy` reads both fields when both are present.
+ * - A list of one answer counts as that answer.
+ *
+ * Multi-select question (the answer is a list, or one text counting as a list
+ * of one):
+ * - The labels go in `qN` as the array of their values, without repeats.
+ * - A text that is not a label is a typed answer and goes in `qN_other`. A list
+ *   of only typed text sends `qN_other` alone. A list of labels and one typed
+ *   text sends both fields, because `agy` reads both and the user gave both.
+ * - An empty list counts as no answer.
+ *
+ * What `agy` does with the array in `qN` is not recorded yet: the recordings
+ * only answered single-choice questions. The next recording of a multi-select
+ * answer must check that `agy` hands every chosen label to the model.
+ *
+ * It refuses when:
+ * - a typed answer has no `qN_other` field to carry it;
+ * - a single-choice answer is a list of several values;
+ * - a multi-select answer holds more than one typed text (`qN_other` is one
+ *   text);
+ * - an answer has a header the form does not have.
+ *
+ * A question left unanswered is absent from the reply. No recorded form has a
+ * `required` list, so none is read.
+ */
+export const buildElicitationReply = (
+  form: QuestionForm,
+  answers: QuestionAnswers,
+): ElicitationAnswerResult => {
+  const headers = new Set(form.mapping.map((question) => question.header));
+  for (const header of Object.keys(answers)) {
+    if (!headers.has(header)) {
+      return refuse(`"${header}" is not a question of this form. Answer the questions shown.`);
+    }
+  }
+  const content: Record<string, string | ReadonlyArray<string>> = {};
+  for (const question of form.mapping) {
+    const given = answers[question.header];
+    const list = given === undefined ? [] : typeof given === "string" ? [given] : given;
+    if (list.length === 0) {
+      continue;
+    }
+    if (!question.multiSelect && list.length !== 1) {
+      return refuse(`${question.header} takes one answer. Give one answer.`);
+    }
+    const values = new Set<string>();
+    const typed: Array<string> = [];
+    for (const answer of list) {
+      const chosen = question.choices.find((choice) => choice.label === answer);
+      if (chosen !== undefined) values.add(chosen.value);
+      else typed.push(answer);
+    }
+    if (typed.length > 0 && question.otherField === undefined) {
+      return refuse(`${question.header} takes one of its options only. Pick one of them.`);
+    }
+    if (typed.length > 1) {
+      return refuse(`${question.header} takes one typed answer at most. Give one.`);
+    }
+    if (values.size > 0) {
+      content[question.field] = question.multiSelect ? [...values] : [...values][0]!;
+    }
+    if (typed[0] !== undefined && question.otherField !== undefined) {
+      content[question.otherField] = typed[0];
+    }
+  }
+  return { kind: "reply", reply: { action: "accept", content } };
+};

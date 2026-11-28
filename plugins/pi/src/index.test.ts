@@ -1,22 +1,19 @@
 /**
  * Tests what the pi plugin declares about itself, as the catalog reads it:
- * the definition it registers, and the JSON Schema derived from its config.
- *
- * The key is a paid credential, so the plugin itself names, describes and
- * marks the field it is entered in - never the runner, never the UI.
+ * the definition it registers, and the provider it runs.
  */
 import { describe, expect, it } from "vitest";
-import { Effect, Result } from "effect";
-import { deriveConfigJsonSchema, type ProviderDefinition } from "@hercule/plugin-host";
+import { Effect } from "effect";
+import type { HarnessDefinition } from "@hercule/plugin-host";
 import { pi } from "./index";
 
 /** Returns the definition the plugin gives the catalog, captured from its registration. */
-const captureProviderDefinition = (): ProviderDefinition => {
-  const definitions: Array<ProviderDefinition> = [];
+const captureHarnessDefinition = (): HarnessDefinition => {
+  const definitions: Array<HarnessDefinition> = [];
   Effect.runSync(
     Effect.orDie(
       pi.register({
-        providers: {
+        harnesses: {
           register: (definition) =>
             Effect.sync(() => {
               definitions.push(definition);
@@ -29,21 +26,81 @@ const captureProviderDefinition = (): ProviderDefinition => {
   return definitions[0]!;
 };
 
-describe("the pi provider's config", () => {
-  it("declares the Z.ai key as its one secret-valued field", () => {
-    const result = deriveConfigJsonSchema(captureProviderDefinition().configSchema);
-
-    expect(Result.isSuccess(result)).toBe(true);
-    if (!Result.isSuccess(result)) return;
-
-    const properties = result.success.properties as Record<string, Record<string, unknown>>;
-    expect(Object.keys(properties)).toEqual(["zaiApiKey"]);
-    const field = properties["zaiApiKey"]!;
-    expect(field["type"]).toBe("string");
-    expect(field["x-secret"]).toBe(true);
-    // The title is the vendor's, not the harness's: the key is Z.ai's.
-    expect(field["title"]).toBe("Z.ai API key");
-    expect(String(field["description"])).toContain("Coding Plan");
-    expect(String(field["title"])).not.toContain("pi");
+describe("the pi harness", () => {
+  it("runs the keys of Anthropic, OpenAI, Z.ai, OpenCode and MiniMax, each under its provider's model argument, with its own model list", () => {
+    expect(captureHarnessDefinition().runs).toEqual([
+      {
+        providerId: "anthropic/anthropic",
+        kinds: [
+          {
+            kind: "api-key",
+            modelArgument: "anthropic/{model}",
+            credentialVariable: "ANTHROPIC_API_KEY",
+          },
+        ],
+        models: "own-list",
+      },
+      {
+        providerId: "openai/openai",
+        kinds: [
+          {
+            kind: "api-key",
+            modelArgument: "openai/{model}",
+            credentialVariable: "OPENAI_API_KEY",
+          },
+        ],
+        models: "own-list",
+      },
+      {
+        providerId: "zai/zai",
+        kinds: [
+          { kind: "api-key", modelArgument: "zai/{model}", credentialVariable: "ZAI_API_KEY" },
+        ],
+        models: "own-list",
+      },
+      {
+        providerId: "openrouter/openrouter",
+        kinds: [
+          {
+            kind: "api-key",
+            modelArgument: "openrouter/{model}",
+            credentialVariable: "OPENROUTER_API_KEY",
+          },
+        ],
+        models: "all",
+      },
+      {
+        providerId: "opencode/opencode",
+        kinds: [
+          {
+            kind: "go-key",
+            modelArgument: "opencode-go/{model}",
+            credentialVariable: "OPENCODE_API_KEY",
+          },
+          {
+            kind: "zen-key",
+            modelArgument: "opencode/{model}",
+            credentialVariable: "OPENCODE_API_KEY",
+          },
+        ],
+        models: "own-list",
+      },
+      {
+        providerId: "minimax/minimax",
+        kinds: [
+          {
+            kind: "pay-as-you-go-key",
+            modelArgument: "minimax/{model}",
+            credentialVariable: "MINIMAX_API_KEY",
+          },
+          {
+            kind: "plan-key",
+            modelArgument: "minimax/{model}",
+            credentialVariable: "MINIMAX_API_KEY",
+          },
+        ],
+        models: "own-list",
+      },
+    ]);
   });
 });

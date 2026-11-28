@@ -8,8 +8,7 @@
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import {
-  BOOTSTRAP_KEYS,
-  buildEnvName,
+  BOOTSTRAP_ENV_VARIABLES,
   locateProcessLogFile,
   locateStderrLogFile,
   type DaemonRole,
@@ -75,7 +74,7 @@ const isDirectory = (path: string): boolean => {
  *
  * A supervisor starts a process with only the system folders on its PATH, so
  * the caller's PATH is passed on, and the controller and the runner find the
- * same harnesses (claude, codex, pi), git and gh as the user does. Relative
+ * same harnesses (claude, codex, pi, agy), git and gh as the user does. Relative
  * entries are dropped, and so are folders that do not exist: the runner starts
  * programs inside workspace checkouts, where `.` on the PATH would let a
  * repository supply its own `git`.
@@ -198,7 +197,7 @@ export const renderSystemdUnit = (unit: ServiceUnit): string =>
     `ExecStart=${quoteCommandWord(unit.program)} ${unit.role}`,
     `Environment=${quoteAssignment("PATH", unit.path)}`,
     `Environment=${quoteAssignment("HERCULE_HOME", unit.home)}`,
-    `UnsetEnvironment=${BOOTSTRAP_KEYS.map(buildEnvName).join(" ")}`,
+    `UnsetEnvironment=${BOOTSTRAP_ENV_VARIABLES.map((variable) => variable.name).join(" ")}`,
     "Restart=always",
     "RestartSec=10",
     "StandardOutput=null",

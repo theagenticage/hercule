@@ -7,6 +7,7 @@ import { Effect, Result, Schema, SchemaAST } from "effect";
 import type {
   ConnectionTypeContribution,
   EventSourceContribution,
+  McpServerContribution,
   Plugin,
   RegistrationHost,
 } from "@hercule/plugin-host";
@@ -29,18 +30,23 @@ const collectContributions = async (
 ): Promise<{
   readonly types: ReadonlyArray<ConnectionTypeContribution>;
   readonly sources: ReadonlyArray<EventSourceContribution>;
+  readonly mcpServers: ReadonlyArray<McpServerContribution>;
 }> => {
   const types: Array<ConnectionTypeContribution> = [];
   const sources: Array<EventSourceContribution> = [];
+  const mcpServers: Array<McpServerContribution> = [];
   const host: RegistrationHost = {
     connections: {
       registerType: (contribution) => Effect.sync(() => void types.push(contribution)),
     },
     eventSources: { register: (definition) => Effect.sync(() => void sources.push(definition)) },
     workflowActions: { register: () => Effect.die("the plugin registers no workflow actions") },
+    mcpServers: {
+      register: (contribution) => Effect.sync(() => void mcpServers.push(contribution)),
+    },
   };
   await Effect.runPromise(plugin.register(host));
-  return { types, sources };
+  return { types, sources, mcpServers };
 };
 
 /** Returns the one connection type the plugin contributes. */
@@ -64,13 +70,19 @@ const KINDS = [
 ] as const;
 
 describe("what the linear plugin registers", () => {
-  it("requests the capabilities its connection type and ingest use", () => {
+  it("requests the capabilities its connection type, ingest and MCP server use", () => {
     expect(linear.manifest).toMatchObject({
       id: "linear",
       displayName: "Linear",
-      capabilities: ["connections", "event-sources", "events"],
+      capabilities: ["connections", "event-sources", "events", "entities", "mcp-servers"],
     });
     expect(linear.manifest.mark?.paths).toHaveLength(1);
+  });
+
+  it("contributes one MCP server", async () => {
+    const { mcpServers } = await collectContributions(linear);
+
+    expect(mcpServers.map((server) => server.id)).toEqual(["linear"]);
   });
 
   it("contributes one type with a redirect flow through the public client and a pasted key", async () => {
@@ -101,7 +113,7 @@ describe("what the linear plugin registers", () => {
     expect(type?.device).toBeUndefined();
   });
 
-  it("contributes one event source with both feeds and every kind", async () => {
+  it("contributes one event source with its three feeds and every kind", async () => {
     const [source, ...others] = (await collectContributions(linear)).sources;
 
     expect(others).toEqual([]);
@@ -110,6 +122,7 @@ describe("what the linear plugin registers", () => {
     expect(source?.feeds).toEqual({
       issues: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
       notifications: { defaultIntervalSeconds: 60, minIntervalSeconds: 30 },
+      entities: { defaultIntervalSeconds: 120, minIntervalSeconds: 60 },
     });
     expect(Object.keys(source?.kinds ?? {}).sort()).toEqual([...KINDS].sort());
   });

@@ -22,7 +22,6 @@ data class Session(
     val conversationId: String?,
     val runId: String?,
     val stepId: String?,
-    val instanceId: String,
     val runnerId: String,
     val workspaceId: String?,
     val projectId: String?,

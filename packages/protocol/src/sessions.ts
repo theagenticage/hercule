@@ -1,6 +1,6 @@
 /**
  * Sessions on the wire: what the controller sends, what the runner reports
- * back, and the normalized vocabulary every provider's traffic is converted to
+ * back, and the normalized vocabulary every harness's traffic is converted to
  * before it leaves the machine it ran on (spec 06 sections 4 and 6).
  *
  * The runner normalizes, so this file is the whole contract for anything that
@@ -11,12 +11,13 @@ import { Schema, SchemaGetter } from "effect";
 
 import { AdapterError } from "./adapter-errors";
 import { AttachmentReference } from "./attachments";
+import { MAX_CATALOG_MODELS, ModelDeclaration } from "./models";
 import { OutputSchema } from "./output-schema";
 import { MAX_SKILLS, LibrarySkillRevision } from "./skills";
 import {
   Fact,
-  InstanceId,
-  InstanceSecrets,
+  HarnessAccount,
+  ProviderAccountId,
   MAX_FACT_ITEMS,
   MAX_FACT_LENGTH,
   MAX_MESSAGE_LENGTH,
@@ -24,6 +25,7 @@ import {
   Sequenced,
   SessionId,
   Timestamp,
+  UsageReading,
   WorkspaceStepKey,
 } from "./primitives";
 
@@ -49,10 +51,10 @@ export type AccessMode = Schema.Schema.Type<typeof AccessMode>;
  */
 const PositiveMillis = Schema.Int.check(Schema.isGreaterThan(0));
 
-/** The provider's original report, retained without interpreting its payload. */
-export const ProviderReport = Schema.Struct({ source: Fact, payload: Schema.Json });
+/** The harness's original report, retained without interpreting its payload. */
+export const HarnessReport = Schema.Struct({ source: Fact, payload: Schema.Json });
 
-export type ProviderReport = Schema.Schema.Type<typeof ProviderReport>;
+export type HarnessReport = Schema.Schema.Type<typeof HarnessReport>;
 
 /**
  * The harness's own id for a subagent, unique within its session: the Claude
@@ -77,7 +79,7 @@ export type SubagentId = Schema.Schema.Type<typeof SubagentId>;
  *   session's own agent did. The adapter needs this tree to stop a continued
  *   subagent together with the subagents below it, because a harness such as
  *   Claude Code names no parent agent in its frames;
- * - `lastUsageReport` is the original provider report behind the latest
+ * - `lastUsageReport` is the original harness report behind the latest
  *   accepted usage snapshot. The adapter can restore its native counter
  *   baseline without counting that history again.
  */
@@ -85,7 +87,7 @@ export const ContinuedSubagent = Schema.Struct({
   subagentId: SubagentId,
   itemId: Schema.optionalKey(Fact),
   parentSubagentId: Schema.optionalKey(SubagentId),
-  lastUsageReport: Schema.optionalKey(ProviderReport),
+  lastUsageReport: Schema.optionalKey(HarnessReport),
 });
 
 export type ContinuedSubagent = Schema.Schema.Type<typeof ContinuedSubagent>;
@@ -130,21 +132,61 @@ export const DisallowedTool = Schema.String.check(
 ).pipe(Schema.refine(isDisallowedTool));
 
 /**
+ * The name of the MCP Gateway's entry in `SessionSpec.mcpServers`. A harness
+ * puts it in front of every tool name, so the model sees
+ * `mcp__tools__<server>__<tool>`, and the controller and the runner's adapters
+ * must spell it the same way.
+ */
+export const MCP_GATEWAY_ENTRY_NAME = "tools";
+
+/**
+ * What a harness puts in front of every tool name of the MCP Gateway:
+ * `mcp__tools__`. The controller counts it against a harness's name limit, and
+ * the runner's adapters strip it to read the tool back.
+ */
+export const MCP_GATEWAY_HARNESS_PREFIX = `mcp__${MCP_GATEWAY_ENTRY_NAME}__`;
+
+/**
+ * The separator in a gateway tool name, `<server name>__<tool name>`. An MCP
+ * Server's name holds no double underscore (spec 21 section 2.2), so the first
+ * one ends the server's name.
+ */
+export const MCP_GATEWAY_TOOL_SEPARATOR = "__";
+
+/**
+ * The gateway's entry in `SessionSpec.mcpServers` (spec 06 section 4): the one
+ * MCP server the harness is given, the MCP Gateway in the controller. It holds
+ * a path and a word, never an address or a token: the runner binds `url`
+ * against the controller it is connected to, and `bearer` to the session's own
+ * token, at each start.
+ */
+export const HarnessMcpServer = Schema.Struct({
+  /** The name in front of every tool the model sees: `mcp__tools__<server>__<tool>`. */
+  name: Schema.Literal(MCP_GATEWAY_ENTRY_NAME),
+  type: Schema.Literal("http"),
+  /** A path on the controller, such as `/mcp`, resolved by the runner to an absolute URL. */
+  url: Fact,
+  /** Send the session's own token as `Authorization: Bearer <token>`. */
+  bearer: Schema.Literal("session-token"),
+});
+
+export type HarnessMcpServer = Schema.Schema.Type<typeof HarnessMcpServer>;
+
+/**
  * What the controller sends for one session: ids, never paths. A workspace's
  * path on disk belongs to the runner, and the controller never stores it. The
- * runner resolves the spec to a `ProviderRunnerContext` on its own machine.
+ * runner resolves the spec to a `HarnessRunnerContext` on its own machine.
  *
  * The row that stores this keeps it byte for byte, apart from `coordination`,
  * which is never stored. A field is added here only when something sends it.
- * `mcpServers`, the one field of spec 06 section 4 that is not here yet,
- * arrives with the feature that needs it.
+ * `mcpServers` is not stored either: it is added to the frame at each start.
  */
 export const SessionSpec = Schema.Struct({
-  instanceId: InstanceId,
+  providerAccountId: ProviderAccountId,
   /** `null` for a session without a workspace: the runner gives it a scratch working directory. */
   workspaceId: Schema.NullOr(Fact),
   modelSelection: ModelSelection,
-  /** The mode after the access-mode fallback: always one the target provider declares native. */
+  /** The mode after the access-mode fallback: always one the target harness declares native. */
   accessMode: AccessMode,
   /**
    * Appended to the harness's own system prompt, never in place of it. A
@@ -171,6 +213,15 @@ export const SessionSpec = Schema.Struct({
    */
   coordination: Schema.optionalKey(Schema.String),
   /**
+   * The one entry that points the harness at the MCP Gateway (spec 21 section
+   * 4.4). The controller adds it to the frame at each start, a resume
+   * included, and only for a runner that negotiated `buildMcpServersCapability`
+   * for the session's harness, and a harness that declares `mcpPassthrough: "native"`. It is never
+   * stored, so the stored spec has none. A runner that does not know this
+   * field ignores it.
+   */
+  mcpServers: Schema.optionalKey(Schema.Array(HarnessMcpServer)),
+  /**
    * `false` turns off the harness's own automatic compaction. An assistant's
    * session sets it, because the controller rotates that session to a fresh
    * one instead, so the context is never summarized behind the assistant's
@@ -178,9 +229,9 @@ export const SessionSpec = Schema.Struct({
    */
   autoCompaction: Schema.optionalKey(Schema.Literal(false)),
   /**
-   * The tool families to take away. A provider that declares it enforces none
+   * The tool families to take away. A harness that declares it enforces none
    * of them still receives the list, and the record the caller reads reports
-   * that the provider ignores the field.
+   * that the harness ignores the field.
    */
   disallowedTools: Schema.optionalKey(Schema.Array(DisallowedTool)),
   /**
@@ -189,8 +240,8 @@ export const SessionSpec = Schema.Struct({
    */
   outputSchema: Schema.optionalKey(OutputSchema),
   /**
-   * The provider-native session this one continues from, on the same runner
-   * and the same instance (spec 06 section 4.1). A resume continues that
+   * The harness-native session this one continues from, on the same runner
+   * and the same Provider Account (spec 06 section 4.1). A resume continues that
    * native session; a fork branches off it, leaving the original untouched.
    *
    * `subagents` lists the subagents the controller already has records of,
@@ -229,13 +280,13 @@ export const SessionSpec = Schema.Struct({
 export type SessionSpec = Schema.Schema.Type<typeof SessionSpec>;
 
 /**
- * The explicit join between a Hercule session and the provider-native object
+ * The explicit join between a Hercule session and the harness-native object
  * behind it. The two ids are separate concepts and nothing else joins them.
  */
 export const SessionBinding = Schema.Struct({
   sessionId: SessionId,
   nativeSessionId: Fact,
-  instanceId: InstanceId,
+  providerAccountId: ProviderAccountId,
 });
 
 export type SessionBinding = Schema.Schema.Type<typeof SessionBinding>;
@@ -427,7 +478,7 @@ const ToolApproval = defineApprovalRequest("tool_approval", { toolName: Fact });
  *
  * The struct is closed, like every detail here: a vendor's extra field (the
  * Claude SDK's `preview`) would make what the user sees depend on which
- * harness asked (ADR 0007). Every provider maps its own shape into this one.
+ * harness asked (ADR 0007). Every harness maps its own shape into this one.
  */
 const Question = Schema.Struct({
   question: Message,
@@ -604,10 +655,10 @@ const base = {
   /** An ISO-8601 timestamp, from the runner's own clock. */
   at: Fact,
   /** Native ids: thread id, vendor item id, tool_use id. */
-  providerRefs: Schema.optionalKey(
+  harnessRefs: Schema.optionalKey(
     Schema.Record(Fact, Schema.String.check(Schema.isMaxLength(MAX_FACT_LENGTH))),
   ),
-  raw: Schema.optionalKey(ProviderReport),
+  raw: Schema.optionalKey(HarnessReport),
 };
 
 const defineEvent = <const Tag extends string, Fields extends Schema.Struct.Fields>(
@@ -639,7 +690,7 @@ const SessionExited = defineEvent("session.exited", {
  * What a turn returned under the session's output schema (spec 06 section 7).
  * It has one shape for every harness. The runner validates whatever its
  * harness produced against the declared schema, so `ok` means the same thing
- * on every provider, and a failure gives its reason in the same words.
+ * on every harness, and a failure gives its reason in the same words.
  */
 export const StructuredResult = Schema.Union([
   Schema.Struct({ outcome: Schema.Literal("ok"), value: Schema.Json }),
@@ -885,14 +936,70 @@ const SessionUsageUpdated = Schema.Union([
 ]);
 
 /**
+ * Why an MCP Server in a session's list could not be called at the session's
+ * last start (spec 21 section 3.8). The order is the order of precedence: when
+ * several reasons apply to one server, the first is the one recorded. The
+ * public API's `Session.mcpServers` uses this type for `leftOut`.
+ */
+export const McpServerLeftOutReason = Schema.Literals([
+  "harness-unsupported",
+  "runner-too-old",
+  "missing-grant",
+  "switched-off",
+  "checking",
+  "needs-sign-in",
+  "unreachable",
+  "error",
+]);
+
+export type McpServerLeftOutReason = Schema.Schema.Type<typeof McpServerLeftOutReason>;
+
+/**
+ * Why a `runtime.warning` names an MCP Server: a reason a start leaves a
+ * server out, or one of the two reasons only a refused call has (spec 21
+ * section 3.6):
+ *
+ * - `not-in-list`: the call named a server that is not in the session's list;
+ * - `timed-out`: the call ran past its deadline.
+ *
+ * The other refusals of a call reuse a left-out reason: the profile lacks the
+ * grant (`missing-grant`), the server is switched off (`switched-off`), the
+ * server is not ready or its sign-in failed (`checking`, `needs-sign-in`,
+ * `unreachable` or `error`). It is one union, so a client maps every reason to
+ * its button in one place.
+ */
+export const McpServerWarningReason = Schema.Literals([
+  ...McpServerLeftOutReason.literals,
+  "not-in-list",
+  "timed-out",
+]);
+
+export type McpServerWarningReason = Schema.Schema.Type<typeof McpServerWarningReason>;
+
+/** One MCP Server a `runtime.warning` names, and why. */
+const McpServerWarning = Schema.Struct({
+  mcpServerId: Fact,
+  reason: McpServerWarningReason,
+});
+
+/**
  * Something went wrong, but the session goes on, such as a retry or an event
  * the runner had to shrink. It may fire inside a turn or between turns, so the
  * turn id is optional.
+ *
+ * `mcpServers` is set by the controller, never by a runner, when the warning is
+ * about MCP Servers (spec 21 sections 3.6 and 3.8). Each entry names one
+ * server and why, so a client can offer the button that fixes it. A warning
+ * that is not about MCP Servers has no `mcpServers`. The field is optional, so
+ * a runner that never sets it needs no protocol version change.
  */
 const RuntimeWarning = defineEvent("runtime.warning", {
   ...attribution,
   turnId: Schema.optionalKey(Fact),
   message: Message,
+  mcpServers: Schema.optionalKey(
+    Schema.Array(McpServerWarning).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
+  ),
 });
 
 /**
@@ -981,7 +1088,7 @@ export type RequestResolution =
   | { readonly decision: ApprovalDecision }
   | { readonly answers: QuestionAnswers };
 
-/** Every event this build of the protocol knows, which `ProviderEvent` decodes strictly. */
+/** Every event this build of the protocol knows, which `HarnessEvent` decodes strictly. */
 const KNOWN_EVENTS = [
   SessionStarted,
   SessionExited,
@@ -1031,7 +1138,7 @@ const readEventTags = (member: (typeof KNOWN_EVENTS)[number]): ReadonlyArray<str
     : member.members.map((branch) => branch.fields._tag.literal);
 
 /**
- * The tags `ProviderEvent` has an arm for, `unknown` included. Derived from
+ * The tags `HarnessEvent` has an arm for, `unknown` included. Derived from
  * the arms, so a new event is known the moment it is added to `KNOWN_EVENTS`.
  */
 const ARM_TAGS: ReadonlySet<string> = new Set([
@@ -1096,15 +1203,15 @@ const UnrecognisedEvent = Schema.StructWithRest(
  * their own, which keeps the lookup: decoding a known event stays about as
  * fast as before the `unknown` arm existed.
  */
-export const ProviderEvent = Schema.Union([
+export const HarnessEvent = Schema.Union([
   Schema.Union([...KNOWN_EVENTS, UnknownEvent]),
   UnrecognisedEvent,
 ]);
 
-export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
+export type HarnessEvent = Schema.Schema.Type<typeof HarnessEvent>;
 
 /**
- * Parses the JSON text of a stored event into a `ProviderEvent`. The text is
+ * Parses the JSON text of a stored event into a `HarnessEvent`. The text is
  * trusted: the controller wrote it itself, so it is well-formed JSON of an
  * object with a string `_tag`, and the function does not check that. Fails
  * only when the text is not valid JSON.
@@ -1120,9 +1227,9 @@ export type ProviderEvent = Schema.Schema.Type<typeof ProviderEvent>;
  * event has, which protocol 11 guarantees. A row whose envelope this build
  * cannot encode is not supported.
  */
-export const parseStoredEvent = (text: string): ProviderEvent => {
+export const parseStoredEvent = (text: string): HarnessEvent => {
   const stored = JSON.parse(text) as ReceivedEvent;
-  return ARM_TAGS.has(stored._tag) ? (stored as ProviderEvent) : wrapUnknownEvent(stored);
+  return ARM_TAGS.has(stored._tag) ? (stored as HarnessEvent) : wrapUnknownEvent(stored);
 };
 
 /**
@@ -1144,8 +1251,8 @@ export type GitIdentity = Schema.Schema.Type<typeof GitIdentity>;
 
 /**
  * Starts one session, or resumes it, and hands its harness the session's
- * first input. It carries the instance's decoded config, as a probe does,
- * because the runner holds no Hercule state and cannot look it up.
+ * first input. It carries the Provider Account's `HarnessAccount`, as a probe
+ * does, because the runner holds no Hercule state and cannot look it up.
  *
  * The runner answers the input with a `SessionInputResult` under
  * `requestId`, exactly as it answers a `SessionInput`. It answers on every
@@ -1161,10 +1268,8 @@ export const SessionStart = Schema.Struct({
   sessionId: SessionId,
   /** The input the session starts with: its oldest waiting Queued Input row. */
   input: TurnInput,
-  providerId: Fact,
-  config: Schema.Json,
-  /** The instance's credentials, which its config never holds; `{}` when none. */
-  secrets: InstanceSecrets,
+  harnessId: Fact,
+  harnessAccount: HarnessAccount,
   spec: SessionSpec,
   /**
    * The session's own credential for the public API, created for this start.
@@ -1228,6 +1333,19 @@ export const SessionStart = Schema.Struct({
    */
   skills: Schema.optionalKey(
     Schema.Array(LibrarySkillRevision).check(Schema.isMaxLength(MAX_SKILLS)),
+  ),
+  /**
+   * The whole Model Catalog of the session's Provider Account, narrowed to
+   * what a harness needs to run a model (`ModelDeclaration`), in the catalog's
+   * order. The pi adapter declares to pi the models of this list that pi does
+   * not ship, so the session can run any model of the catalog. Absent means
+   * this start does not manage the declarations (the harness lists all its
+   * models itself). Present and empty means the catalog holds no model, so the
+   * adapter clears the declarations of an earlier start. Every other adapter
+   * ignores the field.
+   */
+  catalogModels: Schema.optionalKey(
+    Schema.Array(ModelDeclaration).check(Schema.isMaxLength(MAX_CATALOG_MODELS)),
   ),
 });
 
@@ -1374,7 +1492,7 @@ export type SessionInputResult = Schema.Schema.Type<typeof SessionInputResult>;
 export const SessionEvent = Schema.Struct({
   _tag: Schema.Literal("sessionEvent"),
   ...Sequenced.fields,
-  event: ProviderEvent,
+  event: HarnessEvent,
 });
 
 export type SessionEvent = Schema.Schema.Type<typeof SessionEvent>;
@@ -1405,6 +1523,22 @@ export const FilesEdited = Schema.Struct({
 export type FilesEdited = Schema.Schema.Type<typeof FilesEdited>;
 
 /**
+ * Sent by the runner, unasked, when a running session's harness reports the
+ * usage of the session's Provider Account (Claude Code's `rate_limit_event`,
+ * Codex's `account/rateLimits/updated`). It travels outside the session's
+ * numbered events and is best effort, like `FilesEdited`: the controller needs
+ * the latest reading, not every one, so a reading lost with a dropped socket
+ * is replaced by the next.
+ */
+export const AccountUsageReported = Schema.Struct({
+  _tag: Schema.Literal("accountUsageReported"),
+  sessionId: Fact,
+  readings: Schema.Array(UsageReading).check(Schema.isBetweenLength(1, MAX_FACT_ITEMS)),
+});
+
+export type AccountUsageReported = Schema.Schema.Type<typeof AccountUsageReported>;
+
+/**
  * The capability for `GithubTokenRequest` and `GithubTokenAnswer`. The runner
  * lists it at hello when it sends the request; the controller lists it when it
  * answers it. Both frames are new, so a controller on an older build cannot
@@ -1415,6 +1549,61 @@ export type FilesEdited = Schema.Schema.Type<typeof FilesEdited>;
  * copy of the token it got in `SessionStart`.
  */
 export const GITHUB_TOKEN_CAPABILITY = "github-token";
+
+/**
+ * The retired capability for MCP Servers in a start frame. A build that has
+ * only this string (the first MCP Gateway build) says that its runner hands
+ * the entry to Claude Code, the one harness it maps. It cannot say which
+ * harness, so a controller could not tell a runner that ignores the entry for
+ * Codex from one that delivers it. `buildMcpServersCapability` replaces it.
+ *
+ * Both sides still list it, so that a controller and a runner on different
+ * builds keep working while a fleet is upgraded. Only
+ * `readMcpServersHarnessIds` reads it. Delete it, and that function's
+ * fallback, once no runner or controller of the first build remains.
+ */
+export const MCP_SERVERS_CAPABILITY = "mcpServers";
+
+const MCP_SERVERS_CAPABILITY_PREFIX = `${MCP_SERVERS_CAPABILITY}:`;
+
+/**
+ * Returns the hello capability that stands for MCP Servers in the start frame
+ * of one harness, such as `mcpServers:claude-code/claude-code` for the
+ * qualified harness id `claude-code/claude-code` (spec 21 section 4.4).
+ *
+ * A runner lists one for each harness whose adapter hands the entry that
+ * points at the MCP Gateway (`SessionSpec.mcpServers`) to its harness. The
+ * controller lists one for each harness it has registered. It sends the entry
+ * only when the negotiated list holds the capability of the session's harness.
+ * A runner without it still gets the start, only without the entry, so every
+ * MCP Server in the session's list is left out with the reason
+ * `runner-too-old`.
+ *
+ * The capability is per harness because a runner build can map the entry for
+ * one harness and not yet for another.
+ */
+export const buildMcpServersCapability = (harnessId: string): string =>
+  `${MCP_SERVERS_CAPABILITY_PREFIX}${harnessId}`;
+
+/**
+ * Returns the qualified ids of the harnesses whose start frame a runner takes
+ * the MCP Gateway entry for, read from the negotiated capabilities.
+ *
+ * A runner of the first MCP Gateway build lists only the retired plain
+ * `MCP_SERVERS_CAPABILITY`, and its one adapter that maps the entry is Claude
+ * Code's. When the list holds that string and no per-harness capability, this
+ * returns Claude Code alone. This is the one place that names the harness id.
+ */
+export const readMcpServersHarnessIds = (
+  negotiatedCapabilities: ReadonlyArray<string>,
+): ReadonlyArray<string> => {
+  const harnessIds = negotiatedCapabilities
+    .filter((capability) => capability.startsWith(MCP_SERVERS_CAPABILITY_PREFIX))
+    .map((capability) => capability.slice(MCP_SERVERS_CAPABILITY_PREFIX.length));
+  return harnessIds.length === 0 && negotiatedCapabilities.includes(MCP_SERVERS_CAPABILITY)
+    ? ["claude-code/claude-code"]
+    : harnessIds;
+};
 
 /**
  * Sent by the runner when a session's `gh` command needs a GitHub token and

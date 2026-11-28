@@ -24,12 +24,12 @@
  *   until the session is idle again.
  */
 import { describe, expect, it, vi } from "vitest";
-import { Duration, Effect, Exit, Fiber, Option } from "effect";
+import { Cause, Duration, Effect, Exit, Fiber, Option } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type {
   ModelDescriptor,
   ProbeRequest,
-  ProviderEvent,
+  HarnessEvent,
   RunnerFacts,
   SessionInterrupt as SessionInterruptFrame,
   SessionStart,
@@ -48,7 +48,7 @@ import {
   SKILLS_CAPABILITY,
   SteerRefused,
 } from "@hercule/protocol";
-import type { Plugin, ProviderDefinition } from "@hercule/plugin-host";
+import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
 import type { Profile, Runner, Session } from "@hercule/contract";
 import {
   collectPushes,
@@ -65,7 +65,7 @@ import {
 } from "../http/testing";
 import { Live } from "../daemon";
 import { UUID_PATTERN, withTransaction } from "../db";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import { importTestSkill } from "../skills/testing";
 import { sessionRepository } from "./repository";
 import {
@@ -78,6 +78,7 @@ import {
   reportEvent,
   reportTurnCompleted,
   reportTurnStarted,
+  findProviderAccountId,
   spawnSession,
   spawnSessionOrFail,
   spawnThreadWithGrants,
@@ -97,14 +98,14 @@ import {
   waitForConversationSessions,
 } from "../conversations/testing";
 
-/** A provider that supports everything natively: the instance a plain spawn uses. */
-const FULL = buildProviderDefinition("full-provider", { token: "t" });
+/** A harness that supports everything natively: the harness a plain spawn uses. */
+const FULL = buildHarnessDefinition("full");
 
-/** The provider for the access-mode fallback tests: it supports up to `auto-accept-edits`. */
-const LIMITED: ProviderDefinition = {
-  ...buildProviderDefinition("limited-provider", { token: "t" }),
+/** The harness for the access-mode fallback tests: it supports up to `auto-accept-edits`. */
+const LIMITED: HarnessDefinition = {
+  ...buildHarnessDefinition("limited"),
   declared: {
-    ...buildProviderDefinition("limited-provider").declared,
+    ...buildHarnessDefinition("limited").declared,
     steering: "unsupported",
     accessModes: {
       "approval-required": "native",
@@ -116,13 +117,13 @@ const LIMITED: ProviderDefinition = {
 };
 
 /**
- * A provider that supports no access mode at all: even `approval-required` is
+ * A harness that supports no access mode at all: even `approval-required` is
  * unsupported, so the fallback has no lower mode to substitute.
  */
-const BARE: ProviderDefinition = {
-  ...buildProviderDefinition("bare-provider", { token: "t" }),
+const BARE: HarnessDefinition = {
+  ...buildHarnessDefinition("bare"),
   declared: {
-    ...buildProviderDefinition("bare-provider").declared,
+    ...buildHarnessDefinition("bare").declared,
     accessModes: {
       "approval-required": "unsupported",
       "auto-accept-edits": "unsupported",
@@ -133,7 +134,7 @@ const BARE: ProviderDefinition = {
 };
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({ id: "providers", definitions: [FULL, LIMITED, BARE] }).plugin,
+  buildPluginWithProviderPerHarness("harnesses", [FULL, LIMITED, BARE]),
 ];
 
 const FACTS: RunnerFacts = {
@@ -142,8 +143,8 @@ const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["full-provider", "limited-provider", "bare-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["harnesses/full", "harnesses/limited", "harnesses/bare"],
   identityPort: 4939,
 };
 
@@ -228,7 +229,7 @@ const EXPIRING_INPUT_DEADLINE = Duration.millis(300);
  */
 const NO_TICK = Duration.hours(1);
 
-/** Runs `body` against a controller with one joined, connected, logged-in runner, using this suite's providers and models. */
+/** Runs `body` against a controller with one joined, connected, signed-in runner, using this suite's harnesses and models. */
 const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
   options: {
@@ -245,12 +246,6 @@ const withFleet = (
     inputDeadline: INPUT_DEADLINE,
     ...options,
   });
-
-const findInstanceId = (arranged: Arranged, providerId: string): string => {
-  const found = arranged.instances.find((instance) => instance.providerId === providerId);
-  expect(found, providerId).toBeDefined();
-  return found!.id;
-};
 
 const readSession = async (arranged: Arranged, id: string): Promise<Session> => {
   const response = await get(arranged.harness.base, `/api/v1/sessions/${id}`, arranged.token);
@@ -275,6 +270,11 @@ const parseRefusal = async (
     paths: (body.error.details?.issues ?? []).map((one) => one.path),
   };
 };
+
+/** Returns the `details` of a refusal, or `undefined` when it has none. */
+const readRefusalDetails = async (response: Response): Promise<unknown> =>
+  ((await response.clone().json()) as { readonly error: { readonly details?: unknown } }).error
+    .details;
 
 /** Returns every session. After a rejected spawn there must be none. */
 const listSessions = async (arranged: Arranged): Promise<ReadonlyArray<Session>> => {
@@ -355,12 +355,12 @@ const readCrashGuardArmed = async (arranged: Arranged, id: string): Promise<bool
 const at = "2026-09-07T10:00:00.000Z";
 
 /** Builds the events of one ordinary turn, each with its sequence number. */
-const buildTranscript = (sessionId: string): ReadonlyArray<readonly [number, ProviderEvent]> => {
+const buildTranscript = (sessionId: string): ReadonlyArray<readonly [number, HarnessEvent]> => {
   const base = { eventId: crypto.randomUUID(), sessionId, at };
   const turnId = "t1";
   const itemId = "i1";
   return [
-    [1, { ...base, _tag: "session.started", providerRefs: { nativeSessionId: "native-1" } }],
+    [1, { ...base, _tag: "session.started", harnessRefs: { nativeSessionId: "native-1" } }],
     [2, { ...base, _tag: "turn.started", turnId }],
     [
       3,
@@ -530,7 +530,7 @@ const endSession = async (arranged: Arranged, session: Session, seq: number): Pr
       {
         sessionId: session.id,
         nativeSessionId: "native-1",
-        instanceId: findInstanceId(arranged, "full-provider"),
+        providerAccountId: session.providerAccountId,
       },
     ],
   });
@@ -563,7 +563,8 @@ describe("session.spawn", () => {
 
       expect(session.status).toBe("starting");
       expect(session.runnerId).toBe(arranged.runnerId);
-      expect(session.instanceId).toBe(findInstanceId(arranged, "full-provider"));
+      expect(session.providerAccountId).toBe(findProviderAccountId(arranged, "harnesses/full"));
+      expect(session.harnessId).toBe("harnesses/full");
       expect(session.requestedAccessMode).toBe("approval-required");
       expect(session.accessMode).toBe("approval-required");
       expect(session.nativeSessionId).toBeNull();
@@ -571,11 +572,11 @@ describe("session.spawn", () => {
 
       const start = (await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1))[0]!;
       expect(start.sessionId).toBe(session.id);
-      expect(start.providerId).toBe("full-provider");
+      expect(start.harnessId).toBe("harnesses/full");
       expect(start.spec).toEqual({
-        instanceId: session.instanceId,
+        providerAccountId: session.providerAccountId,
         workspaceId: null,
-        // The instance's default model, since neither the settings nor the
+        // The account's default model, since neither the settings nor the
         // call named one.
         modelSelection: { model: "clever", options: {} },
         accessMode: "approval-required",
@@ -605,7 +606,7 @@ describe("session.spawn", () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "limited-provider"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/limited"),
         accessMode: "auto",
       });
 
@@ -617,21 +618,21 @@ describe("session.spawn", () => {
     });
   });
 
-  it("rejects the spawn when the provider supports no mode at or below the requested one", async () => {
+  it("rejects the spawn when the harness supports no mode at or below the requested one", async () => {
     await withFleet(async (arranged) => {
       const response = await spawnSession(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "bare-provider"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/bare"),
         accessMode: "auto",
       });
 
       const said = await response.clone().text();
       expect(response.status, said).toBe(409);
       expect((await parseRefusal(response)).code).toBe("invalid_state");
-      // The error names the requested mode and the provider that cannot run
+      // The error names the requested mode and the harness that cannot run
       // it, so the user knows which of the two to change.
       expect(said).toContain("auto");
-      expect(said).toContain("Provider bare-provider");
+      expect(said).toContain("Harness bare");
       // Nothing was substituted and nothing was started.
       expect(await listSessions(arranged)).toEqual([]);
       await delay(250);
@@ -796,7 +797,7 @@ describe("session.spawn with an explicit runner or profile", () => {
     });
   });
 
-  it("rejects a named runner that is online but not logged in to the instance, and says why", async () => {
+  it("rejects a named runner that is online but not signed in to the account, and says why", async () => {
     await withFleet(async (arranged) => {
       await Effect.runPromise(
         Effect.orDie(
@@ -811,12 +812,12 @@ describe("session.spawn with an explicit runner or profile", () => {
 
       const response = await spawnSession(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "full-provider"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
         runnerId: arranged.runnerId,
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
-      expect(await response.text()).toContain("logged in");
+      expect(await response.text()).toContain("signed in");
       const listing = await get(arranged.harness.base, "/api/v1/sessions", arranged.token);
       const page = (await listing.json()) as { items: ReadonlyArray<Session> };
       expect(page.items).toEqual([]);
@@ -904,7 +905,7 @@ describe("the `userMaterial` flag on a start frame", () => {
           {
             name: "assessor",
             systemPrompt: "You assess tasks.",
-            instanceId: findInstanceId(arranged, "full-provider"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
             permissionProfileId: worker.id,
           },
           arranged.token,
@@ -950,6 +951,113 @@ describe("the `userMaterial` flag on a start frame", () => {
   });
 });
 
+/** Gives an account the home a migrated account kept: `providers/<account id>`. */
+const giveLegacyHome = (arranged: Arranged, providerAccountId: string): Promise<unknown> =>
+  Effect.runPromise(
+    Effect.orDie(
+      withTransaction(
+        arranged.harness.sql,
+        arranged.harness.sql`
+          UPDATE provider_accounts
+          SET legacy_home_folder = ${providerAccountId}, legacy_home_harness_id = 'harnesses/full'
+          WHERE id = unhex(replace(${providerAccountId}, '-', ''))`,
+      ),
+    ),
+  );
+
+describe("the harness account on a session's start, resume and fork frames", () => {
+  it.each([
+    ["a migrated account keeps its legacy home", true, (id: string) => `providers/${id}`],
+    [
+      "a new account gets a home of its own",
+      false,
+      (id: string) => `providers/homes/${id}/harnesses/full`,
+    ],
+  ])("%s, on every frame", async (_name, legacy, home) => {
+    await withFleet(async (arranged) => {
+      const accountId = findProviderAccountId(arranged, "harnesses/full");
+      if (legacy) await giveLegacyHome(arranged, accountId);
+
+      const parent = await startAndEndSession(arranged, "hello");
+      const forked = await continueSession(arranged, parent.id, { mode: "fork", prompt: "more" });
+      expect(forked.status, await forked.clone().text()).toBe(200);
+      const child = (await forked.json()) as Session;
+      const resumed = await sendInput(arranged, parent.id, { text: "still there?" });
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+
+      const [start, resume] = await waitForStartFrames(arranged, parent.id, 2);
+      const [fork] = await waitForStartFrames(arranged, child.id, 1);
+      expect(start!.spec.continue).toBeUndefined();
+      expect(resume!.spec.continue?.mode).toBe("resume");
+      expect(fork!.spec.continue?.mode).toBe("fork");
+      for (const frame of [start!, resume!, fork!]) {
+        expect(frame.harnessId).toBe("harnesses/full");
+        expect(frame.harnessAccount).toMatchObject({
+          providerAccountId: accountId,
+          harnessHome: home(accountId),
+        });
+      }
+    });
+  });
+
+  it("keeps the stored harness on the resumed and forked session", async () => {
+    await withFleet(async (arranged) => {
+      const parent = await startAndEndSession(arranged, "hello");
+      const forked = await continueSession(arranged, parent.id, { mode: "fork", prompt: "more" });
+      expect(forked.status, await forked.clone().text()).toBe(200);
+      const child = (await forked.json()) as Session;
+      const resumed = await sendInput(arranged, parent.id, { text: "still there?" });
+      expect(resumed.status, await resumed.clone().text()).toBe(200);
+
+      for (const session of [await readSession(arranged, parent.id), child]) {
+        expect(session.harnessId).toBe("harnesses/full");
+        expect(session.providerAccountId).toBe(parent.providerAccountId);
+      }
+    });
+  });
+});
+
+describe("continuing a session whose account was deleted", () => {
+  it("refuses a resume and a fork as invalid_state, and sends nothing", async () => {
+    await withFleet(async (arranged) => {
+      // The default assistant runs on the first account, which cannot be
+      // deleted while it does, so the session runs on another.
+      const limited = findProviderAccountId(arranged, "harnesses/limited");
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: "hello",
+        providerAccountId: limited,
+      });
+      await waitForStartFrames(arranged, session.id, 1);
+      const parent = await endSession(arranged, session, 1);
+      const deleted = await send(
+        "DELETE",
+        arranged.harness.base,
+        `/api/v1/provider-accounts/${limited}`,
+        {
+          token: arranged.token,
+        },
+      );
+      expect(deleted.status, await deleted.clone().text()).toBe(200);
+      // The ended session is history: it keeps the account's id.
+      expect((await readSession(arranged, parent.id)).providerAccountId).toBe(limited);
+
+      const input = await sendInput(arranged, parent.id, { text: "still there?" });
+      const fork = await continueSession(arranged, parent.id, { mode: "fork", prompt: "more" });
+
+      for (const response of [input, fork]) {
+        expect(response.status, await response.clone().text()).toBe(409);
+        const refusal = (await response.json()) as {
+          readonly error: { readonly code: string; readonly message: string };
+        };
+        expect(refusal.error.code).toBe("invalid_state");
+        expect(refusal.error.message).toBe("The account this thread ran on was deleted.");
+      }
+      expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
+      expect((await readSession(arranged, parent.id)).status).toBe("exited");
+    });
+  });
+});
+
 /** The capabilities of a runner on a build from before library skills. */
 const CAPABILITIES_WITHOUT_SKILLS = CURRENT_CAPABILITIES.filter(
   (capability) => capability !== SKILLS_CAPABILITY,
@@ -987,7 +1095,7 @@ const spawnAgentSession = async (arranged: Arranged): Promise<Session> => {
     {
       name: "assessor",
       systemPrompt: "You assess tasks.",
-      instanceId: findInstanceId(arranged, "full-provider"),
+      providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
       permissionProfileId: worker.id,
     },
     arranged.token,
@@ -1336,11 +1444,11 @@ describe("what a runner reports", () => {
   it("stores the native id from a sessions report, for a session already running", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
-      const instanceId = findInstanceId(arranged, "full-provider");
+      const providerAccountId = findProviderAccountId(arranged, "harnesses/full");
 
       arranged.wire.send({
         _tag: "sessionsReport",
-        sessions: [{ sessionId: session.id, nativeSessionId: "reported-1", instanceId }],
+        sessions: [{ sessionId: session.id, nativeSessionId: "reported-1", providerAccountId }],
       });
 
       const bound = await waitForSession(
@@ -1361,7 +1469,7 @@ describe("what a runner reports", () => {
           {
             sessionId: session.id,
             nativeSessionId: "native-1",
-            instanceId: findInstanceId(arranged, "full-provider"),
+            providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           },
         ],
       });
@@ -1414,6 +1522,34 @@ describe("what a runner reports", () => {
 
       expect(await readStreamRows(arranged.harness, session.id)).toEqual([]);
       expect((await readSession(arranged, session.id)).status).toBe("starting");
+    });
+  });
+});
+
+describe("a runner that leaves", () => {
+  it("has the session exit it reported just before its goodbye handled, though the close is read first", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+
+      // A leaving runner reports its sessions' exits, says goodbye and closes.
+      // The reports before the exit keep the controller busy, so the close is
+      // read while the exit is still queued. An exit dropped there would
+      // leave the session `busy` until the runner reconnects.
+      //
+      // 50 reports are enough: the controller reads all of them, the exit and
+      // the close before it handles the first (measured: 51 frames still
+      // queued when the close is read). More only slow the test, and on a
+      // loaded machine the controller gives up on frames still queued five
+      // seconds after the close, which 300 reports could exceed.
+      for (let report = 0; report < 50; report++) {
+        arranged.wire.send({ _tag: "factsReport", facts: FACTS });
+      }
+      reportExited(arranged.wire, session.id, 2);
+      arranged.wire.send({ _tag: "goodbye" });
+      arranged.wire.close();
+
+      const ended = await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      expect(ended.status).toBe("exited");
     });
   });
 });
@@ -1485,7 +1621,7 @@ describe("session.input, queued by default", () => {
 
 /**
  * The model options one input sends: validated against the session's own
- * instance, merged over the options the row already has, and all dropped when
+ * account in its harness, merged over the options the row already has, and all dropped when
  * the input changes the model, because the options belong to the model.
  */
 describe("session.input: the model options a submission carries", () => {
@@ -1724,11 +1860,11 @@ describe("input.steer", () => {
     });
   });
 
-  it("interrupts the running turn and sends the input as the next turn, on a provider that does not steer natively", async () => {
+  it("interrupts the running turn and sends the input as the next turn, on a harness that does not steer natively", async () => {
     await withFleet(async (arranged) => {
       const session = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "limited-provider"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/limited"),
       });
       const events = buildTranscript(session.id);
       await waitForStartFrames(arranged, session.id, 1);
@@ -1978,12 +2114,12 @@ describe("session.input from a session", () => {
     });
   });
 
-  it("interrupts the running turn of a provider that does not steer natively", async () => {
+  it("interrupts the running turn of a harness that does not steer natively", async () => {
     await withFleet(async (arranged) => {
       const sender = await spawnThreadWithGrants(arranged, "messenger", ["session.steer"]);
       const target = await spawnSessionOrFail(arranged, {
         prompt: "hello",
-        instanceId: findInstanceId(arranged, "limited-provider"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/limited"),
       });
       const events = buildTranscript(target.id);
       await waitForStartFrames(arranged, target.id, 1);
@@ -2033,7 +2169,7 @@ describe("the sender an input frame names", () => {
         {
           name: "helper",
           systemPrompt: "You help.",
-          instanceId: findInstanceId(arranged, "full-provider"),
+          providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           permissionProfileId: (await createProfile(arranged, "narrow", ["session.read"])).id,
         },
         arranged.token,
@@ -2136,14 +2272,14 @@ describe("a session's inputs", () => {
   const withInputs = async (arranged: Arranged): Promise<Session> => {
     const session = await spawnSessionOrFail(arranged, {
       prompt: "hello",
-      instanceId: findInstanceId(arranged, "limited-provider"),
+      providerAccountId: findProviderAccountId(arranged, "harnesses/limited"),
     });
     const events = buildTranscript(session.id);
     await waitForStartFrames(arranged, session.id, 1);
     reportEvent(arranged.wire, ...events[0]!);
     reportEvent(arranged.wire, ...events[1]!);
     await waitForSession(arranged, session.id, (one) => one.status === "busy");
-    // The provider does not support steering, so both inputs are queued.
+    // The harness does not support steering, so both inputs are queued.
     for (const text of ["second", "third"]) {
       const queued = await sendInput(arranged, session.id, { text });
       expect(queued.status, await queued.clone().text()).toBe(200);
@@ -2557,7 +2693,7 @@ describe("transcript.read", () => {
     id: string,
     query = "",
   ): Promise<{
-    items: ReadonlyArray<{ position: number; event: ProviderEvent }>;
+    items: ReadonlyArray<{ position: number; event: HarnessEvent }>;
     nextCursor?: string;
   }> => {
     const response = await get(
@@ -2636,6 +2772,46 @@ describe("transcript.read", () => {
         },
         expect.objectContaining({ _tag: "runtime.notice" }),
       ]);
+    });
+  });
+
+  it("leaves out each event's raw unless includeRaw is true, and keeps an unknown event's payload whole", async () => {
+    await withFleet(async (arranged) => {
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+      await reportTranscript(arranged, session.id);
+      const at = new Date().toISOString();
+      const raw = { source: "codex.app-server.notification", payload: { method: "x", n: 1 } };
+      // An event of a tag this build does not know: its `raw` is part of
+      // what it could not read, so it stays inside the unknown's payload.
+      const received = {
+        _tag: "turn.paused",
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        raw,
+      };
+      reportEvent(arranged.wire, 8, received as never);
+      reportEvent(arranged.wire, 9, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "runtime.notice",
+        message: "with raw",
+        raw,
+      });
+      await waitUntil("wrote the notice", async () => {
+        const found = await readTranscript(arranged, session.id);
+        return found.items.some((row) => row.event._tag === "runtime.notice") ? found : undefined;
+      });
+
+      const [paused, notice] = (await readTranscript(arranged, session.id)).items.slice(-2);
+      expect(notice!.event).not.toHaveProperty("raw");
+      expect(paused!.event).toMatchObject({ _tag: "unknown", payload: received });
+
+      const [, noticeWithRaw] = (
+        await readTranscript(arranged, session.id, "?includeRaw=true")
+      ).items.slice(-2);
+      expect(noticeWithRaw!.event).toMatchObject({ _tag: "runtime.notice", raw });
     });
   });
 
@@ -3040,7 +3216,7 @@ describe("session.continue", () => {
       expect(child).toMatchObject({
         status: "starting",
         runnerId: parent.runnerId,
-        instanceId: parent.instanceId,
+        providerAccountId: parent.providerAccountId,
         permissionProfileId: parent.permissionProfileId,
         accessMode: parent.accessMode,
         requestedAccessMode: parent.requestedAccessMode,
@@ -3088,7 +3264,7 @@ describe("session.continue", () => {
         {
           name: "assessor",
           systemPrompt: "You assess tasks.",
-          instanceId: findInstanceId(arranged, "full-provider"),
+          providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
           permissionProfileId: worker!.id,
           disallowedTools: ["edit", "shell"],
         },
@@ -3214,7 +3390,7 @@ describe("session.continue", () => {
     });
   });
 
-  it("rejects a parent whose runner is not logged in to its provider instance", async () => {
+  it("rejects a parent whose runner is not signed in to its provider account", async () => {
     await withFleet(async (arranged) => {
       const parent = await startAndEndSession(arranged, "hello");
       await Effect.runPromise(
@@ -3231,7 +3407,7 @@ describe("session.continue", () => {
       const response = await continueSession(arranged, parent.id, { mode: "fork", prompt: "no" });
 
       expect(response.status, await response.clone().text()).toBe(409);
-      expect(await response.text()).toContain("logged in");
+      expect(await response.text()).toContain("signed in");
       expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(1);
     });
   });
@@ -3771,7 +3947,7 @@ describe("a start that carries the session's first input", () => {
             {
               sessionId: session!.id,
               nativeSessionId: "native-1",
-              instanceId: session!.instanceId,
+              providerAccountId: session!.providerAccountId,
             },
           ],
         });
@@ -3831,7 +4007,7 @@ const reportFailedStart = async (
  */
 describe("an input the runner refused with a typed failure", () => {
   const INSTALL_MESSAGE =
-    "Claude Code is not installed on this runner. Install it with: `hercule runner install-harness r1 --provider claude-code`";
+    "Claude Code is not installed on this runner. Install it with: `hercule runner install-harness r1 --harness claude-code/claude-code`";
 
   it("fails a Thread's start input with the install command when the harness is not installed, and the crash exit follows", async () => {
     await withFleet(async (arranged) => {
@@ -4115,7 +4291,7 @@ const setDiskWatermark = async (arranged: Arranged, bytes: number): Promise<void
 
 const GIB = 1024 * 1024 * 1024;
 
-/** Sends a watermark report with the runner's free disk space, which admission reads. */
+/** Sends the Runner Metrics with the runner's free disk space, which admission reads. */
 const reportDiskFree = (wire: Wire, diskFreeBytes: number): void =>
   wire.send({
     _tag: "watermarkReport",
@@ -4341,7 +4517,7 @@ describe("session.spawn onto a runner that is short of disk", () => {
           arranged.token,
         );
         const runner = (await response.json()) as Runner;
-        return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+        return runner.metrics?.diskFreeBytes === 4 * GIB ? runner : undefined;
       });
 
       const waiting = await spawnSessionOrFail(arranged, { prompt: "no room" });
@@ -4368,7 +4544,7 @@ describe("session.spawn onto a runner that is short of disk", () => {
           arranged.token,
         );
         const runner = (await response.json()) as Runner;
-        return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+        return runner.metrics?.diskFreeBytes === 4 * GIB ? runner : undefined;
       });
       const waiting = await spawnSessionOrFail(arranged, { prompt: "no room" });
       expect(waiting.status).toBe("queued");
@@ -4420,7 +4596,7 @@ const reportHeldSessions = (
     sessions: sessionIds.map((sessionId) => ({
       sessionId,
       nativeSessionId: `native-${sessionId}`,
-      instanceId: findInstanceId(arranged, "full-provider"),
+      providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
     })),
   });
 
@@ -4449,7 +4625,7 @@ const startBusySessionOn = async (
     ...base,
     eventId: crypto.randomUUID(),
     _tag: "session.started",
-    providerRefs: { nativeSessionId: `native-${session.id}` },
+    harnessRefs: { nativeSessionId: `native-${session.id}` },
   });
   reportEvent(machine.wire, 2, {
     ...base,
@@ -4731,7 +4907,7 @@ describe("session.input into an exited session", () => {
         sessionId: session.id,
         at,
         _tag: "session.started",
-        providerRefs: { nativeSessionId: "native-2" },
+        harnessRefs: { nativeSessionId: "native-2" },
       });
 
       const bound = await waitForSession(arranged, session.id, (one) => one.status !== "starting");
@@ -4775,8 +4951,8 @@ describe("session.input into an exited session", () => {
       },
     ],
     [
-      "is not logged in to its instance",
-      "logged in",
+      "is not signed in to its account",
+      "signed in",
       async (arranged: Arranged): Promise<void> => {
         await Effect.runPromise(
           Effect.orDie(
@@ -4884,7 +5060,7 @@ describe("session.input into an exited session", () => {
           arranged.token,
         );
         const runner = (await response.json()) as Runner;
-        return runner.watermark?.diskFreeBytes === 4 * GIB ? runner : undefined;
+        return runner.metrics?.diskFreeBytes === 4 * GIB ? runner : undefined;
       });
 
       const response = await sendInput(arranged, session.id, { text: "no room" });
@@ -4994,7 +5170,7 @@ describe("session.input into an exited session", () => {
         );
         expect(read.status, await read.clone().text()).toBe(200);
         const body = (await read.json()) as {
-          items: ReadonlyArray<{ position: number; event: ProviderEvent }>;
+          items: ReadonlyArray<{ position: number; event: HarnessEvent }>;
         };
         return body.items.some(
           (row) => row.event._tag === "item.completed" && row.event.itemId === "i2",
@@ -5335,6 +5511,8 @@ describe("session.respondToQuestion", () => {
       expect(await response.clone().text()).toContain(
         "the agent is not waiting on that question any more",
       );
+      // The Request is still open, so this refusal does not say it is closed.
+      expect(await readRefusalDetails(response)).toBeUndefined();
       expect((await parseRefusal(response)).code).toBe("invalid_state");
       expect((await readSession(arranged, session.id)).openRequests).toEqual(session.openRequests);
     });
@@ -5641,6 +5819,7 @@ describe("answering a Request the session is not waiting on", () => {
       });
 
       expect(response.status, await response.clone().text()).toBe(409);
+      expect(await readRefusalDetails(response)).toEqual({ reason: "request-closed" });
       expect((await parseRefusal(response)).code).toBe("invalid_state");
       await delay(250);
       expect(listResponseFrames(arranged.wire)).toEqual([]);
@@ -5660,6 +5839,7 @@ describe("answering a Request the session is not waiting on", () => {
         });
 
         expect(response.status, await response.clone().text()).toBe(409);
+        expect(await readRefusalDetails(response)).toEqual({ reason: "request-closed" });
         expect((await parseRefusal(response)).code).toBe("invalid_state");
         await delay(250);
         expect(listResponseFrames(arranged.wire)).toEqual([]);
@@ -6726,7 +6906,7 @@ describe("session.markDone and session.reopen", () => {
       {
         name: "assessor",
         systemPrompt: "You assess tasks.",
-        instanceId: findInstanceId(arranged, "full-provider"),
+        providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
         permissionProfileId: worker.id,
       },
       arranged.token,
@@ -6841,6 +7021,37 @@ describe("session.markDone and session.reopen", () => {
     });
   });
 
+  it("lists the sessions of one workspace or of several", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const spawnInNewWorkspace = (prompt: string) =>
+        spawnSessionOrFail(arranged, {
+          prompt,
+          workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+        });
+      const first = await spawnInNewWorkspace("first");
+      const second = await spawnInNewWorkspace("second");
+      const third = await spawnInNewWorkspace("third");
+      expect(new Set([first, second, third].map((one) => one.workspaceId)).size).toBe(3);
+
+      const listIds = async (query: string): Promise<ReadonlyArray<string>> => {
+        const response = await get(
+          arranged.harness.base,
+          `/api/v1/sessions?${query}&sort=createdAt:asc`,
+          arranged.token,
+        );
+        expect(response.status, await response.clone().text()).toBe(200);
+        return ((await response.json()) as { items: ReadonlyArray<Session> }).items.map(
+          (one) => one.id,
+        );
+      };
+      expect(await listIds(`workspaceId=${first.workspaceId}`)).toEqual([first.id]);
+      expect(
+        await listIds(`workspaceId=${first.workspaceId}&workspaceId=${third.workspaceId}`),
+      ).toEqual([first.id, third.id]);
+    });
+  });
+
   it("refuses the removed thread filter and says to ask for kind=thread", async () => {
     await withFleet(async (arranged) => {
       await startIdleSession(arranged, "hello");
@@ -6945,6 +7156,389 @@ describe("session.markDone and session.reopen", () => {
           yield* Fiber.interrupt(announced.fiber);
         }),
       );
+    });
+  });
+});
+
+/**
+ * An archived session takes no input and is never resumed or forked. The
+ * tests set the archive mark straight in the row: they are about what every
+ * other operation does with an archived session, not about `session.archive`.
+ */
+describe("an archived session", () => {
+  const ARCHIVED_REFUSAL =
+    "This thread is archived, so it cannot take input or be reopened. Start a new thread to carry on.";
+
+  /** Marks the session archived by the user, as `session.archive` does, and nothing else. */
+  const archive = (arranged: Arranged, id: string): Promise<unknown> =>
+    Effect.runPromise(
+      Effect.orDie(
+        withTransaction(
+          arranged.harness.sql,
+          arranged.harness.sql`UPDATE sessions SET archived_at = ${at}, archived_by = 'user'
+                               WHERE id = unhex(replace(${id}, '-', ''))`,
+        ),
+      ),
+    );
+
+  /** Checks that the response refuses with `invalid_state` and the archive message. */
+  const expectArchivedRefusal = async (response: Response): Promise<void> => {
+    expect(response.status, await response.clone().text()).toBe(409);
+    expect(await readErrorBody(response)).toMatchObject({
+      code: "invalid_state",
+      message: ARCHIVED_REFUSAL,
+    });
+  };
+
+  /** Gives the session a ready workspace that it holds a lease on, as a placed session has. */
+  const holdWorkspace = (arranged: Arranged, id: string): Promise<unknown> => {
+    const workspace = Bun.randomUUIDv7().replaceAll("-", "");
+    const session = id.replaceAll("-", "");
+    return Effect.runPromise(
+      Effect.orDie(
+        withTransaction(
+          arranged.harness.sql,
+          Effect.all([
+            arranged.harness.sql`INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+              VALUES (unhex(${workspace}), unhex(${arranged.runnerId.replaceAll("-", "")}),
+                      'ephemeral', 'ready', ${at})`,
+            arranged.harness.sql`UPDATE sessions SET workspace_id = unhex(${workspace})
+              WHERE id = unhex(${session})`,
+            arranged.harness
+              .sql`INSERT INTO workspace_leases (workspace_id, holder_kind, holder_id, acquired_at)
+              VALUES (unhex(${workspace}), 'session', unhex(${session}), ${at})`,
+          ]),
+        ),
+      ),
+    );
+  };
+
+  /** Reads the lease of the session's workspace. */
+  const readLeases = (arranged: Arranged, id: string) =>
+    Effect.runPromise(
+      Effect.orDie(
+        arranged.harness.sql<{
+          readonly released_at: string | null;
+          readonly retention: string | null;
+          readonly kept_until: string | null;
+        }>`SELECT released_at, retention, kept_until FROM workspace_leases
+           WHERE holder_id = unhex(replace(${id}, '-', ''))`,
+      ),
+    );
+
+  it("refuses session.input, idle or exited, and stores nothing", async () => {
+    await withFleet(async (arranged) => {
+      // The exit's report lists only the exited session, so it is made first.
+      const exited = await startAndEndSession(arranged, "exited one");
+      const idle = await startIdleSession(arranged, "idle one");
+      await archive(arranged, idle.id);
+      await archive(arranged, exited.id);
+      const sentBefore = listInputFrames(arranged.wire).length;
+      const startsBefore = listFrames<SessionStart>(arranged.wire, "sessionStart").length;
+      const idleInputs = (await listInputs(arranged, idle.id)).length;
+      const exitedInputs = (await listInputs(arranged, exited.id)).length;
+
+      await expectArchivedRefusal(await sendInput(arranged, idle.id, { text: "more" }));
+      await expectArchivedRefusal(await sendInput(arranged, exited.id, { text: "more" }));
+
+      expect(await listInputs(arranged, idle.id)).toHaveLength(idleInputs);
+      expect(await listInputs(arranged, exited.id)).toHaveLength(exitedInputs);
+      expect(listInputFrames(arranged.wire)).toHaveLength(sentBefore);
+      expect(listFrames<SessionStart>(arranged.wire, "sessionStart")).toHaveLength(startsBefore);
+      expect((await readSession(arranged, exited.id)).status).toBe("exited");
+    });
+  });
+
+  it("refuses queueInput and stores nothing", async () => {
+    await withFleet(async (arranged) => {
+      const idle = await startIdleSession(arranged, "hello");
+      await archive(arranged, idle.id);
+      const inputs = (await listInputs(arranged, idle.id)).length;
+
+      const exit = await arranged.harness.runWithLiveSessions(
+        Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          const live = yield* Live;
+          return yield* withTransaction(sql, live.queueInput({ id: idle.id, text: "more" }));
+        }),
+      );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined).toMatchObject({
+        error: { code: "invalid_state", message: ARCHIVED_REFUSAL },
+      });
+      expect(await listInputs(arranged, idle.id)).toHaveLength(inputs);
+      expect(listInputFrames(arranged.wire)).toEqual([]);
+    });
+  });
+
+  it("refuses session.update and leaves the model selection as it was", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      await archive(arranged, session.id);
+
+      const response = await send(
+        "PATCH",
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}`,
+        {
+          body: { options: { effort: "high" } },
+          token: arranged.token,
+        },
+      );
+
+      await expectArchivedRefusal(response);
+      expect((await readSession(arranged, session.id)).modelSelection).toEqual(
+        session.modelSelection,
+      );
+    });
+  });
+
+  it("refuses input.steer and input.update on a queued input, and still lets it be cancelled", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+      reportEvent(arranged.wire, ...buildTranscript(session.id)[1]!);
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+      const queued = await sendInput(arranged, session.id, { text: "waiting" });
+      expect(queued.status, await queued.clone().text()).toBe(200);
+      const { inputId } = (await queued.json()) as { inputId: string };
+      await archive(arranged, session.id);
+      const sentBefore = listInputFrames(arranged.wire).length;
+
+      await expectArchivedRefusal(await steerInput(arranged, session.id, inputId));
+      await expectArchivedRefusal(
+        await patchInput(arranged, session.id, inputId, { text: "changed" }),
+      );
+
+      const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
+      expect(row).toMatchObject({ status: "queued", text: "waiting" });
+      expect(listInputFrames(arranged.wire)).toHaveLength(sentBefore);
+
+      const cancelled = await cancelInput(arranged, session.id, inputId);
+      expect(cancelled.status, await cancelled.clone().text()).toBe(200);
+    });
+  });
+
+  it("refuses session.reopen and keeps the Done mark", async () => {
+    await withFleet(async (arranged) => {
+      const thread = await startIdleSession(arranged, "hello");
+      const marked = await readSessionResponse(await markDone(arranged, [thread.id]));
+      await archive(arranged, thread.id);
+
+      await expectArchivedRefusal(await reopen(arranged, [thread.id]));
+
+      expect((await readSession(arranged, thread.id)).done).toEqual(marked.done);
+    });
+  });
+
+  it("refuses session.continue, idle or exited, and places nothing", async () => {
+    await withFleet(async (arranged) => {
+      const exited = await startAndEndSession(arranged, "exited one");
+      const idle = await startIdleSession(arranged, "idle one");
+      await archive(arranged, idle.id);
+      await archive(arranged, exited.id);
+      const sessionsBefore = (await listSessions(arranged)).length;
+
+      for (const parent of [idle, exited]) {
+        await expectArchivedRefusal(
+          await continueSession(arranged, parent.id, { mode: "fork", prompt: "carry on" }),
+        );
+      }
+
+      expect(await listSessions(arranged)).toHaveLength(sessionsBefore);
+    });
+  });
+
+  it("still answers session.read and transcript.read, and reads as not resumable", async () => {
+    await withFleet(async (arranged) => {
+      const exited = await startAndEndSession(arranged, "hello");
+      expect(exited.resumable).toBe(true);
+      await archive(arranged, exited.id);
+
+      const read = await readSession(arranged, exited.id);
+      expect(read).toMatchObject({ id: exited.id, status: "exited", resumable: false });
+      const transcript = await get(
+        arranged.harness.base,
+        `/api/v1/sessions/${exited.id}/transcript`,
+        arranged.token,
+      );
+      expect(transcript.status, await transcript.clone().text()).toBe(200);
+    });
+  });
+
+  it("cancels an input that was on the wire when it was archived, instead of sending it again", async () => {
+    await withFleet(
+      async (arranged) => {
+        const session = await startIdleSession(arranged, "hello");
+        arranged.wire.answering(() => undefined);
+        const unanswered = sendInput(arranged, session.id, { text: "on the wire" });
+        const [sent] = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+        // Archiving cancels only the inputs still waiting; this one was sent.
+        await archive(arranged, session.id);
+
+        // The runner never answers, so the delivery fails while the session is still idle.
+        expect((await unanswered).status).toBe(409);
+        await arranged.harness.runWithLiveSessions(
+          Effect.flatMap(Live, (live) => live.deliverQueuedInput(session.id)),
+        );
+
+        const [row] = (await listInputs(arranged, session.id)).filter(
+          (one) => one.id === sent!.requestId,
+        );
+        expect(row).toMatchObject({ status: "cancelled" });
+        expect(listInputFrames(arranged.wire)).toHaveLength(1);
+      },
+      { eventRoutingInterval: NO_TICK, inputDeadline: EXPIRING_INPUT_DEADLINE },
+    );
+  });
+
+  it("refuses a repeat of a keyed session.input once the session is archived", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      const first = await sendInput(arranged, session.id, { text: "once", dedupKey: "key-1" });
+      expect(first.status, await first.clone().text()).toBe(200);
+      await archive(arranged, session.id);
+      const sentBefore = listInputFrames(arranged.wire).length;
+
+      await expectArchivedRefusal(
+        await sendInput(arranged, session.id, { text: "once", dedupKey: "key-1" }),
+      );
+
+      expect(listInputFrames(arranged.wire)).toHaveLength(sentBefore);
+    });
+  });
+
+  it("refuses answers to its open Requests and sends nothing to the runner", async () => {
+    await withFleet(async (arranged) => {
+      const parked = await startParkedSession(arranged);
+      await archive(arranged, parked.id);
+
+      await expectArchivedRefusal(
+        await respondToApprovalRequest(arranged, parked.id, {
+          requestId: REQUEST_ID,
+          decision: "allow",
+        }),
+      );
+      expect(
+        listFrames<SessionRespondToApprovalRequest>(
+          arranged.wire,
+          "sessionRespondToApprovalRequest",
+        ),
+      ).toEqual([]);
+    });
+    await withFleet(async (arranged) => {
+      const asking = await startQuestionSession(arranged);
+      await archive(arranged, asking.id);
+
+      await expectArchivedRefusal(
+        await respondToQuestion(arranged, asking.id, { requestId: REQUEST_ID, answers: ANSWERS }),
+      );
+      expect(
+        listFrames<SessionRespondToQuestion>(arranged.wire, "sessionRespondToQuestion"),
+      ).toEqual([]);
+    });
+  });
+
+  it("opens no Request and raises no notification for a Request it reports after it was archived", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+      await archive(arranged, session.id);
+
+      reportEvent(arranged.wire, 2, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "request.opened",
+        request: {
+          requestId: REQUEST_ID,
+          itemId: "i1",
+          kind: "command_approval",
+          decisions: DECISIONS,
+          detail: { command: "ls -la" },
+        },
+      });
+
+      // The event is recorded in the stream, and opens nothing.
+      await waitUntil("recorded the late request", async () =>
+        (await readStreamRows(arranged.harness, session.id)).find(
+          (row) => row.tag === "request.opened",
+        ),
+      );
+      expect((await readSession(arranged, session.id)).openRequests).toEqual([]);
+      expect(await readApprovalNotifications(arranged, session.id)).toEqual([]);
+    });
+  });
+
+  it("closes an async question it held when it was archived once it exits", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startQuestionSession(arranged, true);
+      reportEvent(arranged.wire, 4, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "completed",
+      });
+      const idle = await waitForSession(arranged, session.id, (one) => one.status === "idle");
+      expect(idle.openRequests).toMatchObject([{ requestId: REQUEST_ID, async: true }]);
+      await archive(arranged, session.id);
+
+      reportExited(arranged.wire, session.id, 5);
+
+      const exited = await waitForSession(arranged, session.id, (one) => one.status === "exited");
+      expect(exited.openRequests).toEqual([]);
+    });
+  });
+
+  it("releases its workspace lease as archived when it exits, for the archived window", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+      await holdWorkspace(arranged, session.id);
+      await archive(arranged, session.id);
+      expect(await readLeases(arranged, session.id)).toMatchObject([{ released_at: null }]);
+
+      arranged.wire.send({
+        _tag: "sessionsReport",
+        sessions: [
+          {
+            sessionId: session.id,
+            nativeSessionId: "native-1",
+            providerAccountId: session.providerAccountId,
+          },
+        ],
+      });
+      await waitForSession(arranged, session.id, (one) => one.nativeSessionId !== null);
+      reportExited(arranged.wire, session.id, 4);
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
+
+      const [lease] = await readLeases(arranged, session.id);
+      expect(lease).toMatchObject({ retention: "archived" });
+      expect(lease!.released_at).not.toBeNull();
+      expect(Date.parse(lease!.kept_until!) - Date.parse(lease!.released_at!)).toBe(
+        7 * 24 * 3_600_000,
+      );
+    });
+  });
+
+  it("is told to stop again when a runner's report lists it live, once, and stays as it is", async () => {
+    await withFleet(async (arranged) => {
+      const gone = await startAndEndSession(arranged, "already exited");
+      const live = await startIdleSession(arranged, "still running");
+      await holdWorkspace(arranged, live.id);
+      await archive(arranged, live.id);
+      await archive(arranged, gone.id);
+
+      reportHeldSessions(arranged.wire, arranged, [live.id, gone.id]);
+      const first = await waitForFrames<SessionStopFrame>(arranged.wire, "sessionStop", 2);
+      expect(first.map((frame) => frame.sessionId).sort()).toEqual([live.id, gone.id].sort());
+
+      // After a reconnect the runner reports the same process again.
+      reportHeldSessions(arranged.wire, arranged, [live.id]);
+      const second = await waitForFrames<SessionStopFrame>(arranged.wire, "sessionStop", 3);
+      expect(second[2]).toEqual({ _tag: "sessionStop", sessionId: live.id });
+      expect((await readSession(arranged, live.id)).status).toBe("idle");
+      expect(await readLeases(arranged, live.id)).toMatchObject([{ released_at: null }]);
     });
   });
 });

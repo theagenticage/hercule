@@ -16,9 +16,17 @@ discovery, no dynamic loading and no install step. The plugins shipped so far:
 
 | Package | Contributes |
 | --- | --- |
-| `@hercule/plugin-claude-code` | the `claude-code` provider |
-| `@hercule/plugin-codex` | the `codex` provider |
-| `@hercule/plugin-pi` | the `pi` provider |
+| `@hercule/plugin-claude-code` | the `claude-code/claude-code` harness |
+| `@hercule/plugin-codex` | the `codex/codex` harness |
+| `@hercule/plugin-pi` | the `pi/pi` harness |
+| `@hercule/plugin-antigravity` | the `antigravity/antigravity` harness |
+| `@hercule/plugin-anthropic` | the `anthropic/anthropic` provider |
+| `@hercule/plugin-openai` | the `openai/openai` provider |
+| `@hercule/plugin-google` | the `google/google` provider, with a subscription signed in on each machine; its Default Selection holds Google's own models only |
+| `@hercule/plugin-zai` | the `zai/zai` provider |
+| `@hercule/plugin-openrouter` | the `openrouter/openrouter` provider, with an API key, whose models the controller reads from OpenRouter's API |
+| `@hercule/plugin-opencode` | the `opencode/opencode` provider, with a Go key and a Zen key |
+| `@hercule/plugin-minimax` | the `minimax/minimax` provider, with a pay-as-you-go key and a plan key |
 | `@hercule/plugin-github` | the `github` connection type, the event source that polls GitHub, and the workflow actions on issues and pull requests |
 | `@hercule/plugin-sentry` | the `sentry` connection type, the event source that polls Sentry for issues, the signals for new, returning and escalating issues, and the workflow actions that resolve, archive and assign an issue |
 | `@hercule/plugin-linear` | the `linear` connection type, the event source that polls Linear for the issues you watch and your inbox, and the signals for watched issues, mentions and assignments |

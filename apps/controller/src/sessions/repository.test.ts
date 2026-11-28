@@ -19,9 +19,11 @@ import { Effect, Option } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import { LIVE_SESSION_STATUSES, type SessionKind } from "@hercule/contract";
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
+import { connectionRepository, GITHUB_CONNECTION_TYPE } from "../connections";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
+import { mcpServerRepository } from "../mcp-servers";
 import { inputRepository } from "./inputs";
 import { sessionRepository, type TranscriptPageRequest } from "./repository";
 import { fold, startTracking } from "./stream";
@@ -57,12 +59,14 @@ const insertSession = (
       agentId: origin.agentId,
       conversationId: origin.conversationId,
       step,
-      instanceId: mintId(),
+      providerAccountId: mintId(),
+      harnessId: "harnesses/full",
       runnerId: mintId(),
       requestedAccessMode: "approval-required",
       accessMode: "approval-required",
       workspaceId: null,
       projectId: undefined,
+      taskId: undefined,
       checkoutBranch: undefined,
       githubConnectionId: undefined,
       spec: "{}",
@@ -82,7 +86,7 @@ const fillStream = (sessionId: string, count: number) =>
   Effect.gen(function* () {
     const sessions = yield* sessionRepository;
     for (let seq = 1; seq <= count; seq += 1) {
-      const event: ProviderEvent = {
+      const event: HarnessEvent = {
         _tag: "turn.started",
         eventId: mintId(),
         sessionId,
@@ -327,7 +331,7 @@ describe("a session's tool calls", () => {
         const sessions = yield* sessionRepository;
         const sessionId = yield* aSession;
         const counts: Array<number> = [];
-        const appendItem = (seq: number, event: Partial<ProviderEvent>) =>
+        const appendItem = (seq: number, event: Partial<HarnessEvent>) =>
           Effect.gen(function* () {
             yield* sessions.append(sessionId, {
               seq,
@@ -340,7 +344,7 @@ describe("a session's tool calls", () => {
                 itemId: `i${String(seq)}`,
                 detail: {},
                 ...event,
-              } as ProviderEvent,
+              } as HarnessEvent,
             });
             const session = yield* sessions.one(sessionId);
             counts.push(Option.getOrThrow(session).toolCalls);
@@ -555,9 +559,12 @@ describe("the kind of a session", () => {
         permissionProfileId: undefined,
         kind,
         done: undefined,
+        archived: undefined,
         runId: undefined,
+        taskId: undefined,
         conversationId: undefined,
         activeSince: undefined,
+        workspaceId: undefined,
         doneSince: undefined,
       });
       return page.items.map((one) => one.id);
@@ -664,9 +671,12 @@ describe("listing the sessions on one profile", () => {
           permissionProfileId: profileId,
           kind: undefined,
           done: undefined,
+          archived: undefined,
           runId: undefined,
+          taskId: undefined,
           conversationId: undefined,
           activeSince: undefined,
+          workspaceId: undefined,
           doneSince: undefined,
         });
         return { listed: page.items, profileId, live };
@@ -693,9 +703,12 @@ describe("listing the sessions of runs", () => {
         permissionProfileId: undefined,
         kind: undefined,
         done: undefined,
+        archived: undefined,
         runId,
+        taskId: undefined,
         conversationId: undefined,
         activeSince: undefined,
+        workspaceId: undefined,
         doneSince: undefined,
       });
       return page.items.map((one) => one.id);
@@ -715,6 +728,122 @@ describe("listing the sessions of runs", () => {
           second,
           one: yield* listByRun(runA),
           several: yield* listByRun([runA, runB]),
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(one).toEqual([first]);
+    expect(several).toEqual([first, second]);
+  });
+});
+
+describe("listing the sessions of a Task", () => {
+  /** Lists every session whose Task is `taskId`, oldest first. */
+  const listByTask = (taskId: string) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        kind: undefined,
+        done: undefined,
+        archived: undefined,
+        runId: undefined,
+        taskId,
+        conversationId: undefined,
+        activeSince: undefined,
+        workspaceId: undefined,
+        doneSince: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  it("lists the sessions set on the Task, reads the Task back, and leaves other sessions out", async () => {
+    const { first, second, listed, readTask, readNone } = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const [taskA, taskB] = [mintId(), mintId()];
+        const first = yield* insertSession(mintId());
+        const second = yield* insertSession(mintId());
+        const other = yield* insertSession(mintId());
+        const none = yield* insertSession(mintId());
+        yield* sessions.setTaskId(first, taskA);
+        yield* sessions.setTaskId(second, taskA);
+        yield* sessions.setTaskId(other, taskB);
+        const one = yield* sessions.one(first);
+        const unlinked = yield* sessions.one(none);
+        return {
+          first,
+          second,
+          listed: yield* listByTask(taskA),
+          readTask: Option.map(one, (found) => found.taskId),
+          readNone: Option.map(unlinked, (found) => found.taskId),
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(listed).toEqual([first, second]);
+    expect(Option.isSome(readTask) && readTask.value).not.toBeNull();
+    expect(readNone).toEqual(Option.some(null));
+  });
+});
+
+describe("listing the sessions of workspaces", () => {
+  /** Lists every session placed in `workspaceId`, or in one of them, oldest first. */
+  const listByWorkspaces = (workspaceId: string | ReadonlyArray<string>) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        kind: undefined,
+        workspaceId,
+        done: undefined,
+        archived: undefined,
+        runId: undefined,
+        taskId: undefined,
+        conversationId: undefined,
+        activeSince: undefined,
+        doneSince: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  it("returns the sessions placed in one of the workspaces, and no other rows", async () => {
+    const { first, second, one, several } = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const [workspaceA, workspaceB, workspaceC] = [mintId(), mintId(), mintId()];
+        const first = yield* insertSession(mintId());
+        const second = yield* insertSession(mintId());
+        const third = yield* insertSession(mintId());
+        // A session in no workspace, which no list holds.
+        yield* insertSession(mintId());
+        for (const [sessionId, workspaceId] of [
+          [first, workspaceA],
+          [second, workspaceB],
+          [third, workspaceC],
+        ] as const) {
+          yield* sql`
+            UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
+            WHERE id = ${uuidFromString(sessionId)}
+          `;
+        }
+        return {
+          first,
+          second,
+          one: yield* listByWorkspaces(workspaceA),
+          several: yield* listByWorkspaces([workspaceA, workspaceB]),
         };
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
     );
@@ -763,9 +892,12 @@ describe("listing the sessions active since an instant", () => {
           permissionProfileId: undefined,
           kind,
           done: undefined,
+          archived: undefined,
           runId: undefined,
+          taskId: undefined,
           conversationId: undefined,
           activeSince: instant,
+          workspaceId: undefined,
           doneSince: undefined,
         });
         ids.push(...page.items.map((one) => one.id));
@@ -817,9 +949,12 @@ describe("listing the sessions active since an instant", () => {
             permissionProfileId: undefined,
             kind: ["agent", "run", "assistant"],
             done: undefined,
+            archived: undefined,
             runId: undefined,
+            taskId: undefined,
             conversationId: undefined,
             activeSince: instant,
+            workspaceId: undefined,
             doneSince: undefined,
           })
           .pipe(
@@ -839,6 +974,35 @@ describe("listing the sessions active since an instant", () => {
       "SEARCH sessions USING INDEX sessions_status_exited (status=? AND exited_at>?)",
     );
     expect(details.some((detail) => detail.startsWith("SCAN sessions"))).toBe(false);
+  });
+});
+
+describe("the query plan of the board's session totals", () => {
+  it("reads the thread count and the last turn end of each Task from sessions_task_turn_ended alone", async () => {
+    const plan = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const statements: Array<readonly [string, ReadonlyArray<unknown>]> = [];
+        yield* sessions.listBoardFacts(["0190c000-0000-7000-8000-0000000000b1"]).pipe(
+          Effect.provideService(Statement.CurrentTransformer, (statement) => {
+            statements.push(statement.compile());
+            return Effect.succeed(statement);
+          }),
+        );
+        const [text, params] = statements.find(([text]) => text.includes("thread_count"))!;
+        const steps = yield* sql.unsafe<{ readonly detail: string }>(
+          `EXPLAIN QUERY PLAN ${text}`,
+          params,
+        );
+        return steps.map((step) => step.detail);
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(plan.some((step) => step.includes("COVERING INDEX sessions_task_turn_ended"))).toBe(
+      true,
+    );
+    expect(plan.some((step) => step.startsWith("SCAN sessions"))).toBe(false);
   });
 });
 
@@ -897,7 +1061,7 @@ const insertResumableSession = Effect.gen(function* () {
     VALUES (${runner}, ${uuidToString(runner)}, 'online', 'active', 0, '[]', 'a hash', ${at}, ${at})
   `;
   const sessionId = mintId();
-  const instanceId = mintId();
+  const providerAccountId = mintId();
   yield* sessions.insert({
     id: sessionId,
     title: "a session",
@@ -906,12 +1070,14 @@ const insertResumableSession = Effect.gen(function* () {
     agentId: undefined,
     conversationId: undefined,
     step: undefined,
-    instanceId,
+    providerAccountId,
+    harnessId: "harnesses/full",
     runnerId: uuidToString(runner),
     requestedAccessMode: "approval-required",
     accessMode: "approval-required",
     workspaceId: null,
     projectId: undefined,
+    taskId: undefined,
     checkoutBranch: undefined,
     githubConnectionId: undefined,
     spec: "{}",
@@ -920,7 +1086,7 @@ const insertResumableSession = Effect.gen(function* () {
     createdBy: "user",
     at,
   });
-  yield* sessions.bind(sessionId, uuidToString(runner), instanceId, "native-1");
+  yield* sessions.bind(sessionId, uuidToString(runner), providerAccountId, "native-1");
   yield* sessions.moved(sessionId, "exited", at);
   return sessionId;
 });
@@ -1048,7 +1214,7 @@ describe("an event the controller writes itself", () => {
   const ingestFirstRunnerEvent = (sessionId: string) =>
     Effect.gen(function* () {
       const sessions = yield* sessionRepository;
-      const event: ProviderEvent = { _tag: "session.started", eventId: mintId(), sessionId, at };
+      const event: HarnessEvent = { _tag: "session.started", eventId: mintId(), sessionId, at };
       const folded = fold(startTracking(yield* sessions.ingestState(sessionId)), 1, event);
       if (folded === undefined) return false;
       for (const row of folded.rows) yield* sessions.append(sessionId, row);
@@ -1064,7 +1230,7 @@ describe("an event the controller writes itself", () => {
         WHERE session_id = unhex(${sessionId.replaceAll("-", "")}) ORDER BY position`,
     );
 
-  it("goes before the first event of a session that never ran, and keeps that event", async () => {
+  it("keeps the first event of a session that never ran", async () => {
     const stream = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -1076,12 +1242,12 @@ describe("an event the controller writes itself", () => {
     );
 
     expect(stream).toEqual([
-      { runner_seq: 1, tag: "runtime.warning" },
-      { runner_seq: 2, tag: "session.started" },
+      { runner_seq: -1, tag: "runtime.warning" },
+      { runner_seq: 1, tag: "session.started" },
     ]);
   });
 
-  it("goes past every event of a resumed session, and keeps the resumed process's first event", async () => {
+  it("keeps the resumed process's first event, and numbers each warning below zero", async () => {
     const stream = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -1090,6 +1256,7 @@ describe("an event the controller writes itself", () => {
         // A resume moves the offset to the highest sequence stored, 3.
         yield* sessions.resume(sessionId, "{}");
         yield* sessions.appendRuntimeWarning(sessionId, "a notice", at);
+        yield* sessions.appendRuntimeWarning(sessionId, "another notice", at);
         expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
         return yield* readStream(sessionId);
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
@@ -1099,8 +1266,173 @@ describe("an event the controller writes itself", () => {
       { runner_seq: 1, tag: "turn.started" },
       { runner_seq: 2, tag: "turn.started" },
       { runner_seq: 3, tag: "turn.started" },
-      { runner_seq: 4, tag: "runtime.warning" },
-      { runner_seq: 5, tag: "session.started" },
+      { runner_seq: -1, tag: "runtime.warning" },
+      { runner_seq: -2, tag: "runtime.warning" },
+      { runner_seq: 4, tag: "session.started" },
+    ]);
+  });
+});
+
+describe("the archived mark of a session", () => {
+  /** Lists the ids of the sessions that match `archived`, oldest first; `undefined` lists every session. */
+  const listArchived = (archived: boolean | undefined) =>
+    Effect.gen(function* () {
+      const sessions = yield* sessionRepository;
+      const page = yield* sessions.list({
+        limit: 10,
+        cursor: undefined,
+        direction: "asc",
+        status: undefined,
+        runnerId: undefined,
+        agentId: undefined,
+        permissionProfileId: undefined,
+        kind: undefined,
+        done: undefined,
+        archived,
+        runId: undefined,
+        taskId: undefined,
+        conversationId: undefined,
+        activeSince: undefined,
+        workspaceId: undefined,
+        doneSince: undefined,
+      });
+      return page.items.map((one) => one.id);
+    });
+
+  it("reads back as who archived the session and when, and filters the list", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* sessionRepository;
+        const open = yield* aSession;
+        const archived = yield* aSession;
+        yield* sql`UPDATE sessions SET archived_at = ${at}, archived_by = 'user'
+                   WHERE id = ${uuidFromString(archived)}`;
+        return {
+          open,
+          archived,
+          openMark: Option.getOrThrow(yield* sessions.one(open)).archived,
+          archivedMark: Option.getOrThrow(yield* sessions.one(archived)).archived,
+          onlyArchived: yield* listArchived(true),
+          notArchived: yield* listArchived(false),
+          every: yield* listArchived(undefined),
+        };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(result.openMark).toBeNull();
+    expect(result.archivedMark).toEqual({ at, by: "user" });
+    expect(result.onlyArchived).toEqual([result.archived]);
+    expect(result.notArchived).toEqual([result.open]);
+    expect(result.every).toEqual([result.open, result.archived]);
+  });
+});
+
+/** Inserts one MCP Server named `name` on a Connection of its own, and returns its id. */
+const insertMcpServer = (name: string) =>
+  Effect.gen(function* () {
+    const connections = yield* connectionRepository;
+    const servers = yield* mcpServerRepository;
+    const connection = yield* connections.insert({
+      pluginId: "github",
+      type: GITHUB_CONNECTION_TYPE,
+      label: name,
+      displayName: name,
+      accountId: `account-${name}`,
+      labels: [],
+      config: {},
+      at,
+    });
+    const stored = yield* servers.insertPlugin({
+      name,
+      contributionId: "acme/desk",
+      connectionId: connection.id,
+      accountId: `account-${name}`,
+      connectionGeneration: 0,
+      at,
+    });
+    return stored.id;
+  });
+
+describe("a session's list of MCP Servers", () => {
+  const readLeftOut = (sessionId: string) =>
+    Effect.map(
+      Effect.flatMap(sessionRepository, (sessions) => sessions.one(sessionId)),
+      (row) => Option.getOrThrow(row).mcpServers.map((entry) => [entry.name, entry.leftOut]),
+    );
+
+  it("keeps the reason a start recorded for a server that stays, and starts a new entry unchecked", async () => {
+    const lists = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        const alpha = yield* insertMcpServer("alpha");
+        const bravo = yield* insertMcpServer("bravo");
+        const charlie = yield* insertMcpServer("charlie");
+        yield* sessions.replaceMcpServers(sessionId, [alpha, bravo]);
+        yield* sessions.recordLeftOut(sessionId, new Map([[bravo, "needs-sign-in"]]));
+        const before = yield* readLeftOut(sessionId);
+
+        yield* sessions.replaceMcpServers(sessionId, [charlie, bravo]);
+
+        return { before, after: yield* readLeftOut(sessionId) };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(lists.before).toEqual([
+      ["alpha", null],
+      ["bravo", "needs-sign-in"],
+    ]);
+    expect(lists.after).toEqual([
+      ["charlie", null],
+      ["bravo", "needs-sign-in"],
+    ]);
+  });
+
+  it("records each reason of a start on its servers, clears the reasons of the last start, and ignores an id outside the list", async () => {
+    const lists = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        const alpha = yield* insertMcpServer("alpha");
+        const bravo = yield* insertMcpServer("bravo");
+        const charlie = yield* insertMcpServer("charlie");
+        const delta = yield* insertMcpServer("delta");
+        const outsider = yield* insertMcpServer("outsider");
+        yield* sessions.replaceMcpServers(sessionId, [alpha, bravo, charlie, delta]);
+        yield* sessions.recordLeftOut(
+          sessionId,
+          new Map([
+            [alpha, "needs-sign-in"],
+            [delta, "checking"],
+          ]),
+        );
+        const first = yield* readLeftOut(sessionId);
+
+        yield* sessions.recordLeftOut(
+          sessionId,
+          new Map([
+            [bravo, "error"],
+            [charlie, "error"],
+            [outsider, "switched-off"],
+          ]),
+        );
+
+        return { first, second: yield* readLeftOut(sessionId) };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(lists.first).toEqual([
+      ["alpha", "needs-sign-in"],
+      ["bravo", null],
+      ["charlie", null],
+      ["delta", "checking"],
+    ]);
+    expect(lists.second).toEqual([
+      ["alpha", null],
+      ["bravo", "error"],
+      ["charlie", "error"],
+      ["delta", null],
     ]);
   });
 });

@@ -7,7 +7,7 @@ import { DecisionMark, DoneMark, WorkingMark, cn } from "@hercule/ui";
  * One thread row. The sidebar and All sessions both render the rows of
  * `buildThreadRows` with it. They differ only in:
  *
- * - the second line: a model slug in the sidebar's meta mode, a provider
+ * - the second line: a model slug in the sidebar's meta mode, a harness
  *   display name on All sessions, the run that started a step session;
  * - whether a row can be marked as the open thread.
  *

@@ -59,6 +59,7 @@ import {
 import type { ThreadFixture } from "./perf-fixture.ts";
 import {
   BUDGET,
+  MEMORY_NAME,
   MEMORY_READ_AT_MS,
   READ_HELD_TOPICS,
   RECORD_FRAMES,
@@ -66,6 +67,7 @@ import {
   VISIBLE_SAMPLE_AT_MS,
   buildTopicRows,
   evaluateInPage,
+  macLimit,
   openScreenOnce,
   readCpuMs,
   readProcessMemory,
@@ -674,7 +676,7 @@ function buildPostRows(posts: PostCost): BudgetRow[] {
       "Post, renderer main thread",
       `at most ${String(BUDGET.rendererMainThreadPerNudgeMs)} ms, the thread list's nudge limit`,
       formatMsPerPost(posts.rendererMainThreadMs),
-      mainThreadPerPostMs <= BUDGET.rendererMainThreadPerNudgeMs,
+      macLimit(mainThreadPerPostMs <= BUDGET.rendererMainThreadPerNudgeMs),
     ],
     ["Post, renderer CPU", "recorded; not budgeted", formatMsPerPost(posts.rendererCpuMs), null],
     [
@@ -691,28 +693,28 @@ const formatChange = (mb: number) => `${mb >= 0 ? "+" : ""}${mb.toFixed(1)} MB`;
 
 /** Prints what the Discussions scenario measured, against spec 17 §What Discussions and Wiki cost. */
 export function reportDiscussionWork(measured: DiscussionWork): void {
-  const sumFootprint = (memory: readonly ProcessMemory[]) =>
-    memory.reduce((sum, sample) => sum + sample.footprintMb, 0);
-  const rendererFootprint = (memory: readonly ProcessMemory[]) =>
-    memory.find((sample) => sample.label === "Tab")?.footprintMb ?? 0;
-  const afterSummed = sumFootprint(measured.memoryAfterPosts);
-  const afterRenderer = rendererFootprint(measured.memoryAfterPosts);
+  const sumMemory = (memory: readonly ProcessMemory[]) =>
+    memory.reduce((sum, sample) => sum + sample.memoryMb, 0);
+  const rendererMemory = (memory: readonly ProcessMemory[]) =>
+    memory.find((sample) => sample.label === "Tab")?.memoryMb ?? 0;
+  const afterSummed = sumMemory(measured.memoryAfterPosts);
+  const afterRenderer = rendererMemory(measured.memoryAfterPosts);
   const budgets: BudgetRow[] = [
     ...buildAtRestRows(
       measured,
       "0 fires: every age on screen is hours old, and a Post shows a clock time",
     ),
     [
-      `Footprint, summed, ${String(measured.postsDrawn)} Posts open, after the Posts`,
+      `${MEMORY_NAME}, summed, ${String(measured.postsDrawn)} Posts open, after the Posts`,
       `at most ${String(BUDGET.summedFootprintMb)} MB`,
-      `${afterSummed.toFixed(0)} MB (${formatChange(afterSummed - sumFootprint(measured.memory))} since the first reading)`,
-      afterSummed <= BUDGET.summedFootprintMb,
+      `${afterSummed.toFixed(0)} MB (${formatChange(afterSummed - sumMemory(measured.memory))} since the first reading)`,
+      macLimit(afterSummed <= BUDGET.summedFootprintMb),
     ],
     [
-      `Footprint, renderer, ${String(measured.postsDrawn)} Posts open, after the Posts`,
+      `${MEMORY_NAME}, renderer, ${String(measured.postsDrawn)} Posts open, after the Posts`,
       `at most ${String(BUDGET.rendererFootprintMb)} MB`,
-      `${afterRenderer.toFixed(0)} MB (${formatChange(afterRenderer - rendererFootprint(measured.memory))} since the first reading)`,
-      afterRenderer <= BUDGET.rendererFootprintMb,
+      `${afterRenderer.toFixed(0)} MB (${formatChange(afterRenderer - rendererMemory(measured.memory))} since the first reading)`,
+      macLimit(afterRenderer <= BUDGET.rendererFootprintMb),
     ],
     ...buildPostRows(measured.posts),
   ];

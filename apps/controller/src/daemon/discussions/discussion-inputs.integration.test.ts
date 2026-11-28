@@ -7,7 +7,7 @@
  *   on the wire, nor to a busy session;
  * - a refused Discussion Input is cancelled, and the next turn's end tells
  *   the session again;
- * - an entry steers a busy session, interrupts one whose provider cannot
+ * - an entry steers a busy session, interrupts one whose harness cannot
  *   steer, and opens a turn on an idle Thread but not on an idle step
  *   session;
  * - a session that cannot receive a Discussion Input is told nothing;
@@ -344,7 +344,7 @@ describe("an entry", () => {
     });
   });
 
-  it("interrupts a busy session whose provider cannot steer, as the system, and is told at the turn's end", async () => {
+  it("interrupts a busy session whose harness cannot steer, as the system, and is told at the turn's end", async () => {
     await withAgentFleet(
       async (arranged) => {
         const [first, second] = await spawnPair(arranged);

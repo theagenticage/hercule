@@ -19,6 +19,7 @@ const buildPlugin = (id: string, contributions: PluginDetail["contributions"]): 
   config: {},
   contributions,
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 const PAPER = {
@@ -34,7 +35,7 @@ describe("listConnectionTypes", () => {
       buildPlugin("paper-trail", [
         { extensionPoint: "connection-type", id: "paper-trail/paper", definition: PAPER },
       ]),
-      buildPlugin("quiet-sink", [{ extensionPoint: "provider", id: "acme", definition: {} }]),
+      buildPlugin("quiet-sink", [{ extensionPoint: "harness", id: "acme", definition: {} }]),
     ]);
 
     expect(types).toEqual([

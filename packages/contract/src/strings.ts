@@ -10,6 +10,7 @@
  */
 import { Schema } from "effect";
 import { MAX_DEDUP_KEY_LENGTH } from "@hercule/plugin-host";
+import { MAX_SECRET_VALUE_LENGTH } from "@hercule/protocol";
 
 /** A string of at least `minimum` and at most `maximum` characters. */
 export const bounded = (minimum: number, maximum: number) =>
@@ -129,14 +130,11 @@ export const Username = Schema.String.check(
 );
 
 /**
- * The largest secret value the API stores, in characters.
- *
- * A secret is the largest thing v1 accepts - a private key, a PEM bundle, a
- * service-account JSON - so the bound is generous, but it is a bound: it is
- * caller-controlled text that lands in the database, and the listener's own 1
- * MiB body cap is a limit on the request, not on the field.
+ * The largest secret value the API stores, in characters. The protocol owns the
+ * number, because a stored credential travels to a runner in a frame with the
+ * same bound; see `MAX_SECRET_VALUE_LENGTH` there.
  */
-export const MAX_SECRET_VALUE_LENGTH = 64 * 1024;
+export { MAX_SECRET_VALUE_LENGTH };
 
 /** A secret's value. Empty is not a secret; use `secret.delete` instead. */
 export const SecretValue = bounded(1, MAX_SECRET_VALUE_LENGTH);

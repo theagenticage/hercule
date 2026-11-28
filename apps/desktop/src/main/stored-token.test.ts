@@ -5,7 +5,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import { NoControllerSaved } from "./app-settings";
 import { MainMenu } from "./menu";
-import { KeychainError, SafeStorage } from "./safe-storage";
+import { KeyStoreError, SafeStorage } from "./safe-storage";
 import { StoredToken, StoredTokenLayer } from "./stored-token";
 import {
   makeFakeMainWindow,
@@ -22,21 +22,45 @@ beforeEach(() => {
   return settingsFile.remove;
 });
 
+/** What a keyring's problem tells the user, as on Linux. */
+const ADVICE = "Install a keyring such as gnome-keyring or KeePassXC, and keep it unlocked.";
+
+/** How a fake key store fails; see `makeFakeSafeStorage`. */
+type Failing = false | "denied" | "unavailable";
+
 /**
- * A fake Keychain: it "encrypts" by prefixing the text with `sealed:`, and
- * decrypts only what carries that prefix. `failing` makes both fail, as when
- * the Keychain denies access to its key.
+ * A fake key store: it "encrypts" by prefixing the text with `sealed:`, and
+ * decrypts only what carries that prefix. `failing` makes both fail: "denied"
+ * as when the key store denies access to its key, "unavailable" as when no
+ * keyring runs or it is locked. `keyStoreName` is what the platform calls the
+ * key store.
  */
-const makeFakeSafeStorage = (failing: boolean): Layer.Layer<SafeStorage> =>
+const makeFakeSafeStorage = (
+  failing: Failing,
+  keyStoreName: "Keychain" | "keyring",
+): Layer.Layer<SafeStorage> =>
   Layer.succeed(SafeStorage)({
+    keyStoreName,
     encrypt: (text) =>
       failing
-        ? Effect.fail(new KeychainError({ message: "access denied" }))
+        ? Effect.fail(
+            new KeyStoreError({
+              message: "access denied",
+              unavailable: failing === "unavailable",
+              advice: keyStoreName === "keyring" ? ADVICE : null,
+            }),
+          )
         : Effect.succeed(new TextEncoder().encode(`sealed:${text}`)),
     decrypt: (encrypted) => {
       const text = new TextDecoder().decode(encrypted);
       return failing || !text.startsWith("sealed:")
-        ? Effect.fail(new KeychainError({ message: "wrong key" }))
+        ? Effect.fail(
+            new KeyStoreError({
+              message: "wrong key",
+              unavailable: failing === "unavailable",
+              advice: null,
+            }),
+          )
         : Effect.succeed(text.slice("sealed:".length));
     },
   });
@@ -53,7 +77,8 @@ interface Seen {
 
 /**
  * Runs `effect` against a token service built on the temporary settings file,
- * with a fake Keychain that fails when `keychainFailing` is true. Returns the
+ * with a fake key store that fails as `keyStoreFailing` says, and that
+ * the platform calls `keyStoreName`. Returns the
  * effect's exit and what the menu, the window and the notifications saw.
  *
  * Fails the test when the urgent signals' notifications were not told the
@@ -62,7 +87,8 @@ interface Seen {
  */
 const runWithStoredToken = async <A, E>(
   effect: Effect.Effect<A, E, StoredToken>,
-  keychainFailing = false,
+  keyStoreFailing: Failing = false,
+  keyStoreName: "Keychain" | "keyring" = "Keychain",
 ): Promise<{ exit: Exit.Exit<A, E> } & Seen> => {
   const signedIn: Array<boolean> = [];
   const notificationsSignedIn: Array<boolean> = [];
@@ -72,7 +98,7 @@ const runWithStoredToken = async <A, E>(
     Layer.provide(
       Layer.mergeAll(
         settingsFile.layer,
-        makeFakeSafeStorage(keychainFailing),
+        makeFakeSafeStorage(keyStoreFailing, keyStoreName),
         window.layer,
         Layer.succeed(MainMenu)({
           setSignedIn: (next) =>
@@ -115,7 +141,7 @@ const CONTROLLER_URL = "http://127.0.0.1:4937";
 const writeConnectedSettings = (extra: object = {}) =>
   writeFileSync(settingsFile.path, JSON.stringify({ controllerUrl: CONTROLLER_URL, ...extra }));
 
-/** Returns `text` as the fake Keychain encrypts it, in base64, as the settings file holds it. */
+/** Returns `text` as the fake key store encrypts it, in base64, as the settings file holds it. */
 const sealedInBase64 = (text: string) => Buffer.from(`sealed:${text}`).toString("base64");
 
 /** Returns `token`, stored for `controllerUrl`, as the settings file holds it. */
@@ -178,9 +204,9 @@ describe("the stored token", () => {
     expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
   });
 
-  it("is removed, and reads as null, when the Keychain cannot decrypt it", async () => {
+  it("is removed, and reads as null, when the key store cannot decrypt it", async () => {
     writeConnectedSettings({ token: storedTokenFor(CONTROLLER_URL, "secret-token") });
-    const outcome = await runWithStoredToken(read, true);
+    const outcome = await runWithStoredToken(read, "denied");
     expect(outcome).toEqual({
       exit: Exit.succeed(null),
       signedIn: [false],
@@ -188,6 +214,19 @@ describe("the stored token", () => {
       window: [],
     });
     expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
+  });
+
+  it("is kept, and reads as null, when the key store cannot be used this time", async () => {
+    const token = storedTokenFor(CONTROLLER_URL, "secret-token");
+    writeConnectedSettings({ token });
+    const outcome = await runWithStoredToken(read, "unavailable", "keyring");
+    expect(outcome).toEqual({
+      exit: Exit.succeed(null),
+      signedIn: [false],
+      notificationsSignedIn: [false],
+      window: [],
+    });
+    expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL, token });
   });
 
   it.each<[string, object, object]>([
@@ -216,20 +255,33 @@ describe("the stored token", () => {
     expect(readFileObject()).toEqual(after);
   });
 
-  it("is not stored when the Keychain cannot encrypt it, and a sheet tells the user", async () => {
-    writeConnectedSettings();
-    const before = readFileText();
-    const outcome = await runWithStoredToken(write("secret-token"), true);
-    expect(outcome).toEqual({
-      exit: Exit.void,
-      // The user stays signed in until the app quits, so Sign Out is enabled.
-      signedIn: [true],
-      notificationsSignedIn: [true],
-      window: [
-        "showWarning Hercule could not save your sign-in to the Keychain, so you will need to sign in again next time.",
-      ],
-    });
-    expect(readFileText()).toBe(before);
+  it.each<["Keychain" | "keyring"]>([["Keychain"], ["keyring"]])(
+    "is not stored when the key store cannot encrypt it, and a sheet names the %s",
+    async (keyStoreName) => {
+      writeConnectedSettings();
+      const outcome = await runWithStoredToken(write("secret-token"), "denied", keyStoreName);
+      expect(outcome).toEqual({
+        exit: Exit.void,
+        // The user stays signed in until the app quits, so Sign Out is enabled.
+        signedIn: [true],
+        notificationsSignedIn: [true],
+        window: [
+          `showWarning Hercule could not save your sign-in to the ${keyStoreName}, so you will need to sign in again next time.${keyStoreName === "keyring" ? ` ${ADVICE}` : ""}`,
+        ],
+      });
+      expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
+    },
+  );
+
+  it("removes the token of the previous account when the new account's token cannot be stored, so the next launch does not sign in as the old one", async () => {
+    writeConnectedSettings({ token: storedTokenFor(CONTROLLER_URL, "old-account-token") });
+    // The keyring is locked and not unlocked, and the user signs in as another account.
+    await runWithStoredToken(write("new-account-token"), "unavailable", "keyring");
+    expect(readFileObject()).toEqual({ controllerUrl: CONTROLLER_URL });
+
+    // The next launch, with the keyring unlocked, finds no token at all.
+    const next = await runWithStoredToken(read);
+    expect(next.exit).toEqual(Exit.succeed(null));
   });
 
   it("is refused, and changes nothing, when no controller URL is saved", async () => {

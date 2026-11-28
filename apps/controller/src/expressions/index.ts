@@ -172,13 +172,13 @@ const environment = buildEnvironment(true);
  * - `event`: an expression over one event, such as a trigger's filter, reads
  *   `event`.
  * - `run`: an expression inside a run, such as an edge condition or an
- *   expression in a prompt, reads the run's `inputs` and `steps`.
+ *   expression in a prompt, reads the run's `inputs`, `run` and `steps`.
  */
 export type ExpressionScope = "event" | "run";
 
 /**
  * The variables one evaluation reads, by name: `event` for an expression over
- * one event, or `inputs` and `steps` for one inside a run.
+ * one event, or `inputs`, `run` and `steps` for one inside a run.
  */
 export type EvaluationContext = Readonly<Record<string, unknown>>;
 
@@ -195,7 +195,7 @@ export const buildEvaluationContext = (event: Event): EvaluationContext => ({
 /** The variables each scope declares. All are `dyn`, as in the evaluation environment. */
 const SCOPE_VARIABLES: Record<ExpressionScope, ReadonlyArray<string>> = {
   event: ["event"],
-  run: ["inputs", "steps"],
+  run: ["inputs", "run", "steps"],
 };
 
 /**
@@ -231,6 +231,32 @@ const readSummary = (failure: unknown): string => {
  */
 const isMissingKeyFailure = (failure: unknown): boolean =>
   (failure as { readonly code?: unknown } | null)?.code === "no_such_key";
+
+/**
+ * Returns why an evaluation failed, as the end of a sentence. A read of
+ * `run.taskId` in a run with no Task gets its own explanation, because the
+ * evaluator only says that the key `taskId` is missing and the author cannot
+ * tell that the run has no Task. Any other failure gives the evaluator's own
+ * summary.
+ */
+const describeEvaluationFailure = (
+  failure: unknown,
+  expression: string | CompiledExpression,
+  context: EvaluationContext,
+): string => {
+  const run = context.run;
+  const readsMissingTaskId =
+    isMissingKeyFailure(failure) &&
+    readSummary(failure).startsWith("No such key: taskId") &&
+    typeof expression === "string" &&
+    expression.includes("run.taskId") &&
+    typeof run === "object" &&
+    run !== null &&
+    !("taskId" in run);
+  return readsMissingTaskId
+    ? "run.taskId is not set: this run works on no Task. Start the run on a Task, or guard the read with has(run.taskId)."
+    : readSummary(failure);
+};
 
 /** The summary the evaluator writes when a source is over a structural limit. */
 const OVER_LIMIT = /^Exceeded (\w+) \((\d+)\)/;
@@ -284,7 +310,7 @@ const describeCheckFailure = (failure: CheckFailure, scope: ExpressionScope): st
     variable === "event"
       ? " A run does not keep the event. Map the value you need from the event into an input at the start trigger, and read it as inputs.<name>."
       : "";
-  return `${unavailable} An expression here is evaluated inside a run, so it can read only inputs and steps.${repair}`;
+  return `${unavailable} An expression here is evaluated inside a run, so it can read only inputs, run and steps.${repair}`;
 };
 
 /** A source compiled once, called with one context per event. */
@@ -504,7 +530,7 @@ export const evaluateExpression = (
           : expression(context),
       catch: (failure) =>
         new ExpressionError({
-          message: `that expression could not be evaluated: ${readSummary(failure)}`,
+          message: `that expression could not be evaluated: ${describeEvaluationFailure(failure, expression, context)}`,
           ...(isMissingKeyFailure(failure) ? { isUnresolvedReference: true } : {}),
         }),
     });

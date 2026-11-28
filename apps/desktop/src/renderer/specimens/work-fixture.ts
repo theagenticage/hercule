@@ -1,0 +1,725 @@
+/**
+ * The records of the Work specimen (work.tsx): a board of the invented
+ * Northwind Market world, as `task.queryBoard` would return it at the
+ * specimen's clock, Tuesday 29 September 2026, 09:41 UTC.
+ *
+ * The board has four lanes, in the order the screen draws them (Projects by
+ * name, then "No project"):
+ *
+ * - Depot ops: one card in each of four stages, so the lane is one row tall
+ *   and the next lanes start high in the window. A colleague types behind the
+ *   card in Building, and the card in In review failed, so its second line
+ *   says which workflow failed and why.
+ * - Field app: folded, so it draws as one line of dots.
+ * - Storefront: five cards in Exploring, one with a very long title; five in
+ *   Planned; two in Building; 18 in In review, one of them with a question
+ *   (a raised palm), so the cell shows four cards, that card, and "13 more";
+ *   and three in Landed, which draws as "3 landed".
+ * - No project: two cards.
+ *
+ * Platform and Insights exist as Projects but hold no card, so the board
+ * leaves their lanes out.
+ */
+import type {
+  EntityEdge,
+  EntityPlace,
+  Initiative,
+  Project,
+  TaskDetail,
+  TaskDetailRun,
+  WorkBoard,
+  WorkCard,
+  WorkCardBlocker,
+} from "@hercule/contract";
+import { buildProject } from "@hercule/client-core/threads/testing";
+import { buildBoard, buildCard, buildSummary } from "@hercule/client-core/work/testing";
+import { GITHUB_PLUGIN, QUAYSIDE_PLUGIN } from "./plugins-fixture";
+import { SPECIMEN_NOW, SPECIMEN_RECORDS } from "./sidebar-fixture";
+import type { SidebarRecords } from "./shell-page";
+
+const HOUR_MS = 3_600_000;
+const DAY_MS = 24 * HOUR_MS;
+
+/** Returns the moment `hours` hours before the specimen's clock, as an ISO timestamp. */
+const hoursAgo = (hours: number): string => new Date(SPECIMEN_NOW - hours * HOUR_MS).toISOString();
+
+/** Returns the moment `days` days before the specimen's clock, as an ISO timestamp. */
+const daysAgo = (days: number): string => new Date(SPECIMEN_NOW - days * DAY_MS).toISOString();
+
+/** Returns the id of the Task numbered `n`. */
+const taskId = (n: number): string => `01a0d1c0-6e80-7000-8000-${String(n).padStart(12, "0")}`;
+
+/** Returns the id of the run numbered `n`. Run 1 is the one the failed card's failure names. */
+const runId = (n: number): string => taskId(799 + n);
+
+/** Returns a run of the workflow `workflowName` that has the given `status`, created `hours` hours before the specimen's clock. */
+const buildRun = (
+  n: number,
+  workflowName: string,
+  status: TaskDetailRun["status"],
+  hours: number,
+): TaskDetailRun => ({
+  id: runId(n),
+  workflowId: null,
+  workflowName,
+  status,
+  createdAt: hoursAgo(hours),
+  awaitedSignalIds: [],
+});
+
+/** Returns the id of the Thread numbered `n`. */
+const sessionId = (n: number): string =>
+  `01a0d1c0-6e80-7000-8000-${String(900 + n).padStart(12, "0")}`;
+
+const STOREFRONT = buildProject("p-northwind-storefront", "Storefront");
+const PLATFORM = buildProject("p-northwind-platform", "Platform");
+const DEPOT_OPS = buildProject("p-northwind-depot-ops", "Depot ops");
+const FIELD_APP = buildProject("p-northwind-field-app", "Field app");
+const INSIGHTS = buildProject("p-northwind-insights", "Insights");
+
+/** The Projects of the Northwind Market world. */
+const NORTHWIND_PROJECTS: ReadonlyArray<Project> = [
+  STOREFRONT,
+  PLATFORM,
+  DEPOT_OPS,
+  FIELD_APP,
+  INSIGHTS,
+];
+
+/** The title that does not fit on three lines of a card. */
+const LONG_TITLE =
+  "Search feed errors after the brand change, so that the shop finds again what customers were looking for last week";
+
+/** The Thread of the colleague typing behind the card in Depot ops, Building. */
+const TYPING_THREAD = sessionId(1);
+
+/** The Thread whose question raises a palm behind the card in Storefront, In review. */
+const ASKING_THREAD = sessionId(2);
+
+/** The Thread of the run that failed on the card in Depot ops, In review. */
+const FAILED_THREAD = sessionId(3);
+
+/** One card of the board, by the facts the specimen sets: everything else is the card's usual. */
+interface Placed {
+  readonly project: Project | null;
+  readonly stage: WorkCard["stage"];
+  readonly title: string;
+  /** Days since the card's last activity. Fractions are hours. */
+  readonly idleDays: number;
+  readonly extra?: Partial<WorkCard>;
+}
+
+const depot = (
+  stage: WorkCard["stage"],
+  title: string,
+  idleDays: number,
+  extra?: Partial<WorkCard>,
+): Placed => ({
+  project: DEPOT_OPS,
+  stage,
+  title,
+  idleDays,
+  ...(extra === undefined ? {} : { extra }),
+});
+
+const field = (stage: WorkCard["stage"], title: string, idleDays: number): Placed => ({
+  project: FIELD_APP,
+  stage,
+  title,
+  idleDays,
+});
+
+const shop = (
+  stage: WorkCard["stage"],
+  title: string,
+  idleDays: number,
+  extra?: Partial<WorkCard>,
+): Placed => ({
+  project: STOREFRONT,
+  stage,
+  title,
+  idleDays,
+  ...(extra === undefined ? {} : { extra }),
+});
+
+const unplaced = (stage: WorkCard["stage"], title: string, idleDays: number): Placed => ({
+  project: null,
+  stage,
+  title,
+  idleDays,
+});
+
+/** Every card, in the order of a cell: the board's stored order. */
+const PLACED: ReadonlyArray<Placed> = [
+  depot("exploring", "Show depot staff why an item came back", 3),
+  depot("planned", "Scan a returned crate at the depot door", 4),
+  depot("building", "Return labels at the depot", 0.1, {
+    workingSessionId: TYPING_THREAD,
+    openSessionId: TYPING_THREAD,
+  }),
+  depot("in-review", "Start the refund when the depot confirms", 0.2, {
+    failure: {
+      runId: runId(1),
+      workflowName: "Review PR",
+      cause: "the branch changed mid-run",
+    },
+    openSessionId: FAILED_THREAD,
+  }),
+
+  field("exploring", "Proof of delivery while offline", 20),
+  field("landed", "Drivers reorder their own stops", 8),
+
+  shop("exploring", "Can coupons stack with loyalty points?", 28),
+  shop("exploring", "Search latency on slow phones", 2),
+  shop("exploring", "Rounding rules for multi-buy offers", 35),
+  shop("exploring", "Typo tolerance for short search words", 4),
+  shop("exploring", LONG_TITLE, 3),
+  shop("planned", "Synonyms for everyday products", 12),
+  shop("planned", "Substitutions when an item runs out", 20),
+  shop("planned", "Guest checkout without an account", 14),
+  shop("planned", "Basket drawer traps focus in one browser", 2),
+  shop("planned", "Order history hides cancelled items", 4),
+  shop("building", "Serve smaller product photos", 29),
+  shop("building", "Renew the payment gateway certificate", 2),
+  shop("in-review", "Delivery slot page feels slow at noon", 5),
+  shop("in-review", "Golden tests for price rules", 1),
+  shop("in-review", "Keyboard focus in the basket drawer", 0.5),
+  shop("in-review", "Make the checkout load faster on phones", 2),
+  shop("in-review", "Restore a basket after sign-in", 5, {
+    openQuestion: {
+      sessionId: ASKING_THREAD,
+      requestId: "request-restore-basket",
+      text: "Highest quantity, or add them?",
+    },
+    openSessionId: ASKING_THREAD,
+  }),
+  shop("in-review", "Move multi-buy rules into the price engine", 9),
+  shop("in-review", "Price engine: handle weighed items", 3),
+  shop("in-review", "Show the price breakdown in the basket", 1),
+  shop("in-review", "Label the quantity buttons for screen readers", 3),
+  shop("in-review", "Lazy-load photos below the fold", 12),
+  shop("in-review", "Preload the checkout font", 1),
+  shop("in-review", "Shorten the address form", 3),
+  shop("in-review", "Gift card field on the payment step", 6),
+  shop("in-review", "Fix the basket total on small phones", 4),
+  shop("in-review", "Cache delivery slot lookups", 2),
+  shop("in-review", "Round-trip test for price imports", 7),
+  shop("in-review", "Dark mode for the order page", 10),
+  shop("in-review", "Sticky basket button on narrow screens", 2),
+  shop("landed", "Contrast audit for sale badges", 1),
+  shop("landed", "Gift card balance on the receipt", 4),
+  shop("landed", "Faster basket totals", 6),
+
+  unplaced("exploring", "Tidy the depot labels", 6),
+  unplaced("in-review", "Weekly flake report", 2),
+];
+
+/** Returns the card for the `index`-th entry of `PLACED`. Its Task id is `index` + 1, which stays clear of the Thread ids. */
+const buildPlacedCard = (placed: Placed, index: number): WorkCard => {
+  const lastActivityAt =
+    placed.idleDays < 1 ? hoursAgo(placed.idleDays * 24) : daysAgo(placed.idleDays);
+  return buildCard(taskId(index + 1), {
+    title: placed.title,
+    stage: placed.stage,
+    boardRank: String(index + 1).padStart(4, "0"),
+    ...(placed.project === null ? {} : { projectId: placed.project.id }),
+    createdAt: daysAgo(placed.idleDays + 30),
+    stageChangedAt: daysAgo(placed.idleDays + 1),
+    lastActivityAt,
+    ...placed.extra,
+  });
+};
+
+/** What the Work specimen reads, besides the sidebar's lists. */
+export interface WorkRecords {
+  /** What `task.queryBoard` returns. */
+  readonly board: WorkBoard;
+  /** The ids of the lanes the user folded, which the screen keeps in `localStorage`. */
+  readonly foldedLaneIds: readonly string[];
+  /** What `initiative.query` returns: the open Initiatives. None when left out. */
+  readonly initiatives?: readonly Initiative[];
+  /** The ids of the Initiatives whose row the user opened in place, which the screen keeps in `localStorage`. None when every row is folded. */
+  readonly openedInitiativeIds?: readonly string[];
+  /** What `task.readDetail` returns for the Tasks whose details the specimen opens. None when left out. */
+  readonly details?: readonly TaskDetail[];
+}
+
+/** The board of the Work specimen. */
+export const WORK_RECORDS: WorkRecords = {
+  board: buildBoard(...PLACED.map(buildPlacedCard)),
+  foldedLaneIds: [FIELD_APP.id],
+};
+
+/** Returns the id of the Initiative numbered `n`. */
+const buildInitiativeId = (n: number): string =>
+  `01a0d1c0-6e80-7000-8000-${String(1000 + n).padStart(12, "0")}`;
+
+const GIFT_CARD_REFUNDS: Initiative = {
+  id: buildInitiativeId(1),
+  name: "Gift card refunds",
+  intent: "Let a customer get a cancelled order back onto the gift card that paid for it.",
+  target: "Live by the spring sale",
+  targetDate: "2027-03-20T00:00:00.000Z",
+  hue: 245,
+  projectId: STOREFRONT.id,
+  createdAt: daysAgo(40),
+  updatedAt: daysAgo(3),
+};
+const CALM_THE_TEST_SUITE: Initiative = {
+  id: buildInitiativeId(2),
+  name: "Calm the test suite",
+  intent: "Stop the flaky tests from hiding real failures.",
+  hue: 150,
+  projectId: PLATFORM.id,
+  createdAt: daysAgo(60),
+  updatedAt: daysAgo(1),
+};
+const ONE_PRICE_ENGINE: Initiative = {
+  id: buildInitiativeId(3),
+  name: "One price engine",
+  intent: "Every price in the shop comes from the same rules.",
+  hue: 300,
+  projectId: STOREFRONT.id,
+  createdAt: daysAgo(50),
+  updatedAt: daysAgo(2),
+};
+const SELF_SERVICE_RETURNS: Initiative = {
+  id: buildInitiativeId(4),
+  name: "Self-service returns at the depots",
+  intent: "Depot staff take a return in without calling the office.",
+  hue: 118,
+  projectId: DEPOT_OPS.id,
+  createdAt: daysAgo(35),
+  updatedAt: daysAgo(4),
+};
+
+/** The Tasks of the Initiatives that already stand on the Work specimen's board, by title. */
+const INITIATIVE_OF_TITLE: Readonly<Record<string, Initiative>> = {
+  "Show depot staff why an item came back": SELF_SERVICE_RETURNS,
+  "Scan a returned crate at the depot door": SELF_SERVICE_RETURNS,
+  "Return labels at the depot": SELF_SERVICE_RETURNS,
+  "Start the refund when the depot confirms": GIFT_CARD_REFUNDS,
+  "Gift card field on the payment step": GIFT_CARD_REFUNDS,
+  "Gift card balance on the receipt": GIFT_CARD_REFUNDS,
+  "Rounding rules for multi-buy offers": ONE_PRICE_ENGINE,
+  "Move multi-buy rules into the price engine": ONE_PRICE_ENGINE,
+  "Price engine: handle weighed items": ONE_PRICE_ENGINE,
+};
+
+const buildBlockerByTitle = (title: string): WorkCardBlocker => {
+  const card = WORK_RECORDS.board.cards.find((candidate) => candidate.title === title);
+  if (card === undefined) throw new Error(`The board has no card titled "${title}".`);
+  return { id: card.id, title: card.title, stage: card.stage };
+};
+
+const buildCardIdByTitle = (title: string): string => buildBlockerByTitle(title).id;
+
+/**
+ * Returns the details of the Task titled `title`, for a Task with the Initiative it has on the
+ * board and the blockers and the Tasks it blocks, each named by title. It has no thread, run or
+ * outside link, so only the sections of Initiatives and blockers have anything to draw.
+ */
+const buildInitiativeDetail = (
+  title: string,
+  links: { readonly blockers?: readonly string[]; readonly blocks?: readonly string[] },
+): TaskDetail => {
+  const card = INITIATIVE_BOARD_CARDS.find((candidate) => candidate.title === title);
+  const initiative = INITIATIVE_OF_TITLE[title];
+  if (card === undefined) throw new Error(`The board has no card titled "${title}".`);
+  const blockers = (links.blockers ?? []).map(buildBlockerByTitle);
+  const blocks = (links.blocks ?? []).map(buildBlockerByTitle);
+  return {
+    task: {
+      id: card.id,
+      title: card.title,
+      description: "",
+      status: "open",
+      stage: card.stage,
+      priority: "normal",
+      labels: [],
+      ...(card.projectId === undefined ? {} : { projectId: card.projectId }),
+      ...(initiative === undefined ? {} : { initiativeId: initiative.id }),
+      provenance: [],
+      createdAt: card.createdAt,
+      updatedAt: card.lastActivityAt,
+      statusChangedAt: card.stageChangedAt,
+      stageChangedAt: card.stageChangedAt,
+    },
+    card: {
+      ...card,
+      summary: buildSummary("Waiting on the rounding rules.", {
+        standing: "The price engine rounds a multi-buy offer one line at a time.",
+        left: "Handle a weighed item",
+        generatedAt: hoursAgo(3),
+      }),
+    },
+    sessions: [],
+    sessionCount: 0,
+    runs: [],
+    runCount: 0,
+    blockers,
+    blockerCount: blockers.length,
+    blocks,
+    blockCount: blocks.length,
+    entities: [],
+    places: [],
+    edges: [],
+  };
+};
+
+/** The Tasks that wait on another, by title, and the title of the Task each waits on. */
+const WAITS_ON_TITLE: Readonly<Record<string, string>> = {
+  "Gift card field on the payment step": "Start the refund when the depot confirms",
+  "Price engine: handle weighed items": "Rounding rules for multi-buy offers",
+  "Can coupons stack with loyalty points?": "Rounding rules for multi-buy offers",
+};
+
+/** The Tasks the Initiatives add to the board: the flaky tests, and the gift card Tasks that are new. */
+const FLAKY_TESTS: readonly string[] = [
+  "Checkout test fails on the first run of the day",
+  "Basket test depends on the order of the others",
+  "Price import test waits on a real clock",
+  "Search test reads a stale index",
+  "Coupon test shares one customer with another",
+  "Slot test breaks at midnight UTC",
+  "Photo test needs the network",
+  "Receipt test compares with a moving date",
+  "Address test races the postcode lookup",
+  "Login test keeps the old cookie",
+  "Refund test runs twice on retry",
+];
+
+const buildAddedCard = (n: number, overrides: Partial<WorkCard>): WorkCard =>
+  buildCard(taskId(100 + n), {
+    boardRank: String(100 + n).padStart(4, "0"),
+    createdAt: daysAgo(30),
+    stageChangedAt: daysAgo(3),
+    lastActivityAt: daysAgo(2),
+    ...overrides,
+  });
+
+const ADDED_CARDS: readonly WorkCard[] = [
+  buildAddedCard(1, {
+    title: "Refund to a gift card when an order is cancelled",
+    stage: "planned",
+    projectId: STOREFRONT.id,
+    initiativeId: GIFT_CARD_REFUNDS.id,
+  }),
+  buildAddedCard(2, {
+    title: "Can a gift card pay for delivery?",
+    stage: "in-review",
+    projectId: STOREFRONT.id,
+    initiativeId: GIFT_CARD_REFUNDS.id,
+    openQuestion: {
+      sessionId: sessionId(4),
+      requestId: "request-gift-card-delivery",
+      text: "Gift card for delivery too, or goods only?",
+    },
+    openSessionId: sessionId(4),
+  }),
+  ...FLAKY_TESTS.map((title, index) =>
+    buildAddedCard(10 + index, {
+      title,
+      stage: "exploring",
+      projectId: PLATFORM.id,
+      initiativeId: CALM_THE_TEST_SUITE.id,
+    }),
+  ),
+  buildAddedCard(30, {
+    title: "Run the browser tests in parallel",
+    stage: "building",
+    projectId: PLATFORM.id,
+    initiativeId: CALM_THE_TEST_SUITE.id,
+  }),
+  buildAddedCard(31, {
+    title: "Retry only the tests that failed",
+    stage: "in-review",
+    projectId: PLATFORM.id,
+    initiativeId: CALM_THE_TEST_SUITE.id,
+  }),
+  buildAddedCard(32, {
+    title: "Quarantine a test that fails three times",
+    stage: "landed",
+    projectId: PLATFORM.id,
+    initiativeId: CALM_THE_TEST_SUITE.id,
+  }),
+  buildAddedCard(33, {
+    title: "Show test timings in the report",
+    stage: "landed",
+    projectId: PLATFORM.id,
+    initiativeId: CALM_THE_TEST_SUITE.id,
+  }),
+];
+
+/** The cards of the board of `WORK_INITIATIVES_RECORDS`: the Work specimen's cards with their Initiatives and blockers, and the added ones. */
+const INITIATIVE_BOARD_CARDS: readonly WorkCard[] = [
+  ...WORK_RECORDS.board.cards.map((card): WorkCard => {
+    const initiative = INITIATIVE_OF_TITLE[card.title];
+    const waitsOn = WAITS_ON_TITLE[card.title];
+    return {
+      ...card,
+      ...(initiative === undefined ? {} : { initiativeId: initiative.id }),
+      ...(waitsOn === undefined
+        ? {}
+        : { blockedBy: [buildBlockerByTitle(waitsOn)], blockedByCount: 1 }),
+    };
+  }),
+  ...ADDED_CARDS,
+];
+
+/**
+ * The Work specimen with Initiatives, as the Overview drawing shows "Plans":
+ * the block "Initiatives" on top with four rows, and under "Not in an
+ * initiative" the Project lanes of the Tasks that are on none.
+ *
+ * - Gift card refunds, folded: a failed mark first in In review, then a
+ *   question, then a Task that waits on the failed one; one Task at Planned;
+ *   a landed Task and a ring of one Done Task.
+ * - Calm the test suite, folded: eleven open Tasks at Exploring, which is
+ *   tally marks, and Tasks at the stages after it.
+ * - One price engine, open in place: three cards, two of them waiting on a Task.
+ * - Self-service returns at the depots, folded: three open beads.
+ *
+ * The Depot ops lane has no Task left, so the board leaves it out. In the
+ * Storefront lane, the first card waits on a Task of the open Initiative.
+ */
+export const WORK_INITIATIVES_RECORDS: WorkRecords = {
+  ...WORK_RECORDS,
+  board: {
+    ...WORK_RECORDS.board,
+    cards: INITIATIVE_BOARD_CARDS,
+    initiativeDoneCounts: { [GIFT_CARD_REFUNDS.id]: 1, [CALM_THE_TEST_SUITE.id]: 2 },
+  },
+  initiatives: [GIFT_CARD_REFUNDS, CALM_THE_TEST_SUITE, ONE_PRICE_ENGINE, SELF_SERVICE_RETURNS],
+  openedInitiativeIds: [ONE_PRICE_ENGINE.id],
+  details: [
+    buildInitiativeDetail("Price engine: handle weighed items", {
+      blockers: ["Rounding rules for multi-buy offers"],
+    }),
+    buildInitiativeDetail("Rounding rules for multi-buy offers", {
+      blocks: ["Price engine: handle weighed items", "Can coupons stack with loyalty points?"],
+    }),
+  ],
+};
+
+/**
+ * The id of the Task whose details `WORK_INITIATIVES_RECORDS` holds under Blocked by: a Task of
+ * One price engine that waits on the Task below.
+ */
+export const WORK_BLOCKED_TASK_ID: string = buildCardIdByTitle(
+  "Price engine: handle weighed items",
+);
+
+/** The id of the Task of One price engine that two others wait on, whose details hold a Blocks section. */
+export const WORK_BLOCKING_TASK_ID: string = buildCardIdByTitle(
+  "Rounding rules for multi-buy offers",
+);
+
+/**
+ * The sidebar's lists with the Projects of the Northwind Market world added,
+ * and the two plugins that report the outside things the details link, for a
+ * specimen that opens Work.
+ */
+export const WORK_SIDEBAR_RECORDS: SidebarRecords = {
+  ...SPECIMEN_RECORDS,
+  projects: [...SPECIMEN_RECORDS.projects, ...NORTHWIND_PROJECTS],
+  plugins: [GITHUB_PLUGIN, QUAYSIDE_PLUGIN],
+};
+
+/**
+ * What the Task that asks links outside, for the Linked and Part of sections
+ * of its details: a GitHub issue in the storefront repository and in a
+ * Quayside delivery round, the round under a site, and an issue of another
+ * repository that no Connection can read.
+ */
+const LINKED_ISSUE: EntityPlace = {
+  ref: "github:issue:acme/storefront-web#412",
+  kind: "github/issue",
+  noun: "Issue",
+  title: "Basket is empty after signing in again",
+  identifier: "#412",
+  status: { shape: "ring", tone: "active", label: "In progress" },
+  restricted: false,
+  latestChange: {
+    reason: "reassigned",
+    sentence: { say: "Now with Tessa", tone: "plain" },
+    at: hoursAgo(5),
+  },
+};
+const HIDDEN_ISSUE: EntityPlace = {
+  ref: "github:issue:acme/platform-core#1204",
+  kind: "github/issue",
+  noun: "Issue",
+  restricted: true,
+};
+const STOREFRONT_REPOSITORY: EntityPlace = {
+  ref: "github:repository:acme/storefront-web",
+  kind: "github/repository",
+  noun: "Repository",
+  caption: "GitHub repository",
+  title: "storefront-web",
+  restricted: false,
+};
+const WINTER_ROUND: EntityPlace = {
+  ref: "quayside:round:winter-stock",
+  kind: "quayside/round",
+  noun: "Delivery round",
+  caption: "Quayside delivery round",
+  title: "Winter stock",
+  status: { shape: "half", tone: "active", label: "Receiving" },
+  progress: { fraction: 3 / 5, done: 3, total: 5 },
+  targetDate: "2026-10-21T00:00:00.000Z",
+  restricted: false,
+};
+const ROTTERDAM_SITE: EntityPlace = {
+  ref: "quayside:site:rotterdam",
+  kind: "quayside/site",
+  noun: "Site",
+  caption: "Quayside site",
+  title: "Rotterdam depot",
+  restricted: false,
+};
+const LINKED_EDGES: readonly EntityEdge[] = [
+  { fromRef: LINKED_ISSUE.ref, toRef: STOREFRONT_REPOSITORY.ref },
+  { fromRef: LINKED_ISSUE.ref, toRef: WINTER_ROUND.ref },
+  { fromRef: WINTER_ROUND.ref, toRef: ROTTERDAM_SITE.ref },
+];
+
+/** The Task whose details the `work-details` specimen has open: the one that asks a question. */
+const ASKING_CARD = WORK_RECORDS.board.cards.find(
+  (card) => card.title === "Restore a basket after sign-in",
+)!;
+
+/** The Task with a failed run, on the board of the specimen. */
+const FAILED_CARD = WORK_RECORDS.board.cards.find(
+  (card) => card.title === "Start the refund when the depot confirms",
+)!;
+
+/**
+ * The Work specimen with the details of the Task that asks open beside the
+ * board: its summary and what is left, the question with two answers, the
+ * Thread that asks, and what it links, with the way to link something else.
+ */
+export const WORK_DETAILS_RECORDS: WorkRecords = {
+  ...WORK_RECORDS,
+  details: [
+    {
+      task: {
+        id: ASKING_CARD.id,
+        title: ASKING_CARD.title,
+        description: "",
+        status: "open",
+        stage: ASKING_CARD.stage,
+        priority: "normal",
+        labels: [],
+        projectId: STOREFRONT.id,
+        provenance: [],
+        createdAt: ASKING_CARD.createdAt,
+        updatedAt: ASKING_CARD.lastActivityAt,
+        statusChangedAt: ASKING_CARD.stageChangedAt,
+        stageChangedAt: ASKING_CARD.stageChangedAt,
+      },
+      card: {
+        ...ASKING_CARD,
+        summary: buildSummary("One question is left on the PR.", {
+          standing:
+            "One question is left on the PR: which quantity wins when both baskets hold an item.",
+          left: "Answer the quantity question",
+          generatedAt: hoursAgo(1),
+        }),
+      },
+      sessions: [
+        {
+          id: ASKING_THREAD,
+          title: "Restore a basket after sign-in",
+          role: null,
+          kind: "thread",
+          status: "idle",
+          openRequests: [
+            {
+              requestId: "request-restore-basket",
+              itemId: "item-restore-basket",
+              kind: "question",
+              detail: {
+                questions: [
+                  {
+                    header: "Quantity",
+                    question: "Highest quantity, or add them?",
+                    options: [{ label: "Highest quantity" }, { label: "Add them together" }],
+                    multiSelect: false,
+                  },
+                ],
+              },
+            },
+          ],
+          done: false,
+        },
+      ],
+      sessionCount: 1,
+      runs: [
+        buildRun(2, "Review PR", "running", 1),
+        buildRun(3, "Check the refund rules", "completed", 5),
+      ],
+      runCount: 3,
+      blockers: [],
+      blockerCount: 0,
+      blocks: [],
+      blockCount: 0,
+      entities: [LINKED_ISSUE, HIDDEN_ISSUE],
+      places: [LINKED_ISSUE, HIDDEN_ISSUE, STOREFRONT_REPOSITORY, WINTER_ROUND, ROTTERDAM_SITE],
+      edges: LINKED_EDGES,
+    },
+    {
+      task: {
+        id: FAILED_CARD.id,
+        title: FAILED_CARD.title,
+        description: "",
+        status: "open",
+        stage: FAILED_CARD.stage,
+        priority: "normal",
+        labels: [],
+        projectId: DEPOT_OPS.id,
+        provenance: [],
+        createdAt: FAILED_CARD.createdAt,
+        updatedAt: FAILED_CARD.lastActivityAt,
+        statusChangedAt: FAILED_CARD.stageChangedAt,
+        stageChangedAt: FAILED_CARD.stageChangedAt,
+      },
+      card: {
+        ...FAILED_CARD,
+        summary: buildSummary("The review stopped early.", {
+          standing: "The review stopped before it left any comments on the refund change.",
+          left: "A review",
+          generatedAt: hoursAgo(2),
+        }),
+      },
+      sessions: [
+        {
+          id: FAILED_THREAD,
+          title: "Start the refund when the depot confirms",
+          role: null,
+          kind: "thread",
+          status: "idle",
+          openRequests: [],
+          done: false,
+        },
+      ],
+      sessionCount: 1,
+      runs: [buildRun(1, "Review PR", "failed", 3)],
+      runCount: 1,
+      blockers: [],
+      blockerCount: 0,
+      blocks: [],
+      blockCount: 0,
+      entities: [],
+      places: [],
+      edges: [],
+    },
+  ],
+};
+
+/** The id of the Task whose details `WORK_DETAILS_RECORDS` opens first: the one that asks. */
+export const WORK_OPEN_TASK_ID: string = ASKING_CARD.id;
+
+/** The id of the Task with a failed run, whose details `WORK_DETAILS_RECORDS` also holds. */
+export const WORK_FAILED_TASK_ID: string = FAILED_CARD.id;

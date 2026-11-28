@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
 import type { LiveMessage } from "@hercule/contract";
 import { HOST_API, registerEventSource, type Plugin } from "@hercule/plugin-host";
 import {
@@ -23,9 +24,11 @@ import {
   waitWithin,
   type ServerHarness,
 } from "../http/testing";
+import { pluginRepository } from "./repository";
 import { registry as shipped } from "./registry";
 import {
-  buildProviderDefinition,
+  buildHarnessDefinition,
+  buildMcpServerPlugin,
   createIntakeFixture,
   createPluginFixture,
   IDLE_FEEDS,
@@ -65,11 +68,11 @@ const buildPlugins = (): ReadonlyArray<Plugin> =>
     createPluginFixture({
       id: "alpha",
       configSchema: Schema.Struct({ model: Schema.optionalKey(Schema.String) }),
-      definitions: [buildProviderDefinition("alpha-provider", { model: "alpha-provider-default" })],
+      definitions: [buildHarnessDefinition("alpha")],
     }),
     createPluginFixture({ id: "beta" }),
     createPluginFixture({ id: "outdated", hostApi: HOST_API + 1 }),
-    createPluginFixture({ id: "greedy", capabilities: ["providers", "channels"] }),
+    createPluginFixture({ id: "greedy", capabilities: ["harnesses", "channels"] }),
     createPluginFixture({
       id: "unrenderable",
       configSchema: Schema.Struct({ nested: Schema.Struct({}) }),
@@ -143,6 +146,9 @@ describe("GET /plugins", () => {
         "greedy",
         "unrenderable",
         "flaky",
+        // None of the fixtures offers a provider, so the test controller adds
+        // this plugin to let setup create the default assistant.
+        "test",
       ]);
 
       for (const field of [
@@ -162,7 +168,7 @@ describe("GET /plugins", () => {
         id: "alpha",
         displayName: "Plugin alpha",
         hostApi: HOST_API,
-        capabilities: ["providers"],
+        capabilities: ["harnesses"],
         enabled: true,
         status: { _tag: "active" },
         config: {},
@@ -220,14 +226,15 @@ describe("GET /plugins", () => {
       const alpha = plugins[0]!;
       expect(alpha.contributions).toHaveLength(1);
       const contribution = alpha.contributions[0]!;
-      expect(contribution.extensionPoint).toBe("provider");
-      expect(contribution.id).toBe("alpha-provider");
-      expect(contribution.definition).toEqual(stored.get("alpha/alpha-provider"));
+      expect(contribution.extensionPoint).toBe("harness");
+      expect(contribution.id).toBe("alpha/alpha");
+      expect(contribution.definition).toEqual(stored.get("alpha/alpha/alpha"));
       expect(contribution.definition).toMatchObject({
-        id: "alpha-provider",
-        displayName: "Provider alpha-provider",
-        supportsMultipleInstances: true,
-        defaultConfig: { model: "alpha-provider-default" },
+        id: "alpha/alpha",
+        displayName: "Harness alpha",
+        binaryName: "harness",
+        releaseSource: { kind: "npm", package: "harness" },
+        runs: [],
       });
 
       for (const refused of REFUSED) {
@@ -236,6 +243,35 @@ describe("GET /plugins", () => {
         expect(plugin, refused).not.toHaveProperty("configSchema");
       }
     });
+  });
+});
+
+describe("a plugin whose harness is published on a GitHub repository", () => {
+  it("is errored, with a message that says how to write a repository, when the repository is not <owner>/<name>", async () => {
+    const plugin = createPluginFixture({
+      id: "github",
+      definitions: [
+        {
+          ...buildHarnessDefinition("github"),
+          releaseSource: {
+            kind: "github-releases",
+            repository: "https://github.com/google-antigravity/antigravity-cli",
+          },
+        },
+      ],
+    }).plugin;
+
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+
+        const { status, contributions } = await readPlugin(base, token, "github");
+        expect(status._tag).toBe("errored");
+        expect(status.message).toContain("must be written <owner>/<name>");
+        expect(contributions).toEqual([]);
+      },
+      { plugins: [plugin] },
+    );
   });
 });
 
@@ -826,7 +862,7 @@ describe("the shipped registry over the routes", () => {
   it("loads a plugin whose manifest asks for connections, rather than refusing it", async () => {
     const asking = createPluginFixture({
       id: "asking",
-      capabilities: ["providers", "connections"],
+      capabilities: ["harnesses", "connections"],
     });
 
     await withServer(
@@ -834,7 +870,7 @@ describe("the shipped registry over the routes", () => {
         const token = await completeSetup(base);
 
         expect(await readPlugin(base, token, "asking")).toMatchObject({
-          capabilities: ["providers", "connections"],
+          capabilities: ["harnesses", "connections"],
           status: { _tag: "active" },
         });
       },
@@ -989,6 +1025,54 @@ describe("the event kinds the shipped github plugin declares", () => {
     );
   });
 
+  it("stores the entity kinds beside them, with only what classifying a linked thing needs", async () => {
+    await withServer(
+      async ({ sql }) => {
+        const rows = await readContributionRows(sql, "event-source", "github");
+        const definition = JSON.parse(rows[0]!.definition) as {
+          readonly entityKinds: ReadonlyArray<{
+            kind: string;
+            refPrefix: string;
+            classification: "work" | "context";
+          }>;
+        };
+        expect(definition.entityKinds).toEqual(
+          expect.arrayContaining([
+            { kind: "github/pull-request", refPrefix: "github:pr:", classification: "work" },
+            { kind: "github/issue", refPrefix: "github:issue:", classification: "work" },
+            { kind: "github/repository", refPrefix: "github:repo:", classification: "context" },
+          ]),
+        );
+      },
+      { plugins: shipped },
+    );
+  });
+
+  it("still lists the declared entity kinds of a plugin once it is disabled, because its things stay unread work", async () => {
+    await withServer(
+      async ({ base, sql }) => {
+        const token = await completeSetup(base);
+        const listKinds = () =>
+          Effect.runPromise(
+            Effect.orDie(
+              Effect.flatMap(pluginRepository, (plugins) => plugins.listDeclaredEntityKinds()),
+            ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+          );
+        const pullRequest = {
+          kind: "github/pull-request",
+          refPrefix: "github:pr:",
+          classification: "work",
+        };
+        expect(await listKinds()).toContainEqual(pullRequest);
+
+        expect((await movePlugin(base, token, "github", "disable")).status).toBe(200);
+
+        expect(await listKinds()).toContainEqual(pullRequest);
+      },
+      { plugins: shipped },
+    );
+  });
+
   it("declares each kind with a description and a payload schema that includes the subject", async () => {
     await withServer(
       async ({ sql }) => {
@@ -1063,6 +1147,42 @@ describe("an event source whose kind is not namespaced", () => {
         expect(Object.keys(definition.kinds)).toEqual(["acme.thing.happened"]);
       },
       { plugins: [buildEventSourcePlugin(["acme.thing.happened"])] },
+    );
+  });
+});
+
+describe("an MCP server a plugin offers, over the plugin routes", () => {
+  const EXPECTED = {
+    extensionPoint: "mcp-server",
+    id: "acme/desk",
+    definition: {
+      id: "acme/desk",
+      displayName: "Desk",
+      description: "Read and update Desk tickets.",
+      connectionType: "acme/desk",
+      origin: "https://mcp.desk.example",
+    },
+  };
+
+  it("is listed with every public field and no function, also once its plugin is disabled", async () => {
+    await withServer(
+      async ({ base }) => {
+        const token = await completeSetup(base);
+        const readContribution = (plugin: PluginDetail) =>
+          plugin.contributions.find((one) => one.extensionPoint === "mcp-server");
+
+        const listed = (await listPlugins(base, token)).find((plugin) => plugin.id === "acme");
+        expect(readContribution(listed!)).toEqual(EXPECTED);
+        expect(readContribution(await readPlugin(base, token, "acme"))).toEqual(EXPECTED);
+
+        expect((await movePlugin(base, token, "acme", "disable")).status).toBe(200);
+
+        const disabled = await readPlugin(base, token, "acme");
+        expect(disabled.enabled).toBe(false);
+        expect(readContribution(disabled)).toEqual(EXPECTED);
+        expect(JSON.stringify(disabled)).not.toContain("buildUpstreamRequest");
+      },
+      { plugins: [buildMcpServerPlugin("acme")] },
     );
   });
 });

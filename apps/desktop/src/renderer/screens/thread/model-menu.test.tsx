@@ -1,200 +1,758 @@
 /**
- * Tests the model menu's content: Recent, the thread's account with its older
- * models folded, the other accounts, the filter, and the choice each row makes,
- * on a thread that has started and on a Draft Thread.
+ * Tests the model menu's content: on a Draft Thread, Recent and one lane per
+ * account with the entries that cannot run dimmed with their reason and a
+ * Sign in link; with several Model Profiles, the heads of the accordion; on a
+ * thread that has started, the flat list and its note; the choice each row
+ * makes; and the arrow keys.
  */
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   readThreadConfig,
   type RecentModel,
+  type SignInTarget,
   type ThreadCatalogs,
   type ThreadChoice,
   type ThreadConfig,
   type ThreadKind,
 } from "@hercule/client-core";
-import type { ProviderInstance } from "@hercule/contract";
-import { FIXTURE_INSTANCE, SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
+import type { ModelProfile, ProviderAccount, ResolvedModelProfileEntry } from "@hercule/contract";
+import {
+  ANTHROPIC_IDENTITY,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  buildProviderAccount,
+  HARNESSES,
+  OPENAI_IDENTITY,
+  PROVIDERS,
+} from "@hercule/client-core/testing";
+import { SIDEBAR_FIXTURE, THREAD_FIXTURES } from "../../app/testing";
 import { ModelMenu } from "./model-menu";
 
-/** The fixture instance's one snapshot, from moss. */
-const SNAPSHOT = FIXTURE_INSTANCE.snapshots[0]!;
+const MOSS = SIDEBAR_FIXTURE.runners[0]!;
 
-/** A second Claude Code account on moss, which only a Draft Thread can switch to. */
-const WORK_INSTANCE: ProviderInstance = {
-  ...FIXTURE_INSTANCE,
-  id: "01a06d02-7600-7000-8000-000000000002",
-  name: "work",
-  snapshots: [
-    {
-      ...SNAPSHOT,
-      auth: { status: "ok", identity: "work@example.com", planLabel: "Claude Pro" },
-      models: [
-        {
-          slug: "claude-haiku-5",
-          name: "Claude Haiku 5",
-          imageInput: { maxBytes: null },
-          isDefault: true,
-          options: [],
-        },
-      ],
-    },
-  ],
-};
+const CLAUDE = buildProviderAccount(ANTHROPIC_IDENTITY, [], [{ runnerId: MOSS.id }]);
+/** Codex is not signed in on moss, so its entries cannot run there. */
+const CODEX = buildProviderAccount(
+  OPENAI_IDENTITY,
+  [],
+  [{ runnerId: MOSS.id, state: "not-signed-in" }],
+);
 
-/** The fixture instance with five more models, so the accounts hold more than eight. */
-const MANY_INSTANCE: ProviderInstance = {
-  ...FIXTURE_INSTANCE,
-  snapshots: [
-    {
-      ...SNAPSHOT,
-      models: [
-        ...SNAPSHOT.models,
-        ...["4.1", "4.2", "4.3", "4.4", "4.5"].map((version) => ({
-          slug: `claude-haiku-${version}`,
-          name: `Claude Haiku ${version}`,
-          imageInput: { maxBytes: null },
-          options: [],
-        })),
-      ],
-    },
-  ],
-};
+/** Returns a Claude Code entry of the Anthropic account named after its model. */
+const claudeEntry = (
+  model: string,
+  name: string,
+  fields: Partial<ResolvedModelProfileEntry> = {},
+): ResolvedModelProfileEntry => buildProfileEntry(ANTHROPIC_IDENTITY, model, { name, ...fields });
 
-/** The idle fixture thread's config: Claude Sonnet 5, on the fixture instance. */
-const CONFIG = readThreadConfig({ kind: "active", session: THREAD_FIXTURES.finished.session });
-
-/** Returns the catalogs with `instances` on moss. */
-const buildCatalogs = (instances: readonly ProviderInstance[]): ThreadCatalogs => ({
-  instances,
-  runners: SIDEBAR_FIXTURE.runners,
-  thisMacRunnerId: null,
+const SONNET = claudeEntry("claude-sonnet-5", "Claude Sonnet 5");
+const OPUS = claudeEntry("claude-opus-5", "Claude Opus 5");
+const OPUS_IN_PI = claudeEntry("claude-opus-5", "Claude Opus 5", {
+  harnessId: "pi/pi",
+  resolvedHarnessId: "pi/pi",
+});
+const GPT = buildProfileEntry(OPENAI_IDENTITY, "gpt-5.4", {
+  name: "GPT-5.4",
+  resolvedHarnessId: "codex/codex",
+  problem: { reason: "not-signed-in", message: "Not signed in to Codex." },
 });
 
-/** Renders the menu and returns the function that received each choice. */
+/** The profile "Main": Claude's two models, then Codex's one, with Sonnet as the default. */
+const MAIN: ModelProfile = buildModelProfile(
+  [
+    buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS]),
+    buildProfileSection(OPENAI_IDENTITY, [GPT]),
+  ],
+  { defaultEntry: { providerAccountId: CLAUDE.id, model: SONNET.model, harnessId: null } },
+);
+
+/** The idle fixture thread's config, moved to the Anthropic account and its Sonnet. */
+const CONFIG: ThreadConfig = {
+  ...readThreadConfig({ kind: "active", session: THREAD_FIXTURES.finished.session }),
+  providerAccountId: CLAUDE.id,
+  harnessId: null,
+  model: SONNET.model,
+  runnerId: MOSS.id,
+};
+
+/** Returns the recent entry for `entry`. */
+const recentOf = (entry: ResolvedModelProfileEntry): RecentModel => ({
+  providerAccountId: entry.providerAccountId,
+  harnessId: entry.resolvedHarnessId,
+  model: entry.model,
+});
+
+/** The function that saves a change to a profile, as the menu receives it. */
+type SaveProfile = NonNullable<ComponentProps<typeof ModelMenu>["saveProfile"]>;
+
+/** Renders the menu and returns the functions that received each choice and each sign-in. */
 const renderMenu = ({
-  instances = [FIXTURE_INSTANCE, WORK_INSTANCE],
+  accounts = [CLAUDE, CODEX],
+  profiles = [MAIN],
   config = CONFIG,
-  kind = "active",
+  kind = "draft",
   recent = [],
+  lastOpenProfileId = null,
+  saveProfile,
 }: {
-  readonly instances?: readonly ProviderInstance[];
+  readonly accounts?: readonly ProviderAccount[];
+  readonly profiles?: readonly ModelProfile[];
   readonly config?: ThreadConfig;
   readonly kind?: ThreadKind;
   readonly recent?: readonly RecentModel[];
+  readonly lastOpenProfileId?: string | null;
+  readonly saveProfile?: SaveProfile;
 } = {}) => {
+  const buildCatalogs = (modelProfiles: readonly ModelProfile[]): ThreadCatalogs => ({
+    accounts,
+    providers: PROVIDERS,
+    harnesses: HARNESSES,
+    modelProfiles,
+    runners: SIDEBAR_FIXTURE.runners,
+    thisMacRunnerId: null,
+  });
   const onChoose = vi.fn<(choice: ThreadChoice) => void>();
-  render(
+  const onSignIn = vi.fn<(target: SignInTarget) => void>();
+  const rememberOpenProfile = vi.fn<(profileId: string) => void>();
+  const draw = (modelProfiles: readonly ModelProfile[]) => (
     <ModelMenu
-      catalogs={buildCatalogs(instances)}
+      catalogs={buildCatalogs(modelProfiles)}
+      plugins={[]}
       config={config}
       kind={kind}
+      runnerId={null}
+      timezone="UTC"
       readRecent={() => recent}
+      readLastOpenProfileId={() => lastOpenProfileId}
+      rememberOpenProfile={rememberOpenProfile}
       onChoose={onChoose}
-    />,
+      onSignIn={onSignIn}
+      saveProfile={saveProfile}
+    />
   );
-  return onChoose;
+  const { rerender } = render(draw(profiles));
+  /** Draws the menu again with other profiles, as the app does when the controller changes them. */
+  const showProfiles = (next: readonly ModelProfile[]): void => {
+    rerender(draw(next));
+  };
+  return { onChoose, onSignIn, rememberOpenProfile, showProfiles };
+};
+
+/** Returns the words of a row, without the words a Provider's mark draws as its fallback initial. */
+const readWords = (row: Element): string => {
+  const copy = row.cloneNode(true) as Element;
+  for (const mark of copy.querySelectorAll("svg")) mark.remove();
+  return copy.textContent;
 };
 
 /** Returns the text of each row of each section, in order. A section's label is its first row. */
 const readSections = (): readonly (readonly string[])[] =>
-  [...document.querySelectorAll(".pop-sec")].map((section) =>
-    [...section.children].map((row) => row.textContent),
-  );
+  [...document.querySelectorAll(".pop-sec")].map((section) => [...section.children].map(readWords));
 
-/** Returns the text of each row that can be picked, in order. */
-const readPickable = (): readonly string[] =>
-  screen.getAllByRole("button").map((button) => button.textContent);
-
-describe("the model menu", () => {
-  it("lists Recent, the thread's account, then the other accounts, dimmed because the account is fixed", () => {
-    renderMenu({
-      recent: [
-        { instanceId: WORK_INSTANCE.id, model: "claude-haiku-5" },
-        { instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" },
-      ],
-    });
+describe("the model menu of a Draft Thread", () => {
+  it("lists Recent, then a lane per account named after it, with the entries in the profile's order", () => {
+    renderMenu({ recent: [recentOf(OPUS), recentOf(SONNET)] });
 
     expect(readSections()).toEqual([
-      ["Recent", "Claude Haiku 5 · workaccount fixed", "Claude Opus 5 · personal"],
-      ["personal", "Claude Sonnet 5", "Claude Opus 5", "older models (1)"],
-      ["work · work@example.com · Claude Proaccount fixed"],
+      ["Recent", "Claude Opus 5", "Claude Sonnet 5"],
+      ["Anthropic", "Claude Sonnet 5", "Claude Opus 5"],
+      ["OpenAI", "GPT-5.4not signed in on mossSign in"],
     ]);
-    expect(readPickable()).toEqual([
-      "Claude Opus 5 · personal",
-      "Claude Sonnet 5",
-      "Claude Opus 5",
-      "older models (1)",
-    ]);
-    // Four models are too few to need a filter.
+    // Three entries are too few to need a filter.
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("checks the model in use, and marks the default model when it is another", () => {
-    renderMenu({ config: { ...CONFIG, model: "claude-opus-5" } });
+  it("checks the entry in use and marks the profile's default entry when it is another", () => {
+    renderMenu({ config: { ...CONFIG, model: OPUS.model } });
 
-    const current = screen.getByRole("button", { current: true });
-    expect(current.textContent).toBe("Claude Opus 5");
-    expect(current.querySelector("svg:last-child")).not.toBeNull();
+    expect(screen.getByRole("button", { current: true }).textContent).toBe("Claude Opus 5");
     expect(screen.getByRole("button", { name: "Claude Sonnet 5 · default" })).toBeTruthy();
   });
 
-  it("shows the older models on request, and hands each row's model choice to onChoose", async () => {
-    const user = userEvent.setup();
-    const onChoose = renderMenu({
-      recent: [{ instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" }],
-    });
+  it("names the other harness of an entry that runs in one, and keeps both entries of one model", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS, OPUS_IN_PI]),
+    ]);
+    renderMenu({ profiles: [profile] });
 
-    await user.click(screen.getByRole("button", { name: "older models (1)" }));
-    expect(readSections()[1]).toEqual([
-      "personal",
+    expect(readSections()[0]).toEqual([
+      "Anthropic",
       "Claude Sonnet 5",
       "Claude Opus 5",
-      "Claude Sonnet 4",
-    ]);
-    await user.click(screen.getByRole("button", { name: "Claude Opus 5 · personal" }));
-    await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
-
-    expect(onChoose.mock.calls).toEqual([
-      [{ kind: "model", instanceId: FIXTURE_INSTANCE.id, model: "claude-opus-5" }],
-      [{ kind: "model", instanceId: FIXTURE_INSTANCE.id, model: "claude-sonnet-4" }],
+      "Claude Opus 5 · in pi",
     ]);
   });
 
-  it("offers a filter once the accounts hold more than eight models, focused, which narrows every section", async () => {
+  it("dims an entry that cannot run with its reason, and signs in from the row", async () => {
     const user = userEvent.setup();
-    renderMenu({ instances: [MANY_INSTANCE, WORK_INSTANCE] });
+    const { onChoose, onSignIn } = renderMenu();
+
+    // The row is not a button to pick, but its Sign in link is a button.
+    expect(screen.queryByRole("button", { name: /GPT-5.4/ })).toBeNull();
+    const row = screen.getByText("GPT-5.4").closest(".line")!;
+    expect(row.classList.contains("line--dimmed")).toBe(true);
+    expect(within(row as HTMLElement).getByText("not signed in on moss")).toBeTruthy();
+    await user.click(within(row as HTMLElement).getByRole("button", { name: "Sign in" }));
+
+    expect(onSignIn.mock.calls).toEqual([
+      [expect.objectContaining({ providerAccountId: CODEX.id, runnerId: MOSS.id })],
+    ]);
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("shows a note in the lane of an account whose models are still being read", () => {
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET]),
+      buildProfileSection(OPENAI_IDENTITY, "pending"),
+    ]);
+    renderMenu({ profiles: [profile] });
+
+    expect(readSections()[1]).toEqual(["OpenAI", "Reading models…"]);
+  });
+
+  it("hands the account, the harness and the model of the picked row to onChoose", async () => {
+    const user = userEvent.setup();
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS_IN_PI]),
+    ]);
+    const { onChoose } = renderMenu({ profiles: [profile] });
+
+    await user.click(screen.getByRole("button", { name: "Claude Opus 5 · in pi" }));
+
+    expect(onChoose.mock.calls).toEqual([
+      [{ kind: "model", providerAccountId: CLAUDE.id, harnessId: "pi/pi", model: OPUS.model }],
+    ]);
+  });
+
+  it("offers a focused filter once the profile holds more than eight entries, which narrows every lane", async () => {
+    const user = userEvent.setup();
+    const many = ["1", "2", "3", "4", "5", "6", "7", "8"].map((version) =>
+      claudeEntry(`claude-haiku-${version}`, `Claude Haiku ${version}`),
+    );
+    const profile = buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, ...many]),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]);
+    renderMenu({ profiles: [profile] });
 
     const filter = screen.getByRole("textbox", { name: "Filter models" });
     expect(document.activeElement).toBe(filter);
-    await user.type(filter, "haiku 4.2");
+    await user.type(filter, "haiku 3");
 
-    expect(readSections().slice(1)).toEqual([["personal", "Claude Haiku 4.2"]]);
+    expect(readSections().slice(1)).toEqual([["Anthropic", "Claude Haiku 3"]]);
+    await user.clear(filter);
+    await user.type(filter, "zzz");
+    expect(screen.getByText("No model matches.")).toBeTruthy();
   });
 
-  it("lets a Draft Thread switch to another account, which chooses the account alone", async () => {
-    const user = userEvent.setup();
-    const onChoose = renderMenu({ kind: "draft" });
+  it("says so when the user has no model in the menu yet", () => {
+    renderMenu({ profiles: [buildModelProfile([])] });
 
-    expect(readSections()[1]).toEqual(["work · work@example.com · Claude Pro1 model"]);
-    await user.click(
-      screen.getByRole("button", { name: "work · work@example.com · Claude Pro1 model" }),
+    expect(screen.getByText("No models in this profile yet.")).toBeTruthy();
+  });
+});
+
+/** The profile "Work": Claude's Haiku, and Codex's GPT, which cannot run on moss. */
+const HAIKU = claudeEntry("claude-haiku-5", "Claude Haiku 5");
+const WORK: ModelProfile = buildModelProfile(
+  [buildProfileSection(ANTHROPIC_IDENTITY, [HAIKU]), buildProfileSection(OPENAI_IDENTITY, [GPT])],
+  { id: "profile-work", name: "Work" },
+);
+
+/**
+ * Makes the next switch of profiles start one transition, as the fold does in
+ * a browser, and returns a function that ends it. jsdom runs no transitions.
+ */
+const holdFold = (): (() => Promise<void>) => {
+  let end = (): void => {};
+  const finished = new Promise<Animation>((resolve) => {
+    end = () => {
+      resolve({} as Animation);
+    };
+  });
+  vi.spyOn(Element.prototype, "getAnimations").mockReturnValue([{ finished } as Animation]);
+  return async () => {
+    end();
+    await act(() => finished);
+    vi.restoreAllMocks();
+  };
+};
+
+/** Returns the heads of the accordion, in order. */
+const readHeads = (): readonly HTMLElement[] => [
+  ...document.querySelectorAll<HTMLElement>("button[aria-expanded]"),
+];
+
+describe("the model menu of a Draft Thread with several Model Profiles", () => {
+  it("has a head per profile, with the profile that holds the current entry unfolded", () => {
+    renderMenu({ profiles: [MAIN, WORK] });
+
+    // Each head is named by the profile's name and its number of entries. The
+    // face beside the name is decoration, so it is not part of the name.
+    const heads = readHeads();
+    expect(heads).toEqual([
+      screen.getByRole("button", { name: /^Main\s?3$/ }),
+      screen.getByRole("button", { name: /^Work\s?2$/ }),
+    ]);
+    expect(heads.map((head) => head.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+    // Only the unfolded profile's lanes are drawn.
+    expect(screen.queryByText("Claude Haiku 5")).toBeNull();
+    expect(screen.getByText("Claude Opus 5")).toBeTruthy();
+  });
+
+  it("has no heads when the user has one profile", () => {
+    renderMenu({ profiles: [MAIN] });
+
+    expect(readHeads()).toEqual([]);
+  });
+
+  it("unfolds a clicked head and folds the other, without changing the draft's model, and remembers it", async () => {
+    const user = userEvent.setup();
+    const { onChoose, rememberOpenProfile } = renderMenu({ profiles: [MAIN, WORK] });
+
+    const endFold = holdFold();
+    await user.click(screen.getByRole("button", { name: /^Work/ }));
+
+    expect(readHeads().map((head) => head.getAttribute("aria-expanded"))).toEqual([
+      "false",
+      "true",
+    ]);
+    expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
+    // Main's rows fold away first, and cannot be picked or focused meanwhile.
+    expect(screen.getByText("Claude Opus 5").closest("[inert]")).not.toBeNull();
+    await endFold();
+    expect(screen.queryByText("Claude Opus 5")).toBeNull();
+    expect(rememberOpenProfile.mock.calls).toEqual([["profile-work"]]);
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("ends a switch at once when it starts no transition, as when a switch is undone before it draws", async () => {
+    const user = userEvent.setup();
+    renderMenu({ profiles: [MAIN, WORK] });
+
+    await user.click(screen.getByRole("button", { name: /^Work/ }));
+
+    expect(screen.queryByText("Claude Opus 5")).toBeNull();
+    expect(document.querySelector(".is-unfolding")).toBeNull();
+  });
+
+  it("switches profiles at once under Reduce motion, where no fold runs to its end", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query) => ({ matches: query === "(prefers-reduced-motion: reduce)" }) as MediaQueryList,
     );
+    const user = userEvent.setup();
+    renderMenu({ profiles: [MAIN, WORK] });
 
-    expect(onChoose.mock.calls).toEqual([[{ kind: "account", instanceId: WORK_INSTANCE.id }]]);
+    await user.click(screen.getByRole("button", { name: /^Work/ }));
+
+    expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
+    expect(screen.queryByText("Claude Opus 5")).toBeNull();
+    vi.restoreAllMocks();
   });
 
-  it("lists another account's matching models on a Draft Thread, each choosing the account and the model together", async () => {
-    const user = userEvent.setup();
-    const onChoose = renderMenu({ kind: "draft", instances: [MANY_INSTANCE, WORK_INSTANCE] });
+  it("opens scrolled to the row of the current entry", () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    renderMenu({ profiles: [MAIN, WORK] });
 
-    await user.type(screen.getByRole("textbox", { name: "Filter models" }), "haiku 5");
-    expect(readSections().slice(1)).toEqual([["work", "Claude Haiku 5 · default"]]);
-    await user.click(screen.getByRole("button", { name: "Claude Haiku 5 · default" }));
+    expect(scrollIntoView.mock.contexts).toEqual([
+      screen.getByRole("button", { name: /Claude Sonnet 5/, current: true }),
+    ]);
+    vi.restoreAllMocks();
+  });
+
+  it("opens on the profile open last when the current entry is in neither", () => {
+    const elsewhere: ThreadConfig = { ...CONFIG, model: "claude-unlisted" };
+    renderMenu({ profiles: [MAIN, WORK], config: elsewhere, lastOpenProfileId: "profile-work" });
+
+    expect(readHeads().map((head) => head.getAttribute("aria-expanded"))).toEqual([
+      "false",
+      "true",
+    ]);
+  });
+
+  it("shows each profile's own Recent entries under its head", async () => {
+    const user = userEvent.setup();
+    renderMenu({ profiles: [MAIN, WORK], recent: [recentOf(HAIKU), recentOf(OPUS)] });
+
+    expect(readSections()[0]).toEqual(["Recent", "Claude Opus 5"]);
+    await user.click(screen.getByRole("button", { name: /^Work/ }));
+    expect(readSections()[0]).toEqual(["Recent", "Claude Haiku 5"]);
+  });
+
+  it("dims an entry of the unfolded profile with its reason", () => {
+    renderMenu({
+      profiles: [MAIN, WORK],
+      lastOpenProfileId: "profile-work",
+      config: { ...CONFIG, model: HAIKU.model },
+    });
+
+    const row = screen.getByText("GPT-5.4").closest(".line")!;
+    expect(row.classList.contains("line--dimmed")).toBe(true);
+    expect(within(row as HTMLElement).getByText("not signed in on moss")).toBeTruthy();
+  });
+
+  it("unfolds every profile with a match while filtering, and leaves out the others", async () => {
+    const user = userEvent.setup();
+    const many = ["1", "2", "3", "4", "5", "6", "7", "8"].map((version) =>
+      claudeEntry(`claude-haiku-${version}`, `Claude Haiku ${version}`),
+    );
+    const big = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, many)], {
+      id: "profile-big",
+      name: "Big",
+    });
+    renderMenu({ profiles: [MAIN, WORK, big] });
+
+    await user.type(screen.getByRole("textbox", { name: "Filter models" }), "haiku");
+
+    // Main holds no Haiku, so its head is gone; Work and Big are both unfolded.
+    expect(readHeads()).toEqual([
+      screen.getByRole("button", { name: /^Work\s?2$/, expanded: true }),
+      screen.getByRole("button", { name: /^Big\s?8$/, expanded: true }),
+    ]);
+    await user.clear(screen.getByRole("textbox", { name: "Filter models" }));
+    await user.type(screen.getByRole("textbox", { name: "Filter models" }), "zzz");
+    expect(screen.getByText("No model matches.")).toBeTruthy();
+    expect(readHeads()).toEqual([]);
+  });
+
+  it("reaches every head and row with the Tab key, and a head opens with Enter", async () => {
+    const user = userEvent.setup();
+    renderMenu({ profiles: [MAIN, WORK] });
+
+    const stops: (Element | null)[] = [];
+    for (let stop = 0; stop < 5; stop += 1) {
+      await user.tab();
+      stops.push(document.activeElement);
+    }
+
+    // The first head, the unfolded profile's two entries and the Sign in on
+    // the third, then the second head.
+    expect(stops).toEqual([
+      screen.getByRole("button", { name: /^Main\s?3$/ }),
+      screen.getByRole("button", { name: /Claude Sonnet 5/ }),
+      screen.getByRole("button", { name: /Claude Opus 5/ }),
+      screen.getByText("Sign in"),
+      screen.getByRole("button", { name: /^Work\s?2$/ }),
+    ]);
+    await user.keyboard("{Enter}");
+    expect(document.activeElement?.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("Claude Haiku 5")).toBeTruthy();
+  });
+
+  it("moves through the filter, the heads and the rows with the arrow keys, past rows that fold away", async () => {
+    const user = userEvent.setup();
+    const many = ["1", "2", "3", "4", "5", "6", "7", "8"].map((version) =>
+      claudeEntry(`claude-haiku-${version}`, `Claude Haiku ${version}`),
+    );
+    const big = buildModelProfile([buildProfileSection(ANTHROPIC_IDENTITY, many)], {
+      id: "profile-big",
+      name: "Big",
+    });
+    renderMenu({ profiles: [MAIN, big] });
+    const filter = screen.getByRole("textbox", { name: "Filter models" });
+    expect(document.activeElement).toBe(filter);
+
+    // Main's third entry cannot run, so it is no stop; its Sign in is not either.
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Main\s?3$/ }));
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Big\s?8$/ }));
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /Claude Opus 5/ }));
+
+    // Unfolding Big leaves Main's rows folding away. The arrows pass over
+    // them: up from Big's head is Main's head, not Main's last row.
+    const endFold = holdFold();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(screen.getByText("Claude Opus 5").closest("[inert]")).not.toBeNull();
+    await user.keyboard("{ArrowDown}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Claude Haiku 1" }));
+    await user.keyboard("{ArrowUp}{ArrowUp}");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: /^Main\s?3$/ }));
+    await user.keyboard("{ArrowUp}");
+    expect(document.activeElement).toBe(filter);
+    await endFold();
+  });
+});
+
+describe("the model menu of a thread that has started", () => {
+  it("lists the models of its account and harness as one flat list, with the note under it", () => {
+    renderMenu({ kind: "active", recent: [recentOf(OPUS)] });
+
+    // No Recent, no lane label, and no entry of another account.
+    expect(readSections()).toEqual([["Claude Sonnet 5", "Claude Opus 5"]]);
+    expect(screen.getByText("Other models start a new thread.")).toBeTruthy();
+  });
+
+  it("hands the picked model to onChoose with the thread's account and harness", async () => {
+    const user = userEvent.setup();
+    const { onChoose } = renderMenu({ kind: "active" });
+
+    await user.click(screen.getByRole("button", { name: "Claude Opus 5" }));
 
     expect(onChoose.mock.calls).toEqual([
-      [{ kind: "model", instanceId: WORK_INSTANCE.id, model: "claude-haiku-5" }],
+      [
+        {
+          kind: "model",
+          providerAccountId: CLAUDE.id,
+          harnessId: ANTHROPIC_IDENTITY.harnessId,
+          model: OPUS.model,
+        },
+      ],
     ]);
+  });
+});
+
+/** An announced model of the Anthropic account, which arrived on 26 Oct of the year the test runs in. */
+const OPUS_5_6 = {
+  model: "claude-opus-5-6",
+  name: "Claude Opus 5.6",
+  firstSeenAt: `${String(new Date().getUTCFullYear())}-10-26T12:00:00.000Z`,
+};
+
+/** The profile "Main" whose Anthropic section announces `OPUS_5_6`. */
+const WITH_NEW_MODEL: ModelProfile = buildModelProfile([
+  buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS], { newModels: [OPUS_5_6] }),
+  buildProfileSection(OPENAI_IDENTITY, [GPT]),
+]);
+
+/** Returns the "New" row of the menu. */
+const findNewRow = (): HTMLElement => document.querySelector<HTMLElement>(".line--new")!;
+
+/** Saves nothing and works at once. */
+const SAVE_AT_ONCE: SaveProfile = () => Promise.resolve();
+
+describe("the New rows of a Draft Thread's menu", () => {
+  it("draws the row first in its lane, with the date, and no pick on its body", async () => {
+    const user = userEvent.setup();
+    const { onChoose } = renderMenu({
+      profiles: [WITH_NEW_MODEL],
+      saveProfile: SAVE_AT_ONCE,
+    });
+
+    expect(readSections()[0]).toEqual([
+      "Anthropic",
+      "NewClaude Opus 5.6 · arrived 26 OctAdd",
+      "Claude Sonnet 5",
+      "Claude Opus 5",
+    ]);
+    await user.click(screen.getByText("Claude Opus 5.6"));
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it("gives the whole line as the tooltip of a name that may be cut", () => {
+    renderMenu({ profiles: [WITH_NEW_MODEL], saveProfile: SAVE_AT_ONCE });
+
+    expect(findNewRow().querySelector(".grow")!.getAttribute("title")).toBe(
+      "Claude Opus 5.6 · arrived 26 Oct",
+    );
+  });
+
+  it("draws the row without buttons when the screen gives no way to act on it", () => {
+    renderMenu({ profiles: [WITH_NEW_MODEL] });
+
+    expect(findNewRow().textContent).toBe("NewClaude Opus 5.6 · arrived 26 Oct");
+    expect(within(findNewRow()).queryAllByRole("button")).toEqual([]);
+  });
+
+  it("saves the profile of the lane, adding the model on Add and dismissing it on Not now", async () => {
+    const user = userEvent.setup();
+    const saveProfile = vi.fn<SaveProfile>(() => Promise.resolve());
+    renderMenu({ profiles: [WITH_NEW_MODEL], saveProfile });
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+    const dismiss = screen.getByRole("button", { name: "Not now: Claude Opus 5.6" });
+    expect(dismiss.getAttribute("title")).toBe("Not now");
+    await user.click(dismiss);
+
+    expect(saveProfile.mock.calls.map(([{ profileId }]) => profileId)).toEqual([
+      WITH_NEW_MODEL.id,
+      WITH_NEW_MODEL.id,
+    ]);
+    const [added, dismissed] = saveProfile.mock.calls.map(([change]) =>
+      "newModelEdit" in change ? change.newModelEdit : null,
+    );
+    const edit = { providerAccountId: CLAUDE.id, model: OPUS_5_6.model };
+    expect(added).toEqual({ action: "add", ...edit });
+    expect(dismissed).toEqual({ action: "dismiss", ...edit });
+  });
+
+  it("keeps the buttons of a row focusable but inert while its save runs, and shows a refusal under the lane", async () => {
+    const user = userEvent.setup();
+    let refuse: (error: Error) => void = () => undefined;
+    const saveProfile = vi.fn<SaveProfile>(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = reject;
+        }),
+    );
+    renderMenu({ profiles: [WITH_NEW_MODEL], saveProfile });
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+    const addButton = screen.getByRole("button", { name: "Add Claude Opus 5.6" });
+    const dismissButton = screen.getByRole("button", { name: "Not now: Claude Opus 5.6" });
+    for (const button of [addButton, dismissButton]) {
+      expect(button.getAttribute("aria-disabled")).toBe("true");
+      expect(button.hasAttribute("data-unready")).toBe(true);
+    }
+    // The pressed button keeps the focus, and pressing it again does nothing.
+    expect(document.activeElement).toBe(addButton);
+    await user.keyboard("{Enter}");
+    expect(saveProfile).toHaveBeenCalledTimes(1);
+
+    refuse(new Error("pi does not list Claude Opus 5.6."));
+
+    const lane = findNewRow().closest(".pop-sec")!;
+    await waitFor(() => {
+      expect(within(lane as HTMLElement).getByRole("alert").textContent).toBe(
+        "The change was not saved. pi does not list Claude Opus 5.6.",
+      );
+    });
+    // The row stays, with its buttons ready for another try.
+    expect(addButton.hasAttribute("aria-disabled")).toBe(false);
+    expect(document.activeElement).toBe(addButton);
+  });
+
+  it("draws no New row in the menu of a thread that has started", () => {
+    renderMenu({ profiles: [WITH_NEW_MODEL], kind: "active" });
+
+    expect(findNewRow()).toBeNull();
+  });
+});
+
+/** An announced model that follows `OPUS_5_6`. */
+const OPUS_5_7 = { ...OPUS_5_6, model: "claude-opus-5-7", name: "Claude Opus 5.7" };
+
+describe("the focus after a New row leaves the menu", () => {
+  /** Returns the profile whose Anthropic section holds `entries` and announces `newModels`. */
+  const buildProfile = (
+    entries: readonly ResolvedModelProfileEntry[],
+    newModels: readonly (typeof OPUS_5_6)[],
+  ): ModelProfile =>
+    buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, entries, { newModels }),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]);
+
+  /**
+   * Renders the menu on `before`. A save then draws the menu on what `after`
+   * returns for the profile the save changed, which is what the app does when
+   * the controller answers.
+   */
+  const renderMenuThatRedraws = (before: ModelProfile, after: () => ModelProfile) => {
+    let show: (profiles: readonly ModelProfile[]) => void = () => undefined;
+    const menu = renderMenu({
+      profiles: [before],
+      saveProfile: () => {
+        show([after()]);
+        return Promise.resolve();
+      },
+    });
+    show = menu.showProfiles;
+    return menu;
+  };
+
+  it("moves to the row of the added entry after Add", async () => {
+    const user = userEvent.setup();
+    renderMenuThatRedraws(buildProfile([SONNET, OPUS], [OPUS_5_6]), () =>
+      buildProfile([SONNET, OPUS, claudeEntry(OPUS_5_6.model, OPUS_5_6.name)], []),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Claude Opus 5.6" }));
+    });
+  });
+
+  it("finds the added entry in another harness than the section's", async () => {
+    const user = userEvent.setup();
+    const inPi = claudeEntry(OPUS_5_6.model, OPUS_5_6.name, {
+      harnessId: "pi/pi",
+      resolvedHarnessId: "pi/pi",
+    });
+    renderMenuThatRedraws(buildProfile([SONNET, OPUS], [OPUS_5_6]), () =>
+      buildProfile([SONNET, OPUS, inPi], []),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Claude Opus 5.6 · in pi" }),
+      );
+    });
+  });
+
+  it("finds the added entry by its exact model, not by the end of another model's slug", async () => {
+    const user = userEvent.setup();
+    const foo = { ...OPUS_5_6, model: "foo", name: "Foo" };
+    const vendorFoo = claudeEntry("vendor/foo", "Vendor Foo");
+    renderMenuThatRedraws(buildProfile([vendorFoo], [foo]), () =>
+      buildProfile([vendorFoo, claudeEntry("foo", "Foo")], []),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Foo" }));
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Foo" }));
+    });
+  });
+
+  it("moves to the Add button of the next New row after Not now, else to the lane's first row", async () => {
+    const user = userEvent.setup();
+    let dismissals = 0;
+    renderMenuThatRedraws(buildProfile([SONNET, OPUS], [OPUS_5_6, OPUS_5_7]), () => {
+      dismissals += 1;
+      return buildProfile([SONNET, OPUS], dismissals === 1 ? [OPUS_5_7] : []);
+    });
+
+    await user.click(screen.getByRole("button", { name: "Not now: Claude Opus 5.6" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Add Claude Opus 5.7" }),
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Not now: Claude Opus 5.7" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Claude Sonnet 5" }));
+    });
+  });
+
+  it("leaves the focus alone after a refusal", async () => {
+    const user = userEvent.setup();
+    renderMenu({
+      profiles: [WITH_NEW_MODEL],
+      saveProfile: () => Promise.reject(new Error("Refused.")),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+
+    await screen.findByRole("alert");
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Add Claude Opus 5.6" }),
+    );
+  });
+
+  it("does not take the focus later when the user moved on before the row left", async () => {
+    const user = userEvent.setup();
+    const menu = renderMenu({ profiles: [WITH_NEW_MODEL], saveProfile: SAVE_AT_ONCE });
+
+    // The save works, but the controller's answer has not removed the row yet.
+    await user.click(screen.getByRole("button", { name: "Add Claude Opus 5.6" }));
+    await user.click(screen.getByRole("button", { name: "Claude Sonnet 5" }));
+    menu.showProfiles([WITH_NEW_MODEL]);
+    // Later the focus is lost for some other reason, and the row leaves.
+    (document.activeElement as HTMLElement).blur();
+    menu.showProfiles([
+      buildProfile([SONNET, OPUS, claudeEntry(OPUS_5_6.model, OPUS_5_6.name)], []),
+    ]);
+
+    expect(document.activeElement).toBe(document.body);
   });
 });

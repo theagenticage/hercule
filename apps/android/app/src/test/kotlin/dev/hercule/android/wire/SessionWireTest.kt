@@ -1,6 +1,7 @@
 package dev.hercule.android.wire
 
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -41,6 +42,19 @@ class SessionWireTest {
         assertEquals(listOf("Edge build", "Fresh"), asked.options.map { it.label })
         assertEquals(false, asked.multiSelect)
         assertNull(asked.secret)
+    }
+
+    @Test
+    fun `decodes a session from a controller that no longer sends instanceId`() {
+        val newShape = BUSY_THREAD.replace(
+            "\"instanceId\": \"01928f00-0000-7000-8000-0000000000c1\",",
+            "\"providerAccountId\": \"01928f00-0000-7000-8000-0000000000c1\"," +
+                " \"harnessId\": \"claude-code/claude-code\",",
+        )
+        assertFalse("instanceId" in newShape, "the replace no longer matched the fixture")
+        val session = WireJson.decodeFromString<Session>(newShape)
+
+        assertEquals(SessionStatus.Busy, session.status)
     }
 
     @Test

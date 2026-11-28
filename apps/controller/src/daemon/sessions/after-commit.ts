@@ -8,7 +8,7 @@ import * as FiberSet from "effect/FiberSet";
 import type * as Scope from "effect/Scope";
 import { CurrentActor } from "../../actor";
 import { afterCommit } from "../../db";
-import { absorbFailures } from "../absorbing";
+import { absorbFailures } from "../../absorbing";
 
 /**
  * Makes a function that schedules an effect to run once the caller's

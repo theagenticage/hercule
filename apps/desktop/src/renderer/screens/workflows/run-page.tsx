@@ -33,7 +33,7 @@ import { ClockIcon } from "../../icons/clock";
 import { Mark } from "../../marks";
 import { useStartTime } from "./list-time";
 import { WorkflowCrumb, WorkflowsCrumb } from "./run-crumbs";
-import { ViewSwitch, type ViewChoice } from "./view-switch";
+import { ViewSwitch, type ViewChoice } from "../view-switch";
 import "../session/floating-header.css";
 import "../thread/thread-header.css";
 import "./workflow-list.css";

@@ -49,9 +49,15 @@ const make = Effect.gen(function* () {
   const workflows = yield* workflowRepository;
   const notifier = yield* Notifier;
 
-  /** Tells clients watching the trigger's workflow that the trigger changed. */
+  /** Tells clients watching the trigger's workflow that the trigger's health changed. */
   const announceTriggerChange = (key: TriggerKey): Effect.Effect<void> =>
-    announce({ _tag: "record", topic: "workflow", id: key.workflowId, kind: "updated" });
+    announce({
+      _tag: "record",
+      topic: "workflow",
+      id: key.workflowId,
+      kind: "updated",
+      derived: true,
+    });
 
   return {
     /**

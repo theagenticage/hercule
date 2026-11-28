@@ -40,10 +40,10 @@ import {
   type AttachmentReference,
   type ToolResultImage,
 } from "@hercule/protocol";
-import type { LocalAttachment } from "../providers";
+import type { LocalAttachment } from "../harnesses";
 import { parseErrorEnvelopeMessage } from "../error-envelope";
-import { buildAdapterFailed } from "../providers/adapter-error-builders";
-import { truncateFact } from "../providers/text";
+import { buildAdapterFailed } from "../harnesses/adapter-error-builders";
+import { truncateFact } from "../harnesses/text";
 
 export interface AttachmentCache {
   /**

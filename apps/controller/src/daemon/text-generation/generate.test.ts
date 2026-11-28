@@ -7,17 +7,41 @@
  * test says otherwise.
  */
 import { describe, expect, it } from "vitest";
-import { Deferred, Duration, Effect, Exit, Fiber, Layer, Option, Ref, Scope } from "effect";
-import type * as SqlClient from "effect/sql/SqlClient";
-import type { TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
-import { TestDatabase } from "../../db/testing";
-import { AuditLogLayer } from "../../events";
+import {
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Scope,
+} from "effect";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { CatalogModel, TextGenerationOutcome, TextGenerationRequest } from "@hercule/protocol";
+import { nowIso, uuidFromString, withTransaction } from "../../db";
 import { readEventsOfKind } from "../../events/testing";
 import { PluginHost } from "../../plugins";
-import { ServingPromotionStateLayer } from "../../promotion/testing";
-import type { StoredInstance } from "../../providers";
+import {
+  buildHarnessDefinition,
+  buildPluginStack,
+  buildProviderDefinition,
+  createPluginFixture,
+} from "../../plugins/testing";
+import {
+  HarnessAccountsLayer,
+  modelCatalogRepository,
+  providerAccountRepository,
+  ModelCatalogsLayer,
+  ProviderAccountRunnersLayer,
+} from "../../provider-accounts";
+import { inertMembership } from "../../provider-accounts/testing";
 import { LocalRunnerId, RunnerConnections, type Answer, type SendOutcome } from "../../runners";
-import { Secrets } from "../../secrets";
+import { buildProviderAccountOwner, Secrets } from "../../secrets";
+import { SettingsLayer } from "../../settings";
+import { AccountUsageLayer } from "../../usage";
 import {
   LastTextGenerationFailure,
   LastTextGenerationFailureLayer,
@@ -26,25 +50,38 @@ import {
   type TextGenerationCall,
   type TextGenerationTarget,
 } from "../../text-generation";
+import { buildTextGenerationPlugins } from "../../text-generation/testing";
 import { TextGenerationDeadline, TextGenerationLayer } from "./generate";
 import { TextGenerationTargetChanges, TextGenerationTargetChangesLayer } from "./target-changes";
 
 const FAILURE_KEY = "test-key";
 
-const INSTANCE: StoredInstance = {
-  id: "instance-1",
-  providerId: "codex",
-  name: "Codex",
-  config: {},
-  createdAt: "2026-10-11T10:00:00.000Z",
-  updatedAt: "2026-10-11T10:00:00.000Z",
-};
+/** The id of the OpenAI account that `arrangeAccount` inserts, which `TARGET` names. */
+const ACCOUNT_ID = "0199f0b7-2000-7000-8000-000000000001";
+
+/**
+ * Boots the plugins of the text generation fixtures and inserts the OpenAI
+ * account `TARGET` names, so a call can build the frame's `HarnessAccount`
+ * from a real account row.
+ */
+const arrangeAccount = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* Effect.flatMap(PluginHost, (host) => host.boot(buildTextGenerationPlugins()));
+  yield* withTransaction(
+    sql,
+    sql`INSERT INTO provider_accounts (id, provider_id, kind, default_harness_id, created_at, updated_at)
+        VALUES (${uuidFromString(ACCOUNT_ID)}, 'openai/openai', 'subscription-per-machine',
+                'codex/codex', '2026-10-11T10:00:00.000Z', '2026-10-11T10:00:00.000Z')`,
+  );
+});
 
 const TARGET: TextGenerationTarget = {
   _tag: "resolved",
   failureKey: FAILURE_KEY,
-  instance: INSTANCE,
-  model: "codex-mini",
+  providerAccountId: ACCOUNT_ID,
+  providerAccountName: "OpenAI",
+  harnessId: "codex/codex",
+  model: "gpt-6-luna",
   runnerIds: ["runner-1"],
 };
 
@@ -102,13 +139,20 @@ interface Stubs {
 
 /**
  * Builds the service with a connection whose `sendRequest` does what the test
- * says, on the database, audit log and promotion state of the caller.
+ * says, on the database, plugin host, secrets, audit log and promotion state
+ * of the caller.
  */
 const buildServiceLayer = (
   sendRequest: SendRequest,
   { target = Ref.makeUnsafe<TextGenerationTarget>(TARGET), disconnected = [] }: Stubs,
 ) =>
   TextGenerationLayer.pipe(
+    Layer.provideMerge(HarnessAccountsLayer),
+    Layer.provideMerge(ModelCatalogsLayer),
+    Layer.provideMerge(inertMembership),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(AccountUsageLayer),
+    Layer.provideMerge(SettingsLayer),
     Layer.provideMerge(
       Layer.mergeAll(
         LastTextGenerationFailureLayer,
@@ -117,12 +161,6 @@ const buildServiceLayer = (
           sendRequest,
           holdsConnection: (id: string) => Effect.succeed(!disconnected.includes(id)),
         } as unknown as RunnerConnections["Service"]),
-        Layer.succeed(Secrets, {
-          values: () => Effect.succeed([]),
-        } as unknown as Secrets["Service"]),
-        Layer.succeed(PluginHost, {
-          providers: () => Effect.succeed([]),
-        } as unknown as PluginHost["Service"]),
         Layer.succeed(LocalRunnerId, { read: () => undefined }),
       ),
     ),
@@ -131,11 +169,7 @@ const buildServiceLayer = (
 
 /** Builds the service, as `buildServiceLayer` does, on a database of its own. */
 const buildLayer = (sendRequest: SendRequest, stubs: Stubs) =>
-  buildServiceLayer(sendRequest, stubs).pipe(
-    Layer.provideMerge(ServingPromotionStateLayer),
-    Layer.provideMerge(AuditLogLayer),
-    Layer.provideMerge(TestDatabase),
-  );
+  buildServiceLayer(sendRequest, stubs).pipe(Layer.provideMerge(buildPluginStack()));
 
 /** Runs `body` against the layer, with the deadline set to `deadline`. */
 const runWithLayer = <A, E>(
@@ -149,7 +183,7 @@ const runWithLayer = <A, E>(
   stubs: Stubs = {},
 ) =>
   Effect.runPromise(
-    body.pipe(
+    Effect.andThen(arrangeAccount, body).pipe(
       Effect.provide(buildLayer(sendRequest, stubs)),
       Effect.provideService(TextGenerationDeadline, deadline),
       Effect.orDie,
@@ -205,6 +239,53 @@ describe("the choice of a runner", () => {
 
     expect(exit).toEqual(Exit.succeed({ title: "Fix it" }));
     expect(asked).toEqual(["runner-2"]);
+  });
+});
+
+describe("the request sent to the runner", () => {
+  it("names the harness and carries the account's home and model argument", async () => {
+    const requests: Array<TextGenerationRequest> = [];
+    await runWithLayer(
+      (_, request) => {
+        requests.push(request);
+        return Effect.succeed(buildAnswer(request, OK));
+      },
+      Effect.flatMap(TextGeneration, (service) => service.generate(CALL)),
+    );
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      harnessId: "codex/codex",
+      harnessAccount: {
+        providerAccountId: ACCOUNT_ID,
+        harnessHome: `providers/homes/${ACCOUNT_ID}/codex/codex`,
+        modelArgument: "{model}",
+      },
+      spec: { model: "gpt-6-luna" },
+    });
+  });
+
+  it("fails as failed, with the reason, when the account was deleted since the setting resolved", async () => {
+    const { exit, lastFailure } = await runWithLayer(
+      () => Effect.die("no frame is sent"),
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        yield* withTransaction(
+          sql,
+          sql`DELETE FROM provider_accounts WHERE id = ${uuidFromString(ACCOUNT_ID)}`,
+        );
+        const exit = yield* Effect.exit(
+          Effect.flatMap(TextGeneration, (service) => service.generate(CALL)),
+        );
+        return { exit, lastFailure: yield* (yield* LastTextGenerationFailure).read(FAILURE_KEY) };
+      }),
+    );
+
+    expect(exit).toMatchObject({
+      _tag: "Failure",
+      cause: { reasons: [{ error: { reason: "failed", message: "no such provider account" } }] },
+    });
+    expect(lastFailure).toMatchObject({ reason: "failed" });
   });
 });
 
@@ -426,7 +507,7 @@ describe("a call that queues for a slot", () => {
 
     expect(result.exit).toEqual(Exit.succeed({ title: "Fix it" }));
     expect(result.requests.map((request) => request.spec.model)).toEqual([
-      ...Array.from({ length: PERMITS }, () => "codex-mini"),
+      ...Array.from({ length: PERMITS }, () => "gpt-6-luna"),
       "codex-max",
     ]);
   });
@@ -444,6 +525,7 @@ describe("a call that queues for a slot", () => {
           scope,
         );
         yield* Effect.gen(function* () {
+          yield* arrangeAccount;
           const service = yield* TextGeneration;
           yield* Effect.forEach(Array.from({ length: PERMITS }), () =>
             Effect.forkChild(Effect.exit(service.generate(CALL))),
@@ -456,14 +538,7 @@ describe("a call that queues for a slot", () => {
         // Stopping interrupts every slot's holder, the withdrawn call's too.
         yield* Scope.close(scope, Exit.void);
         return yield* readEventsOfKind("textGeneration.failed");
-      }).pipe(
-        Effect.provide(
-          Layer.mergeAll(ServingPromotionStateLayer, AuditLogLayer).pipe(
-            Layer.provideMerge(TestDatabase),
-          ),
-        ),
-        Effect.orDie,
-      ),
+      }).pipe(Effect.provide(buildPluginStack()), Effect.orDie),
     );
 
     // The ten sent calls end without an answer, and each is recorded once.
@@ -605,5 +680,147 @@ describe("a caller interrupted as the runner answers", () => {
     );
 
     expect(entries).toBe(ROUNDS);
+  });
+});
+
+describe("the catalog models the harness does not list, on the request", () => {
+  const WIDE = "wide/wide";
+  const NARROW = "narrow/narrow";
+  const API_ONLY: CatalogModel = {
+    slug: "api-only",
+    name: "API only",
+    imageInput: null,
+    options: [],
+    contextWindow: 200_000,
+    reasoning: true,
+  };
+
+  /**
+   * A provider that reads its catalog from its API, a harness that can run
+   * any of its models and one that runs only what it lists.
+   */
+  const buildApiPlugins = () => [
+    createPluginFixture({
+      id: "wide",
+      definitions: [
+        buildHarnessDefinition("wide", [
+          {
+            providerId: "apiprov/apiprov",
+            kinds: [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "API_KEY" }],
+            models: "all",
+          },
+        ]),
+      ],
+    }).plugin,
+    createPluginFixture({
+      id: "narrow",
+      definitions: [
+        buildHarnessDefinition("narrow", [
+          {
+            providerId: "apiprov/apiprov",
+            kinds: [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "API_KEY" }],
+            models: "own-list",
+          },
+        ]),
+      ],
+    }).plugin,
+    createPluginFixture({
+      id: "apiprov",
+      capabilities: ["providers"],
+      definitions: [],
+      providers: [
+        {
+          ...buildProviderDefinition("apiprov", [WIDE, NARROW]),
+          catalogSource: {
+            kind: "provider-api",
+            url: "https://api.example.com/v1/models",
+            headers: { authorization: "Bearer {apiKey}" },
+          },
+        },
+      ],
+      providerOptions: { parseCatalogBody: () => [] },
+    }).plugin,
+  ];
+
+  /** Makes a call in `harnessId` on an account whose catalog holds `API_ONLY`, and returns the request sent. */
+  const sendInHarness = async (harnessId: string): Promise<TextGenerationRequest> => {
+    const requests: Array<TextGenerationRequest> = [];
+    // Set once the account exists, because the repository mints its id.
+    const target = Ref.makeUnsafe<TextGenerationTarget>({
+      ...TARGET,
+      harnessId,
+      model: "api-only",
+    });
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const accounts = yield* providerAccountRepository;
+        const catalogs = yield* modelCatalogRepository;
+        yield* Effect.flatMap(PluginHost, (host) => host.boot(buildApiPlugins()));
+        const account = yield* withTransaction(
+          sql,
+          accounts.insert({
+            providerId: "apiprov/apiprov",
+            kind: "api-key",
+            label: null,
+            defaultHarnessId: WIDE,
+            at: yield* nowIso,
+          }),
+        );
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            const secrets = yield* Secrets;
+            yield* secrets.set(
+              buildProviderAccountOwner(account.id),
+              "apiKey",
+              Redacted.make("a-fixture-key"),
+            );
+            yield* catalogs.recordSuccess(
+              account.id,
+              [API_ONLY],
+              yield* nowIso,
+              "2026-10-31T10:00:00.000Z",
+            );
+          }),
+        );
+        yield* Ref.update(target, (one) => ({ ...one, providerAccountId: account.id }));
+        const service = yield* TextGeneration;
+        yield* service.generate(CALL);
+      }).pipe(
+        Effect.provide(
+          buildLayer(
+            (_, request) => {
+              requests.push(request);
+              return Effect.succeed(buildAnswer(request, OK));
+            },
+            { target },
+          ),
+        ),
+        Effect.provideService(TextGenerationDeadline, Duration.seconds(60)),
+        Effect.orDie,
+      ),
+    );
+    return requests[0]!;
+  };
+
+  it("carries the catalog when the harness can run any model of the provider", async () => {
+    const request = await sendInHarness(WIDE);
+
+    expect(request.catalogModels).toEqual([
+      {
+        slug: "api-only",
+        name: "API only",
+        imageInput: null,
+        contextWindow: 200_000,
+        reasoning: true,
+      },
+    ]);
+  });
+
+  it("leaves the catalog off when the harness runs only the models it lists", async () => {
+    const request = await sendInHarness(NARROW);
+
+    expect("catalogModels" in request).toBe(false);
   });
 });

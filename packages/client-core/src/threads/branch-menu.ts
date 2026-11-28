@@ -15,6 +15,11 @@ export interface BranchRow {
 export interface BranchField {
   readonly header: string;
   readonly note: string;
+  /**
+   * What the lip shows: "From remote default" or "From local branch main" for
+   * the revision a new branch starts from, or the branch that existing files
+   * keep, such as "main".
+   */
   readonly label: string;
   /** The key of the selected source row. */
   readonly value: string;
@@ -86,7 +91,7 @@ export const buildBranchField = (
     return {
       header: "Starting revision",
       note: "each new branch starts from its selected source",
-      label: revisions.map(describeStartingRevision).join(" · "),
+      label: `From ${revisions.map(describeStartingRevision).join(" · ")}`,
       value: "",
       glyph: false,
       locked: "Each repository uses the starting revision shown here",
@@ -118,7 +123,7 @@ export const buildBranchField = (
   return {
     header: "Starting revision",
     note: "the new branch starts from this source",
-    label: describeStartingRevision(revision),
+    label: `From ${describeStartingRevision(revision)}`,
     value: buildStartingRevisionKey(revision),
     glyph: false,
     locked: null,

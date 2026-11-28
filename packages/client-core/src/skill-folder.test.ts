@@ -81,6 +81,7 @@ describe("findSkillFolders", () => {
     const found = await Effect.runPromise(findSkillFolders(path.join(root, "grilling")));
 
     expect(found.folder).toBe(path.join(root, "grilling"));
+    expect(found.isSkill).toBe(true);
     expect(found.skills).toEqual([
       { name: "grilling", folder: path.join(root, "grilling"), source: null },
     ]);
@@ -94,6 +95,7 @@ describe("findSkillFolders", () => {
 
     const found = await Effect.runPromise(findSkillFolders(path.join(root, "skills")));
 
+    expect(found.isSkill).toBe(false);
     expect(found.skills.map((skill) => skill.name)).toEqual(["alpha", "zeta"]);
     expect(found.skills[0]?.folder).toBe(path.join(root, "skills/alpha"));
   });

@@ -2,47 +2,61 @@
  * The records the draft specimen seeds its query cache with, as the
  * controller would return them: the Draft Thread in webshop of the Bureau
  * book's session-empty.html, with the picks its composer shows and the three
- * open tasks its start cards offer.
+ * planned tasks its start cards offer.
  *
  * The user has picked a new workspace of webshop, which starts from main,
  * edits accepted, and Opus 5.5 at high effort. webshop's repo has a main
  * workspace on studio-mac, on main, so the app knows the branch a new
  * workspace starts from, as the book's lip names it.
  *
- * The start cards are two Proposals and one Task, most urgent first, as the
- * book draws them. The app draws a card's source as the GitHub mark or, for
- * any other source, the tasks glyph, and always draws the priority's bars:
+ * The start cards are three Tasks, most urgent first. The book draws the first
+ * two as Proposals, which the app no longer has. The app draws a card's source
+ * as the GitHub mark or, for any other source, the heading's Inbox tray, and
+ * names the priority in words, where the book draws bars:
  *
- * - the book's Sentry Proposal came from a GitHub issue here, and is urgent,
- *   the book's four bars;
- * - the book's Stripe Proposal came from a Stripe event, and is normal, the
+ * - the book's Sentry card came from a GitHub issue here, and is urgent, the
+ *   book's four bars;
+ * - the book's Stripe card came from a Stripe event, and is normal, the
  *   book's two bars;
- * - the book's Task has no source and no bars, and is low here, one bar.
+ * - the book's Task has no source and no bars, and is low here.
  *
- * The book's page has two more states, for a fresh install whose Intake is
- * still empty, and the specimen is opened with the same `?state=`:
+ * The book's page has two more states, for a fresh install with no planned
+ * task yet, and the specimen is opened with the same `?state=`:
  *
- * - `first`: the same draft, with no open task and a GitHub Connection, so
- *   the starters are about code and the line under them says that Triage
- *   reads GitHub;
+ * - `first`: the same draft, with no planned task and a GitHub Connection, so
+ *   the starters are about code and the line under them points at the
+ *   Inbox;
  * - `first-no-repo`: webshop has no repo and nothing is connected, so the
  *   draft works without a checkout, the starters are about knowledge work,
  *   and the line under them asks the user to connect GitHub.
  *
  * Everything else is the sidebar specimen's (sidebar-fixture.ts).
  */
-import type { ThreadPicks } from "@hercule/client-core";
+import type { RecentModel, ThreadPicks } from "@hercule/client-core";
 import {
   GITHUB_CONNECTION_TYPE,
   type Connection,
+  type ModelProfile,
+  type ProviderAccount,
   type Resource,
   type Task,
   type TaskPriority,
   type Workspace,
 } from "@hercule/contract";
 import { buildCheckout, buildRepo, buildWorkspace } from "@hercule/client-core/threads/testing";
+import { PROVIDER_PLUGINS } from "./settings-providers-fixture";
 import type { DraftScreenRecords, SidebarRecords } from "./shell-page";
-import { CLAUDE_OPUS, SPECIMEN_NOW, SPECIMEN_RECORDS, STUDIO_MAC } from "./sidebar-fixture";
+import {
+  buildSpecimenProfileSection,
+  CLAUDE_OPUS,
+  CLAUDE_SONNET,
+  GPT,
+  SPECIMEN_MODEL_PROFILE,
+  SPECIMEN_NOW,
+  SPECIMEN_RECORDS,
+  STUDIO_MAC,
+  type SpecimenModel,
+} from "./sidebar-fixture";
 
 /** webshop's one repo. */
 const WEBSHOP_REPO: Resource = buildRepo(
@@ -59,55 +73,53 @@ const WEBSHOP_MAIN_WORKSPACE: Workspace = buildWorkspace({
   checkouts: [buildCheckout(WEBSHOP_REPO.id, "main")],
 });
 
-/** A start card's task: its title, its priority, its labels, and the external ref it came from, if any. */
+/** A start card's task: its title, its priority, and the external ref it came from, if any. */
 interface SpecimenTask {
   readonly id: string;
   readonly title: string;
   readonly priority: TaskPriority;
-  readonly labels: ReadonlyArray<string>;
   readonly ref: string | null;
 }
 
-/** The three open tasks of webshop, most urgent first, as the start cards' query returns them. */
+/** The three planned tasks of webshop, most urgent first, as the start cards' query returns them. */
 const START_TASKS: ReadonlyArray<SpecimenTask> = [
   {
     id: "t-3ds-checkout",
     title: "Fix: Checkout fails for EU cards with 3‑D Secure",
     priority: "urgent",
-    labels: ["proposed"],
     ref: "github:issue:acme/webshop#1289",
   },
   {
     id: "t-webhook-retries",
     title: "Investigate: Stripe webhook retries rising",
     priority: "normal",
-    labels: ["proposed"],
     ref: "stripe:event:evt_1Q2w3E4r5T6y",
   },
   {
     id: "t-cart-rounding",
     title: "Cart total rounding on discounts",
     priority: "low",
-    labels: [],
     ref: null,
   },
 ];
 
-/** Returns `task` as the controller stores it: open, in webshop, created an hour before `SPECIMEN_NOW`. */
-const buildOpenTask = ({ id, title, priority, labels, ref }: SpecimenTask): Task => {
+/** Returns `task` as the controller stores it: planned, in webshop, created an hour before `SPECIMEN_NOW`. */
+const buildPlannedTask = ({ id, title, priority, ref }: SpecimenTask): Task => {
   const at = new Date(SPECIMEN_NOW - 60 * 60_000).toISOString();
   return {
     id,
     title,
     description: "",
     status: "open",
+    stage: "planned",
     priority,
-    labels,
+    labels: [],
     projectId: "p-webshop",
     provenance: ref === null ? [] : [{ ref, at, actor: "system" }],
     createdAt: at,
     updatedAt: at,
     statusChangedAt: at,
+    stageChangedAt: at,
   };
 };
 
@@ -119,13 +131,87 @@ const DRAFT_PICKS: ThreadPicks = {
   options: { effort: "high" },
 };
 
+/** A second Codex model, so the OpenAI lane of the model menu holds more than one row. */
+const GPT_MINI: SpecimenModel = { ...GPT, slug: "gpt-5.4-mini", name: "GPT-5.4 mini" };
+
+/**
+ * The accounts of the draft's model menu: Claude Code signed in on
+ * studio-mac, and Codex not, so the OpenAI lane is dimmed with its reason and
+ * a Sign in link.
+ */
+const DRAFT_ACCOUNTS: ReadonlyArray<ProviderAccount> = SPECIMEN_RECORDS.accounts.map((account) =>
+  account.id === GPT.providerAccountId
+    ? {
+        ...account,
+        readiness: [{ harnessId: GPT.harnessId, runnerId: STUDIO_MAC.id, state: "not-signed-in" }],
+      }
+    : account,
+);
+
+/**
+ * The user's Model Profile as the draft's model menu draws it: Opus 5.5 and
+ * Sonnet 5 from Anthropic, and the two Codex models, which cannot run until
+ * the account is signed in.
+ */
+const DRAFT_MODEL_PROFILE: ModelProfile = {
+  ...SPECIMEN_MODEL_PROFILE,
+  accounts: [
+    {
+      ...buildSpecimenProfileSection([CLAUDE_OPUS, CLAUDE_SONNET]),
+      newModels: [
+        { model: "opus-5-6", name: "Opus 5.6", firstSeenAt: "2026-09-26T08:00:00.000Z" },
+        {
+          model: "opus-5-6-long",
+          name: "Claude Opus 5.6 with an extended context window",
+          firstSeenAt: "2025-12-02T08:00:00.000Z",
+        },
+      ],
+    },
+    {
+      ...buildSpecimenProfileSection([GPT, GPT_MINI]),
+      entries: buildSpecimenProfileSection([GPT, GPT_MINI]).entries.map((entry) => ({
+        ...entry,
+        problem: {
+          reason: "not-signed-in" as const,
+          message: "Sign in to Codex on studio-mac.",
+        },
+      })),
+    },
+  ],
+};
+
+/** The entries the user picked lately, oldest first: Sonnet 5, then Opus 5.5, which the draft now has picked. */
+const DRAFT_RECENT: ReadonlyArray<RecentModel> = [CLAUDE_SONNET, CLAUDE_OPUS].map((model) => ({
+  providerAccountId: model.providerAccountId,
+  harnessId: model.harnessId,
+  model: model.slug,
+}));
+
 /** The Draft Thread in webshop, as the draft screen reads it. */
 export const WEBSHOP_DRAFT: DraftScreenRecords = {
   projectId: "p-webshop",
-  startTasks: START_TASKS.map(buildOpenTask),
+  startTasks: START_TASKS.map(buildPlannedTask),
   connections: [],
   picks: DRAFT_PICKS,
+  recent: DRAFT_RECENT,
   skillsPreview: { runnerId: STUDIO_MAC.id, resourceId: [WEBSHOP_REPO.id] },
+};
+
+/**
+ * The Draft Thread in webshop on Codex, which is not signed in on
+ * studio-mac: the lip offers the sign-in, and the composer shows the start
+ * the controller refused for it.
+ */
+const SIGNED_OUT_DRAFT: DraftScreenRecords = {
+  ...WEBSHOP_DRAFT,
+  picks: {
+    ...DRAFT_PICKS,
+    providerAccountId: GPT.providerAccountId,
+    harnessId: GPT.harnessId,
+    model: GPT.slug,
+    options: {},
+  },
+  failure: "OpenAI is not signed in on studio-mac",
 };
 
 /** The user's GitHub Connection, made an hour before `SPECIMEN_NOW`. */
@@ -143,7 +229,7 @@ const GITHUB_CONNECTION: Connection = {
   updatedAt: new Date(SPECIMEN_NOW - 60 * 60_000).toISOString(),
 };
 
-/** The Draft Thread in webshop on a fresh install: no open task, and GitHub connected. */
+/** The Draft Thread in webshop on a fresh install: no planned task, and GitHub connected. */
 const FIRST_DRAFT: DraftScreenRecords = {
   ...WEBSHOP_DRAFT,
   startTasks: [],
@@ -166,6 +252,9 @@ const FIRST_NO_REPO_DRAFT: DraftScreenRecords = {
 /** Every list the shell reads: the sidebar specimen's, with webshop's repo and its main workspace. */
 export const DRAFT_PAGE_RECORDS: SidebarRecords = {
   ...SPECIMEN_RECORDS,
+  accounts: DRAFT_ACCOUNTS,
+  modelProfiles: [DRAFT_MODEL_PROFILE],
+  plugins: PROVIDER_PLUGINS,
   resources: [WEBSHOP_REPO],
   workspaces: [WEBSHOP_MAIN_WORKSPACE],
 };
@@ -178,7 +267,8 @@ export interface DraftFixture {
 
 /**
  * Returns the fixture for the book's `?state=`: `first`, `first-no-repo`,
- * or, for no state or any other, the draft with its start cards. When
+ * `signed-out`, or, for no state or any other, the draft with its start
+ * cards. When
  * webshop has no repo, the shell's lists are the sidebar specimen's, which
  * hold no repo and no workspace.
  */
@@ -188,6 +278,8 @@ export const chooseDraftFixture = (state: string | null): DraftFixture => {
       return { records: DRAFT_PAGE_RECORDS, draft: FIRST_DRAFT };
     case "first-no-repo":
       return { records: SPECIMEN_RECORDS, draft: FIRST_NO_REPO_DRAFT };
+    case "signed-out":
+      return { records: DRAFT_PAGE_RECORDS, draft: SIGNED_OUT_DRAFT };
     default:
       return { records: DRAFT_PAGE_RECORDS, draft: WEBSHOP_DRAFT };
   }

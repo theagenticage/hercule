@@ -13,6 +13,10 @@ import type { Project, Resource, Runner, Session, Workspace } from "@hercule/con
 
 export const AT = "2026-09-10T09:00:00.000Z";
 
+/**
+ * Returns an online runner that has Claude Code and Codex installed and a
+ * build that can drive both, so the accounts of those harnesses are ready on it.
+ */
 export const buildRunner = (id: string, name: string): Runner => ({
   id,
   name,
@@ -21,8 +25,21 @@ export const buildRunner = (id: string, name: string): Runner => ({
   reserved: false,
   version: "0.4.2",
   labels: [],
-  facts: null,
-  watermark: null,
+  facts: {
+    os: "darwin",
+    arch: "arm64",
+    totalMemoryBytes: 1024,
+    docker: false,
+    toolchains: [],
+    harnesses: [
+      { name: "claude", present: true, path: "/usr/local/bin/claude" },
+      { name: "codex", present: true, path: "/usr/local/bin/codex" },
+    ],
+    adapters: ["claude-code/claude-code", "codex/codex"],
+    identityPort: 4939,
+  },
+  metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 1024,
   lastSeenAt: AT,
@@ -31,6 +48,7 @@ export const buildRunner = (id: string, name: string): Runner => ({
 export const buildProject = (id: string, name: string): Project => ({
   id,
   name,
+  mcpServerIds: [],
   createdAt: AT,
   updatedAt: AT,
 });
@@ -97,6 +115,8 @@ export const buildWorkspace = (over: Partial<Workspace> & { id: string }): Works
   message: null,
   sessionIds: [],
   keptUntil: null,
+  diskUsage: null,
+  diskUsageError: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,
@@ -125,7 +145,8 @@ export const buildSession = (over: Partial<Session> & { id: string }): Session =
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "i-claude",
+  providerAccountId: "a-anthropic",
+  harnessId: "claude-code/claude-code",
   runnerId: SLOTS.moss,
   workspaceId: null,
   projectId: null,
@@ -141,6 +162,7 @@ export const buildSession = (over: Partial<Session> & { id: string }): Session =
   exitedAt: null,
   lastActivityAt: AT,
   unenforced: [],
+  mcpServers: [],
   ...over,
 });
 

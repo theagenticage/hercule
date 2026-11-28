@@ -260,5 +260,8 @@ describe("describeUnrestrictedGrantChange", () => {
     expect(
       describeUnrestrictedGrantChange("unrestricted", { grant: "skill.apply", held: true }),
     ).toBe("This gives Apply on Skills to unrestricted.");
+    expect(
+      describeUnrestrictedGrantChange("unrestricted", { grant: "mcp.manage", held: true }),
+    ).toBe("This gives Manage on MCP servers to unrestricted.");
   });
 });

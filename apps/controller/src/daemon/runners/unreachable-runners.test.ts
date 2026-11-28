@@ -14,10 +14,14 @@ import { TestDatabase } from "../../db/testing";
 import { AuditLogLayer } from "../../events";
 import { NotifierLayer } from "../../notifications";
 import { ServingPromotionStateLayer } from "../../promotion/testing";
+import { RunnerMetricsServiceLayer } from "../../runner-metrics";
 import { RunnerConnectionsLayer, runnerRepository } from "../../runners";
+import { SettingsLayer } from "../../settings";
 import { sweepUnreachableRunners } from "./unreachable-runners";
 
 const layer = RunnerConnectionsLayer.pipe(
+  Layer.provideMerge(RunnerMetricsServiceLayer),
+  Layer.provideMerge(SettingsLayer),
   Layer.provideMerge(NotifierLayer),
   Layer.provideMerge(AuditLogLayer),
   Layer.provideMerge(ServingPromotionStateLayer),

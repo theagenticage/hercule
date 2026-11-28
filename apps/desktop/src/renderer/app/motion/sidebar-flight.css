@@ -1,0 +1,14 @@
+/* The layer over the whole window that a mark flying to the sidebar crosses, and the wash that the
+   place it lands on shows. The layer takes no pointer and holds nothing at rest: it is made for a
+   flight and removed when the last flight in it ends. */
+.motion-flights {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+.motion-wash {
+  position: absolute;
+  border-radius: var(--r-sm);
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+}

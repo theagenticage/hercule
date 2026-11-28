@@ -1,28 +1,24 @@
 /**
- * Builds the start cards under a Draft Thread's composer: the open tasks of
+ * Builds the start cards under a Draft Thread's composer: the planned tasks of
  * the draft's project, most urgent first, each one a click away from a first
  * message that points the thread's agent at it.
  */
 import type { Task, TaskPriority } from "@hercule/contract";
 
-/** The label that makes a task a Proposal (GLOSSARY.md): prepared by agents, not yet accepted. */
-const PROPOSED_LABEL = "proposed";
-
-/** How many of four bars a priority fills. Four is urgent, which is drawn in the failure hue. */
-const PRIORITY_BARS: Readonly<Record<TaskPriority, 1 | 2 | 3 | 4>> = {
-  urgent: 4,
-  high: 3,
-  normal: 2,
-  low: 1,
+/** The priority in words, the card's eyebrow. "Urgent" is drawn in the failure hue. */
+const PRIORITY_WORDS: Readonly<Record<TaskPriority, StartCard["priorityText"]>> = {
+  urgent: "Urgent",
+  high: "High",
+  normal: "Normal",
+  low: "Low",
 };
 
 export interface StartCard {
   readonly taskId: string;
-  /** `Proposal` for a task the agents are asking the user to accept, `Task` otherwise. */
-  readonly kind: "Proposal" | "Task";
-  /** The task's priority, which the bars draw and which a screen reader reads out instead. */
+  /** The task's priority: the card draws the word of an urgent one in the failure hue. */
   readonly priority: TaskPriority;
-  readonly bars: 1 | 2 | 3 | 4;
+  /** The priority in words, which the card shows above its title: "Urgent", "High", "Normal" or "Low". */
+  readonly priorityText: "Urgent" | "High" | "Normal" | "Low";
   /**
    * The system the task came from, when the card can draw its mark: `github`
    * when the task's first external ref is a GitHub one, `null` otherwise.
@@ -65,9 +61,8 @@ export const buildStartCards = (tasks: readonly Task[]): readonly StartCard[] =>
     const ref = task.provenance.find((entry) => entry.ref !== undefined)?.ref;
     return {
       taskId: task.id,
-      kind: task.labels.includes(PROPOSED_LABEL) ? "Proposal" : "Task",
       priority: task.priority,
-      bars: PRIORITY_BARS[task.priority],
+      priorityText: PRIORITY_WORDS[task.priority],
       source: ref?.startsWith("github:") === true ? "github" : null,
       title: task.title,
       message: buildStartMessage(task, ref),

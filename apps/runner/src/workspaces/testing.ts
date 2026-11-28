@@ -26,12 +26,23 @@ import type { ProvisionCheckout, WorkspaceKind, WorkspaceProvision } from "@herc
 /**
  * The user's own git configuration is kept out: a test must not depend on the
  * machine's `init.defaultBranch`, hooks, or credential helpers.
+ *
+ * Git's automatic maintenance and garbage collection are turned off too. After
+ * a commit, clone or fetch, git may start `git maintenance` in the background,
+ * which creates and removes files such as `.git/objects/maintenance.lock`.
+ * That changes a repository behind the test's back, and `hashContents` fails
+ * when a file it listed has vanished before it reads it.
  */
 const GIT_ENV: Record<string, string> = {
   PATH: process.env["PATH"] ?? "/usr/bin:/bin",
   HOME: process.env["HOME"] ?? "/tmp",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_SYSTEM: "/dev/null",
+  GIT_CONFIG_COUNT: "2",
+  GIT_CONFIG_KEY_0: "maintenance.auto",
+  GIT_CONFIG_VALUE_0: "false",
+  GIT_CONFIG_KEY_1: "gc.auto",
+  GIT_CONFIG_VALUE_1: "0",
   GIT_TERMINAL_PROMPT: "0",
   GIT_AUTHOR_NAME: "Test Author",
   GIT_AUTHOR_EMAIL: "author@example.invalid",
@@ -51,11 +62,25 @@ export const runGitOrThrow = (cwd: string, ...args: ReadonlyArray<string>): stri
 const roots: Array<string> = [];
 const workspaceScopes: Array<Scope.Closeable> = [];
 
-/** Constructs a manager whose workers remain alive until the test fixtures are cleaned up. */
-export const makeTestWorkspaces = (options: Parameters<typeof makeWorkspaces>[0]): Workspaces => {
+type TestWorkspacesOptions = Omit<
+  Parameters<typeof makeWorkspaces>[0],
+  "deleteArchivedSessionFiles"
+> &
+  Partial<Pick<Parameters<typeof makeWorkspaces>[0], "deleteArchivedSessionFiles">>;
+
+/**
+ * Constructs a manager whose workers remain alive until the test fixtures are
+ * cleaned up. A test that does not look at archived sessions' files gets a
+ * delete function that deletes nothing.
+ */
+export const makeTestWorkspaces = (options: TestWorkspacesOptions): Workspaces => {
   const scope = Effect.runSync(Scope.make());
   workspaceScopes.push(scope);
-  return Effect.runSync(makeWorkspaces(options).pipe(Scope.provide(scope)));
+  return Effect.runSync(
+    makeWorkspaces({ deleteArchivedSessionFiles: () => Effect.succeed([]), ...options }).pipe(
+      Scope.provide(scope),
+    ),
+  );
 };
 
 /** Stops test-owned workspace workers before their directories are removed. */

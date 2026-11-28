@@ -5,8 +5,10 @@
  *
  * The messages are read a page at a time, newest first. When the reader
  * scrolls within one screen of the top, the page of messages before them is
- * read and added above, and the view is moved by the height they add, so
- * the message the reader was looking at stays where it was.
+ * read and added above. A reader above the bottom has the view moved by the
+ * height they add, so the message they were looking at stays where it was;
+ * a reader at the bottom stays at the bottom. Who keeps the view in each
+ * state is explained in ../session/message-list.
  *
  * Like the transcript, the Conversation is not a live region: the
  * assistant's streaming text would flood a screen reader.
@@ -23,10 +25,10 @@ import {
 } from "react";
 import { useSuspenseInfiniteQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   buildConversationBlocks,
   flattenMessagePages,
+  hasMessageAfter,
   resolveBrowserTimezone,
   type ConversationBlock,
   type Pose,
@@ -34,13 +36,7 @@ import {
 import type { Assistant, Attachment, Session, TranscriptRow } from "@hercule/contract";
 import { conversationMessagesQuery } from "../../app/queries";
 import { Face, type Look } from "../../faces";
-import {
-  DEFAULT_END_PADDING,
-  HEADER_CLEARANCE,
-  measureBlock,
-  OVERSCAN,
-  useMessageList,
-} from "../session/message-list";
+import { HEADER_CLEARANCE, useMessageList } from "../session/message-list";
 import { formatBlockTime, UserMessage } from "../session/messages";
 import { useStartOfToday } from "../session/start-of-today";
 import type { AttachOpenParagraph } from "../session/use-session-live";
@@ -75,17 +71,20 @@ const STAMP_HEIGHT = 15;
 const OWNER_FRAME_HEIGHT = 40;
 /** The height of a reply's name line with its 2px margin, above the text. */
 const REPLY_NAME_HEIGHT = 21.5;
-/** The height of a notice: the 28px failed face inside 8px of padding above and below. */
+/** The height of the newest notice: the 28px failed face inside 8px of padding above and below. */
 const NOTICE_HEIGHT = 44;
+/** The height of a notice a message follows: one line of 12px text at the transcript's 1.45 line height, above the 16px failed face. */
+const PAST_NOTICE_HEIGHT = 17.4;
 /** The height of the reply being written before any text: its name line and the caret's line. */
 const OPEN_REPLY_HEIGHT = 43.9;
 
 /**
- * Estimates a block's height, without the gap above it, before it is
- * measured, from the heights above. Only blocks that were never mounted use
- * the estimate.
+ * Estimates the height of the block at `index` in `blocks`, without the gap
+ * above it, before it is measured, from the heights above. Only blocks that
+ * were never mounted use the estimate.
  */
-const estimateBlockHeight = (block: ListBlock): number => {
+const estimateBlockHeight = (blocks: readonly ListBlock[], index: number): number => {
+  const block = blocks[index]!;
   switch (block.kind) {
     case "stamp":
       return STAMP_HEIGHT;
@@ -101,7 +100,7 @@ const estimateBlockHeight = (block: ListBlock): number => {
       );
     case "notice":
     case "unreadable-stream":
-      return NOTICE_HEIGHT;
+      return hasMessageAfter(blocks, index) ? PAST_NOTICE_HEIGHT : NOTICE_HEIGHT;
     case "open-reply":
       return OPEN_REPLY_HEIGHT;
   }
@@ -265,6 +264,13 @@ function ConversationList({
   readonly onBottomChange: (atBottom: boolean) => void;
   readonly ref?: Ref<ConversationHandle> | undefined;
 }): JSX.Element {
+  "use no memo";
+  // The React Compiler would memoize what this component reads from the
+  // virtualizer, such as the virtual items. The virtualizer is one object
+  // that changes inside while its identity stays the same, so the compiler
+  // would keep showing stale items. The compiler already skips the hook that
+  // creates the virtualizer, but not this component, so it is opted out by
+  // hand.
   /**
    * The first stored message drawn at the last commit, and where it started
    * in the column. When earlier messages are added above it, the view moves
@@ -273,39 +279,28 @@ function ConversationList({
   const anchorRef = useRef<{ readonly key: string; readonly start: number } | null>(null);
 
   // Memoized by hand, as the thread's transcript explains: the React
-  // Compiler leaves this component alone because of the virtualizer.
+  // Compiler is told to leave this component alone.
   const getItemKey = useCallback((index: number) => blocks[index]!.key, [blocks]);
   const estimateSize = useCallback(
-    (index: number) => BLOCK_GAP + estimateBlockHeight(blocks[index]!),
+    (index: number) => BLOCK_GAP + estimateBlockHeight(blocks, index),
     [blocks],
   );
-  // The estimated scroll position of the bottom, so the first render mounts
-  // the last blocks rather than the first. Read once, when the virtualizer is
-  // created.
-  const estimateBottomOffset = (): number =>
-    Math.max(
-      0,
-      blocks.reduce((sum, _block, index) => sum + estimateSize(index), SCROLL_MARGIN) +
-        DEFAULT_END_PADDING -
-        window.innerHeight,
-    );
 
-  const { scrollRef, columnRef, showsScrollbar, noteScroll, scrollToBottom } = useMessageList({
-    composerStack,
-    onBottomChange,
-  });
-
-  // eslint-disable-next-line react-hooks/incompatible-library -- The virtualizer returns an object that changes inside while its identity stays the same, which the React Compiler cannot memoize, so the compiler leaves this component alone. The callbacks above keep the renders cheap instead.
-  const virtualizer = useVirtualizer({
+  const {
+    virtualizer,
+    scrollRef,
+    columnRef,
+    showsScrollbar,
+    noteScroll,
+    scrollToBottom,
+    keepReadingPlace,
+  } = useMessageList({
     count: blocks.length,
-    getScrollElement: () => scrollRef.current,
     estimateSize,
     getItemKey,
-    measureElement: measureBlock,
-    overscan: OVERSCAN,
     scrollMargin: SCROLL_MARGIN,
-    initialRect: { width: 0, height: window.innerHeight },
-    initialOffset: estimateBottomOffset,
+    composerStack,
+    onBottomChange,
   });
 
   // A list mounted for a new current session opens at the bottom, while the
@@ -318,16 +313,19 @@ function ConversationList({
   }, []);
 
   // Runs before the browser paints the blocks added above, so the reader
-  // never sees the view jump. The added blocks start at their estimated
-  // heights; when they are measured, the virtualizer moves the view by the
-  // difference itself, because they sit above it.
+  // never sees the view jump. A reader above the bottom has the view moved
+  // by the height the added blocks take; a reader at the bottom is kept there
+  // by the observer in `useMessageList`, so `keepReadingPlace` does nothing.
+  // The added blocks start at their estimated heights; when they are
+  // measured, the virtualizer moves a reading view by the difference itself,
+  // because they sit above it. The anchor is updated in both states.
   useLayoutEffect(() => {
     const key = findFirstMessageKey(blocks);
     const measurements = virtualizer.measurementsCache;
     const previous = anchorRef.current;
     if (previous !== null && previous.key !== key) {
       const moved = measurements[blocks.findIndex((block) => block.key === previous.key)];
-      if (moved !== undefined) scrollRef.current!.scrollTop += moved.start - previous.start;
+      if (moved !== undefined) keepReadingPlace(moved.start - previous.start);
     }
     const first = measurements[blocks.findIndex((block) => block.key === key)];
     anchorRef.current =
@@ -343,8 +341,9 @@ function ConversationList({
 
   useImperativeHandle(ref, () => ({ scrollToBottom }));
 
-  /** Returns the element that draws `block`. */
-  const renderBlock = (block: ListBlock): JSX.Element => {
+  /** Returns the element that draws the block at `index`. */
+  const renderBlock = (index: number): JSX.Element => {
+    const block = blocks[index]!;
     switch (block.kind) {
       case "stamp":
         return <DayStamp label={block.label} />;
@@ -368,13 +367,21 @@ function ConversationList({
           />
         );
       case "notice":
-        return <Notice look={look} text={block.message.text} time={block.time} />;
+        return (
+          <Notice
+            look={look}
+            text={block.message.text}
+            time={block.time}
+            isPast={hasMessageAfter(blocks, index)}
+          />
+        );
       case "unreadable-stream":
         return (
           <Notice
             look={look}
             text={UNREADABLE_STREAM_MESSAGE}
             time={formatBlockTime(block.at, timezone, today)}
+            isPast={hasMessageAfter(blocks, index)}
           />
         );
       case "open-reply":
@@ -407,12 +414,11 @@ function ConversationList({
         )}
         {virtualItems.map(({ index, key }) => (
           <div key={key} ref={virtualizer.measureElement} data-index={index} className="atx-item">
-            {renderBlock(blocks[index]!)}
+            {renderBlock(index)}
           </div>
         ))}
         {last === undefined || last.end >= end ? null : <div style={{ height: end - last.end }} />}
       </div>
-      <div className="transcript-end" />
     </section>
   );
 }

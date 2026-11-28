@@ -26,8 +26,8 @@ const buildFacts = (identityPort: number): RunnerFacts => ({
   totalMemoryBytes: 64 * 1024 * 1024 * 1024,
   docker: true,
   toolchains: [],
-  providers: [],
-  adapters: ["claude-code"],
+  harnesses: [],
+  adapters: ["claude-code/claude-code"],
   identityPort,
 });
 
@@ -44,7 +44,8 @@ const buildRunner = (
   version: "1.0.0",
   labels: [],
   facts: buildFacts(identityPort),
-  watermark: null,
+  metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: null,

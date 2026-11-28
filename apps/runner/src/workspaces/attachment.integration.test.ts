@@ -28,13 +28,15 @@ import {
 import { makeAttachmentCache } from "../attachments";
 import { makeSessionSkillsFolders } from "../skills";
 import { openFileClock } from "../edit-marks";
-import { NO_CONTROLLER_UPLOADER } from "../providers/testing";
+import { NO_CONTROLLER_UPLOADER } from "../harnesses/testing";
 
 afterAll(cleanTemporaries);
 
 type AttachmentFrame = WorkspaceProvision & {
   readonly attachment: { readonly path: string; readonly remoteName: string };
 };
+
+const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
 
 const createAttachment = (linked = false, remoteName = "origin") => {
   const remote = makeRemote();
@@ -282,7 +284,7 @@ describe("recovering attachment availability", () => {
 
     expect(Effect.runSync(manager.resolve(fixture.frame.workspaceId))).toBeUndefined();
     const machine: Machine = {
-      providersDir: join(fixture.storageDir, "providers"),
+      storageDir: fixture.storageDir,
       scratchDir: join(fixture.storageDir, "scratch"),
       attachmentsDir: join(fixture.storageDir, "attachments"),
       editMarksDir: join(fixture.storageDir, "edit-marks"),
@@ -314,12 +316,16 @@ describe("recovering attachment availability", () => {
       requestId: createId(),
       sessionId: createId(),
       input: { text: "hello" },
-      providerId: "claude-code",
-      config: {},
-      secrets: {},
+      harnessId: "claude-code/claude-code",
+      harnessAccount: {
+        providerAccountId: ACCOUNT_ID,
+        harnessHome: `providers/${ACCOUNT_ID}`,
+        modelArgument: "{model}",
+        credentialVariables: [],
+      },
       token: "fixture-session-token",
       spec: {
-        instanceId: createId(),
+        providerAccountId: ACCOUNT_ID,
         workspaceId: fixture.frame.workspaceId,
         modelSelection: { model: "fixture", options: {} },
         accessMode: "approval-required",
@@ -328,7 +334,7 @@ describe("recovering attachment availability", () => {
     };
     const specifications: ReadonlyArray<SessionStart["spec"]> = [
       frame.spec,
-      { ...frame.spec, continue: { nativeSessionId: "saved-provider-transcript", mode: "resume" } },
+      { ...frame.spec, continue: { nativeSessionId: "saved-harness-transcript", mode: "resume" } },
     ];
     for (const spec of specifications) {
       const outcome = await Effect.runPromise(

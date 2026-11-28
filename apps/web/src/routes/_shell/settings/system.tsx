@@ -3,12 +3,20 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildTextGenerationField,
-  describeTextGenerationFailure,
+  describeTextGenerationProblem,
   formatAccessMode,
 } from "@hercule/client-core";
 import { ACCESS_MODE_CHAIN } from "@hercule/contract";
 import { EmptyState, FormCard, Row, Select } from "@hercule/ui";
-import { controllerQuery, providersQuery, settingsQuery } from "../../../app/queries";
+import {
+  controllerQuery,
+  ensureProviderAccountReads,
+  harnessesQuery,
+  modelProfilesQuery,
+  providerAccountsQuery,
+  providersQuery,
+  settingsQuery,
+} from "../../../app/queries";
 import { SaveStatus } from "../../../screens/save-status";
 import { useSaveSettings } from "./-form";
 
@@ -17,7 +25,7 @@ export const Route = createFileRoute("/_shell/settings/system")({
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData(controllerQuery(context.client)),
-      context.queryClient.ensureQueryData(providersQuery(context.client)),
+      ensureProviderAccountReads(context.queryClient, context.client),
     ]);
   },
   component: System,
@@ -36,13 +44,27 @@ export const Route = createFileRoute("/_shell/settings/system")({
 function System(): JSX.Element {
   const { client } = Route.useRouteContext();
   const settings = useSuspenseQuery(settingsQuery(client)).data;
-  const instances = useSuspenseQuery(providersQuery(client)).data;
+  const accounts = useSuspenseQuery(providerAccountsQuery(client)).data;
+  const providers = useSuspenseQuery(providersQuery(client)).data;
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
+  const modelProfiles = useSuspenseQuery(modelProfilesQuery(client)).data;
   const controller = useSuspenseQuery(controllerQuery(client)).data;
   const { save, saved, failure } = useSaveSettings(client);
 
   const stored = settings.controller["textGeneration.model"];
-  const field = buildTextGenerationField(stored, instances, controller.textGeneration);
-  const lastFailure = describeTextGenerationFailure(stored, controller.textGeneration, new Date());
+  const field = buildTextGenerationField(
+    stored,
+    providers,
+    accounts,
+    harnesses,
+    modelProfiles,
+    controller.textGeneration,
+  );
+  const textGenerationProblem = describeTextGenerationProblem(
+    stored,
+    controller.textGeneration,
+    new Date(),
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -68,7 +90,9 @@ function System(): JSX.Element {
             ))}
           </Select>
         </Row>
-        {lastFailure === null ? null : <p className="text-fine text-muted">{lastFailure}</p>}
+        {textGenerationProblem === null ? null : (
+          <p className="text-fine text-muted">{textGenerationProblem}</p>
+        )}
         <SaveStatus saved={saved} failure={failure} />
       </FormCard>
       <FormCard
@@ -84,8 +108,8 @@ function System(): JSX.Element {
           {ACCESS_MODE_CHAIN.map(formatAccessMode).join(" < ")}
         </span>
         <p className="text-row text-muted">
-          A thread asking for a mode its provider does not support runs at the nearest less
-          permissive mode that provider does support. The substitution never goes the other way: a
+          A thread asking for a mode its harness does not support runs at the nearest less
+          permissive mode that harness does support. The substitution never goes the other way: a
           thread never runs more permissively than it asked for.
         </p>
       </FormCard>

@@ -6,12 +6,12 @@
 import {
   MAX_MESSAGE_LENGTH,
   type ExitReason,
-  type ProviderEvent,
+  type HarnessEvent,
   type WorkspaceStepOutcome,
 } from "@hercule/protocol";
 
 /** An event that ends an agent step's turn: the turn's own end, or the end of its session. */
-export type StepTurnEnding = Extract<ProviderEvent, { _tag: "turn.completed" | "session.exited" }>;
+export type StepTurnEnding = Extract<HarnessEvent, { _tag: "turn.completed" | "session.exited" }>;
 
 /** What the supervisor knows about the step's turn beyond the event that ended it. */
 export interface StepTurn {

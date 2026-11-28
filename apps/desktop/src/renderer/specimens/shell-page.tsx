@@ -11,9 +11,10 @@
  * - settings-assistants.tsx, which opens Settings > Assistants;
  * - settings-profiles.tsx, which opens Settings > Permission profiles, the
  *   list or one profile's page;
- * - settings-connections.tsx, which opens Settings > Connections;
- * - intake.tsx, which opens Intake, with or without a signal's pane;
+ * - settings-providers.tsx, which opens Settings > Providers;
  * - workflows.tsx, which opens Workflows;
+ * - fleet.tsx, which opens the Fleet page or a machine's page;
+ * - work.tsx, which opens the Work board;
  * - run.tsx, which opens a run's page;
  * - discussions.tsx and wiki.tsx, which open Discussions and the Wiki, a
  *   list with an open Discussion or page.
@@ -55,39 +56,49 @@ import type {
   Assistant,
   Connection,
   ConversationMessage,
-  Event,
   EventCountsByConnection,
-  EventHandling,
-  EventWithFacts,
-  HandoffLeg,
-  IgnoreRuleWithCatches,
+  Harness,
+  InboxGroupQuery,
+  InboxQuery,
+  InboxValueQuery,
   Input,
   MemoryDocument,
   MemoryEntry,
+  ModelCatalog,
+  ModelProfile,
   PluginDetail,
   Profile,
   Project,
-  ProviderInstance,
+  Provider,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
-  Signal,
   SignedInUser,
+  Skill,
+  SkillDetail,
+  SkillRevisionDiff,
   SkillsPreviewFilter,
   Task,
-  TrackingDetail,
-  TrackingTask,
   TranscriptRow,
   Workspace,
-  YourWorkTask,
 } from "@hercule/contract";
+import { CORE_SAVED_QUERY_IDS } from "@hercule/contract";
 import {
   createClient,
   type FetchLike,
   type HerculeClient,
   type Live,
+  queryKeys,
+  type RecentModel,
   type ThreadPicks,
 } from "@hercule/client-core";
+import { computeDayStart } from "@hercule/client-core/list-time";
+import {
+  buildMachineFiveMinuteScope,
+  FLEET_HOUR_METRICS_SCOPE,
+} from "@hercule/client-core/metrics-history";
+import { HARNESSES, PROVIDERS } from "@hercule/client-core/testing";
 import type { Bridge } from "../../ipc/bridge";
 import {
   agentsQuery,
@@ -98,20 +109,24 @@ import {
   currentConversationSessionQuery,
   discussionQuery,
   discussionsQuery,
-  eventQuery,
-  eventsEverythingQuery,
-  eventCountsQuery,
-  ignoreRulesQuery,
+  fleetSessionsQuery,
   liveAgentSessionsQuery,
   liveRunsQuery,
   localRunnerQuery,
+  machineActivityQuery,
+  machineRecentActivityQuery,
   memoryDocumentQuery,
   memoryIndexQuery,
+  modelProfilesQuery,
   newestRunsQuery,
   pluginsQuery,
   previewSkillsQuery,
   profilesQuery,
   projectsQuery,
+  harnessesQuery,
+  inboxCountQuery,
+  inboxOutlineQuery,
+  providerAccountsQuery,
   providersQuery,
   queuedInputsQuery,
   rerunsQuery,
@@ -120,23 +135,18 @@ import {
   runningTurnQuery,
   runQuery,
   runSessionsQuery,
+  runWorkflowNameQuery,
   senderSessionQuery,
   sessionQuery,
   sessionSkillsQuery,
   settingsQuery,
-  signalQuery,
-  signalsClearedTodayQuery,
-  signalsDoneQuery,
-  laterSignalsOfKindQuery,
-  signalsLaterQuery,
-  signalsToDoQuery,
-  snoozeTimerQuery,
+  skillDiffQuery,
+  skillQuery,
+  skillsQuery,
+  taskAttentionQuery,
   startTasksQuery,
   subagentsQuery,
   threadAndAgentSessionsQuery,
-  trackingDetailQuery,
-  trackingQuery,
-  yourWorkQuery,
   transcriptQuery,
   triggersQuery,
   userQuery,
@@ -155,20 +165,36 @@ import {
   type PendingSubmissions,
 } from "../app/pending-submissions";
 import { createAppearanceStore } from "../app/appearance";
+import { rememberRecentModel } from "../app/recent-models";
 import { createQueryClient } from "../app/query-client";
+import { createAccountScopes } from "../app/account-scope";
+import { CleanupProvider } from "../app/cleanup";
+import {
+  decideStorageNow,
+  listCleanupCandidateIds,
+  negotiatedCapabilitiesQuery,
+  writeIdleWorkspaceThreads,
+} from "../app/machine-storage-queries";
 import { DoneMovesProvider } from "../app/done-moves";
 import { SessionPresentationProvider } from "../app/session-presentation";
 import { AssistantScreen } from "../screens/assistant/assistant-screen";
 import { DraftScreen } from "../screens/new-thread/draft-screen";
+import { useKeepRequestDrafts } from "../app/request-drafts";
 import { AgentPage } from "../screens/thread/agent-page";
 import { Route as SettingsRoute } from "../routes/_connected/_shell/settings/route";
 import { Route as AppearanceSettingsRoute } from "../routes/_connected/_shell/settings/appearance";
 import { Route as ConnectionsSettingsRoute } from "../routes/_connected/_shell/settings/connections";
+import { Route as ProvidersSettingsRoute } from "../routes/_connected/_shell/settings/providers";
 import { Route as AssistantsSettingsRoute } from "../routes/_connected/_shell/settings/assistants/index";
 import { Route as PermissionProfilesSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/index";
 import { Route as PermissionProfileSettingsRoute } from "../routes/_connected/_shell/settings/permission-profiles/$id";
-import { Route as IntakeSettingsRoute } from "../routes/_connected/_shell/settings/intake";
-import { Route as IntakeRoute } from "../routes/_connected/_shell/intake";
+import { Route as SkillsSettingsRoute } from "../routes/_connected/_shell/settings/skills/index";
+import { Route as SkillSettingsRoute } from "../routes/_connected/_shell/settings/skills/$name";
+import { Route as InboxRoute } from "../routes/_connected/_shell/inbox";
+import { Route as WorkRoute } from "../routes/_connected/_shell/work";
+import { Route as FleetRoute } from "../routes/_connected/_shell/fleet/index";
+import { Route as MachineRoute } from "../routes/_connected/_shell/fleet/$runnerId";
+import { Route as MachineActivityRoute } from "../routes/_connected/_shell/fleet/$runnerId_.activity";
 import { Route as WorkflowsRoute } from "../routes/_connected/_shell/workflows/route";
 import { Route as OpenWorkflowRoute } from "../routes/_connected/_shell/workflows/$workflowId";
 import { Route as RunRoute } from "../routes/_connected/_shell/runs/$runId";
@@ -176,11 +202,21 @@ import { Route as DiscussionsRoute } from "../routes/_connected/_shell/discussio
 import { Route as OpenDiscussionRoute } from "../routes/_connected/_shell/discussions/$discussionId";
 import { Route as WikiRoute } from "../routes/_connected/_shell/wiki/route";
 import { Route as OpenWikiPageRoute } from "../routes/_connected/_shell/wiki/$pageId";
+import {
+  buildWorkViewKey,
+  EMPTY_WORK_VIEW,
+  writeSavedWorkView,
+  type SavedWorkView,
+} from "../screens/work/work-view-storage";
 import { Shell } from "../shell";
 import { applySheetAppearance, readSheetAppearance } from "./sheet-page";
 import type { DiscussionsRecords } from "./discussions-fixture";
 import type { RunRecords } from "./run-fixture";
 import type { WikiRecords } from "./wiki-fixture";
+import { createCleanupSession } from "./fleet-cleanup-fixture";
+import type { FleetRecords } from "./fleet-fixture";
+import type { InboxRecords } from "./inbox-fixture";
+import type { WorkRecords } from "./work-fixture";
 import type { WorkflowsRecords } from "./workflows-fixture";
 
 /**
@@ -205,22 +241,16 @@ export interface SidebarRecords {
   readonly workspaces: ReadonlyArray<Workspace>;
   readonly resources: ReadonlyArray<Resource>;
   readonly runners: ReadonlyArray<Runner>;
-  readonly instances: ReadonlyArray<ProviderInstance>;
+  readonly accounts: ReadonlyArray<ProviderAccount>;
+  /** The Model Profiles, whose entries the composer's model menu lists. None when left out. */
+  readonly modelProfiles?: ReadonlyArray<ModelProfile>;
   readonly user: SignedInUser;
   /**
    * The Connections, which decide the red dot on the Connections row of the
    * Hercule face. None when left out. A screen that reads them too sets its own.
    */
   readonly connections?: ReadonlyArray<Connection>;
-  /** The signals on To do, which Intake's row and the Hercule segment count. None when left out. */
-  readonly signals?: ReadonlyArray<Signal>;
-  /** The signals on Later, soonest snooze first. None when left out. */
-  readonly later?: ReadonlyArray<Signal>;
-  /** The signals on Done, newest first, which Intake's foot counts. None when left out. */
-  readonly done?: ReadonlyArray<Signal>;
-  /** The leg of each handoff on `done`, which Done's rows and pane read their trips from. None when left out. */
-  readonly doneLegs?: ReadonlyArray<HandoffLeg>;
-  /** The installed plugins, which name each signal's source. None when left out. */
+  /** The installed plugins, which name each source. None when left out. */
   readonly plugins?: ReadonlyArray<PluginDetail>;
   /**
    * The live sessions that are not threads. Those of a run with an open
@@ -228,27 +258,14 @@ export interface SidebarRecords {
    * workflow in Needs you. None when left out.
    */
   readonly agentSessions?: ReadonlyArray<Session>;
+  /** Whether a run failed on a live Task, which draws the sidebar's failed-run dot. False when left out. */
+  readonly hasFailedRun?: boolean;
   /**
-   * What `task.queryTracking` returns: the Tasks Tracking follows, which the
-   * Hercule segment's count and Intake's Tracking read. None when left out.
+   * How many things someone waits on the user for, which the sidebar's Inbox
+   * row counts. A specimen that opens the Inbox counts its own list instead.
+   * 0 when left out.
    */
-  readonly tracking?: ReadonlyArray<TrackingTask>;
-  /**
-   * What `task.readTracking` returns for each Task whose pane a scene opens,
-   * by the Task's id. None when left out.
-   */
-  readonly trackingDetails?: ReadonlyMap<string, TrackingDetail>;
-  /**
-   * The signals handed to the Tasks of `tracking`, as `signal.read` returns
-   * them, which each Tracking pane reads under "You asked". None when left out.
-   */
-  readonly handedSignals?: ReadonlyArray<Signal>;
-  /**
-   * What `signal.queryYourWork` returns: the open Tasks that belong to a
-   * signal on To do, which make a Tracking row Needs you (Your work). None
-   * when left out.
-   */
-  readonly yourWorkTasks?: ReadonlyArray<YourWorkTask>;
+  readonly inboxWaiting?: number;
 }
 
 /** What the thread screen reads of the one thread it shows, as the thread route's loader reads it. */
@@ -281,18 +298,25 @@ export interface ThreadScreenRecords {
 /** What the draft screen reads of a Draft Thread in a project that joins no workspace. */
 export interface DraftScreenRecords {
   readonly projectId: string;
-  /** The project's open tasks the start cards offer, most urgent first, as the start cards' query returns them. */
+  /** The project's planned tasks the start cards offer, most urgent first, as the start cards' query returns them. */
   readonly startTasks: ReadonlyArray<Task>;
-  /** The Connections, which decide the line under the starters that show when there is no open task. */
+  /** The Connections, which decide the line under the starters that show when there is no planned task. */
   readonly connections: ReadonlyArray<Connection>;
   /** What the user picked in the draft's composer, which the draft's pending submission holds. */
   readonly picks: ThreadPicks;
+  /**
+   * The entries the user picked lately, oldest first, which the composer's
+   * model menu shows in its Recent lane. None when left out.
+   */
+  readonly recent?: ReadonlyArray<RecentModel>;
   /**
    * The filter the composer reads the draft's skills by: the runner and the
    * repos the picks open, or the empty filter when they open no repo. The
    * Bureau book draws no skill chip, so the list read by it is empty.
    */
   readonly skillsPreview: SkillsPreviewFilter;
+  /** The message of a start that failed, which the composer shows under its row. None when left out. */
+  readonly failure?: string;
 }
 
 /** What Settings > Assistants reads besides the sidebar's lists. */
@@ -319,6 +343,18 @@ export interface PermissionProfilesSettingsRecords {
   readonly connections: ReadonlyArray<Connection>;
 }
 
+/** What Settings > Skills reads besides the sidebar's lists. */
+export interface SkillsSettingsRecords {
+  /** The Skill Library's list, sorted by name. */
+  readonly skills: ReadonlyArray<Skill>;
+  /** Each skill's page, by its name. */
+  readonly details: ReadonlyMap<string, SkillDetail>;
+  /** What each waiting revision changes, by `<skill name>/<revision hash>`. */
+  readonly diffs: ReadonlyMap<string, SkillRevisionDiff>;
+  /** The Connections the Settings list reads for its Connections row's dot. */
+  readonly connections: ReadonlyArray<Connection>;
+}
+
 /**
  * The records Settings > Appearance reads. The section itself reads none:
  * it reads the Appearance from the bridge.
@@ -326,42 +362,6 @@ export interface PermissionProfilesSettingsRecords {
 export interface AppearanceSettingsRecords {
   /** The Connections the Settings list reads for its Connections row's dot. */
   readonly connections: ReadonlyArray<Connection>;
-}
-
-/**
- * What Intake reads besides the shell's lists, which hold To do, Later, Done
- * and the plugins: the selected signal and the event it was raised from. It
- * also says which view Intake opens on, and how the page answers a move.
- */
-export interface IntakeRecords {
-  /** The selected signal, as the controller reads it, or `null` when none is selected. */
-  readonly signal: Signal | null;
-  /** The event the selected signal was raised from, or `null` for none. */
-  readonly event: Event | null;
-  /** The view Intake opens on. To do when left out. */
-  readonly view?: "later" | "done" | "everything";
-  /** Whether Tracking is opened over the To do list. Folded when left out. */
-  readonly trackingOpen?: boolean;
-  /** The Task whose pane is open in opened Tracking. None when left out. */
-  readonly trackingTaskId?: string;
-  /**
-   * What the Everything view reads: the events its one page holds, newest
-   * first, under the search text, the handling filter and the source tab it
-   * opens with, and the event whose pane is open. Used only when `view` is "everything".
-   */
-  readonly everything?: {
-    readonly events: ReadonlyArray<EventWithFacts>;
-    readonly text?: string;
-    readonly handling?: EventHandling;
-    readonly source?: string;
-    readonly selectedEventId?: number;
-  };
-  /**
-   * Answers the requests that move signals, such as `signal.markDone`, for a
-   * scene that makes a move. Every other request is refused, as on every
-   * page. When left out, moves are refused too.
-   */
-  readonly answerMove?: FetchLike;
 }
 
 /**
@@ -375,11 +375,22 @@ export interface ConnectionsSettingsRecords {
 }
 
 /**
- * What Settings > Intake reads besides the shell's lists, which hold the
- * plugins and the Connections: the Ignore Rules, with what each caught.
+ * What Settings > Providers reads besides the shell's lists, which hold the
+ * accounts, the providers, the harnesses, the runners and the plugins.
  */
-export interface IntakeSettingsRecords {
-  readonly ignoreRules: ReadonlyArray<IgnoreRuleWithCatches>;
+export interface ProvidersSettingsRecords {
+  /** The id of the runner on this Mac, which the account sheet draws as a laptop. */
+  readonly thisMacRunnerId: string;
+  /** The providers, with every kind of account each offers, which the add-account sheet draws. */
+  readonly providers: ReadonlyArray<Provider>;
+  /** The harnesses, when the accounts use a kind the shared ones do not run: the account sheet's Default harness lists them. */
+  readonly harnesses?: ReadonlyArray<Harness>;
+  /** The id of the runner on the machine that runs the controller, which the add-account sheet puts first. */
+  readonly controllerRunnerId: string;
+  /** The account `providerAccount.create` answers with. */
+  readonly createdAccount: ProviderAccount;
+  /** The Model Catalog `providerAccount.readCatalog` answers with, for the account it names. */
+  readonly catalog: ModelCatalog;
 }
 
 /** The screens a shell specimen opens beside the sidebar. It opens at most one of them. */
@@ -388,11 +399,13 @@ interface OpenScreens {
   readonly draft?: DraftScreenRecords;
   readonly assistantsSettings?: AssistantsSettingsRecords;
   readonly permissionProfilesSettings?: PermissionProfilesSettingsRecords;
+  readonly skillsSettings?: SkillsSettingsRecords;
   readonly appearanceSettings?: AppearanceSettingsRecords;
-  readonly connectionsSettings?: ConnectionsSettingsRecords;
-  readonly intake?: IntakeRecords;
-  readonly intakeSettings?: IntakeSettingsRecords;
+  readonly providersSettings?: ProvidersSettingsRecords;
   readonly workflows?: WorkflowsRecords;
+  readonly fleet?: FleetRecords;
+  readonly work?: WorkRecords;
+  readonly inbox?: InboxRecords;
   readonly run?: RunScreenRecords;
   readonly discussions?: DiscussionsRecords;
   readonly wiki?: WikiRecords;
@@ -424,9 +437,6 @@ const refuseRequest: FetchLike = (url) =>
     ),
   );
 
-/** Matches the address of a request that moves signals: Done, Snooze, Unsnooze or Not urgent. */
-const MOVE_PATH = /\/api\/v1\/signals\/(mark-done|snooze|unsnooze|lower-priority)$/;
-
 /** Returns an error for a bridge call the page made, naming `call`. */
 const buildBridgeCallError = (call: string): Error =>
   new Error(
@@ -448,15 +458,27 @@ const SILENT_LIVE: Live = {
   serverVersion: null,
 };
 
+/** The live connection of a page that shows the app offline: it reports the connection as lost the moment something listens. */
+const OFFLINE_LIVE: Live = {
+  ...SILENT_LIVE,
+  onStatus: (listener) => {
+    listener("disconnected");
+    return () => undefined;
+  },
+};
+
 /**
  * The bridge the page passes to the app. It refuses every call, for the same
  * reason the client refuses every request, except what the shell sends main
  * for the Go menu, the dock badge and the notifications: it accepts that,
  * and ignores it. It reads the Appearance as the defaults, so the page looks
- * as it does on a Mac where the user never changed them. It sends no menu command and opens no thread or
- * assistant.
+ * as it does on a Mac where the user never changed them, and says the platform
+ * is a Mac, so that the screenshots keep the Mac's look. It sends no menu
+ * command and opens no thread or assistant.
  */
 const REFUSING_BRIDGE: Bridge = {
+  platform: "mac",
+  hiddenWindowDraws: true,
   controllerUrl: {
     read: () => Promise.reject(buildBridgeCallError("controllerUrl.read")),
     save: () => Promise.reject(buildBridgeCallError("controllerUrl.save")),
@@ -513,6 +535,11 @@ const REFUSING_BRIDGE: Bridge = {
   link: {
     open: () => Promise.reject(buildBridgeCallError("link.open")),
   },
+  signInReturn: {
+    listen: () => Promise.reject(buildBridgeCallError("signInReturn.listen")),
+    wait: () => Promise.reject(buildBridgeCallError("signInReturn.wait")),
+    cancel: () => Promise.reject(buildBridgeCallError("signInReturn.cancel")),
+  },
   menu: {
     onCommand: () => () => undefined,
   },
@@ -545,11 +572,13 @@ const seedQueryCache = (
     draft,
     assistantsSettings,
     permissionProfilesSettings,
+    skillsSettings,
     appearanceSettings,
-    connectionsSettings,
-    intake,
-    intakeSettings,
+    providersSettings,
     workflows,
+    fleet,
+    work,
+    inbox,
     run,
     discussions,
     wiki,
@@ -560,49 +589,15 @@ const seedQueryCache = (
   queryClient.setQueryData(workspacesQuery(client).queryKey, records.workspaces);
   queryClient.setQueryData(resourcesQuery(client).queryKey, records.resources);
   queryClient.setQueryData(runnersQuery(client).queryKey, records.runners);
-  queryClient.setQueryData(providersQuery(client).queryKey, records.instances);
+  queryClient.setQueryData(providerAccountsQuery(client).queryKey, records.accounts);
+  queryClient.setQueryData(modelProfilesQuery(client).queryKey, records.modelProfiles ?? []);
+  // The providers and harnesses are what the plugins register, so every
+  // specimen shows the same ones.
+  queryClient.setQueryData(providersQuery(client).queryKey, PROVIDERS);
+  queryClient.setQueryData(harnessesQuery(client).queryKey, HARNESSES);
   queryClient.setQueryData(userQuery(client).queryKey, records.user);
   queryClient.setQueryData(connectionsQuery(client).queryKey, records.connections ?? []);
-  queryClient.setQueryData(signalsToDoQuery(client).queryKey, records.signals ?? []);
-  // Each paged list fits on its one page.
-  queryClient.setQueryData(signalsLaterQuery(client).queryKey, {
-    pages: [{ items: records.later ?? [] }],
-    pageParams: [undefined],
-  });
-  // The Ignore dialog, and an open offer of an Ignore Rule, look for the
-  // signals a rule matches in Later of the rule's kind, read whole.
-  for (const kind of new Set(
-    [...(records.signals ?? []), ...(records.later ?? [])].map((signal) => signal.kind),
-  )) {
-    queryClient.setQueryData(
-      laterSignalsOfKindQuery(client, kind).queryKey,
-      (records.later ?? []).filter((signal) => signal.kind === kind),
-    );
-  }
-  queryClient.setQueryData(signalsDoneQuery(client).queryKey, {
-    pages: [{ items: records.done ?? [], legs: records.doneLegs ?? [] }],
-    pageParams: [undefined],
-  });
-  queryClient.setQueryData(signalsClearedTodayQuery(client).queryKey, {
-    pages: [{ items: records.done ?? [] }],
-    pageParams: [undefined],
-  });
-  queryClient.setQueryData(
-    snoozeTimerQuery(client).queryKey,
-    records.later?.[0]?.snooze?.until ?? null,
-  );
   queryClient.setQueryData(pluginsQuery(client).queryKey, records.plugins ?? []);
-  queryClient.setQueryData(trackingQuery(client).queryKey, {
-    tasks: records.tracking ?? [],
-    readStartedAt: 0,
-  });
-  for (const [taskId, detail] of records.trackingDetails ?? []) {
-    queryClient.setQueryData(trackingDetailQuery(client, taskId).queryKey, detail);
-  }
-  for (const signal of records.handedSignals ?? []) {
-    queryClient.setQueryData(signalQuery(client, signal.id).queryKey, signal);
-  }
-  queryClient.setQueryData(yourWorkQuery(client).queryKey, { tasks: records.yourWorkTasks ?? [] });
   queryClient.setQueryData(liveAgentSessionsQuery(client).queryKey, records.agentSessions ?? []);
   queryClient.setQueryData(
     assistantsQuery(client).queryKey,
@@ -624,6 +619,13 @@ const seedQueryCache = (
   }
   queryClient.setQueryData(settingsQuery(client).queryKey, { controller: {}, user: {} });
   queryClient.setQueryData(profilesQuery(client).queryKey, []);
+  // The Inbox's start-thread dialog starts from the user's thread settings.
+  if (inbox?.threadStart !== undefined) {
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: inbox.threadStart.settings,
+    });
+  }
   queryClient.setQueryData(localRunnerQuery(REFUSING_BRIDGE, records.runners).queryKey, null);
   if (draft !== undefined) {
     queryClient.setQueryData(startTasksQuery(client, draft.projectId).queryKey, draft.startTasks);
@@ -652,34 +654,51 @@ const seedQueryCache = (
       permissionProfilesSettings.connections,
     );
   }
+  if (skillsSettings !== undefined) {
+    queryClient.setQueryData(settingsQuery(client).queryKey, {
+      controller: {},
+      user: { timezone: "UTC" },
+    });
+    queryClient.setQueryData(connectionsQuery(client).queryKey, skillsSettings.connections);
+    // A line names the session that proposed or applied a revision, which the
+    // sidebar's lists do not hold for an assistant's conversation.
+    for (const { currentSession } of records.assistants) {
+      if (currentSession !== null) {
+        queryClient.setQueryData(
+          senderSessionQuery(client, currentSession.id).queryKey,
+          currentSession,
+        );
+      }
+    }
+    queryClient.setQueryData(skillsQuery(client).queryKey, skillsSettings.skills);
+    for (const [name, detail] of skillsSettings.details) {
+      queryClient.setQueryData(skillQuery(client, name).queryKey, detail);
+    }
+    for (const [key, diff] of skillsSettings.diffs) {
+      const [name, revisionHash] = key.split("/") as [string, string];
+      queryClient.setQueryData(skillDiffQuery(client, name, revisionHash).queryKey, diff);
+    }
+  }
   if (appearanceSettings !== undefined) {
     queryClient.setQueryData(connectionsQuery(client).queryKey, appearanceSettings.connections);
   }
-  if (connectionsSettings !== undefined) {
-    queryClient.setQueryData(connectionsQuery(client).queryKey, connectionsSettings.connections);
-    queryClient.setQueryData(pluginsQuery(client).queryKey, connectionsSettings.plugins);
-    queryClient.setQueryData(eventCountsQuery(client).queryKey, connectionsSettings.counts);
-  }
-  if (intakeSettings !== undefined) {
-    queryClient.setQueryData(ignoreRulesQuery(client).queryKey, intakeSettings.ignoreRules);
-  }
-  if (intake !== undefined) {
-    // The drawings' signals come from plugins, so no workflow names any of them.
-    queryClient.setQueryData(workflowsQuery(client).queryKey, []);
-  }
-  if (intake?.everything !== undefined) {
-    const { events, text, handling, source } = intake.everything;
+  if (providersSettings !== undefined) {
     queryClient.setQueryData(
-      // `since` is not part of the listing's key, so any value finds it.
-      eventsEverythingQuery(client, { text, handling, source }, "").queryKey,
-      { pages: [{ items: events }], pageParams: [undefined] },
+      localRunnerQuery(REFUSING_BRIDGE, records.runners).queryKey,
+      providersSettings.thisMacRunnerId,
     );
-  }
-  if (intake?.signal != null) {
-    queryClient.setQueryData(signalQuery(client, intake.signal.id).queryKey, intake.signal);
-  }
-  if (intake?.event != null) {
-    queryClient.setQueryData(eventQuery(client, intake.event.id).queryKey, intake.event);
+    queryClient.setQueryData(providersQuery(client).queryKey, providersSettings.providers);
+    if (providersSettings.harnesses !== undefined) {
+      queryClient.setQueryData(harnessesQuery(client).queryKey, providersSettings.harnesses);
+    }
+    queryClient.setQueryData(controllerQuery(client).queryKey, {
+      id: "01a06d02-7800-7000-8000-000000000001",
+      publicKey: "controller-key",
+      version: "0.4.2",
+      defaultRunnerId: null,
+      localRunnerId: providersSettings.controllerRunnerId,
+      textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+    });
   }
   if (run !== undefined) {
     const { workflow, agents, workflowActions } = run.workflows.openWorkflow;
@@ -713,6 +732,87 @@ const seedQueryCache = (
       user: { timezone: "UTC" },
     });
   }
+  if (fleet !== undefined) {
+    // The runners and the accounts are the sidebar's lists, seeded above.
+    queryClient.setQueryData(harnessesQuery(client).queryKey, fleet.harnesses);
+    queryClient.setQueryData(fleetSessionsQuery(client).queryKey, fleet.sessions);
+    // Running here names each run by its own read of the workflow's name.
+    for (const [runId, workflowName] of Object.entries(fleet.workflowNames)) {
+      queryClient.setQueryData(runWorkflowNameQuery(client, runId).queryKey, workflowName);
+    }
+    queryClient.setQueryData(controllerQuery(client).queryKey, fleet.controller);
+    const { fiveMinutesByRunner, fleetHours } = fleet.metrics;
+    queryClient.setQueryData(queryKeys.runnerMetrics(FLEET_HOUR_METRICS_SCOPE), fleetHours);
+    for (const [runnerId, history] of Object.entries(fiveMinutesByRunner)) {
+      queryClient.setQueryData(
+        queryKeys.runnerMetrics(buildMachineFiveMinuteScope(runnerId)),
+        history,
+      );
+    }
+    for (const [runnerId, events] of Object.entries(fleet.activity)) {
+      // Each log fits on one page of each read, so no read has a next page.
+      queryClient.setQueryData(machineRecentActivityQuery(client, runnerId).queryKey, {
+        items: events,
+      });
+      queryClient.setQueryData(machineActivityQuery(client, runnerId).queryKey, {
+        pages: [{ items: events }],
+        pageParams: [undefined],
+      });
+    }
+    for (const run of fleet.runs) {
+      queryClient.setQueryData(runQuery(client, run.id).queryKey, run);
+    }
+    // Storage reads what each runner negotiated, and the Threads of the workspaces
+    // that are idle at the hour points' read time (see `decideStorageNow`).
+    const clock = new Date();
+    const storageNow = decideStorageNow(fleetHours.readAt, computeDayStart(clock, "UTC") ?? clock);
+    for (const runner of records.runners) {
+      queryClient.setQueryData(
+        negotiatedCapabilitiesQuery(client, runner.id).queryKey,
+        fleet.negotiatedCapabilities[runner.id] ?? null,
+      );
+      const idleIds = listCleanupCandidateIds(records.workspaces, runner.id, storageNow);
+      writeIdleWorkspaceThreads(
+        queryClient,
+        runner.id,
+        idleIds,
+        fleet.cleanupThreads.filter(
+          ({ workspaceId }) => workspaceId !== null && idleIds.includes(workspaceId),
+        ),
+      );
+    }
+  }
+  if (work !== undefined) {
+    queryClient.setQueryData(queryKeys.workBoard(), work.board);
+    queryClient.setQueryData(queryKeys.initiatives(), work.initiatives ?? []);
+    for (const detail of work.details ?? []) {
+      queryClient.setQueryData(queryKeys.taskDetail(detail.task.id), detail);
+    }
+    // The board and the details read whether summaries are on.
+    queryClient.setQueryData(controllerQuery(client).queryKey, {
+      id: "01a06d02-7800-7000-8000-000000000001",
+      publicKey: "controller-key",
+      version: "0.4.2",
+      defaultRunnerId: null,
+      localRunnerId: null,
+      textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+    });
+  }
+  // The sidebar's dot reads whether a run failed on a Task on every screen.
+  queryClient.setQueryData(taskAttentionQuery(client).queryKey, {
+    anyFailure: records.hasFailedRun ?? false,
+  });
+  // The sidebar's Inbox row reads its small counts on every screen. The Inbox counts its own
+  // list; every other screen counts the workspace's.
+  const waiting =
+    inbox === undefined
+      ? (records.inboxWaiting ?? 0)
+      : (inbox.outline.savedQueries.find((query) => query.id === CORE_SAVED_QUERY_IDS.waits)
+          ?.count ?? 0);
+  queryClient.setQueryData(inboxCountQuery(client).queryKey, { waiting, newestArrival: 0 });
+  // The Inbox screen reads its outline once, and the route's loader waits for it.
+  if (inbox !== undefined)
+    queryClient.setQueryData(inboxOutlineQuery(client).queryKey, inbox.outline);
   if (workflows !== undefined) {
     queryClient.setQueryData(workflowsQuery(client).queryKey, workflows.workflows);
     queryClient.setQueryData(triggersQuery(client).queryKey, workflows.triggers);
@@ -781,11 +881,13 @@ const seedQueryCache = (
       user: { timezone: "UTC" },
     });
   }
-  if (thread !== undefined) {
-    const sessionId = thread.session.id;
-    queryClient.setQueryData(sessionQuery(client, sessionId).queryKey, thread.session);
-    queryClient.setQueryData(transcriptQuery(client, sessionId).queryKey, thread.transcript);
-    queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, thread.queuedInputs);
+  // The Inbox's start-thread dialog shows the thread its fake controller starts, read from the same records.
+  const opened = thread ?? inbox?.threadStart?.started;
+  if (opened !== undefined) {
+    const sessionId = opened.session.id;
+    queryClient.setQueryData(sessionQuery(client, sessionId).queryKey, opened.session);
+    queryClient.setQueryData(transcriptQuery(client, sessionId).queryKey, opened.transcript);
+    queryClient.setQueryData(queuedInputsQuery(client, sessionId).queryKey, opened.queuedInputs);
     // The Bureau book draws a thread with no subagents.
     queryClient.setQueryData(subagentsQuery(client, sessionId).queryKey, []);
     // The Bureau book draws no skill chip, so the thread has no skills.
@@ -793,7 +895,7 @@ const seedQueryCache = (
       items: [],
       skipped: [],
     });
-    if (thread.profiles === null) {
+    if (opened.profiles === null) {
       // A failed read keeps the list read before it, here an empty one, and
       // the dock reads the profiles again only after a read that succeeded.
       queryClient
@@ -803,10 +905,10 @@ const seedQueryCache = (
           status: "error",
           error: new Error("The permission profiles could not be read."),
         });
-    } else if (thread.profiles !== undefined) {
-      queryClient.setQueryData(profilesQuery(client).queryKey, thread.profiles);
+    } else if (opened.profiles !== undefined) {
+      queryClient.setQueryData(profilesQuery(client).queryKey, opened.profiles);
     }
-    if (thread.syncing === true) {
+    if (opened.syncing === true) {
       // A read that never answers, on top of the rows just stored: the
       // marker watches the transcript's query while it reads.
       const { queryKey } = transcriptQuery(client, sessionId);
@@ -817,7 +919,7 @@ const seedQueryCache = (
         staleTime: 0,
       });
     }
-    for (const sender of thread.senders ?? []) {
+    for (const sender of opened.senders ?? []) {
       queryClient.setQueryData(senderSessionQuery(client, sender.id).queryKey, sender.session);
     }
   }
@@ -832,9 +934,11 @@ function ShellLayout(): JSX.Element {
   return (
     <SessionPresentationProvider>
       <DoneMovesProvider client={client}>
-        <Shell onNewThread={() => undefined}>
-          <Outlet />
-        </Shell>
+        <CleanupProvider client={client}>
+          <Shell onNewThread={() => undefined}>
+            <Outlet />
+          </Shell>
+        </CleanupProvider>
       </DoneMovesProvider>
     </SessionPresentationProvider>
   );
@@ -849,6 +953,16 @@ function NewThreadScreen(): JSX.Element {
   return <DraftScreen projectId={search.project ?? null} workspaceId={search.workspace ?? null} />;
 }
 
+/**
+ * Renders the thread's page and keeps the thread's Request drafts while it is
+ * shown, as the app's thread layout route does. Without it, an answer typed
+ * in the dock or the composer is dropped.
+ */
+function ThreadSpecimenPage({ sessionId }: { readonly sessionId: string }): JSX.Element {
+  useKeepRequestDrafts(sessionId);
+  return <AgentPage sessionId={sessionId} subagentId={undefined} inThreadRoute />;
+}
+
 /** Renders the page of the assistant the address names, as the app's assistant route does. */
 function AssistantRoute(): JSX.Element {
   const { assistantId } = useParams({ from: "/_connected/_shell/assistants/$assistantId" });
@@ -858,8 +972,8 @@ function AssistantRoute(): JSX.Element {
 /**
  * Builds the router: the root, the `_connected` and `_shell` layout routes,
  * the three screens the sidebar links to, `/`, `/threads/$sessionId` and
- * `/assistants/$assistantId`, Intake, Workflows, and Settings with its Appearance,
- * Connections, Intake, Assistants and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
+ * `/assistants/$assistantId`, Workflows, and Settings with its Appearance,
+ * Connections, Assistants and Permission profiles sections, starting at `path`. The ids are the app's, because the sidebar and the
  * screens read their context, and the sidebar its selected thread or draft,
  * by route id.
  *
@@ -875,21 +989,26 @@ function AssistantRoute(): JSX.Element {
  * attached without its loader: the loader reads the permission profiles and
  * the settings again each time the section opens, and the query cache
  * already holds both. The Permission profiles routes are attached the same
- * way, and so are Settings > Intake, whose loader reads the Ignore Rules
- * again each time the section opens, and Workflows, whose loader reads the lists the cache already
+ * way, and so is Workflows, whose loader reads the lists the cache already
  * holds, and so is Settings > Connections, whose loader reads the
  * Connections and the plugins through a query client this router's context
- * does not have, and the cache already holds both. Intake keeps a loader of
- * its own that returns the moment it opened, because the screen reads that
- * moment, and the cache already holds the records its real loader would read.
+ * does not have, and the cache already holds both.
  */
 const buildRouter = (
   client: HerculeClient,
+  queryClient: QueryClient,
   pendingSubmissions: PendingSubmissions,
   path: string,
   openThreadId: string | undefined,
+  live: Live = SILENT_LIVE,
 ) => {
   const rootRoute = createRootRoute();
+  const accountScopes = createAccountScopes({
+    controllerUrl: CONTROLLER_URL,
+    client,
+    queryClient,
+    storage: localStorage,
+  });
   const connectedRoute = createRoute({
     getParentRoute: () => rootRoute,
     id: "_connected",
@@ -900,14 +1019,21 @@ const buildRouter = (
       controller: {
         url: CONTROLLER_URL,
         client,
-        live: SILENT_LIVE,
+        live,
         pendingSubmissions,
+        accountScopes,
       },
     }),
   });
   const shellRoute = createRoute({
     getParentRoute: () => connectedRoute,
     id: "_shell",
+    // Opens the account scope of the signed-in user as the app's shell route
+    // does. The cache already holds the user, so this sends no request.
+    loader: async () => {
+      const { username } = await queryClient.ensureQueryData(userQuery(client));
+      accountScopes.open(username);
+    },
     component: ShellLayout,
   });
   // `update` is typed for the options a route may change once it is built,
@@ -937,6 +1063,18 @@ const buildRouter = (
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);
+  const skillsSettingsRoute = SkillsSettingsRoute.update({
+    id: "/skills/",
+    path: "/skills/",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
+  const skillSettingsRoute = SkillSettingsRoute.update({
+    id: "/skills/$name",
+    path: "/skills/$name",
+    getParentRoute: () => settingsRoute,
+    loader: undefined,
+  } as never);
   const appearanceSettingsRoute = AppearanceSettingsRoute.update({
     id: "/appearance",
     path: "/appearance",
@@ -948,23 +1086,49 @@ const buildRouter = (
     getParentRoute: () => settingsRoute,
     loader: undefined,
   } as never);
-  const intakeSettingsRoute = IntakeSettingsRoute.update({
-    id: "/intake",
-    path: "/intake",
+  const providersSettingsRoute = ProvidersSettingsRoute.update({
+    id: "/providers",
+    path: "/providers",
     getParentRoute: () => settingsRoute,
     loader: undefined,
-  } as never);
-  const intakeRoute = IntakeRoute.update({
-    id: "/intake",
-    path: "/intake",
-    getParentRoute: () => shellRoute,
-    // The real loader reads the cache again; the screen needs only the moment
-    // it opened, which is the specimen's stopped clock.
-    loader: () => ({ openedAt: Date.now() }),
   } as never);
   const workflowsRoute = WorkflowsRoute.update({
     id: "/workflows",
     path: "/workflows",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
+  const workRoute = WorkRoute.update({
+    id: "/work",
+    path: "/work",
+    getParentRoute: () => shellRoute,
+    // The real loader reads the Projects and starts the board's read, and the
+    // cache already holds both.
+    loader: undefined,
+  } as never);
+  const inboxRoute = InboxRoute.update({
+    id: "/inbox",
+    path: "/inbox",
+    getParentRoute: () => shellRoute,
+    // The real loader starts the list's first read through the route context's query client.
+    // The screen reads the fake controller itself.
+    loader: undefined,
+  } as never);
+  const fleetRoute = FleetRoute.update({
+    id: "/fleet/",
+    path: "/fleet/",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
+  const machineRoute = MachineRoute.update({
+    id: "/fleet/$runnerId",
+    path: "/fleet/$runnerId",
+    getParentRoute: () => shellRoute,
+    loader: undefined,
+  } as never);
+  const machineActivityRoute = MachineActivityRoute.update({
+    id: "/fleet/$runnerId_/activity",
+    path: "/fleet/$runnerId/activity",
     getParentRoute: () => shellRoute,
     loader: undefined,
   } as never);
@@ -1013,12 +1177,7 @@ const buildRouter = (
           path: "threads/$sessionId",
           component: () =>
             openThreadId === undefined ? null : (
-              <AgentPage
-                key={openThreadId}
-                sessionId={openThreadId}
-                subagentId={undefined}
-                inThreadRoute
-              />
+              <ThreadSpecimenPage key={openThreadId} sessionId={openThreadId} />
             ),
         }),
         createRoute({
@@ -1026,18 +1185,24 @@ const buildRouter = (
           path: "assistants/$assistantId",
           component: AssistantRoute,
         }),
-        intakeRoute,
         workflowsRoute.addChildren([openWorkflowRoute]),
+        workRoute,
+        inboxRoute,
+        fleetRoute,
+        machineRoute,
+        machineActivityRoute,
         discussionsRoute.addChildren([openDiscussionRoute]),
         wikiRoute.addChildren([openWikiPageRoute]),
         runRoute,
         settingsRoute.addChildren([
           appearanceSettingsRoute,
           connectionsSettingsRoute,
-          intakeSettingsRoute,
+          providersSettingsRoute,
           assistantsSettingsRoute,
           permissionProfilesSettingsRoute,
           permissionProfileSettingsRoute,
+          skillsSettingsRoute,
+          skillSettingsRoute,
         ]),
       ]),
     ]),
@@ -1076,6 +1241,25 @@ const findWorkflowsDrawnSelector = (path: string): string => {
 };
 
 /**
+ * Returns the selector of what the Fleet page draws last at `path`, the
+ * app's address: a machine's card or row; on a machine's page, the Recent
+ * section's last lines; on its Activity page, the first entry, which the
+ * virtual list draws once it has measured its height.
+ */
+const findFleetDrawnSelector = (path: string): string => {
+  if (path === "/fleet") return ".fleet-card, .fleet-row";
+  return path.endsWith("/activity")
+    ? ".machine-activity-row"
+    : ".machine-page .machine-activity-row";
+};
+
+/** The selector of what the Inbox draws last: a row or an empty state, unless the fixture names another part. */
+const INBOX_DRAWN_SELECTOR = ".ib-row, .ib-empty";
+
+/** The selector of what the Work board draws last: a card, which the lanes draw after the first render. */
+const WORK_DRAWN_SELECTOR = ".board-lanes .desk-card";
+
+/**
  * Returns the selector of what Discussions or the Wiki draws last at `path`,
  * the app's address: the list's rows, or its empty line, unless the list is
  * hidden (`full=true`), and then the open Discussion's Posts or the open
@@ -1105,8 +1289,7 @@ const findRunDrawnSelector = (path: string): string =>
  * `screens` opens a thread, an assistant's settings when it opens Settings >
  * Assistants, the theme cards when it opens Settings > Appearance, a
  * Connection's row when it opens Settings > Connections, a
- * plugin's section when it opens Settings > Intake, the
- * list's rows or its empty line when it opens Intake or Workflows, a step
+ * the list's rows or its empty line when it opens Workflows, a step
  * when it opens a run's page, and the start cards with the focus in the
  * message field when it opens a draft, and started no read. Fails with the keys of the
  * reads it started, or with what it did not draw, otherwise.
@@ -1118,7 +1301,8 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
     .getQueryCache()
     .findAll({ fetchStatus: "fetching" })
     .filter((query) => !keptReadingHashes.has(query.queryHash));
-  if (reads.length > 0) {
+  // The Inbox reads its pages and its open thing from the fixture's fake controller, which answers at once.
+  if (reads.length > 0 && screens.inbox === undefined) {
     throw new Error(
       `The page read ${reads.map((query) => JSON.stringify(query.queryKey)).join(", ")} ` +
         "again. The specimen's query cache must hold every record it reads.",
@@ -1146,27 +1330,25 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
       "Settings > Permission profiles drew no list and no profile. Check the page's console for the error.",
     );
   }
+  if (
+    screens.skillsSettings !== undefined &&
+    document.querySelector(".skill-list, .skill-record") === null
+  ) {
+    throw new Error(
+      "Settings > Skills drew no list and no skill. Check the page's console for the error.",
+    );
+  }
   if (screens.appearanceSettings !== undefined && document.querySelector(".themes") === null) {
     throw new Error(
       "Settings > Appearance drew no theme cards. Check the page's console for the error.",
     );
   }
-  if (screens.connectionsSettings !== undefined && document.querySelector(".conn") === null) {
-    throw new Error(
-      "Settings > Connections drew no Connection's row. Check the page's console for the error.",
-    );
-  }
-  if (screens.intakeSettings !== undefined && document.querySelector(".set-sec") === null) {
-    throw new Error(
-      "Settings > Intake drew no plugin's section. Check the page's console for the error.",
-    );
-  }
   if (
-    screens.intake !== undefined &&
-    document.querySelector(".ask-row, .asks-empty, .asks-zero, .asks-note") === null
+    screens.providersSettings !== undefined &&
+    document.querySelector(".pa-card, .pa-empty") === null
   ) {
     throw new Error(
-      "Intake drew no row and no empty line. Check the page's console for the error.",
+      "Settings > Providers drew no account's card and no line saying there is none. Check the page's console for the error.",
     );
   }
   if (
@@ -1176,6 +1358,15 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
     throw new Error(
       "Workflows drew no row and no empty line. Check the page's console for the error.",
     );
+  }
+  if (
+    screens.fleet !== undefined &&
+    document.querySelector(findFleetDrawnSelector(path)) === null
+  ) {
+    throw new Error("Fleet drew no machine. Check the page's console for the error.");
+  }
+  if (screens.work !== undefined && document.querySelector(WORK_DRAWN_SELECTOR) === null) {
+    throw new Error("Work drew no card. Check the page's console for the error.");
   }
   if (
     screens.discussions !== undefined &&
@@ -1222,35 +1413,149 @@ const assertShellDrawn = (queryClient: QueryClient, screens: OpenScreens, path: 
  * first render, as if the user had made them. Returns once the page is in the
  * document. Fails when the page has no `#root`, draws nothing, or tries to
  * read a record the cache does not hold.
+ *
+ * `pathOpenedAfterDrawn`, when given, is pushed to the address once the page
+ * is drawn, as a click on a card would. Opening it that way leaves the board
+ * where it is. An address that names a Task when the screen opens brings that
+ * Task's card into view, which scrolls the board.
  */
 async function mountShellSpecimen(
   records: SidebarRecords,
   path: string,
   screens: OpenScreens,
   unsentThreadIds: readonly string[] = [],
+  pathOpenedAfterDrawn?: string,
 ): Promise<void> {
   applySheetAppearance();
-  const answerMove = screens.intake?.answerMove;
+  const created = screens.providersSettings?.createdAccount;
+  const catalog = screens.providersSettings?.catalog;
+  const answerJson = (body: unknown): Promise<Response> =>
+    Promise.resolve(
+      new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } }),
+    );
+  const fetchRecords: FetchLike =
+    created !== undefined
+      ? // The add-account sheet creates an account, and the page then reads the list again.
+        // A model picker reads the account's catalog.
+        (url, init) =>
+          init?.method === "POST" && url.endsWith("/api/v1/provider-accounts")
+            ? answerJson(created)
+            : catalog !== undefined &&
+                (init?.method ?? "GET") === "GET" &&
+                url.endsWith(`/api/v1/provider-accounts/${catalog.providerAccountId}/catalog`)
+              ? answerJson(catalog)
+              : refuseRequest(url, init)
+      : refuseRequest;
+  const inbox = screens.inbox;
+  const fetchWithInbox: FetchLike =
+    inbox === undefined
+      ? fetchRecords
+      : async (url, init) => {
+          // The Inbox reads its pages, the values of a field and the pane's thing from the fake controller.
+          if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/inbox/query")) {
+            // The body may arrive as a stream, so it is read the way the controller reads it.
+            const query = JSON.parse(await new Request(url, init).text()) as InboxQuery;
+            const answer = inbox.answer(query);
+            return answer === "never" ? new Promise(() => undefined) : answerJson(answer);
+          }
+          if (
+            init?.method === "POST" &&
+            url.endsWith("/api/v1/external-entities/inbox/group") &&
+            inbox.answerGroup !== undefined
+          ) {
+            const query = JSON.parse(await new Request(url, init).text()) as InboxGroupQuery;
+            return answerJson(inbox.answerGroup(query));
+          }
+          if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/inbox/values")) {
+            const query = JSON.parse(await new Request(url, init).text()) as InboxValueQuery;
+            return answerJson(inbox.answerValues(query));
+          }
+          // The start-thread dialog matches its things to a Project, then starts the thread.
+          if (init?.method === "POST" && inbox.threadStart !== undefined) {
+            if (url.endsWith("/api/v1/external-entities/match-project")) {
+              const { ids } = JSON.parse(await new Request(url, init).text()) as {
+                ids: readonly string[];
+              };
+              return answerJson(inbox.threadStart.matchProject(ids));
+            }
+            if (url.endsWith("/api/v1/sessions"))
+              return answerJson(inbox.threadStart.started.session);
+          }
+          // The cards under a message that carried context are read together, from the fixture things.
+          if (init?.method === "POST" && url.endsWith("/api/v1/external-entities/cards")) {
+            const { ids } = JSON.parse(await new Request(url, init).text()) as {
+              ids: readonly string[];
+            };
+            const cards = ids.flatMap((id) => {
+              const detail = inbox.details.get(id);
+              return detail === undefined
+                ? []
+                : [
+                    {
+                      id,
+                      ref: detail.ref,
+                      kind: detail.kind,
+                      noun: detail.noun,
+                      card: detail.card,
+                      identifier: detail.identifier,
+                      title: detail.title,
+                      ...(detail.status === undefined ? {} : { status: detail.status }),
+                      face: detail.face ?? null,
+                      restricted: false,
+                    },
+                  ];
+            });
+            return answerJson({ cards });
+          }
+          const isRead = (init?.method ?? "GET") === "GET";
+          // The pane reads what the source shows of the open thing, and the open ask whole.
+          const blocksPath = /\/api\/v1\/external-entities\/([^/]+)\/blocks$/.exec(url);
+          if (isRead && blocksPath !== null) {
+            const blocks = inbox.blocks.get(blocksPath[1]!) ?? { blocks: [] };
+            return blocks === "fails"
+              ? new Response(
+                  JSON.stringify({ _tag: "Internal", message: "The source did not answer." }),
+                  { status: 500, headers: { "content-type": "application/json" } },
+                )
+              : answerJson(blocks);
+          }
+          const signal = isRead
+            ? inbox.signals.get(url.slice(url.lastIndexOf("/") + 1))
+            : undefined;
+          if (signal !== undefined && url.includes("/api/v1/signals/")) return answerJson(signal);
+          const detail = inbox.details.get(url.slice(url.lastIndexOf("/") + 1));
+          return isRead && url.includes("/api/v1/external-entities/") && detail !== undefined
+            ? answerJson(detail)
+            : fetchRecords(url, init);
+        };
+  const cleanupAnswers = screens.fleet?.cleanupAnswers;
+  const cleanupSession =
+    cleanupAnswers === undefined ? undefined : createCleanupSession(cleanupAnswers);
   const client = createClient({
     baseUrl: CONTROLLER_URL,
-    fetch:
-      answerMove === undefined
-        ? refuseRequest
-        : (url, init) => (MOVE_PATH.test(url) ? answerMove(url, init) : refuseRequest(url, init)),
+    fetch: (url, init) => cleanupSession?.answer(url, init) ?? fetchWithInbox(url, init),
   });
   const queryClient = createQueryClient();
   seedQueryCache(queryClient, client, records, screens);
   const pendingSubmissions = createPendingSubmissions();
   if (screens.draft !== undefined) {
-    pendingSubmissions.writePicks(
-      buildDraftKey(screens.draft.projectId, null),
-      screens.draft.picks,
-    );
+    const key = buildDraftKey(screens.draft.projectId, null);
+    pendingSubmissions.writePicks(key, screens.draft.picks);
+    if (screens.draft.failure !== undefined) {
+      pendingSubmissions.recordFailure(key, screens.draft.failure);
+    }
   }
   for (const sessionId of unsentThreadIds) {
     pendingSubmissions.writeText(sessionId, "Also check the alt text on the gallery page");
   }
-  const router = buildRouter(client, pendingSubmissions, path, screens.thread?.session.id);
+  const router = buildRouter(
+    client,
+    queryClient,
+    pendingSubmissions,
+    path,
+    screens.thread?.session.id,
+    screens.inbox?.isOffline === true ? OFFLINE_LIVE : SILENT_LIVE,
+  );
   await router.load();
 
   const root = document.getElementById("root");
@@ -1262,13 +1567,16 @@ async function mountShellSpecimen(
       </QueryClientProvider>,
     );
   });
-  // The starters, which a draft shows in a project with no open task, load
+  // The starters, which a draft shows in a project with no planned task, load
   // the first time they show, so they arrive after the first render.
   if (screens.draft !== undefined) await waitForElement(".start");
-  // The list draws its rows once it has measured its height, after the first render.
-  if (screens.intake !== undefined) await waitForElement(".ask-row, .asks-empty, .asks-zero");
   if (screens.workflows !== undefined) {
     await waitForElement(findWorkflowsDrawnSelector(path));
+  }
+  if (screens.fleet !== undefined) await waitForElement(findFleetDrawnSelector(path));
+  if (screens.work !== undefined) await waitForElement(WORK_DRAWN_SELECTOR);
+  if (screens.inbox !== undefined) {
+    await waitForElement(screens.inbox.drawn ?? INBOX_DRAWN_SELECTOR);
   }
   if (screens.discussions !== undefined) {
     await waitForElement(findListDrawnSelector(path, OPEN_DISCUSSION_PART));
@@ -1278,6 +1586,7 @@ async function mountShellSpecimen(
   }
   if (screens.run !== undefined) await waitForElement(findRunDrawnSelector(path));
   assertShellDrawn(queryClient, screens, path);
+  if (pathOpenedAfterDrawn !== undefined) router.history.push(pathOpenedAfterDrawn);
 }
 
 /**
@@ -1316,7 +1625,7 @@ export async function mountThreadSpecimen(
  * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with the Draft Thread of `draft` open: the sidebar draws it as a row, and
  * the main pane shows the app's real draft screen, with `draft`'s picks made
- * and its project's start cards, or the starters when `draft` has no open
+ * and its project's start cards, or the starters when `draft` has no planned
  * task, and the focus in the message field, as the app puts it there.
  * Returns once the cards are in the document. Fails when the page has no
  * `#root`, draws no sidebar row or no card, leaves
@@ -1327,6 +1636,7 @@ export async function mountDraftSpecimen(
   records: SidebarRecords,
   draft: DraftScreenRecords,
 ): Promise<void> {
+  for (const entry of draft.recent ?? []) rememberRecentModel(CONTROLLER_URL, entry);
   await mountShellSpecimen(records, `/?project=${draft.projectId}`, { draft });
 }
 
@@ -1367,6 +1677,24 @@ export async function mountPermissionProfilesSettingsSpecimen(
 
 /**
  * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Settings > Skills open at `path`: `/settings/skills` for the list, or
+ * `/settings/skills/<name>` for one skill's page. The main pane shows the
+ * app's real Settings frame and section, which read the skills, their
+ * pages and their diffs from `settings`. Returns once the list or the skill
+ * is in the document. Fails when the page has no `#root`, draws no sidebar
+ * row, no list and no skill, or tries to read a record the cache does not
+ * hold.
+ */
+export async function mountSkillsSettingsSpecimen(
+  records: SidebarRecords,
+  path: string,
+  settings: SkillsSettingsRecords,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { skillsSettings: settings });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
  * with Settings > Appearance open: the main pane shows the app's real
  * Settings frame and Appearance section, with the Appearance's defaults, and
  * the Settings list reads the Connections from `settings`.
@@ -1383,63 +1711,17 @@ export async function mountAppearanceSettingsSpecimen(
 
 /**
  * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with Settings > Connections open: the main pane shows the app's real
- * Settings frame and Connections section, with the Connections and the
- * plugins of `settings`. Returns once the Connections' rows are in the
+ * with Settings > Providers open: the main pane shows the app's real
+ * Settings frame and Providers section, with the accounts, the machines and
+ * the plugins of `records`. Returns once the accounts' cards are in the
  * document. Fails when the page has no `#root`, draws no sidebar row or no
- * Connection's row, or tries to read a record the cache does not hold.
+ * account's card, or tries to read a record the cache does not hold.
  */
-export async function mountConnectionsSettingsSpecimen(
+export async function mountProvidersSettingsSpecimen(
   records: SidebarRecords,
-  settings: ConnectionsSettingsRecords,
+  settings: ProvidersSettingsRecords,
 ): Promise<void> {
-  await mountShellSpecimen(records, "/settings/connections", { connectionsSettings: settings });
-}
-
-/**
- * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with Intake open: the main pane shows the app's real Intake screen, on
- * `intake.view` or To do, with the signals from `records`, and the pane of
- * `intake.signal` when it is not `null`. On Everything, it shows the events
- * of `intake.everything`. Returns once the list's rows, or its empty line, are in
- * the document. Fails when the page has no `#root`, draws no sidebar row, no
- * list row and no empty line, or tries to read a record the cache does not
- * hold.
- */
-export async function mountIntakeSpecimen(
-  records: SidebarRecords,
-  intake: IntakeRecords,
-): Promise<void> {
-  const search = new URLSearchParams();
-  if (intake.view !== undefined) search.set("view", intake.view);
-  if (intake.signal !== null) search.set("signal", intake.signal.id);
-  if (intake.trackingOpen === true) search.set("tracking", "true");
-  if (intake.trackingTaskId !== undefined) search.set("task", intake.trackingTaskId);
-  const everything = intake.everything;
-  if (everything?.selectedEventId !== undefined) {
-    search.set("event", String(everything.selectedEventId));
-  }
-  if (everything?.text !== undefined) search.set("text", everything.text);
-  if (everything?.handling !== undefined) search.set("handling", everything.handling);
-  if (everything?.source !== undefined) search.set("source", everything.source);
-  const path = search.size === 0 ? "/intake" : `/intake?${search.toString()}`;
-  await mountShellSpecimen(records, path, { intake });
-}
-
-/**
- * Applies the URL's theme and draws the shell into `#root` from `records`,
- * with Settings > Intake open: the main pane shows the app's real Settings
- * frame and Intake section, with a section for each plugin in `records`
- * that raises signals or reads events, and the Ignore Rules of `settings`.
- * Returns once the sections are in the document. Fails when the page has no
- * `#root`, draws no sidebar row or no plugin's section, or tries to read a
- * record the cache does not hold.
- */
-export async function mountIntakeSettingsSpecimen(
-  records: SidebarRecords,
-  settings: IntakeSettingsRecords,
-): Promise<void> {
-  await mountShellSpecimen(records, "/settings/intake", { intakeSettings: settings });
+  await mountShellSpecimen(records, "/settings/providers", { providersSettings: settings });
 }
 
 /**
@@ -1473,6 +1755,79 @@ export async function mountWorkflowsSpecimen(
       : `/workflows/${workflows.openWorkflow.workflow.id}` +
         (search.size === 0 ? "" : `?${search.toString()}`);
   await mountShellSpecimen(records, path, { workflows });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with the Work board open: the main pane shows the app's real Work screen,
+ * drawn from the board of `work`, with the lanes of `work.foldedLaneIds`
+ * folded and the Initiative rows of `work.openedInitiativeIds` opened, as if
+ * the user had done both, and the details of `openTaskId` open
+ * beside it when one is given (`work.details` holds what they read), and the
+ * choices of `view` laid over the default view. Returns
+ * once a card is in the document. Fails when the page has no `#root`, draws no sidebar row and no
+ * card, or tries to read a record the cache does not hold.
+ */
+export async function mountWorkSpecimen(
+  records: SidebarRecords,
+  work: WorkRecords,
+  openTaskId?: string,
+  view?: Partial<SavedWorkView>,
+): Promise<void> {
+  writeSavedWorkView(buildWorkViewKey(CONTROLLER_URL, records.user.username), {
+    ...EMPTY_WORK_VIEW,
+    foldedLaneIds: work.foldedLaneIds,
+    openedInitiativeIds: work.openedInitiativeIds ?? [],
+    ...view,
+  });
+  await mountShellSpecimen(
+    records,
+    "/work",
+    { work },
+    [],
+    openTaskId === undefined ? undefined : `/work?task=${openTaskId}`,
+  );
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with the Inbox open: the main pane shows the app's real Inbox screen, over
+ * the fake controller `inbox` holds. `inbox.windowWidth` is written to
+ * `data-window-width` on the page, for the capture script to size the window
+ * to, and `inbox.paneWidth` is the width stored for the pane. Returns once a row, an empty state or the
+ * loading shapes are in the document. Fails when the page has no `#root`, or
+ * tries to read a record the fixture does not hold.
+ */
+export async function mountInboxSpecimen(
+  records: SidebarRecords,
+  inbox: InboxRecords,
+): Promise<void> {
+  if (inbox.paneWidth !== undefined) {
+    localStorage.setItem("hercule.inbox.pane-width", String(inbox.paneWidth));
+  }
+  // The shell is as wide as the window (`100vw`), so the capture script sizes the window.
+  if (inbox.windowWidth !== undefined) {
+    document.documentElement.dataset.windowWidth = String(inbox.windowWidth);
+  }
+  await mountShellSpecimen(records, "/inbox", { inbox });
+}
+
+/**
+ * Applies the URL's theme and draws the shell into `#root` from `records`,
+ * with Fleet open at `path`: `/fleet` for the Fleet page, or `/fleet/<id>`
+ * for the page of the machine with that id. The main pane shows the app's
+ * real page, drawn from the machines in `records` and the sessions,
+ * harnesses and controller of `fleet`. Returns once a machine's card or row,
+ * or the machine page's Software rows, are in the document. Fails when the
+ * page has no `#root`, draws no sidebar row and no machine, or tries to read
+ * a record the cache does not hold.
+ */
+export async function mountFleetSpecimen(
+  records: SidebarRecords,
+  fleet: FleetRecords,
+  path: string,
+): Promise<void> {
+  await mountShellSpecimen(records, path, { fleet });
 }
 
 /**

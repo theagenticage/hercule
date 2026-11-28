@@ -1,0 +1,277 @@
+/* Carrying a card on the Work board. From the Overview drawing's
+   `css/work.css` ("Carrying"), with the differences React makes:
+
+   - The card in the hand is a copy in `.board-carry`. The card in the page
+     stays mounted and is hidden with `data-dragged`, because React must be
+     able to keep it. State set from outside React is written as data
+     attributes, which React never rewrites, and never as classes, which it
+     does when a card's `className` changes.
+   - The hollow `.board-slot` is made by the hook and lives in a cell. */
+
+/* ---------- Motion ---------- */
+/* A CSS transition fights a spring, and a card gliding or landing stands above
+   the cards it passes. The kernel puts `is-moving` on whatever it moves. */
+.work-desk .is-moving {
+  will-change: transform;
+}
+.desk-card.is-moving {
+  z-index: 3;
+  transition: none;
+}
+.desk-card.is-rising {
+  z-index: 6;
+}
+.desk-card[data-landing].is-moving {
+  z-index: 8;
+}
+
+/* ---------- The card in the hand ---------- */
+.board-carry {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+.board-carry .desk-card {
+  cursor: grabbing;
+}
+/* A card that stands as words alone in Landed needs a sheet's padding in the hand, where it is lifted onto a sheet. */
+.board-carry .desk-card[data-state="landed"] {
+  padding-left: var(--card-pad-x);
+  padding-right: var(--card-pad-x);
+}
+
+/* The card in the page waits, out of the layout, until it lands. */
+.desk-card[data-dragged] {
+  display: none;
+}
+
+/* While a card is in the hand the pointer is a grabbing hand everywhere, and
+   nothing under it reacts to a hover. */
+.work-desk[data-carrying],
+.work-desk[data-carrying] * {
+  cursor: grabbing !important;
+}
+.work-desk[data-carrying] .board-lanes {
+  pointer-events: none;
+}
+/* The page must not get shorter under a carried card, or the row under it would jump. */
+.work-desk[data-carrying] .board-canvas {
+  padding-bottom: 340px;
+}
+
+/* ---------- The slot ---------- */
+.board-slot {
+  flex: none;
+  border-radius: var(--card-r);
+  background: color-mix(in oklab, var(--ink) 3.5%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ink) 9%, transparent);
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.board-slot.is-new {
+  opacity: 0;
+  transition: none;
+}
+/* The slot closes while a merge is chosen, but keeps its room, so nothing jumps. */
+.board-slot.is-shut {
+  opacity: 0;
+}
+
+/* ---------- The aisle ---------- */
+/* The stage the card would land in shows a faint column behind its cells. At
+   rest the stages are only alignment, so the grid shows only when it is needed. */
+.work-desk[data-carrying] .board-cell {
+  position: relative;
+}
+.work-desk[data-carrying] .board-cell::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  right: -7px;
+  top: -10px;
+  bottom: -14px;
+  border-radius: var(--r-md);
+  background: color-mix(in oklab, var(--ink) 1.8%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--m-quick) var(--m-ease);
+}
+.work-desk[data-drag-stage="exploring"] .board-cell[data-stage="exploring"]::before,
+.work-desk[data-drag-stage="planned"] .board-cell[data-stage="planned"]::before,
+.work-desk[data-drag-stage="building"] .board-cell[data-stage="building"]::before,
+.work-desk[data-drag-stage="in-review"] .board-cell[data-stage="in-review"]::before,
+.work-desk[data-drag-stage="landed"] .board-cell[data-stage="landed"]::before {
+  opacity: 1;
+}
+
+/* A folded lane has no cell to hold a slot, so its head is the target. A folded
+   Initiative row's target is its line (`initiatives.css`). */
+.board-lane[data-drop-target] .board-lane-head {
+  box-shadow: inset 0 0 0 1px var(--focus);
+  border-radius: var(--r-xs);
+}
+
+/* ---------- Landing ---------- */
+/* A card that landed in Landed, and a card that took part in a merge, get a
+   thin ring that fades away. The ring is a pseudo-element that fades by opacity alone, so nothing repaints per frame.
+   Under Reduce motion it is never drawn. */
+@media (prefers-reduced-motion: no-preference) {
+  .desk-card[data-just-landed]::before,
+  .desk-card[data-merged]::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: var(--card-r);
+    box-shadow: 0 0 0 1.5px var(--focus);
+    pointer-events: none;
+    animation: board-landed var(--m-long) var(--m-ease) both;
+  }
+}
+@keyframes board-landed {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* ---------- Merging ---------- */
+/* The card that is merged into stands above its neighbours, takes a ring, and
+   shows two labels on its edges: whom it is merged into on the top edge, and
+   what stays on the bottom edge. The hook sets `data-merge-target` and the two
+   labels' words as data attributes, outside React. The labels are
+   pseudo-elements, so they cost no element and take no pointer. */
+.desk-card[data-merge-target] {
+  z-index: 5;
+}
+.desk-card[data-merge-target] .card-stock {
+  box-shadow:
+    var(--h-hover),
+    0 0 0 2px var(--focus);
+}
+.desk-card[data-merge-target]::after,
+.desk-card[data-merge-target]::before {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  background: var(--stock-carry);
+  box-shadow:
+    inset 0 0 0 1px var(--stock-rim),
+    var(--shadow-1);
+  font: var(--type-meta);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.desk-card[data-merge-target]::after {
+  content: attr(data-merge-label);
+  top: -12px;
+  color: var(--ink);
+  font-weight: var(--w-medium);
+}
+.desk-card[data-merge-target]::before {
+  content: attr(data-merge-keeps);
+  bottom: -12px;
+  color: var(--muted);
+}
+/* The labels are cut with an ellipsis when they are wider than the card, and
+   the bottom one is not drawn while the merge check runs (it has no words). */
+.desk-card[data-merge-target]::after,
+.desk-card[data-merge-target]::before {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.desk-card[data-merge-target]:not([data-merge-keeps])::before {
+  content: none;
+}
+
+/* The merge check decides how the ring reads. While it runs, or when it could
+   not be made, the ring is the quiet one of a card that is not approved yet.
+   When the controller would refuse the merge, the ring and the top label take
+   the failure colour. */
+.desk-card[data-merge-target][data-merge-check="checking"] .card-stock,
+.desk-card[data-merge-target][data-merge-check="unchecked"] .card-stock {
+  box-shadow:
+    var(--h-hover),
+    0 0 0 2px var(--faint);
+}
+.desk-card[data-merge-target][data-merge-check="refused"] .card-stock {
+  box-shadow:
+    var(--h-hover),
+    0 0 0 2px var(--fail-ink);
+}
+.desk-card[data-merge-target][data-merge-check="refused"]::after {
+  color: var(--fail-ink);
+}
+
+/* Picking the card to merge into by key: the card to merge dashes, and the
+   walk's ring is the accent. The ring is the walk's alone, so the target's
+   ring is not drawn twice. */
+.work-desk[data-merge-picking] .desk-card[data-merge-source] .card-stock {
+  outline: 1px dashed var(--faint);
+  outline-offset: 2px;
+}
+.work-desk[data-merge-picking] .desk-card:focus-visible:not([data-merge-source]) .card-stock {
+  outline-color: var(--accent);
+}
+.work-desk[data-merge-picking] .desk-card[data-merge-target] .card-stock {
+  box-shadow: var(--h-hover);
+}
+.work-desk[data-merge-picking]
+  .desk-card[data-merge-target][data-merge-check="refused"]:focus-visible
+  .card-stock {
+  outline-color: var(--fail-ink);
+}
+
+/* The copy of a card sliding in under the card it merges into stands in the
+   board's own canvas, as its first child: it is positioned and has no
+   z-index, so every card, which is positioned too and comes later, paints
+   over it. */
+.board-merge-under {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* A card that took part in a merge stands above the card sliding in or out
+   under it, and wears the same thin ring that fades as a card that landed. */
+.desk-card[data-merged] {
+  z-index: 9;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .board-slot,
+  .work-desk[data-carrying] .board-cell::before {
+    transition: none;
+  }
+}
+
+/* ---------- Several cards in the hand ---------- */
+/* The cards carried behind the first ride under it, one place behind the
+   other. They keep the check of a selected card, and lose its ring. */
+.board-carry .desk-card.is-follower .card-stock {
+  box-shadow: var(--h-hover);
+}
+/* The count on the card in the hand: itself and the cards behind it. */
+.board-carry .desk-card.has-followers::after {
+  content: attr(data-count);
+  position: absolute;
+  z-index: 6;
+  right: -8px;
+  top: -8px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--ink);
+  color: var(--desk);
+  font: var(--type-meta);
+  font-weight: var(--w-bold);
+  font-variant-numeric: tabular-nums;
+}

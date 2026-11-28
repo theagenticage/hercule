@@ -15,7 +15,7 @@ import type * as Scope from "effect/Scope";
 import * as SqlClient from "effect/sql/SqlClient";
 import { TestClock } from "effect/testing";
 import type { Delta, LiveMessage, TranscriptRow } from "@hercule/contract";
-import { mintUuid, uuidFromString, uuidToString } from "../db";
+import { announce, mintUuid, RecordChanges, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { sessionRepository } from "../sessions";
 import { subscribeSkippingFirstPush } from "./testing";
@@ -35,7 +35,7 @@ const SESSION = "0199e0e7-0000-7000-8000-000000000001";
  * follow.
  */
 const run = <A, E>(
-  effect: Effect.Effect<A, E, LiveTopics | SqlClient.SqlClient | Scope.Scope>,
+  effect: Effect.Effect<A, E, LiveTopics | RecordChanges | SqlClient.SqlClient | Scope.Scope>,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.scoped(effect).pipe(
@@ -107,6 +107,167 @@ describe("the pace of record changes", () => {
     ]);
     expect(afterLongWindow).toEqual([
       { _tag: "invalidate", ids: ["usage"], kind: "updated", conversationIds: { usage: null } },
+    ]);
+  });
+});
+
+describe("the one listener of committed changes", () => {
+  it("reaches the live topics and the in-process followers of record changes with one announce", async () => {
+    const { followed, pushed } = await run(
+      Effect.gen(function* () {
+        const changes = yield* RecordChanges;
+        const follower = yield* changes.subscribe(["connection"]);
+        const pushQueue = yield* subscribeSkippingFirstPush("connection");
+
+        yield* announce({ _tag: "record", topic: "connection", id: "c1", kind: "updated" });
+        yield* advance(COALESCE_WINDOW_MS);
+
+        return {
+          followed: [...(yield* follower.takePending)],
+          pushed: [...(yield* Queue.clear(pushQueue))],
+        };
+      }),
+    );
+
+    expect(followed).toEqual([{ topic: "connection", id: "c1" }]);
+    expect(pushed).toEqual([{ _tag: "invalidate", ids: ["c1"], kind: "updated" }]);
+  });
+});
+
+describe("the pace of a change to a Task's card", () => {
+  const TASK = "0199e0e7-0000-7000-8000-0000000000a1";
+  const cardChange = {
+    _tag: "record",
+    topic: "task",
+    id: TASK,
+    kind: "updated",
+    derived: true,
+  } as const;
+
+  it("collects a burst into one push a second, and sends no push for a token", async () => {
+    const received = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const queue = yield* subscribeSkippingFirstPush("task");
+        const sent: Array<ReadonlyArray<LiveMessage>> = [];
+
+        // A busy agent: a change every 50 ms for 900 ms, with a token between each.
+        for (let step = 0; step < 18; step++) {
+          yield* topics.publish([
+            cardChange,
+            {
+              _tag: "tap",
+              sessionId: SESSION,
+              item: { turnId: "t", itemId: "i", streamKind: "assistant_text", delta: "hi" },
+            },
+          ]);
+          yield* advance(COALESCE_WINDOW_MS);
+          sent.push(yield* Queue.clear(queue));
+        }
+        yield* advance(SLOW_COALESCE_WINDOW_MS);
+        sent.push(yield* Queue.clear(queue));
+        return sent;
+      }),
+    );
+
+    // Nothing within the short window, then one push when the first change's
+    // second is over.
+    const sendSteps = received.flatMap((messages, step) => (messages.length > 0 ? [step] : []));
+    expect(sendSteps).toEqual([18]);
+    expect(received.flat()).toEqual([
+      { _tag: "invalidate", ids: [TASK], kind: "updated", derived: true },
+    ]);
+  });
+
+  it("sends a person's change at once and the agent's change a second later, so one Task can get both", async () => {
+    const [afterShortWindow, afterLongWindow] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const queue = yield* subscribeSkippingFirstPush("task");
+        yield* topics.publish([
+          cardChange,
+          { _tag: "record", topic: "task", id: TASK, kind: "updated" },
+        ]);
+        yield* advance(COALESCE_WINDOW_MS);
+        const early = yield* Queue.clear(queue);
+        yield* advance(SLOW_COALESCE_WINDOW_MS);
+        return [early, yield* Queue.clear(queue)] as const;
+      }),
+    );
+
+    expect(afterShortWindow).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated" }]);
+    expect(afterLongWindow).toEqual([
+      { _tag: "invalidate", ids: [TASK], kind: "updated", derived: true },
+    ]);
+  });
+
+  it("names no ids in the first push of a new subscription, however many card changes are waiting", async () => {
+    const [firstAfterReconnect, later] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        yield* topics.publish([cardChange]);
+        const reconnected = yield* topics.subscribe("task");
+        const first = yield* Queue.clear(reconnected);
+        yield* advance(SLOW_COALESCE_WINDOW_MS);
+        return [first, yield* Queue.clear(reconnected)] as const;
+      }),
+    );
+
+    expect(firstAfterReconnect).toEqual([{ _tag: "invalidate", ids: [], kind: "updated" }]);
+    // The change made while the client was away is still pushed, after the first push.
+    expect(later).toEqual([{ _tag: "invalidate", ids: [TASK], kind: "updated", derived: true }]);
+  });
+});
+
+describe("the pace of a change to a workflow", () => {
+  const WORKFLOW = "0199e0e7-0000-7000-8000-0000000000b1";
+
+  it("sends a definition change at once and a derived change of its triggers a second later, marked derived", async () => {
+    const [afterShortWindow, afterLongWindow] = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const queue = yield* subscribeSkippingFirstPush("workflow");
+        yield* topics.publish([
+          { _tag: "record", topic: "workflow", id: WORKFLOW, kind: "updated", derived: true },
+          { _tag: "record", topic: "workflow", id: WORKFLOW, kind: "updated" },
+        ]);
+        yield* advance(COALESCE_WINDOW_MS);
+        const early = yield* Queue.clear(queue);
+        yield* advance(SLOW_COALESCE_WINDOW_MS);
+        return [early, yield* Queue.clear(queue)] as const;
+      }),
+    );
+
+    expect(afterShortWindow).toEqual([{ _tag: "invalidate", ids: [WORKFLOW], kind: "updated" }]);
+    expect(afterLongWindow).toEqual([
+      { _tag: "invalidate", ids: [WORKFLOW], kind: "updated", derived: true },
+    ]);
+  });
+});
+
+describe("the messages of one window", () => {
+  it("are one per kind, and name each id once, however often it changed", async () => {
+    const messages = await run(
+      Effect.gen(function* () {
+        const topics = yield* LiveTopics;
+        const queue = yield* subscribeSkippingFirstPush("task");
+        yield* topics.publish([
+          { _tag: "record", topic: "task", id: "t1", kind: "created" },
+          { _tag: "record", topic: "task", id: "t2", kind: "created" },
+        ]);
+        yield* topics.publish([
+          { _tag: "record", topic: "task", id: "t3", kind: "created" },
+          { _tag: "record", topic: "task", id: "t2", kind: "created" },
+          { _tag: "record", topic: "task", id: "t1", kind: "deleted" },
+        ]);
+        yield* advance(COALESCE_WINDOW_MS);
+        return yield* Queue.clear(queue);
+      }),
+    );
+
+    expect(messages).toEqual([
+      { _tag: "invalidate", ids: ["t1", "t2", "t3"], kind: "created" },
+      { _tag: "invalidate", ids: ["t1"], kind: "deleted" },
     ]);
   });
 });
@@ -195,12 +356,14 @@ const insertSession = Effect.gen(function* () {
       agentId: undefined,
       conversationId: undefined,
       step: undefined,
-      instanceId: uuidToString(mintUuid()),
+      providerAccountId: uuidToString(mintUuid()),
+      harnessId: "test/test",
       runnerId: uuidToString(mintUuid()),
       requestedAccessMode: "approval-required",
       accessMode: "approval-required",
       workspaceId: null,
       projectId: undefined,
+      taskId: undefined,
       checkoutBranch: undefined,
       githubConnectionId: undefined,
       spec: "{}",

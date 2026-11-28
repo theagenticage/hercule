@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Navigate, redirect } from "@tanstack/react-router";
+import type { DesktopPlatform } from "../../../../../../../../ipc/platform/desktop-platform";
 import {
   computeMemoryFill,
   describeShrinkLoss,
@@ -91,7 +92,8 @@ function MemoryDocumentRecord({
   readonly assistant: Assistant;
   readonly name: string;
 }): JSX.Element {
-  const { client } = Route.useRouteContext().controller;
+  const { controller, bridge } = Route.useRouteContext();
+  const { client } = controller;
   const document = useSuspenseQuery(memoryDocumentQuery(client, assistant.id, name)).data;
   const saved = useSavedMemoryDocument(client, assistant.id, document);
   const isCore = name === MEMORY_CORE;
@@ -125,6 +127,7 @@ function MemoryDocumentRecord({
           {!isCore && (
             <>
               <GistRow
+                platform={bridge.platform}
                 gist={saved.gist.text}
                 readOnly={saved.gist.saving}
                 error={describeSaveError(saved.gist.error)}
@@ -139,6 +142,7 @@ function MemoryDocumentRecord({
             </>
           )}
           <SettingTextRow
+            platform={bridge.platform}
             label="Text"
             hint={describeTextHint(document)}
             value={saved.body.text}
@@ -227,14 +231,16 @@ function GistRow({
   error,
   onCommit,
   onEditStart,
+  platform,
 }: {
   readonly gist: string;
   readonly readOnly: boolean;
   readonly error: string | null;
   readonly onCommit: (gist: string) => void;
   readonly onEditStart: () => void;
+  readonly platform: DesktopPlatform;
 }): JSX.Element {
-  const input = useTextDraft(gist, onCommit, onEditStart);
+  const input = useTextDraft(platform, gist, onCommit, onEditStart);
   return (
     <SettingRow
       label="Gist"

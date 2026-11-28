@@ -25,6 +25,7 @@ import { Mark } from "../../marks";
 import { ProjectTile } from "../../screens/project-tile";
 import { RequestDock } from "../../screens/session/dock";
 import { useAgeLabel, useAgeWords } from "../../app/age-clock";
+import { buildAssistantDraftKey } from "../../app/pending-submissions";
 import { useKeepRequestDrafts } from "../../app/request-drafts";
 import type { BuiltOffice } from "../engine/contracts";
 import {
@@ -190,6 +191,8 @@ export function DossierCard({
             sessionId={sessionId}
             look={colleague.look}
             request={oldestRequest}
+            composerBelow={false}
+            messageDraftKey={assistant ? buildAssistantDraftKey(colleague.id) : sessionId}
           />
         </div>
       )}

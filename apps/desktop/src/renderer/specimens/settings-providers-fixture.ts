@@ -1,0 +1,743 @@
+/**
+ * The records the Settings > Providers specimen (settings-providers.tsx)
+ * seeds its query cache with, as the controller would return them: nine
+ * Provider Accounts on three machines, in the states the Accounts section
+ * draws.
+ *
+ * - studio-mac is this Mac, with Claude Code and Codex installed. atlas is a
+ *   server with Claude Code only, so a Codex account offers Install there.
+ *   moss is offline. old-box is retired, so no card and no sheet lists it.
+ * - Anthropic is signed in on studio-mac and atlas, not on moss.
+ * - Anthropic · Work is signed in on studio-mac only.
+ * - OpenAI is signed in on studio-mac; OpenAI · Personal is signed in
+ *   nowhere and knows no identity yet.
+ * - Z.ai is an API key every machine uses. Its label is long, to show the
+ *   name ending in an ellipsis. It reports no usage, so its card has no gauge.
+ * - The usage and the expiry are relative to the time the page loads, so the
+ *   page shows the same states on any day. Anthropic has a five-hour and a
+ *   weekly window; Anthropic · Work has one at 85%, which turns marigold;
+ *   OpenAI has a five-hour window that is hit; OpenAI · Team has a weekly
+ *   window and credit left.
+ * - Anthropic · Token expires in 12 days, and Anthropic · Old token has
+ *   expired. OpenAI · API holds a key OpenAI refused. OpenAI · Personal is
+ *   signed in nowhere, so its card says it is signed out.
+ * - OpenRouter, OpenCode and MiniMax are listed in the add-account sheet only:
+ *   no account uses them, so the page has no card for them.
+ * - Each plugin declares the mark the shipped plugin declares: the book's
+ *   brand path scaled by 2/3 onto the 16-unit grid a plugin's mark uses. The
+ *   OpenRouter, OpenCode and MiniMax plugins draw their own marks on that grid.
+ */
+import type {
+  AccountKind,
+  Harness,
+  ModelCatalog,
+  ModelProfile,
+  PluginDetail,
+  PluginMark,
+  Provider,
+  ProviderAccount,
+  Runner,
+} from "@hercule/contract";
+import { buildRunner } from "@hercule/client-core/threads/testing";
+import {
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  HARNESSES,
+  type ProviderAccountIdentity,
+} from "@hercule/client-core/testing";
+import { SPECIMEN_RECORDS } from "./sidebar-fixture";
+import type { ProvidersSettingsRecords, SidebarRecords } from "./shell-page";
+import { buildPlugin } from "./plugins-fixture";
+
+const ANTHROPIC_MARK: PluginMark = {
+  paths: [
+    "M11.536067 2.360667h-2.447867l4.464 11.278667H16Zm-7.072133 0L0 13.639333h2.496133l0.912867 -2.368467h4.670133l0.912867 2.368533h2.496133L7.0242 2.3606Zm-0.247467 6.815467 1.5276 -3.963733 1.5276 3.963733Z",
+  ],
+};
+const OPENAI_MARK: PluginMark = {
+  paths: [
+    "M14.8546 6.5474a3.9898 3.9898 0 0 0 -0.3438 -3.273867 4.0308 4.0308 0 0 0 -4.339867 -1.933333A4.0434 4.0434 0 0 0 3.320467 2.787867a3.9898 3.9898 0 0 0 -2.665133 1.933333 4.0308 4.0308 0 0 0 0.495133 4.731067 3.986667 3.986667 0 0 0 0.340667 3.2738 4.034 4.034 0 0 0 4.343067 1.9334A3.9898 3.9898 0 0 0 8.839933 16a4.037133 4.037133 0 0 0 3.847867 -2.803867 3.992933 3.992933 0 0 0 2.665133 -1.9334 4.037133 4.037133 0 0 0 -0.498333 -4.715267zm-6.014667 8.4054a2.983667 2.983667 0 0 1 -1.9176 -0.693867l0.0946 -0.0536 3.185533 -1.8388a0.529867 0.529867 0 0 0 0.2618 -0.4542v-4.491267l1.346667 0.779067a0.047333 0.047333 0 0 1 0.025333 0.034667v3.721733a3.002667 3.002667 0 0 1 -2.996333 2.996267zm-6.440467 -2.750267a2.980533 2.980533 0 0 1 -0.3564 -2.009133l0.094667 0.0568 3.188667 1.8388a0.514133 0.514133 0 0 0 0.5204 0l3.8952 -2.245667v1.554933a0.0536 0.0536 0 0 1 -0.022133 0.041L6.493333 13.300133a2.999467 2.999467 0 0 1 -4.093867 -1.0976zM1.560533 5.263733a2.99 2.99 0 0 1 1.577 -1.3152V7.733333a0.510933 0.510933 0 0 0 0.2586 0.451l3.876267 2.2362 -1.346733 0.779a0.050467 0.050467 0 0 1 -0.047333 0l-3.2202 -1.857667A3.002667 3.002667 0 0 1 1.560533 5.248zm11.0642 2.570533L8.735867 5.576 10.079467 4.8a0.050467 0.050467 0 0 1 0.047333 0l3.2202 1.860867a2.996267 2.996267 0 0 1 -0.451 5.4028v-3.7848a0.526667 0.526667 0 0 0 -0.271333 -0.444667zm1.340467 -2.0154l-0.094667 -0.0568 -3.182333 -1.854533a0.517267 0.517267 0 0 0 -0.5236 0L6.272667 6.153133V4.598267a0.044133 0.044133 0 0 1 0.018933 -0.041l3.2202 -1.857733a2.999467 2.999467 0 0 1 4.453467 3.106667zM5.537667 8.575333l-1.346667 -0.775867a0.0536 0.0536 0 0 1 -0.025333 -0.0378V4.049467a2.999467 2.999467 0 0 1 4.917133 -2.302467l-0.094667 0.053667L5.802667 3.639333a0.529867 0.529867 0 0 0 -0.2618 0.4542zm0.731733 -1.576933l1.734667 -0.999867 1.737933 0.999867v1.9996l-1.7316 0.9998 -1.7378 -0.9998Z",
+  ],
+};
+const ZAI_MARK: PluginMark = {
+  paths: ["M3 2.333333h10v2.2L6.6 11.466667h6.4v2.2h-10v-2.2l6.4 -6.933333H3z"],
+};
+/** OpenRouter's mark, copied from OPENROUTER_MARK_PATH in plugins/openrouter/src/index.ts. */
+const OPENROUTER_MARK: PluginMark = {
+  paths: [
+    "M12.436 2.58a3.391333 3.391333 0 1 1 0 6.782667L15.8 12.726667c0.426667 0.427333 0.124667 1.158 -0.48 1.158H5.653333a5.652667 5.652667 0 0 1 0 -11.305333h6.783333zM5.652667 4.84a3.391333 3.391333 0 1 0 0 6.784 3.391333 3.391333 0 0 0 0 -6.783333z",
+  ],
+};
+/** OpenCode's mark, copied from OPENCODE_MARK_PATH in plugins/opencode/src/index.ts. */
+const OPENCODE_MARK: PluginMark = {
+  paths: [
+    "M10.666667 4H5.333333v8h5.333333V4zm2.666667 10.666667H2.666667V1.333333h10.666667v13.333333z",
+  ],
+};
+/** MiniMax's mark, copied from MINIMAX_MARK_PATH in plugins/minimax/src/index.ts. */
+const MINIMAX_MARK: PluginMark = {
+  paths: [
+    "M10.852 1.333333c0.770667 0 1.395333 0.618 1.395333 1.38v8.334a0.493333 0.493333 0 0 0 0.496 0.472667 0.493333 0.493333 0 0 0 0.495333 -0.472667V6.066a1.373333 1.373333 0 0 1 1.380667 -1.366A1.373333 1.373333 0 0 1 16 6.066667v4.374a0.432667 0.432667 0 0 1 -0.434667 0.43 0.432667 0.432667 0 0 1 -0.435333 -0.43V6.066667a0.508 0.508 0 0 0 -0.510667 -0.505333 0.508 0.508 0 0 0 -0.510667 0.505333v4.981333a1.358 1.358 0 0 1 -1.365333 1.350667 1.358 1.358 0 0 1 -1.365333 -1.350667v-8.333333a0.523333 0.523333 0 0 0 -0.525333 -0.502 0.523333 0.523333 0 0 0 -0.526 0.501333l-0.000667 10.602667A1.358 1.358 0 0 1 8.960667 14.666667a1.358 1.358 0 0 1 -1.365333 -1.350667V12.026667c0 -0.237333 0.194667 -0.43 0.434667 -0.43 0.24 0 0.434667 0.192667 0.434667 0.43v1.289333c0 0.175333 0.094667 0.337333 0.248 0.425333 0.153333 0.087333 0.342667 0.087333 0.496 0a0.489333 0.489333 0 0 0 0.248 -0.425333V2.713333c0 -0.762 0.624667 -1.38 1.395333 -1.38zm-3.782667 0c0.770667 0 1.395333 0.618 1.395333 1.38v7.682a0.432 0.432 0 0 1 -0.434667 0.43 0.432 0.432 0 0 1 -0.434667 -0.43V2.713333a0.523333 0.523333 0 0 0 -0.526 -0.52 0.523333 0.523333 0 0 0 -0.526 0.52v9.342a1.373333 1.373333 0 0 1 -1.38 1.365333 1.373333 1.373333 0 0 1 -1.380667 -1.365333V6.066667a0.508 0.508 0 0 0 -0.510667 -0.505333 0.508 0.508 0 0 0 -0.510667 0.505333v2.533333a1.373333 1.373333 0 0 1 -1.380667 1.366A1.373333 1.373333 0 0 1 0 8.6v-0.918667c0 -0.238 0.194667 -0.430667 0.434667 -0.430667 0.24 0 0.435333 0.193333 0.435333 0.430667V8.6c0 0.278667 0.228667 0.504667 0.510667 0.504667s0.510667 -0.226 0.510667 -0.504667V6.066a1.373333 1.373333 0 0 1 1.38 -1.365333 1.373333 1.373333 0 0 1 1.380667 1.365333v5.989333c0 0.279333 0.228667 0.505333 0.511333 0.505333 0.282 0 0.510667 -0.226 0.510667 -0.505333V2.713333c0 -0.762 0.624667 -1.38 1.395333 -1.38z",
+  ],
+};
+
+const AT = "2026-09-10T09:00:00.000Z";
+
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+/** The time the page loads, which the readings and the expiries are counted from. */
+const LOADED_AT = Date.now();
+const minutesAgo = (minutes: number): string =>
+  new Date(LOADED_AT - minutes * MINUTE_MS).toISOString();
+const inDays = (days: number): string => new Date(LOADED_AT + days * DAY_MS).toISOString();
+const inHours = (hours: number): string =>
+  new Date(LOADED_AT + hours * 60 * MINUTE_MS).toISOString();
+
+/** Returns a usage window as a session reported it eight minutes ago. */
+const buildWindow = (
+  window: "five-hour" | "weekly" | "monthly",
+  usedPercent: number,
+  resetsAt: string,
+  hit = false,
+): ProviderAccount["usage"][number] => ({
+  kind: "window",
+  window,
+  usedPercent,
+  resetsAt,
+  hit,
+  takenAt: minutesAgo(8),
+  source: "session",
+});
+
+/** Returns facts for a machine with the harnesses named `installed` on its PATH, and all three adapters. */
+const buildFacts = (installed: ReadonlyArray<string>): NonNullable<Runner["facts"]> => ({
+  os: "darwin",
+  arch: "arm64",
+  totalMemoryBytes: 64 * 1024 * 1024 * 1024,
+  docker: true,
+  toolchains: [],
+  harnesses: ["claude", "codex", "pi"].map((name) =>
+    installed.includes(name)
+      ? { name, present: true, path: `/opt/homebrew/bin/${name}` }
+      : { name, present: false },
+  ),
+  adapters: ["claude-code/claude-code", "codex/codex", "pi/pi"],
+  identityPort: 4939,
+});
+
+/** The user's own Mac, online, with Claude Code, Codex and pi. */
+const STUDIO_MAC: Runner = {
+  ...buildRunner("r-studio-mac", "studio-mac"),
+  facts: buildFacts(["claude", "codex", "pi"]),
+};
+/** A server, online, with Claude Code only. */
+const ATLAS: Runner = { ...buildRunner("r-atlas", "atlas"), facts: buildFacts(["claude"]) };
+/** A server that is switched off. */
+const MOSS: Runner = {
+  ...buildRunner("r-moss", "moss"),
+  connectivity: "offline",
+  facts: buildFacts(["claude", "codex"]),
+};
+/** A machine the user retired. */
+const OLD_BOX: Runner = { ...buildRunner("r-old-box", "old-box"), lifecycle: "retired" };
+
+/** Returns the snapshot of an account in `harnessId` on `runner`, signed in as `identity` or not signed in. */
+const buildSnapshot = (
+  runner: Runner,
+  harnessId: string,
+  identity: string | null,
+  planLabel?: string,
+): ProviderAccount["snapshots"][number] => ({
+  runnerId: runner.id,
+  harnessId,
+  probedAt: AT,
+  harnessVersion: null,
+  versionVerdict: "unknown",
+  auth:
+    identity === null
+      ? { status: "unauthenticated" }
+      : { status: "ok", identity, ...(planLabel === undefined ? {} : { planLabel }) },
+  models: [],
+});
+
+/** The plugins that register the Providers, with the marks the accounts and the model menu draw. */
+export const PROVIDER_PLUGINS: ReadonlyArray<PluginDetail> = [
+  buildPlugin("anthropic", "Anthropic", ANTHROPIC_MARK),
+  buildPlugin("openai", "OpenAI", OPENAI_MARK),
+  buildPlugin("zai", "Z.ai", ZAI_MARK),
+  buildPlugin("openrouter", "OpenRouter", OPENROUTER_MARK),
+  buildPlugin("opencode", "OpenCode", OPENCODE_MARK),
+  buildPlugin("minimax", "MiniMax", MINIMAX_MARK),
+];
+
+/** A Provider Account before it is given its Model Catalog facts and readiness. */
+type AccountWithoutCatalog = Omit<
+  ProviderAccount,
+  "modelCount" | "catalogReadAt" | "catalogError" | "readiness"
+>;
+
+/**
+ * Returns `account` with its Model Catalog facts and readiness. A signed-in
+ * snapshot is a ready account on its runner and any other snapshot is not
+ * signed in; an account that has been signed in has read its catalog.
+ */
+const withCatalog = (account: AccountWithoutCatalog): ProviderAccount => {
+  const signedIn = account.snapshots.some((snapshot) => snapshot.auth.status === "ok");
+  return {
+    ...account,
+    modelCount: signedIn ? 4 : 0,
+    catalogReadAt: signedIn ? AT : null,
+    catalogError: null,
+    readiness: account.snapshots.map((snapshot) => ({
+      harnessId: snapshot.harnessId,
+      runnerId: snapshot.runnerId,
+      state: snapshot.auth.status === "ok" ? "ready" : "not-signed-in",
+    })),
+  };
+};
+
+/** The nine accounts, in the order they were added. */
+export const PROVIDER_ACCOUNTS: ReadonlyArray<ProviderAccount> = (
+  [
+    {
+      id: "01a06d02-8000-7000-8000-000000000a01",
+      providerId: "anthropic/anthropic",
+      kind: "subscription-per-machine",
+      label: null,
+      identity: "rogier@acme.com",
+      planLabel: "Max",
+      defaultHarnessId: "claude-code/claude-code",
+      expiresAt: null,
+      usage: [buildWindow("five-hour", 61, inHours(3)), buildWindow("weekly", 38, inDays(3))],
+      failure: null,
+      snapshots: [
+        buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@acme.com", "Max"),
+        buildSnapshot(ATLAS, "claude-code/claude-code", "rogier@acme.com", "Max"),
+        buildSnapshot(MOSS, "claude-code/claude-code", null),
+      ],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a02",
+      providerId: "anthropic/anthropic",
+      kind: "subscription-per-machine",
+      label: "Work",
+      identity: "rogier@work.example",
+      planLabel: "Team",
+      defaultHarnessId: "claude-code/claude-code",
+      expiresAt: null,
+      usage: [buildWindow("five-hour", 85, inHours(1)), buildWindow("weekly", 41, inDays(2))],
+      failure: null,
+      snapshots: [
+        buildSnapshot(STUDIO_MAC, "claude-code/claude-code", "rogier@work.example", "Team"),
+        buildSnapshot(ATLAS, "claude-code/claude-code", null),
+      ],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a03",
+      providerId: "openai/openai",
+      kind: "subscription-per-machine",
+      label: null,
+      identity: "rogier@acme.com",
+      planLabel: "Pro",
+      defaultHarnessId: "codex/codex",
+      expiresAt: null,
+      usage: [
+        buildWindow("five-hour", 100, inHours(2), true),
+        buildWindow("weekly", 72, inDays(4)),
+      ],
+      failure: null,
+      snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@acme.com", "Pro")],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a04",
+      providerId: "openai/openai",
+      kind: "subscription-per-machine",
+      label: "Personal",
+      identity: null,
+      planLabel: null,
+      defaultHarnessId: "codex/codex",
+      expiresAt: null,
+      usage: [],
+      failure: null,
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a05",
+      providerId: "zai/zai",
+      kind: "api-key",
+      label: "Coding plan for the platform team",
+      identity: null,
+      planLabel: null,
+      defaultHarnessId: "pi/pi",
+      expiresAt: null,
+      usage: [],
+      failure: null,
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a06",
+      providerId: "openai/openai",
+      kind: "subscription-per-machine",
+      label: "Team",
+      identity: "rogier@platform.example",
+      planLabel: "Business",
+      defaultHarnessId: "codex/codex",
+      expiresAt: null,
+      usage: [
+        buildWindow("weekly", 54, inDays(5)),
+        { kind: "credit", remaining: 1240, limit: 2000, takenAt: minutesAgo(8), source: "read" },
+      ],
+      failure: null,
+      snapshots: [buildSnapshot(STUDIO_MAC, "codex/codex", "rogier@platform.example", "Business")],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a07",
+      providerId: "anthropic/anthropic",
+      kind: "subscription-token",
+      label: "Token",
+      identity: "rogier@acme.com",
+      planLabel: "Max",
+      defaultHarnessId: "claude-code/claude-code",
+      expiresAt: inDays(12),
+      usage: [],
+      failure: null,
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a08",
+      providerId: "anthropic/anthropic",
+      kind: "subscription-token",
+      label: "Old token",
+      identity: "rogier@acme.com",
+      planLabel: "Max",
+      defaultHarnessId: "claude-code/claude-code",
+      expiresAt: inDays(-3),
+      usage: [],
+      failure: null,
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+    {
+      id: "01a06d02-8000-7000-8000-000000000a09",
+      providerId: "openai/openai",
+      kind: "api-key",
+      label: "API",
+      identity: null,
+      planLabel: null,
+      defaultHarnessId: "codex/codex",
+      expiresAt: null,
+      usage: [],
+      failure: { message: "Incorrect API key provided.", failedAt: minutesAgo(40) },
+      snapshots: [],
+      createdAt: AT,
+      updatedAt: AT,
+    },
+  ] satisfies ReadonlyArray<AccountWithoutCatalog>
+).map(withCatalog);
+
+/** The kinds the add-account specimens draw, one of each way an account gets its credential. */
+const KEY_FIELD = {
+  name: "apiKey",
+  label: "API key",
+  help: "Create one in the Z.ai console, under API keys.",
+};
+
+export const SPECIMEN_KINDS: Readonly<Record<string, AccountKind>> = {
+  token: {
+    id: "subscription-token",
+    title: "Claude subscription, every machine",
+    description:
+      "Sign in once and every machine uses it, also the ones you add later. The token lasts a year.",
+    setup: [{ kind: "harness-login", method: "create-token" }],
+    harnesses: ["claude-code/claude-code"],
+  },
+  perMachine: {
+    id: "subscription-per-machine",
+    title: "Claude subscription, signed in on each machine",
+    description: "Sign in on every machine you want to use it on. Nothing is shared between them.",
+    setup: [{ kind: "harness-login", method: "sign-in" }],
+    harnesses: ["claude-code/claude-code"],
+  },
+  anthropicKey: {
+    id: "api-key",
+    title: "API key",
+    description: "Pay per use with a key from the Anthropic console.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["claude-code/claude-code", "pi/pi"],
+  },
+  openaiPerMachine: {
+    id: "subscription-per-machine",
+    title: "ChatGPT subscription, signed in on each machine",
+    description:
+      "Uses your ChatGPT plan through Codex. You sign in to Codex once on each machine that runs it.",
+    setup: [{ kind: "harness-login", method: "sign-in" }],
+    harnesses: ["codex/codex"],
+  },
+  openaiKey: {
+    id: "api-key",
+    title: "API key",
+    description:
+      "From the OpenAI platform. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["codex/codex", "pi/pi"],
+  },
+  zaiKey: {
+    id: "api-key",
+    title: "API key",
+    description: "A Z.ai API key.",
+    setup: [{ kind: "credentials", fields: [KEY_FIELD] }],
+    harnesses: ["pi/pi"],
+  },
+  openrouterKey: {
+    id: "api-key",
+    title: "API key",
+    description:
+      "From the Keys page of your OpenRouter account (openrouter.ai/keys). It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
+  opencodeGo: {
+    id: "go-key",
+    title: "Go key",
+    description:
+      "From your OpenCode Go subscription, in the OpenCode console at opencode.ai. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
+  opencodeZen: {
+    id: "zen-key",
+    title: "Zen key",
+    description:
+      "From your OpenCode Zen balance, in the OpenCode console at opencode.ai. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
+  minimaxPayAsYouGo: {
+    id: "pay-as-you-go-key",
+    title: "Pay-as-you-go key",
+    description:
+      "From the API keys page of the MiniMax platform (platform.minimax.io). A pay-as-you-go key and a plan key are not interchangeable, so pick the kind that matches your key. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
+  minimaxPlan: {
+    id: "plan-key",
+    title: "Plan key",
+    description:
+      "From your MiniMax M Plan subscription, on platform.minimax.io. A pay-as-you-go key and a plan key are not interchangeable, so pick the kind that matches your key. It is stored on the controller and sent to whichever machine runs a thread, so it is entered once and works on every machine.",
+    setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+    harnesses: ["pi/pi"],
+  },
+};
+
+export const SPECIMEN_PROVIDERS: ReadonlyArray<Provider> = [
+  {
+    id: "anthropic/anthropic",
+    pluginId: "anthropic",
+    displayName: "Anthropic",
+    defaultHarnessId: "claude-code/claude-code",
+    kinds: [SPECIMEN_KINDS.token!, SPECIMEN_KINDS.perMachine!, SPECIMEN_KINDS.anthropicKey!],
+  },
+  {
+    id: "openai/openai",
+    pluginId: "openai",
+    displayName: "OpenAI",
+    defaultHarnessId: "codex/codex",
+    kinds: [SPECIMEN_KINDS.openaiPerMachine!, SPECIMEN_KINDS.openaiKey!],
+  },
+  {
+    id: "zai/zai",
+    pluginId: "zai",
+    displayName: "Z.ai",
+    defaultHarnessId: "pi/pi",
+    kinds: [SPECIMEN_KINDS.zaiKey!],
+  },
+  {
+    id: "openrouter/openrouter",
+    pluginId: "openrouter",
+    displayName: "OpenRouter",
+    defaultHarnessId: "pi/pi",
+    kinds: [SPECIMEN_KINDS.openrouterKey!],
+  },
+  {
+    id: "opencode/opencode",
+    pluginId: "opencode",
+    displayName: "OpenCode",
+    defaultHarnessId: "pi/pi",
+    kinds: [SPECIMEN_KINDS.opencodeGo!, SPECIMEN_KINDS.opencodeZen!],
+  },
+  {
+    id: "minimax/minimax",
+    pluginId: "minimax",
+    displayName: "MiniMax",
+    defaultHarnessId: "pi/pi",
+    kinds: [SPECIMEN_KINDS.minimaxPayAsYouGo!, SPECIMEN_KINDS.minimaxPlan!],
+  },
+];
+
+/** The identity the model profile's builders need of one of the accounts above. */
+const identityOf = (id: string): ProviderAccountIdentity => {
+  const account = PROVIDER_ACCOUNTS.find((each) => each.id === id)!;
+  return {
+    id,
+    providerId: account.providerId,
+    kind: account.kind,
+    harnessId: account.defaultHarnessId,
+    label: account.label,
+  };
+};
+const ANTHROPIC = identityOf("01a06d02-8000-7000-8000-000000000a01");
+const ANTHROPIC_WORK = identityOf("01a06d02-8000-7000-8000-000000000a02");
+const OPENAI = identityOf("01a06d02-8000-7000-8000-000000000a03");
+const OPENAI_PERSONAL = identityOf("01a06d02-8000-7000-8000-000000000a04");
+const OPENAI_API = identityOf("01a06d02-8000-7000-8000-000000000a09");
+
+/**
+ * The one Model Profile, "Main": Anthropic with Opus 5.5 as the profile's
+ * default; Anthropic's Work account with one model; OpenAI's ChatGPT
+ * subscription with two models (it runs only in Codex); OpenAI's Personal
+ * account, which has not read its catalog yet, so its section waits; and
+ * OpenAI's API key account, which the profile runs in pi, with one model that
+ * follows the section and one that is offered twice, the second time in Codex.
+ */
+export const PROVIDER_MODEL_PROFILES: ReadonlyArray<ModelProfile> = [
+  buildModelProfile(
+    [
+      buildProfileSection(
+        ANTHROPIC,
+        [
+          buildProfileEntry(ANTHROPIC, "opus-5-5", { name: "Opus 5.5" }),
+          buildProfileEntry(ANTHROPIC, "fable-5-1", { name: "Fable 5.1" }),
+          buildProfileEntry(ANTHROPIC, "sonnet-5-5", { name: "Sonnet 5.5" }),
+          buildProfileEntry(ANTHROPIC, "haiku-5-5", { name: "Haiku 5.5" }),
+        ],
+        {
+          newModels: [
+            { model: "opus-5-6", name: "Opus 5.6", firstSeenAt: "2026-10-26T08:00:00.000Z" },
+            { model: "haiku-5-6", name: "Haiku 5.6", firstSeenAt: "2025-12-02T08:00:00.000Z" },
+          ],
+        },
+      ),
+      buildProfileSection(
+        ANTHROPIC_WORK,
+        [buildProfileEntry(ANTHROPIC_WORK, "opus-4-8", { name: "Opus 4.8" })],
+        {
+          newModels: [
+            {
+              model: "opus-5-6-long",
+              name: "Claude Opus 5.6 with an extended context window",
+              firstSeenAt: "2026-10-28T08:00:00.000Z",
+            },
+          ],
+        },
+      ),
+      buildProfileSection(OPENAI, [
+        buildProfileEntry(OPENAI, "gpt-6-1-sol", { name: "GPT-6.1 Sol" }),
+        buildProfileEntry(OPENAI, "gpt-6-luna", { name: "GPT-6 Luna" }),
+      ]),
+      buildProfileSection(OPENAI_PERSONAL, "pending"),
+      // A key account, which pi can run. The profile names pi for it, so its pill is raised.
+      buildProfileSection(
+        OPENAI_API,
+        [
+          buildProfileEntry(OPENAI_API, "gpt-6-luna", {
+            name: "GPT-6 Luna",
+            resolvedHarnessId: "pi/pi",
+          }),
+          // Offered twice: once following the section (pi), once named in Codex.
+          buildProfileEntry(OPENAI_API, "gpt-6-1-sol", {
+            name: "GPT-6.1 Sol",
+            resolvedHarnessId: "pi/pi",
+          }),
+          buildProfileEntry(OPENAI_API, "gpt-6-1-sol", {
+            name: "GPT-6.1 Sol",
+            harnessId: "codex/codex",
+            resolvedHarnessId: "codex/codex",
+          }),
+        ],
+        { harnessId: "pi/pi", resolvedHarnessId: "pi/pi" },
+      ),
+    ],
+    {
+      id: "01a06d02-8000-7000-8000-000000000b01",
+      revision: 6,
+      defaultEntry: { providerAccountId: ANTHROPIC.id, model: "opus-5-5", harnessId: null },
+    },
+  ),
+];
+
+/** What Anthropic's catalog holds, which its picker lists: the profile's four models, and an older one. */
+export const ANTHROPIC_CATALOG: ModelCatalog = {
+  providerAccountId: ANTHROPIC.id,
+  readAt: AT,
+  error: null,
+  models: [
+    ["opus-5-5", "Opus 5.5"],
+    ["fable-5-1", "Fable 5.1"],
+    ["sonnet-5-5", "Sonnet 5.5"],
+    ["haiku-5-5", "Haiku 5.5"],
+    ["opus-4-8", "Opus 4.8"],
+  ].map(([slug, name]) => ({
+    slug: slug!,
+    name: name!,
+    ...(slug === "opus-4-8" ? { isLegacy: true } : {}),
+    imageInput: null,
+    options: [],
+    firstSeenAt: AT,
+  })),
+};
+
+/**
+ * The shared harnesses, with the kinds this page's accounts use added: Claude
+ * Code runs Anthropic's token and key, and Codex runs OpenAI's key. Without
+ * them the account sheet's Default harness would strike out the harness an
+ * account of those kinds runs in.
+ */
+const SPECIMEN_HARNESSES: ReadonlyArray<Harness> = HARNESSES.map((harness) => {
+  const extraKinds =
+    harness.id === "claude-code/claude-code"
+      ? [
+          {
+            kind: "subscription-token",
+            modelArgument: "{model}",
+            credentialVariable: "CLAUDE_CODE_OAUTH_TOKEN",
+          },
+          { kind: "api-key", modelArgument: "{model}", credentialVariable: "ANTHROPIC_API_KEY" },
+        ]
+      : harness.id === "codex/codex"
+        ? [{ kind: "api-key", modelArgument: "{model}", credentialVariable: "OPENAI_API_KEY" }]
+        : [];
+  // pi runs the keys of Anthropic, OpenAI, OpenRouter, OpenCode and MiniMax too, as the
+  // pi plugin declares (the shared harness lists only Z.ai's).
+  const extraRuns: Harness["runs"] =
+    harness.id === "pi/pi"
+      ? [
+          {
+            providerId: "anthropic/anthropic",
+            kinds: [
+              {
+                kind: "api-key",
+                modelArgument: "anthropic/{model}",
+                credentialVariable: "ANTHROPIC_API_KEY",
+              },
+            ],
+            models: "own-list",
+          },
+          {
+            providerId: "openai/openai",
+            kinds: [
+              {
+                kind: "api-key",
+                modelArgument: "openai/{model}",
+                credentialVariable: "OPENAI_API_KEY",
+              },
+            ],
+            models: "own-list",
+          },
+          {
+            providerId: "openrouter/openrouter",
+            kinds: [
+              {
+                kind: "api-key",
+                modelArgument: "openrouter/{model}",
+                credentialVariable: "OPENROUTER_API_KEY",
+              },
+            ],
+            models: "all",
+          },
+          {
+            providerId: "opencode/opencode",
+            kinds: [
+              {
+                kind: "go-key",
+                modelArgument: "opencode-go/{model}",
+                credentialVariable: "OPENCODE_API_KEY",
+              },
+              {
+                kind: "zen-key",
+                modelArgument: "opencode/{model}",
+                credentialVariable: "OPENCODE_API_KEY",
+              },
+            ],
+            models: "own-list",
+          },
+          {
+            providerId: "minimax/minimax",
+            kinds: [
+              {
+                kind: "pay-as-you-go-key",
+                modelArgument: "minimax/{model}",
+                credentialVariable: "MINIMAX_API_KEY",
+              },
+              {
+                kind: "plan-key",
+                modelArgument: "minimax/{model}",
+                credentialVariable: "MINIMAX_API_KEY",
+              },
+            ],
+            models: "own-list",
+          },
+        ]
+      : [];
+  return {
+    ...harness,
+    runs: [
+      ...harness.runs.map((run) => ({ ...run, kinds: [...run.kinds, ...extraKinds] })),
+      ...extraRuns,
+    ],
+  };
+});
+
+/**
+ * The records the specimen draws beside the section: the sidebar of the
+ * Bureau book, with the accounts, the machines and the plugins whose marks
+ * name the providers.
+ */
+export const PROVIDERS_SIDEBAR_RECORDS: SidebarRecords = {
+  ...SPECIMEN_RECORDS,
+  threads: SPECIMEN_RECORDS.threads.slice(0, 4),
+  runners: [STUDIO_MAC, ATLAS, MOSS, OLD_BOX],
+  accounts: PROVIDER_ACCOUNTS,
+  modelProfiles: PROVIDER_MODEL_PROFILES,
+  plugins: PROVIDER_PLUGINS,
+};
+
+/** What the section reads besides the sidebar's lists: which machine is this Mac. */
+export const PROVIDERS_SETTINGS_RECORDS: ProvidersSettingsRecords = {
+  thisMacRunnerId: STUDIO_MAC.id,
+  providers: SPECIMEN_PROVIDERS,
+  harnesses: SPECIMEN_HARNESSES,
+  controllerRunnerId: STUDIO_MAC.id,
+  catalog: ANTHROPIC_CATALOG,
+  createdAccount: withCatalog({
+    id: "01a06d02-8000-7000-8000-0000000000c2",
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    label: "Home",
+    identity: null,
+    planLabel: null,
+    defaultHarnessId: "claude-code/claude-code",
+    expiresAt: null,
+    usage: [],
+    failure: null,
+    snapshots: [],
+    createdAt: AT,
+    updatedAt: AT,
+  }),
+};

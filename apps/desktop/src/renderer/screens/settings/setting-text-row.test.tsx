@@ -18,6 +18,7 @@ const renderRow = (error: string | null = null) => {
       error={error}
       onCommit={onCommit}
       onEditStart={onEditStart}
+      platform="mac"
     />,
   );
   return { onCommit, onEditStart, area: screen.getByRole("textbox", { name: "Persona" }) };

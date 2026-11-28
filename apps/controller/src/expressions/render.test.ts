@@ -278,3 +278,27 @@ describe("an unresolved reference", () => {
     expect(readError("1 / 0").isUnresolvedReference).toBeUndefined();
   });
 });
+
+describe("the run in a run's context", () => {
+  it("renders the run's id and Task", () => {
+    const context = { run: { id: "run-1", taskId: "task-1" } };
+    expect(
+      Effect.runSync(provideUnlimitedBudget(renderTemplate("{{ run.taskId }}", context))),
+    ).toBe("task-1");
+    expect(
+      Effect.runSync(provideUnlimitedBudget(renderTemplate("run {{ run.id }}", context))),
+    ).toBe("run run-1");
+  });
+
+  it("fails with a message that says the run has no Task when it is read on a run with none", () => {
+    const message = readFailure(renderTemplate("{{ run.taskId }}", { run: { id: "run-1" } }));
+    expect(message).toContain("run.taskId is not set: this run works on no Task");
+  });
+
+  it("does not blame the Task for another missing key", () => {
+    const message = readFailure(
+      renderTemplate("{{ inputs.taskId }}", { run: { id: "run-1" }, inputs: {} }),
+    );
+    expect(message).not.toContain("works on no Task");
+  });
+});

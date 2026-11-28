@@ -1,7 +1,7 @@
 /**
- * Groups a transcript into turns. A transcript is a flat log of provider
+ * Groups a transcript into turns. A transcript is a flat log of harness
  * events, and a turn is what the thread screen renders. Grouping here means
- * the transcript column only renders turns, and no provider event names leak
+ * the transcript column only renders turns, and no harness event names leak
  * into it.
  *
  * The assistant's text is never on `item.started` or `item.completed`: it
@@ -21,13 +21,17 @@ import { Schema } from "effect";
 import {
   Attachment,
   type ContextCompactionDetail,
+  type PromptContextBlock,
   type SessionStatus,
   type TodoListDetail,
   type TodoStep,
   type TranscriptRow,
 } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
+import type { McpServerWarningEntry } from "../mcp-servers/fix";
 import type { AgentState } from "./agent-state";
+import { findFirstMessageItemId, splitSentText } from "./first-message";
+import { readUserSender } from "./sender";
 import {
   describeCompactionTarget,
   describeWaitDuration,
@@ -41,12 +45,12 @@ import {
   summarizeTodoList,
 } from "./item-detail";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemStarted = Extract<ProviderEvent, { _tag: "item.started" }>;
+type HarnessEvent = TranscriptRow["event"];
+type ItemStarted = Extract<HarnessEvent, { _tag: "item.started" }>;
 type ItemKind = ItemStarted["kind"];
-type ItemUpdated = Extract<ProviderEvent, { _tag: "item.updated" }>;
-type ItemCompleted = Extract<ProviderEvent, { _tag: "item.completed" }>;
-type TurnEndState = Extract<ProviderEvent, { _tag: "turn.completed" }>["state"];
+type ItemUpdated = Extract<HarnessEvent, { _tag: "item.updated" }>;
+type ItemCompleted = Extract<HarnessEvent, { _tag: "item.completed" }>;
+type TurnEndState = Extract<HarnessEvent, { _tag: "turn.completed" }>["state"];
 
 export interface ThreadItem {
   readonly itemId: string;
@@ -117,16 +121,6 @@ const readUserSkills = (detail: unknown): readonly string[] => {
 };
 
 /**
- * Returns the id of the session whose agent sent a `user_message`, from its
- * detail's `senderSessionId`. Returns `undefined` for a message the session's
- * owner sent, which carries no sender.
- */
-export const readUserSender = (detail: unknown): string | undefined => {
-  const sender = readJsonObject(detail)?.senderSessionId;
-  return typeof sender === "string" && sender !== "" ? sender : undefined;
-};
-
-/**
  * Checks whether a `user_message` was steered into a turn that was already
  * running, from its detail's `steered`. Returns `false` for a message that
  * opened its turn.
@@ -136,7 +130,10 @@ const isSteeredUserMessage = (detail: unknown): boolean => readJsonObject(detail
 /** One message sent into a turn: by the session's owner, or by another session's agent. */
 export interface ThreadUserMessage {
   readonly itemId: string;
+  /** The user's words: the text as sent, without the context block that follows them. */
   readonly text: string;
+  /** The block that tells the agent about things, when the text ended in one. Absent otherwise. */
+  readonly context?: PromptContextBlock;
   /** The images sent with the message, in the order they were attached. Empty when none were. */
   readonly attachments: readonly Attachment[];
   /**
@@ -159,12 +156,15 @@ export interface ThreadUserMessage {
  * and its blocks both build their messages here, so the two never read a
  * message differently.
  */
-export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
+export const buildUserMessage = (
+  event: ItemStarted,
+  isFirstMessage: boolean,
+): ThreadUserMessage => {
   const text = readJsonObject(event.detail)?.text;
   const senderSessionId = readUserSender(event.detail);
   return {
     itemId: event.itemId,
-    text: typeof text === "string" ? text : "",
+    ...splitSentText(typeof text === "string" ? text : "", isFirstMessage),
     attachments: readUserAttachments(event.detail),
     skills: readUserSkills(event.detail),
     steered: isSteeredUserMessage(event.detail),
@@ -185,6 +185,11 @@ export interface RuntimeNote {
   readonly severity: "error" | "warning" | "notice";
   readonly message: string;
   readonly at: string;
+  /**
+   * The MCP Servers a warning is about and why, as the controller wrote them.
+   * Absent for every note that is not a warning about MCP Servers.
+   */
+  readonly mcpServers?: readonly McpServerWarningEntry[];
 }
 
 /**
@@ -258,7 +263,7 @@ interface DetailField {
  * a file search looked for, the URL a page fetch loaded, what a web search
  * searched for, or a tool call's description. The first of these that is
  * present wins, even when it is not a string. Returns `undefined` when none is
- * present. Each provider adapter shapes `detail` its own way, so every field
+ * present. Each harness adapter shapes `detail` its own way, so every field
  * is optional (spec 06 §6.3).
  */
 const findDetailField = (detail: Record<string, unknown>): DetailField | undefined => {
@@ -607,7 +612,7 @@ export const buildUnknownEventMessage = (originalType: string): string =>
 const buildRuntimeNote = (
   row: TranscriptRow,
   event: Extract<
-    ProviderEvent,
+    HarnessEvent,
     { _tag: "runtime.error" | "runtime.warning" | "runtime.notice" | "unknown" }
   >,
 ): RuntimeNote => {
@@ -616,7 +621,13 @@ const buildRuntimeNote = (
     case "runtime.error":
       return { key, severity: "error", message: event.message ?? event.class, at: event.at };
     case "runtime.warning":
-      return { key, severity: "warning", message: event.message, at: event.at };
+      return {
+        key,
+        severity: "warning",
+        message: event.message,
+        at: event.at,
+        ...(event.mcpServers === undefined ? {} : { mcpServers: event.mcpServers }),
+      };
     case "runtime.notice":
       return { key, severity: "notice", message: event.message, at: event.at };
     case "unknown":
@@ -671,9 +682,10 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
 
   const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
   let openTurnId: string | null = null;
+  const firstMessageItemId = findFirstMessageItemId(rows, agent);
 
   for (const row of rows) {
-    const event: ProviderEvent = row.event;
+    const event: HarnessEvent = row.event;
     switch (event._tag) {
       case "turn.started": {
         findOrStartTurn(event.turnId, event.at).startedAt = event.at;
@@ -709,7 +721,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          turn.userMessages.push(buildUserMessage(event));
+          turn.userMessages.push(buildUserMessage(event, event.itemId === firstMessageItemId));
         } else if (event.kind !== "assistant_message") {
           const { item, compaction } = buildStartedItem(event);
           turn.itemIndex.set(event.itemId, turn.items.length);

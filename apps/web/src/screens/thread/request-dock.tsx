@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import type { JSX } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   buildRequestDock,
@@ -7,7 +7,8 @@ import {
   type RequestAsker,
 } from "@hercule/client-core";
 import type { Session, Subagent } from "@hercule/contract";
-import { PermissionCard } from "./permission-card";
+import { useShownRequestId } from "../../app/thread-drafts";
+import { PermissionCard, type DockComposer } from "./permission-card";
 
 /**
  * Renders the dock above the composer, or above a subagent's status card,
@@ -22,15 +23,17 @@ import { PermissionCard } from "./permission-card";
  *   and the line has the arrows alone, because the page already names the
  *   subagent.
  *
- * The shown Request is remembered by its id, so a Request that opens or
- * closes elsewhere does not move the user off the one they are reading. When
- * the shown Request closes, the dock goes back to the oldest open one.
+ * The shown Request is remembered by its id in the thread's drafts, so a
+ * Request that opens or closes elsewhere does not move the user off the one
+ * they are reading, and the composer can tell which Request the dock shows.
+ * When the shown Request closes, the dock goes back to the oldest open one.
  */
 export function RequestDock({
   client,
   session,
   subagents,
   subagent,
+  composer,
 }: {
   readonly client: HerculeClient;
   readonly session: Session;
@@ -38,8 +41,10 @@ export function RequestDock({
   readonly subagents: readonly Subagent[];
   /** The subagent whose page this is; undefined on the thread's own page. */
   readonly subagent: Subagent | undefined;
+  /** Where the thread's composer is, relative to this dock. */
+  readonly composer: DockComposer;
 }): JSX.Element | null {
-  const [shownRequestId, setShownRequestId] = useState<string | undefined>(undefined);
+  const [shownRequestId, setShownRequestId] = useShownRequestId();
   const dock = buildRequestDock(session.openRequests, subagents, subagent?.id, shownRequestId);
   if (dock === null) return null;
   return (
@@ -77,6 +82,7 @@ export function RequestDock({
         client={client}
         sessionId={session.id}
         request={dock.request}
+        composer={composer}
       />
     </>
   );

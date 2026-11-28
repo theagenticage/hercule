@@ -15,9 +15,10 @@ const BYTES_PER_MIB = 1024 * 1024;
  * Measures the bytes `frame` takes on the socket, as its UTF-8 JSON text.
  *
  * The socket sends `JSON.stringify` of the frame as the `RunnerToController`
- * schema encodes it. That encoding transforms no field: it may write the keys
- * in another order, but every value stays the same, so the byte count is the
- * same.
+ * schema encodes it. The encoding changes no value. It only renames keys, and
+ * only on the metrics report (`metrics` is written as `watermark`, 2 bytes
+ * longer). That frame is a few hundred bytes, so this function measures the
+ * decoded frame, which is exact for every frame that can grow near the limit.
  */
 export const measureFrameBytes = (frame: RunnerToController): number =>
   Buffer.byteLength(JSON.stringify(frame), "utf8");

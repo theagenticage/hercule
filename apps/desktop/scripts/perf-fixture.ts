@@ -24,15 +24,12 @@
  * own clock, and no operation sets it. So before each launch,
  * `prepareLaunch` stops the controller, writes the idle threads' last
  * activity into its database, and starts it again on the same port. It sets
- * the time each open signal was raised the same way, for Intake's age
- * labels, the title, author and arrival time of every event, for
- * Everything's rows, the time of each Discussion and Post, for the Discussion
+ * the time of each Discussion and Post the same way, for the Discussion
  * list's age labels, and on request spreads one workflow's finished runs over
- * a day, for the Runs tab's timeline, and makes some open signals signals
- * about a thread, for Your work. Those are the only things written to
- * the database directly: the threads, and every state they are in, come from
- * the fleet, the signals from `signal.raise`, the events from `event.emit`,
- * and the runs from `run.start`.
+ * a day, for the Runs tab's timeline. Those are the only things the fixture
+ * writes to the database directly, besides what a scenario writes through
+ * `writeDatabase`: the threads, and every state they are in, come from the
+ * fleet, and the runs from `run.start`.
  *
  * It runs on plain Node, like the perf script, so its imports name the `.ts`
  * file.
@@ -44,10 +41,13 @@ import { DatabaseSync } from "node:sqlite";
 import type {
   Assistant,
   Heartbeat,
+  ModelProfile,
   Project,
+  ProviderAccount,
   Runner,
   Session,
 } from "../../../packages/contract/src/index";
+import type { UsageReading } from "../../../packages/protocol/src/index";
 import {
   deleteMasterKeyItem,
   findCompiledBinary,
@@ -55,6 +55,11 @@ import {
   startSetUpController,
 } from "../../../scripts/controller-process.ts";
 import { replaceConnections, type ConnectionFixture } from "./connection-fixtures.ts";
+import {
+  resetProviderAccounts,
+  writeProviderAccounts,
+  type ProviderAccountFixture,
+} from "./provider-account-fixtures.ts";
 import type { ScriptedRunner, ScriptStep } from "./scripted-runner.ts";
 import { callApi, connectFleet, type Fleet } from "./fleet.ts";
 import { pollUntil } from "./poll.ts";
@@ -138,22 +143,6 @@ const TWO_MINUTES_MS = 120_000;
  */
 const OTHER_PROJECTS_BACK_MS = 7 * HOUR_MS;
 
-/**
- * How far back the newest open signal is set, and how far apart the oldest
- * and the newest may be (see `backdateOpenSignals`).
- */
-const NEWEST_SIGNAL_BACK_MS = 2.5 * HOUR_MS;
-const SIGNALS_BACK_SPREAD_MS = 10 * 60_000;
-
-/**
- * How far back `titleEvents` spreads the events: the oldest one is set this
- * long ago, inside Everything's 90-day horizon.
- */
-const EVENTS_BACK_MS = 80 * 24 * HOUR_MS;
-
-/** The authors `titleEvents` hands out in turn. */
-const EVENT_AUTHORS = ["Marta", "Jonas", "Priya", "Tomas", "Ines"] as const;
-
 /** The controller's database, inside its Hercule Home. */
 const DATABASE_PATH = ["data", "hercule.db"] as const;
 
@@ -193,6 +182,278 @@ const FIXTURE_CONNECTIONS: ReadonlyArray<ConnectionFixture> = [
     type: "acme/widgets",
   },
 ];
+
+/** The share of its 5-hour window that the fixture's Claude account has used when the launch starts. */
+const FIXTURE_FIVE_HOUR_PERCENT = 38;
+
+/** How long after being read the usage windows of the fixture's accounts reset, in milliseconds. */
+const FIVE_HOUR_RESET_MS = 3 * 3_600_000;
+const WEEK_RESET_MS = 3 * 86_400_000;
+
+/**
+ * Returns the usage window `window` of a Provider Account, used by
+ * `usedPercent` as of `takenAt` (epoch milliseconds), which resets
+ * `resetsInMs` later.
+ */
+const buildUsageWindow = (
+  window: "five-hour" | "weekly",
+  usedPercent: number,
+  takenAt: number,
+  resetsInMs: number,
+): UsageReading => ({
+  kind: "window",
+  window,
+  usedPercent,
+  resetsAt: new Date(takenAt + resetsInMs).toISOString(),
+  hit: false,
+  takenAt: new Date(takenAt).toISOString(),
+});
+
+/**
+ * Returns the accounts the launch with Settings › Providers open has: seven,
+ * the number spec 17's reference setup names. The first is the Anthropic
+ * account the fleet makes, which gets an identity and a plan, and the others
+ * are added, some with a label, so the cards draw both a name with a label and
+ * a name without one. The Claude and Codex subscription accounts have usage
+ * readings taken at `now`, so their cards draw gauges and the account sheet a
+ * Usage section. The Anthropic API key has been refused, so its card draws a
+ * state line and a button to fix it. The last two, a Z.ai key and an OpenAI
+ * key, have nothing to show. The reference setup's OpenRouter account with 466
+ * models is not here, because no runner can read a catalog in this fixture.
+ */
+const buildProviderAccountFixtures = (now: number): ReadonlyArray<ProviderAccountFixture> => [
+  {
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    identity: "rogier@example.com",
+    planLabel: "Max",
+    defaultHarnessId: "claude-code/claude-code",
+    usage: [
+      buildUsageWindow("five-hour", FIXTURE_FIVE_HOUR_PERCENT, now, FIVE_HOUR_RESET_MS),
+      buildUsageWindow("weekly", 18, now, WEEK_RESET_MS),
+    ],
+  },
+  {
+    providerId: "openai/openai",
+    kind: "subscription-per-machine",
+    identity: "rogier@example.com",
+    planLabel: "Pro",
+    defaultHarnessId: "codex/codex",
+    usage: [
+      buildUsageWindow("five-hour", 12, now, FIVE_HOUR_RESET_MS),
+      buildUsageWindow("weekly", 61, now, WEEK_RESET_MS),
+    ],
+  },
+  {
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+    label: "Work",
+    identity: "rogier@acme.test",
+    planLabel: "Team",
+    defaultHarnessId: "claude-code/claude-code",
+  },
+  {
+    providerId: "openai/openai",
+    kind: "subscription-per-machine",
+    label: "Work",
+    identity: "rogier@acme.test",
+    planLabel: "Team",
+    defaultHarnessId: "codex/codex",
+  },
+  {
+    providerId: "anthropic/anthropic",
+    kind: "api-key",
+    label: "Key",
+    defaultHarnessId: "claude-code/claude-code",
+    failureMessage: "401 Unauthorized: invalid x-api-key",
+  },
+  {
+    providerId: "zai/zai",
+    kind: "api-key",
+    defaultHarnessId: "pi/pi",
+  },
+  {
+    providerId: "openai/openai",
+    kind: "api-key",
+    label: "Key",
+    defaultHarnessId: "codex/codex",
+  },
+];
+
+/**
+ * The Model Profiles the launch with Settings › Providers open has besides
+ * "Main", by name, with the accounts each holds as positions in the list of
+ * `buildProviderAccountFixtures`. "Main" holds every account. Spec 17's
+ * reference setup has four profiles, so the tabs, the account cards' faces
+ * and the pointer all have several to draw.
+ */
+const EXTRA_PROFILE_ACCOUNTS: ReadonlyArray<readonly [string, ReadonlyArray<number>]> = [
+  ["Work", [2, 3, 5]],
+  ["Review", [0, 1]],
+  ["Cheap", [4, 5, 6]],
+];
+
+/**
+ * One section of "Main" in the Providers launch: the harness the section runs
+ * in (`null` for the account's own), and its models. A model is a slug, or a
+ * slug with the harness that entry names for itself.
+ */
+interface MainSectionFixture {
+  readonly harnessId: string | null;
+  readonly models: ReadonlyArray<string | readonly [model: string, harnessId: string]>;
+}
+
+/**
+ * The sections of "Main" in the Providers launch, as positions in the list of
+ * `buildProviderAccountFixtures`: 60 model rows in all, so the page draws
+ * sections as long as a real setup's, with a section and some rows set to run
+ * in a harness other than their account's default:
+ *
+ * - position 4 (an Anthropic key) is set to run in pi;
+ * - position 6 (an OpenAI key) offers `gpt-5` twice, in Codex and in pi, and
+ *   `gpt-5-mini` in pi alone, so two of its rows say "in pi".
+ *
+ * A harness here is one the account's kind may run in. The write is refused
+ * otherwise.
+ */
+const MAIN_SECTION_FIXTURES: ReadonlyArray<MainSectionFixture> = [
+  {
+    harnessId: null,
+    models: [
+      "claude-opus-4-5",
+      "claude-opus-4-1",
+      "claude-opus-4-0",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-0",
+      "claude-3-7-sonnet-latest",
+      "claude-haiku-4-5",
+      "claude-3-5-haiku-latest",
+      "claude-3-5-sonnet-latest",
+      "claude-3-opus-latest",
+      "claude-3-5-sonnet-20241022",
+      "claude-3-haiku-20240307",
+    ],
+  },
+  {
+    harnessId: null,
+    models: [
+      "gpt-5",
+      "gpt-5-codex",
+      "gpt-5-mini",
+      "gpt-5-nano",
+      "gpt-5-pro",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4.1-nano",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "o3",
+      "o4-mini",
+    ],
+  },
+  {
+    harnessId: null,
+    models: [
+      "claude-opus-4-5",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-0",
+      "claude-haiku-4-5",
+      "claude-3-5-haiku-latest",
+      "claude-opus-4-1",
+    ],
+  },
+  {
+    harnessId: null,
+    models: ["gpt-5", "gpt-5-codex", "gpt-5-mini", "gpt-4.1", "o3", "o4-mini"],
+  },
+  {
+    harnessId: "pi/pi",
+    models: [
+      "claude-opus-4-5",
+      "claude-sonnet-4-5",
+      "claude-sonnet-4-0",
+      "claude-haiku-4-5",
+      "claude-3-7-sonnet-latest",
+      "claude-3-5-haiku-latest",
+      "claude-opus-4-1",
+      "claude-opus-4-0",
+    ],
+  },
+  {
+    harnessId: null,
+    models: [
+      "glm-4.6",
+      "glm-4.5",
+      "glm-4.5-air",
+      "glm-4.5-flash",
+      "glm-4.5v",
+      "glm-4-32b-0414-128k",
+    ],
+  },
+  {
+    harnessId: null,
+    models: [
+      "gpt-5",
+      ["gpt-5", "pi/pi"],
+      ["gpt-5-mini", "pi/pi"],
+      "gpt-5-nano",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "o3",
+      "o4-mini",
+    ],
+  },
+];
+
+/**
+ * Makes the Model Profiles of the Providers launch through the API of the
+ * running controller: puts every account in "Main" with the models of
+ * `MAIN_SECTION_FIXTURES`, then creates the profiles of
+ * `EXTRA_PROFILE_ACCOUNTS`, each with its accounts and no models yet. Entries
+ * sent by hand are not checked against a catalog, and no catalog is read in
+ * this fixture (the scripted runners probe only the fleet's account).
+ * `resetProviderAccounts` undoes it.
+ */
+const makeModelProfiles = async (
+  call: <T>(method: string, path: string, body?: unknown) => Promise<T>,
+): Promise<void> => {
+  const accounts = await call<ReadonlyArray<ProviderAccount>>("GET", "/provider-accounts");
+  const [main] = await call<ReadonlyArray<ModelProfile>>("GET", "/model-profiles");
+  const sections = accounts.map((account, position) => {
+    const { harnessId, models } = MAIN_SECTION_FIXTURES[position]!;
+    return {
+      providerAccountId: account.id,
+      harnessId,
+      entries: models.map((model) => ({
+        providerAccountId: account.id,
+        model: typeof model === "string" ? model : model[0],
+        harnessId: typeof model === "string" ? null : model[1],
+      })),
+    };
+  });
+  await call("PATCH", `/model-profiles/${main!.id}`, {
+    expectedRevision: main!.revision,
+    name: main!.name,
+    accounts: sections,
+    defaultEntry: sections[0]!.entries[0],
+    dismissedNewModels: main!.dismissedNewModels,
+  });
+  for (const [name, positions] of EXTRA_PROFILE_ACCOUNTS) {
+    const created = await call<ModelProfile>("POST", "/model-profiles", { name });
+    await call("PATCH", `/model-profiles/${created.id}`, {
+      expectedRevision: created.revision,
+      name,
+      accounts: positions.map((position) => ({
+        providerAccountId: accounts[position]!.id,
+        harnessId: null,
+      })),
+      defaultEntry: null,
+      dismissedNewModels: [],
+    });
+  }
+};
 
 /** What the user asks in each turn `growTranscript` plays. */
 const LONG_THREAD_QUESTION = "The checkout test fails again. Can you find out why?";
@@ -264,6 +525,13 @@ export interface ThreadFixture {
   /** The controller's URL. It stays the same when the controller restarts. */
   readonly url: string;
   /**
+   * The path of the controller's database file. A scenario writes into it
+   * what no operation makes: while the controller is stopped through
+   * `prepareLaunch`'s `writeDatabase`, or, for a row the controller is to find
+   * at its next read, while it runs.
+   */
+  readonly databasePath: string;
+  /**
    * Spawns threads until the controller holds `count`, spread over the
    * projects and the runners as the top of this file describes, and returns
    * once each new thread has settled. The first call picks the busy and the
@@ -277,20 +545,23 @@ export interface ThreadFixture {
    * the thread was created, and a header tab's the time since its last
    * activity, so both are set. With `twoMinuteRow`, one idle thread in the
    * first project is set only two minutes back instead, so exactly one row on
-   * screen shows minutes. Every open signal is set hours back too (see
-   * `backdateOpenSignals`). With `spreadRuns`, the runs of one workflow are
+   * screen shows minutes. With `spreadRuns`, the runs of one workflow are
    * spread over a span of time too (see `spreadRuns`). With `connections`,
    * the controller holds the fixture's Connections for the launch, and
-   * without it none (see `FIXTURE_CONNECTIONS`). With `signalsAboutThreads`,
-   * that many of the oldest open signals become signals of a plugin's event,
-   * each about a thread (see `makeSignalsAboutThreads`). Fails when a thread
-   * is not in its expected state afterwards.
+   * without it none (see `FIXTURE_CONNECTIONS`). With `providerAccounts`,
+   * the controller holds the fixture's Provider Accounts for the launch, and
+   * without it only the Anthropic account the fleet makes, with no identity
+   * (see `buildProviderAccountFixtures`). With `writeDatabase`, that function runs on the stopped controller's database
+   * last, for a scenario that seeds what no operation makes, such as Runner
+   * Metrics history. Fails when a thread is not in its expected state
+   * afterwards.
    */
   readonly prepareLaunch: (options: {
     readonly twoMinuteRow: boolean;
     readonly spreadRuns?: RunSpread;
     readonly connections?: boolean;
-    readonly signalsAboutThreads?: number;
+    readonly providerAccounts?: boolean;
+    readonly writeDatabase?: (database: DatabaseSync) => void;
   }) => Promise<void>;
   /**
    * Spawns the 500 threads of the sidebar's groups scenario instead of
@@ -310,6 +581,14 @@ export interface ThreadFixture {
    * makes the controller push one change to the app.
    */
   readonly nudge: () => void;
+  /**
+   * Reports that the Claude account's 5-hour window is `usedPercent` used, as
+   * the harness of a running thread does when Anthropic sends a rate limit
+   * update. The controller stores the reading and pushes the account on the
+   * `provider` topic. Only the Providers launch has the account's readings
+   * (see `buildProviderAccountFixtures`), but the report works in any launch.
+   */
+  readonly reportClaudeFiveHourUsage: (usedPercent: number) => void;
   /** Returns the process ID of the running controller. It changes when `prepareLaunch` restarts the controller. */
   readonly readControllerPid: () => number;
   /**
@@ -343,6 +622,19 @@ export interface ThreadFixture {
     text: string,
     script: ReadonlyArray<ScriptStep>,
   ) => Promise<{ readonly played: Promise<void> }>;
+  /** The scripted runners the fixture enlisted, "studio" and "laptop" first, then each `enlistRunner` added. */
+  readonly runners: ReadonlyArray<ScriptedRunner>;
+  /**
+   * Enlists one more scripted runner (see `Fleet`). The fixture reconnects it
+   * after each restart of the controller, as it does its own two.
+   */
+  readonly enlistRunner: Fleet["enlistRunner"];
+  /**
+   * Spawns threads on a runner (see `Fleet`). The fixture does not track
+   * them: a scenario that spawns some settles them itself, idle, before the
+   * next `prepareLaunch`, which counts every idle thread.
+   */
+  readonly spawnThreads: Fleet["spawnThreads"];
   /** Calls one operation of the public API as the signed-in user (see `Fleet`). */
   readonly call: Fleet["call"];
   /**
@@ -512,7 +804,8 @@ export async function runWithThreadFixture<T>(
         const agent = await call<{ readonly id: string }>("POST", "/agents", {
           name: "perf-group-agent",
           systemPrompt: "Review the change.",
-          instanceId: first!.instanceId,
+          providerAccountId: first!.providerAccountId,
+          harnessId: null,
           permissionProfileId: first!.permissionProfileId,
         });
         for (const trio of trios.slice(0, GROUPS_WITH_AGENT_SESSION)) {
@@ -576,12 +869,14 @@ export async function runWithThreadFixture<T>(
         twoMinuteRow,
         spreadRuns: spread,
         connections = false,
-        signalsAboutThreads = 0,
+        providerAccounts = false,
+        writeDatabase,
       }: {
         readonly twoMinuteRow: boolean;
         readonly spreadRuns?: RunSpread;
         readonly connections?: boolean;
-        readonly signalsAboutThreads?: number;
+        readonly providerAccounts?: boolean;
+        readonly writeDatabase?: (database: DatabaseSync) => void;
       }) => {
         // A Request is answered before the restart and opened again after it,
         // so the restart never has to decide what happens to one.
@@ -621,17 +916,25 @@ export async function runWithThreadFixture<T>(
           [...busyIds.slice(1), ...waitingIds.slice(1)],
         );
         backdateDone(home, oldDoneIds);
-        backdateOpenSignals(home);
-        if (signalsAboutThreads > 0) makeSignalsAboutThreads(home, signalsAboutThreads);
-        backdateTrackedRuns(home);
-        titleEvents(home);
         backdateDiscussions(home);
         if (spread !== undefined) spreadRuns(home, spread);
         // Only the launch with Settings › Connections open has Connections, so
         // every other launch measures what it measured before Connections
-        // were built: a GitHub Connection adds a segment to Settings › Intake,
+        // were built: a GitHub Connection adds a segment to Settings › Signals,
         // and one that needs sign-in puts a dot on the Settings row.
         replaceConnections(home, connections ? FIXTURE_CONNECTIONS : []);
+        // Only the launch with Settings › Providers open has the accounts of
+        // the fixture, so every other launch measures what it measured before.
+        resetProviderAccounts(home);
+        if (providerAccounts) writeProviderAccounts(home, buildProviderAccountFixtures(Date.now()));
+        if (writeDatabase !== undefined) {
+          const database = new DatabaseSync(join(home, ...DATABASE_PATH));
+          try {
+            writeDatabase(database);
+          } finally {
+            database.close();
+          }
+        }
         controller = await startController({ home, binary: findCompiledBinary(), port });
         await Promise.all(runners.map((runner) => runner.reconnect()));
         for (const runner of runners) {
@@ -641,6 +944,7 @@ export async function runWithThreadFixture<T>(
             `runner ${runner.runnerId} online`,
           );
         }
+        if (providerAccounts) await makeModelProfiles(call);
         // A runner is online once the controller answers its hello, before the
         // controller has matched the sessions the runner reports to its threads.
         await waitForCensus(listThreads, {
@@ -678,6 +982,15 @@ export async function runWithThreadFixture<T>(
       };
 
       const readControllerPid = (): number => controller.pid;
+
+      const reportClaudeFiveHourUsage = (usedPercent: number): void => {
+        const id = busyIds[0]!;
+        runnerBySessionId
+          .get(id)!
+          .reportAccountUsage(id, [
+            buildUsageWindow("five-hour", usedPercent, Date.now(), FIVE_HOUR_RESET_MS),
+          ]);
+      };
 
       /** Returns how many rows the transcript of the thread `sessionId` holds. */
       const countTranscriptRows = async (sessionId: string): Promise<number> =>
@@ -724,14 +1037,23 @@ export async function runWithThreadFixture<T>(
 
       return await use({
         url,
+        databasePath: join(home, ...DATABASE_PATH),
         growTo,
         growGroups,
         prepareLaunch,
         nudge,
+        reportClaudeFiveHourUsage,
         readControllerPid,
         growTranscript,
         streamTurn,
         playTurn,
+        runners,
+        enlistRunner: async (name, options) => {
+          const runner = await fleet.enlistRunner(name, options);
+          runners.push(runner);
+          return runner;
+        },
+        spawnThreads: fleet.spawnThreads,
         call,
         callAsSession: (sessionId, method, path, body) =>
           callApi(
@@ -749,143 +1071,6 @@ export async function runWithThreadFixture<T>(
   } finally {
     rmSync(home, { recursive: true, force: true });
     deleteMasterKeyItem(home);
-  }
-}
-
-/**
- * Sets every open signal in the stopped controller's database in the Home
- * `home` raised between 2 h 30 min and 2 h 40 min back, in the order they
- * were raised. Intake's rows then all show "2h", and the next label change
- * is 20 minutes or more away, so no label changes during a launch.
- *
- * Each open signal is set one second before the next, oldest first, so To
- * do keeps its order. At most 600 signals fit in those 10 minutes, and the
- * function fails with more.
- */
-function backdateOpenSignals(home: string): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    const ids = database
-      .prepare("SELECT id FROM signals WHERE status = 'open' ORDER BY created_at, id")
-      .all()
-      .map((row) => row["id"] as Uint8Array);
-    if (ids.length > SIGNALS_BACK_SPREAD_MS / 1_000) {
-      throw new Error(
-        `the fixture backdates at most ${String(SIGNALS_BACK_SPREAD_MS / 1_000)} open signals, not ${String(ids.length)}`,
-      );
-    }
-    const update = database.prepare("UPDATE signals SET created_at = ? WHERE id = ?");
-    const newest = Date.now() - NEWEST_SIGNAL_BACK_MS;
-    database.exec("BEGIN");
-    for (const [index, id] of ids.entries()) {
-      const back = (ids.length - 1 - index) * 1_000;
-      update.run(new Date(newest - back).toISOString(), id);
-    }
-    database.exec("COMMIT");
-  } finally {
-    database.close();
-  }
-}
-
-/**
- * The id of the Connection the signals made by `makeSignalsAboutThreads` name.
- * No such Connection exists, and reading the signals does not need one. The id
- * has the form of a UUID version 7, because the contract refuses any other.
- */
-const THREAD_SIGNALS_CONNECTION_ID = "0199c0ff-8888-7000-8000-000000000001";
-
-/**
- * Builds the External Ref of the thread the `index`th signal made by
- * `makeSignalsAboutThreads` is about, counting from the oldest. A Task that
- * carries this ref in its provenance is Your work for that signal.
- */
-export const buildSignalThreadRef = (index: number): string =>
-  `github:pull-request:acme/payments-api#${String(1_000 + index)}`;
-
-/**
- * Turns the `count` oldest open signals in the stopped controller's database
- * in the Home `home` into signals of a plugin's event, each about its own
- * thread (`buildSignalThreadRef`). `signal.raise` can only make signals of the
- * core, which are about no thread, and a plugin's event needs a Connection the
- * fixture does not run; but only a signal about a thread can be matched to
- * Tasks as Your work. The signal's kind and text stay as they were.
- */
-function makeSignalsAboutThreads(home: string, count: number): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    const ids = database
-      .prepare("SELECT id FROM signals WHERE status = 'open' ORDER BY created_at, id LIMIT ?")
-      .all(count)
-      .map((row) => row["id"] as Uint8Array);
-    if (ids.length < count) {
-      throw new Error(`the fixture has ${String(ids.length)} open signals, not ${String(count)}`);
-    }
-    const update = database.prepare(
-      "UPDATE signals SET origin = ?, connection_id = ?, thread_ref = ? WHERE id = ?",
-    );
-    database.exec("BEGIN");
-    for (const [index, id] of ids.entries()) {
-      const threadRef = buildSignalThreadRef(index);
-      const origin = {
-        type: "event",
-        eventId: index + 1,
-        connectionId: THREAD_SIGNALS_CONNECTION_ID,
-        threadRef,
-      };
-      update.run(
-        JSON.stringify(origin),
-        Buffer.from(THREAD_SIGNALS_CONNECTION_ID.replaceAll("-", ""), "hex"),
-        threadRef,
-        id,
-      );
-    }
-    database.exec("COMMIT");
-  } finally {
-    database.close();
-  }
-}
-
-/** How far back `backdateTrackedRuns` moves the runs it finds. */
-const TRACKED_RUNS_BACK_MS = 3 * HOUR_MS;
-
-/**
- * Moves every run that works on a Task, and its steps, written in the last
- * hour, in the stopped controller's database in the Home `home`, back by
- * `TRACKED_RUNS_BACK_MS`. A row of Tracking shows how long ago its run ended
- * or started, so left alone its rows would show minutes and change during a
- * launch. Each time of a run moves by the same amount, so a run keeps the
- * times it took. A run already moved is older than an hour, so a second call
- * leaves it where it is.
- *
- * A run that is still live moves too. Its `wait` step counts from its start,
- * and a day-long wait that started three hours back still has twenty-one
- * hours to go.
- */
-function backdateTrackedRuns(home: string): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    const recent = new Date(Date.now() - HOUR_MS).toISOString();
-    const shift = (column: string) =>
-      `strftime('%Y-%m-%dT%H:%M:%fZ', ${column}, '-${String(TRACKED_RUNS_BACK_MS / HOUR_MS)} hours')`;
-    database.exec("BEGIN");
-    // The steps first: they are found through their runs, which still hold their recent times.
-    database
-      .prepare(
-        `UPDATE run_steps SET created_at = ${shift("created_at")}, ` +
-          `started_at = ${shift("started_at")}, finished_at = ${shift("finished_at")} ` +
-          `WHERE run_id IN (SELECT id FROM runs WHERE task_id IS NOT NULL AND created_at > ?)`,
-      )
-      .run(recent);
-    database
-      .prepare(
-        `UPDATE runs SET created_at = ${shift("created_at")}, ` +
-          `started_at = ${shift("started_at")}, finished_at = ${shift("finished_at")} ` +
-          `WHERE task_id IS NOT NULL AND created_at > ?`,
-      )
-      .run(recent);
-    database.exec("COMMIT");
-  } finally {
-    database.close();
   }
 }
 
@@ -918,44 +1103,6 @@ function backdateDiscussions(home: string): void {
         `UPDATE discussion_posts SET created_at = ${shift("created_at")} WHERE created_at > ?`,
       )
       .run(recent);
-    database.exec("COMMIT");
-  } finally {
-    database.close();
-  }
-}
-
-/**
- * Gives every event in the stopped controller's database in the Home `home`
- * a title, an author and an arrival time, oldest first, spread evenly over
- * the `EVENTS_BACK_MS` before now. `event.emit` sets none of the three, and
- * only a plugin's ingest does, so without this Everything's rows would be
- * untitled and all received at once, which no real log is.
- *
- * The full-text index over titles and authors is rebuilt afterwards, because
- * the controller keeps it current only for events as they are inserted.
- */
-function titleEvents(home: string): void {
-  const database = new DatabaseSync(join(home, ...DATABASE_PATH));
-  try {
-    const ids = database
-      .prepare("SELECT id FROM events ORDER BY id")
-      .all()
-      .map((row) => row["id"] as number);
-    const update = database.prepare(
-      "UPDATE events SET title = ?, author = ?, received_at = ? WHERE id = ?",
-    );
-    const now = Date.now();
-    database.exec("BEGIN");
-    for (const [index, id] of ids.entries()) {
-      const back = ((ids.length - 1 - index) / Math.max(ids.length - 1, 1)) * EVENTS_BACK_MS;
-      update.run(
-        `Pull request #${String(1_000 + index)} needs a review`,
-        EVENT_AUTHORS[index % EVENT_AUTHORS.length]!,
-        new Date(now - back).toISOString(),
-        id,
-      );
-    }
-    database.exec("INSERT INTO events_fts (events_fts) VALUES ('rebuild')");
     database.exec("COMMIT");
   } finally {
     database.close();

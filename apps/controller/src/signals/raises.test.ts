@@ -23,6 +23,8 @@ import { PluginHost, type RegisteredSignalKind } from "../plugins";
 import { ignoreRuleRepository } from "./ignore-rule-repository";
 import { SignalRaises, SignalRaisesLayer } from "./raises";
 import { signalRepository } from "./repository";
+import { SignalEntities } from "./signal-entities";
+import { buildSignalEntitiesDouble } from "./signal-entities.testing";
 
 const ASKED_KIND = "acme/asked";
 const PINGED_KIND = "acme/pinged";
@@ -48,6 +50,8 @@ const buildKind = (kind: string, probe: BuildProbe): RegisteredSignalKind => ({
   word: kind.slice("acme/".length),
   label: "Asked",
   description: "Someone asked.",
+  noun: "question",
+  asks: true,
   from: ["acme.asked"],
   rule: '"yes"',
   guidance: "Raise it.",
@@ -82,7 +86,11 @@ const ConnectionTypesStub = Layer.mock(ConnectionTypes)({
 type Deps = SignalRaises | SqlClient.SqlClient;
 
 /** Runs `effect` against a fresh database, with Acme's kinds reporting to `probe`. */
-const run = <A, E>(effect: Effect.Effect<A, E, Deps>, probe: BuildProbe = { calls: 0 }) => {
+const run = <A, E>(
+  effect: Effect.Effect<A, E, Deps>,
+  probe: BuildProbe = { calls: 0 },
+  entities: { readonly layer: Layer.Layer<SignalEntities> } = buildSignalEntitiesDouble(),
+) => {
   const kinds = [
     buildKind(ASKED_KIND, probe),
     buildKind(PINGED_KIND, probe),
@@ -95,8 +103,10 @@ const run = <A, E>(effect: Effect.Effect<A, E, Deps>, probe: BuildProbe = { call
     findSignalKind: (kind) =>
       Effect.succeed(Option.fromNullishOr(kinds.find((known) => known.kind === kind))),
     status: () => Effect.succeed(Option.some({ _tag: "active" as const })),
+    listActiveEventSources: () => Effect.succeed([{ signalKinds: kinds }] as never),
   });
   const layer = SignalRaisesLayer.pipe(
+    Layer.provide(entities.layer),
     Layer.provide(host),
     Layer.provide(ConnectionTypesStub),
     Layer.provide(FakeBoundOperationsLayer),
@@ -377,5 +387,48 @@ describe("raising a signal from a raise with nothing to raise", () => {
     );
     expect(outcome.signals).toEqual([]);
     expect(outcome.pending).toEqual([]);
+  });
+});
+
+describe("reporting the arrival of a raised signal", () => {
+  it("reports the thread of a signal it writes, and nothing for a raise an Ignore Rule catches", async () => {
+    const entities = buildSignalEntitiesDouble();
+    const written = await run(
+      Effect.gen(function* () {
+        const writtenEvent = yield* insertEvent("marta");
+        yield* insertRaise(writtenEvent);
+        yield* raiseAll;
+        yield* insertRule({ author: "dependabot[bot]" });
+        yield* insertRaise(yield* insertEvent("dependabot[bot]"));
+        yield* raiseAll;
+        return writtenEvent;
+      }),
+      { calls: 0 },
+      entities,
+    );
+
+    expect(entities.calls.arrivals).toEqual([`t-${String(written)}`]);
+  });
+
+  it("reports it inside the transaction that writes the signal, so a failed report leaves no signal", async () => {
+    const failing = {
+      layer: Layer.succeed(SignalEntities)({
+        readByRefs: () => Effect.succeed(new Map()),
+        recordArrivalAfter: (_ref, _askingKinds, write) =>
+          Effect.flatMap(write, () => Effect.die("the entity write failed")),
+      }),
+    };
+    const outcome = await run(
+      Effect.gen(function* () {
+        yield* insertRaise(yield* insertEvent("marta"));
+        yield* Effect.exit(raiseAll);
+        return yield* readOutcome;
+      }),
+      { calls: 0 },
+      failing,
+    );
+
+    expect(outcome.signals).toEqual([]);
+    expect(outcome.pending).toHaveLength(1);
   });
 });

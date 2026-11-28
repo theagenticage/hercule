@@ -23,6 +23,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
+import { isId } from "@hercule/contract";
 import { locateCompiledBinary, type LogLevel } from "@hercule/home";
 import { LocalAnnouncement, LocalEnrolment } from "@hercule/protocol";
 import { SYSTEM_ACTOR } from "../actor";
@@ -126,6 +127,15 @@ export class LocalRunnerId extends Context.Service<
   LocalRunnerId,
   { readonly read: () => string | undefined }
 >()("hercule/controller/runners/LocalRunnerId") {}
+
+/**
+ * Returns the runner id the child printed if it is a valid id, else undefined.
+ * The child's output is text the controller does not control, and a crash-loop
+ * entry stores the id as the event's runner, which fails for anything that is
+ * not an id. An id that is not valid is treated as not announced.
+ */
+const keepValidRunnerId = (runnerId: string): string | undefined =>
+  isId(runnerId) ? runnerId : undefined;
 
 /**
  * Parses one announcement line, and returns `None` when the line is not JSON
@@ -369,7 +379,7 @@ export const startLocalRunner = (
         );
 
       if ("runnerId" in announcement) {
-        announced = announcement.runnerId;
+        announced = keepValidRunnerId(announcement.runnerId);
         // Close the pipe, or the child keeps waiting for an enrolment.
         yield* writeEnrolment();
         return spawned;
@@ -390,7 +400,7 @@ export const startLocalRunner = (
       yield* Effect.forkIn(
         Effect.flatMap(Deferred.await(announcements.joinedRunnerId), (runnerId) =>
           Effect.sync(() => {
-            if (runnerId !== undefined) announced = runnerId;
+            if (runnerId !== undefined) announced = keepValidRunnerId(runnerId);
           }),
         ),
         readers,

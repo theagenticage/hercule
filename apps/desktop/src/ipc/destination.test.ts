@@ -14,8 +14,8 @@ describe("buildDestinationKey", () => {
     );
   });
 
-  it("builds different keys for a signal and a thread with the same id", () => {
-    expect(buildDestinationKey({ kind: "signal", signalId: "same-id" })).not.toBe(
+  it("builds different keys for an entity and a thread with the same id", () => {
+    expect(buildDestinationKey({ kind: "entity", ref: "same-id" })).not.toBe(
       buildDestinationKey({ kind: "thread", sessionId: "same-id" }),
     );
   });

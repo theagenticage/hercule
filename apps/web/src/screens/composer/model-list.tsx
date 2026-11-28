@@ -1,104 +1,211 @@
 import { Fragment, type JSX, type ReactNode } from "react";
 import {
-  describeAccountRow,
   describeModelRow,
-  type LoginTarget,
   type ModelMenu,
+  type ModelMenuRow,
+  type NewModelRow,
+  type SignInTarget,
+  type ThreadChoice,
 } from "@hercule/client-core";
-import { ProviderLogo } from "@hercule/ui";
-import { Lane, renderMarker, MenuRow } from "./menu";
+import { Button, HarnessLogo } from "@hercule/ui";
+import { Lane, MenuFoot, MenuRow, ProfileHead, renderMarker } from "./menu";
 
-type Row = ModelMenu["current"]["rows"][number];
-
-/** Classes that make the Log in on an account's row look like the row's note, not a button. */
-const ROW_LOGIN =
+/** Classes that make the Sign in on a dimmed row look like the row's note, not a button. */
+const ROW_SIGN_IN =
   "p-0 text-[11px] leading-normal font-normal text-muted enabled:hover:bg-transparent";
 
+/** A New row, as a profile's lane holds it. */
+export interface NewModelSaving {
+  readonly profileId: string;
+  readonly providerAccountId: string;
+  readonly model: string;
+}
+
+/** Why a save of a New row failed, and the lane it is shown under. */
+export interface NewModelRefusal extends NewModelSaving {
+  readonly message: string;
+}
+
 /**
- * The list in the model menu, below the filter. It shows, in order:
+ * The list in the model menu, below the filter. `buildModelMenu` decides what
+ * it holds; this component only draws it.
  *
- * - Recent: the models picked most recently;
- * - the account in use, with its older models collapsed;
- * - every other account, as one row that says why it cannot be picked, or as
- *   a lane of its own when the filter matches models in it.
+ * A draft shows its profiles as an accordion: a head per profile (none when
+ * the user has one profile), and under the unfolded head the profile's Recent
+ * entries, then one lane per Provider Account with its entries. A running thread shows one flat list and the line
+ * that tells the user other models start a new thread. An entry that cannot
+ * run stays in the list, dimmed, with its reason at the right and, when
+ * signing in would fix it, a Sign in on the row.
+ *
+ * A lane begins with a row for each model announced as new, with Add and Not
+ * now. Neither picks the model or closes the menu. A row listed in
+ * `savingNewModels` has both buttons `aria-disabled`: the focus stays on the
+ * pressed button and a press does nothing.
+ * `newModelRefusal` shows under the lane of the row whose save was refused.
  */
 export function ModelList({
   menu,
-  older,
-  onOlder,
-  onPickModel,
-  onPickInstance,
-  loginSlot,
+  renderProviderMark,
+  onChoose,
+  onOpenProfile,
+  onAddNewModel,
+  onDismissNewModel,
+  savingNewModels,
+  newModelRefusal,
+  signInSlot,
 }: {
   readonly menu: ModelMenu;
-  readonly older: boolean;
-  readonly onOlder: () => void;
-  readonly onPickModel: (instanceId: string, model: string) => void;
-  readonly onPickInstance: (instanceId: string) => void;
-  readonly loginSlot: (login: LoginTarget, className: string) => ReactNode;
+  /** Draws the mark of a Provider, which marks the lanes of its accounts. */
+  readonly renderProviderMark: (providerId: string) => ReactNode;
+  readonly onChoose: (choice: ThreadChoice) => void;
+  readonly onOpenProfile: (profileId: string) => void;
+  /** Adds the model of a New row to the profile whose lane holds the row. */
+  readonly onAddNewModel: (profileId: string, row: NewModelRow) => void;
+  /** Hides the model of a New row for good in the profile whose lane holds the row. */
+  readonly onDismissNewModel: (profileId: string, row: NewModelRow) => void;
+  /** The New rows whose save is running. */
+  readonly savingNewModels: readonly NewModelSaving[];
+  /** The refusal of the last save of a New row, or `null`. */
+  readonly newModelRefusal: NewModelRefusal | null;
+  readonly signInSlot: (target: SignInTarget, className: string) => ReactNode;
 }): JSX.Element {
-  const renderModelRow = (providerId: string | null, row: Row): JSX.Element => (
-    <MenuRow
-      key={`${row.instanceId}:${row.slug}`}
-      marker={renderMarker(providerId === null ? null : <ProviderLogo providerId={providerId} />)}
-      name={row.name}
-      detail={describeModelRow(row)}
-      note={row.current ? "✓" : undefined}
-      current={row.current}
-      onPick={() => {
-        onPickModel(row.instanceId, row.slug);
-      }}
-    />
-  );
+  const renderRow = (
+    row: ModelMenuRow,
+    key: string,
+    options: { readonly account?: string | null; readonly showCheck: boolean },
+  ): JSX.Element => {
+    const detail = [options.account ?? null, describeModelRow(row)]
+      .filter((part) => part !== null)
+      .join(" · ");
+    return (
+      <MenuRow
+        key={key}
+        marker={renderMarker(<HarnessLogo harnessId={row.harnessId} />)}
+        name={row.name}
+        detail={detail}
+        note={options.showCheck && row.isCurrent ? "✓" : undefined}
+        current={options.showCheck && row.isCurrent}
+        dimmed={row.problem?.message ?? null}
+        trailing={row.problem?.signIn == null ? null : signInSlot(row.problem.signIn, ROW_SIGN_IN)}
+        onPick={() => {
+          onChoose({
+            kind: "model",
+            providerAccountId: row.providerAccountId,
+            harnessId: row.harnessId,
+            model: row.model,
+          });
+        }}
+      />
+    );
+  };
+  const renderNewModelRow = (profileId: string, row: NewModelRow): JSX.Element => {
+    const busy = savingNewModels.some(
+      (each) =>
+        each.profileId === profileId &&
+        each.providerAccountId === row.providerAccountId &&
+        each.model === row.model,
+    );
+    return (
+      <MenuRow
+        key={`new:${row.providerAccountId}:${row.model}`}
+        marker={renderMarker(null)}
+        name={
+          <>
+            <span className="mr-1.5 text-label font-emph tracking-[0.1em] text-faint uppercase">
+              New
+            </span>
+            {row.name}
+          </>
+        }
+        detail={row.arrivalText}
+        plain
+        note={
+          <>
+            <Button
+              aria-disabled={busy || undefined}
+              aria-label={`Add ${row.name}`}
+              className="px-1.5 py-0.5 text-[11px] font-normal"
+              onClick={() => {
+                if (busy) return;
+                onAddNewModel(profileId, row);
+              }}
+            >
+              Add
+            </Button>
+            <Button
+              aria-disabled={busy || undefined}
+              title="Not now"
+              aria-label={`Not now: ${row.name}`}
+              className="px-1.5 py-0.5 text-[13px] font-normal"
+              onClick={() => {
+                if (busy) return;
+                onDismissNewModel(profileId, row);
+              }}
+            >
+              ×
+            </Button>
+          </>
+        }
+      />
+    );
+  };
+  const buildRowKey = (row: ModelMenuRow): string =>
+    `${row.providerAccountId}:${row.harnessId}:${row.model}`;
 
+  const emptyNote =
+    menu.empty === null ? null : <p className="px-2 py-1.5 text-meta text-faint">{menu.empty}</p>;
+  if (menu.kind === "active") {
+    return (
+      <>
+        {emptyNote}
+        {menu.rows.map((row) => renderRow(row, buildRowKey(row), { showCheck: true }))}
+        <MenuFoot>{menu.note}</MenuFoot>
+      </>
+    );
+  }
+
+  if (emptyNote !== null) return <>{emptyNote}</>;
   return (
     <>
-      {menu.recent.length === 0 ? null : <Lane label="Recent" />}
-      {menu.recent.map((row) => (
-        <MenuRow
-          key={`recent:${row.instanceId}:${row.model}`}
-          marker={renderMarker(<ProviderLogo providerId={row.providerId} />)}
-          name={row.name}
-          detail={row.account}
-          dimmed={row.dimmed}
-          onPick={() => {
-            onPickModel(row.instanceId, row.model);
-          }}
-        />
+      {menu.profiles.map((profile) => (
+        <Fragment key={profile.profileId}>
+          {menu.hasHeads ? (
+            <ProfileHead
+              label={profile.name}
+              unfolded={profile.unfolded}
+              onOpen={() => {
+                onOpenProfile(profile.profileId);
+              }}
+            />
+          ) : null}
+          {profile.empty === null ? null : (
+            <p className="px-2 py-1.5 text-meta text-faint">{profile.empty}</p>
+          )}
+          {profile.recent.length === 0 ? null : <Lane label="Recent" />}
+          {profile.recent.map((row) =>
+            renderRow(row, `recent:${buildRowKey(row)}`, {
+              account: row.account,
+              showCheck: false,
+            }),
+          )}
+          {profile.lanes.map((lane) => (
+            <Fragment key={lane.providerAccountId}>
+              <Lane label={lane.name} logo={renderProviderMark(lane.providerId)} />
+              {lane.note === null ? null : (
+                <p className="py-1.5 pr-2 pl-8 text-meta text-faint">{lane.note}</p>
+              )}
+              {lane.newModels.map((row) => renderNewModelRow(profile.profileId, row))}
+              {lane.rows.map((row) => renderRow(row, buildRowKey(row), { showCheck: true }))}
+              {newModelRefusal?.profileId === profile.profileId &&
+              newModelRefusal.providerAccountId === lane.providerAccountId ? (
+                <p className="py-1.5 pr-2 pl-8 text-fine text-fail" role="alert">
+                  {newModelRefusal.message}
+                </p>
+              ) : null}
+            </Fragment>
+          ))}
+        </Fragment>
       ))}
-      {menu.current.label === null ? null : <Lane label={menu.current.label} />}
-      {menu.current.rows.map((row) => renderModelRow(menu.current.providerId, row))}
-      {menu.current.older.length === 0 ? null : older ? (
-        menu.current.older.map((row) => renderModelRow(menu.current.providerId, row))
-      ) : (
-        <MenuRow
-          marker={renderMarker(null)}
-          name={<span className="text-faint">older models ({menu.current.older.length}) ›</span>}
-          onPick={onOlder}
-        />
-      )}
-      {menu.others.map((instance) =>
-        instance.dimmed !== null || instance.rows.length === 0 ? (
-          <MenuRow
-            key={instance.instanceId}
-            className="mt-1 rounded-t-none border-t border-line-soft pt-[9px]"
-            marker={renderMarker(<ProviderLogo providerId={instance.providerId} />)}
-            name={instance.name}
-            detail={describeAccountRow(instance)}
-            note={instance.dimmed === null ? `${instance.models} ›` : undefined}
-            dimmed={instance.dimmed}
-            trailing={instance.login === null ? null : loginSlot(instance.login, ROW_LOGIN)}
-            onPick={() => {
-              onPickInstance(instance.instanceId);
-            }}
-          />
-        ) : (
-          <Fragment key={instance.instanceId}>
-            <Lane label={instance.name} />
-            {instance.rows.map((row) => renderModelRow(instance.providerId, row))}
-          </Fragment>
-        ),
-      )}
     </>
   );
 }

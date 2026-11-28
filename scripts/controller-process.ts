@@ -17,7 +17,9 @@
  * caller has to read what the command printed.
  */
 import { spawn, spawnSync } from "node:child_process";
+import { createCipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
@@ -36,15 +38,16 @@ const BUN = process.execPath.endsWith("/bun") ? process.execPath : "bun";
 
 /**
  * Builds the environment a spawned Hercule sees: this process's environment,
- * without any `HERCULE_` variable. A developer with `HERCULE_HOME` or
- * `HERCULE_TOKEN` set in their shell must not change what a test or a
- * measurement exercises.
+ * without any `HERCULE_` or `OTEL_` variable. A developer with `HERCULE_HOME`
+ * or `HERCULE_TOKEN` set in their shell must not change what a test or a
+ * measurement exercises, and one with `OTEL_EXPORTER_OTLP_ENDPOINT` set must
+ * not receive a test controller's traces in their own collector.
  */
 export function buildCleanEnv(): Record<string, string> {
   return Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] =>
-        entry[1] !== undefined && !entry[0].startsWith("HERCULE_"),
+        entry[1] !== undefined && !entry[0].startsWith("HERCULE_") && !entry[0].startsWith("OTEL_"),
     ),
   );
 }
@@ -61,6 +64,53 @@ export function deleteMasterKeyItem(home: string): void {
   spawnSync("security", ["delete-generic-password", "-s", "Hercule", "-a", home], {
     stdio: "ignore",
   });
+}
+
+/**
+ * Returns the controller's Master Key for the Hercule Home `home`, as AES-GCM
+ * key bytes. On macOS it sits in the login keychain, under the home's path;
+ * elsewhere it is the base64 text of `<home>/master.key`. The controller must
+ * have booted in `home` already, because it makes the key on its first boot.
+ */
+export function readMasterKey(home: string): Buffer {
+  const encoded =
+    process.platform === "darwin"
+      ? spawnSync("security", ["find-generic-password", "-s", "Hercule", "-a", home, "-w"], {
+          encoding: "utf8",
+        }).stdout
+      : readFileSync(join(home, "master.key"), "utf8");
+  return Buffer.from(encoded.trim(), "base64");
+}
+
+/** A Provider Account's API key as the controller stores it in the `secrets` table. */
+export interface EncryptedAccountKey {
+  readonly nonce: Uint8Array;
+  readonly ciphertext: Uint8Array;
+}
+
+/**
+ * Encrypts `apiKey` the way the controller stores a Provider Account's API
+ * key: AES-256-GCM under the Master Key of `home`, with the owner and the name
+ * of the secret as associated data, so a stored key cannot be moved to another
+ * account. The ciphertext ends with the 16-byte authentication tag, as Web
+ * Crypto lays it out. `providerAccountId` is the account's canonical UUID
+ * text. The caller inserts the result as the `secrets` row
+ * `(provider-account, providerAccountId, apiKey)`.
+ */
+export function encryptAccountKey(
+  home: string,
+  providerAccountId: string,
+  apiKey: string,
+): EncryptedAccountKey {
+  const nonce = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", readMasterKey(home), nonce);
+  cipher.setAAD(Buffer.from(`provider-account|${providerAccountId}|apiKey`));
+  const ciphertext = Buffer.concat([
+    cipher.update(apiKey, "utf8"),
+    cipher.final(),
+    cipher.getAuthTag(),
+  ]);
+  return { nonce, ciphertext };
 }
 
 /** The result of a finished command. */
@@ -84,6 +134,24 @@ export interface Ran {
 export function pickCandidatePort(): number {
   return 20_000 + Math.floor(Math.random() * 12_768);
 }
+
+/**
+ * Returns a port on 127.0.0.1 that nothing listened on a moment ago. The port
+ * is picked below the range the kernel uses for outgoing connections, so
+ * that, between this check and the moment a test's child process binds the
+ * port, only a process that deliberately listens there can take it.
+ */
+export const findFreePort = async (): Promise<number> => {
+  for (;;) {
+    const port = pickCandidatePort();
+    const isFree = await new Promise<boolean>((resolve) => {
+      const server = createServer();
+      server.once("error", () => resolve(false));
+      server.listen(port, "127.0.0.1", () => server.close(() => resolve(true)));
+    });
+    if (isFree) return port;
+  }
+};
 
 /** A controller process that is running and responding. */
 export interface Controller {
@@ -376,16 +444,19 @@ export async function completeSetup(options: {
 /**
  * Starts a controller from the compiled binary against `home`, completes
  * first-run setup as `username` (`USERNAME` when it is not given), and
- * returns the controller once a client can sign in to it. Fails when there is no compiled binary, when the controller
- * does not start, or when setup fails; a controller that started is stopped
- * before a failed setup is reported.
+ * returns the controller once a client can sign in to it. `env` is added to
+ * the environment of the controller and of the runner it starts for itself.
+ * Fails when there is no compiled binary, when the controller does not start,
+ * or when setup fails; a controller that started is stopped before a failed
+ * setup is reported.
  */
 export async function startSetUpController(options: {
   readonly home: string;
   readonly username?: string | undefined;
+  readonly env?: Readonly<Record<string, string>> | undefined;
 }): Promise<Controller> {
   const binary = findCompiledBinary();
-  const controller = await startController({ home: options.home, binary });
+  const controller = await startController({ home: options.home, binary, env: options.env });
   const setup = await completeSetup({
     home: options.home,
     url: controller.url,

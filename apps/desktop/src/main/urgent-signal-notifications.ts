@@ -1,11 +1,11 @@
 /**
  * How the app tells the user, outside its window, that an urgent signal has
- * arrived: a signal of priority `urgent` that opens on Intake's To do, under
- * Now, shows a native notification while the window is not focused. Spec 17
+ * arrived: an open signal of priority `urgent` about an External Entity shows
+ * a native notification while the window is not focused. Spec 17
  * (§Native behaviour) owns the rules.
  *
- * The page holds the signals, so it sends main every urgent signal open on
- * To do each time that list changes. Main keeps everything else: the
+ * The page holds the signals, so it sends main every urgent open signal each
+ * time that list changes. Main keeps everything else: the
  * notifications it has shown, the last list it was sent, whether the window
  * is focused, and whether the user is signed in. Main's state outlives a
  * reload of the page, and main learns of a sign-out before the page can send
@@ -35,7 +35,7 @@ import type { NativeNotification, WaitingNotificationPlatform } from "./waiting-
 /** What the service needs from the platform: only Electron's `Notification` class, or a fake. */
 export type UrgentSignalNotificationPlatform = Pick<WaitingNotificationPlatform, "Notification">;
 
-/** The native notifications of the urgent signals open on To do. */
+/** The native notifications of the urgent open signals. */
 export class UrgentSignalNotifications extends Context.Service<
   UrgentSignalNotifications,
   {
@@ -48,16 +48,15 @@ export class UrgentSignalNotifications extends Context.Service<
     readonly setSignedIn: (signedIn: boolean) => Effect.Effect<void>;
 
     /**
-     * Takes `signals`, every urgent signal open on To do now, and brings the
+     * Takes `signals`, every urgent open signal now, and brings the
      * notifications in line with them. A signal has at most one
      * notification:
      *
      * - a signal that was not in the last list shows a notification while
      *   the window is not focused. A user who has the window in front sees
-     *   it arrive on Intake. A signal back from snooze is not in the last
-     *   list, so it notifies again;
+     *   it arrive on the Inbox;
      * - a notification whose signal is no longer in the list, because it was
-     *   resolved, snoozed or lowered anywhere, is removed;
+     *   resolved anywhere, is removed;
      * - otherwise the notification stays as it is.
      *
      * The first list after signing in shows no notification, so that
@@ -66,7 +65,7 @@ export class UrgentSignalNotifications extends Context.Service<
      * that arrives during the reload still gets its notification.
      *
      * Clicking a notification shows and focuses the window, and asks the
-     * page to open Intake with the signal selected.
+     * page to open the signal's External Entity in the Inbox's pane.
      */
     readonly setUrgentSignals: (signals: ReadonlyArray<UrgentSignal>) => Effect.Effect<void>;
   }
@@ -98,14 +97,14 @@ export const makeUrgentSignalNotificationsLayer = (
         shown.delete(signalId);
       };
 
-      const showNotification = ({ signalId, title, body }: UrgentSignal): void => {
+      const showNotification = ({ signalId, ref, title, body }: UrgentSignal): void => {
         const notification = new platform.Notification({ title, body });
         notification.once("click", () => {
           // A notification already removed can still be clicked on screen:
           // its signal left the list, or the user signed out.
           if (shown.get(signalId) !== notification) return;
           shown.delete(signalId);
-          runFork(window.showAndSend("destination.open", { kind: "signal", signalId }));
+          runFork(window.showAndSend("destination.open", { kind: "entity", ref }));
         });
         // A notification macOS refuses, because the user has not allowed the
         // app's notifications, fails with no sign on screen.

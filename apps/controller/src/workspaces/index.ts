@@ -32,11 +32,17 @@ export {
   type RepositoryRef,
 } from "./checked-out-repositories";
 export { requireCheckedOut, validateCheckoutDirectories } from "./layout";
-export { buildReadyClause, type Retention, type WorkspaceHolder } from "./repository";
+export {
+  buildReadyClause,
+  type Retention,
+  type StoredWorkspace,
+  type WorkspaceHolder,
+} from "./repository";
 export {
   buildRunBranch,
   buildThreadBranch,
   WorkspaceService,
   WorkspaceServiceLayer,
   type QueryInput,
+  type SweepDisposal,
 } from "./service";

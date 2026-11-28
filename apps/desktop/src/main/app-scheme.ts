@@ -8,7 +8,9 @@
  *   server.
  *
  * Every response, a 404 too, carries the renderer's Content-Security-Policy,
- * built for the controller URL saved at the time of the request.
+ * built for the controller URL saved at the time of the request, and the
+ * Document-Policy that lets main read the page's JavaScript call stack when
+ * the page stops responding (see `./page-hang-log.ts`).
  */
 import path from "node:path";
 import { net } from "electron";
@@ -25,13 +27,21 @@ import { buildRendererFileTable, findRendererFile } from "./renderer-files";
 const answerWithStatus = (status: number): Response => new Response(null, { status });
 
 /**
- * Returns `response` with the Content-Security-Policy header set to `policy`.
- * It copies the response, because the headers of a fetched response cannot
- * be changed.
+ * The Document-Policy every page gets. Chromium gives main a page's
+ * JavaScript call stack (`collectJavaScriptCallStack`) only when the page
+ * opted in with it, and answers with a refusal otherwise.
  */
-const addContentSecurityPolicy = (response: Response, policy: string): Response => {
+const DOCUMENT_POLICY = "include-js-call-stacks-in-crash-reports";
+
+/**
+ * Returns `response` with the Content-Security-Policy header set to `policy`
+ * and the Document-Policy header set to `DOCUMENT_POLICY`. It copies the
+ * response, because the headers of a fetched response cannot be changed.
+ */
+const addPagePolicies = (response: Response, policy: string): Response => {
   const headers = new Headers(response.headers);
   headers.set("content-security-policy", policy);
+  headers.set("document-policy", DOCUMENT_POLICY);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -110,7 +120,7 @@ const make = (devServerUrl: string | null) =>
           const response = yield* answerRequest(request);
           const controllerUrl = yield* settings.readControllerUrl;
           const policy = buildContentSecurityPolicy(controllerUrl, devServerUrl);
-          return addContentSecurityPolicy(response, policy);
+          return addPagePolicies(response, policy);
         }),
     };
   });

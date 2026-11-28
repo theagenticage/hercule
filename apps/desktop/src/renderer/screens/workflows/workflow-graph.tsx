@@ -35,6 +35,8 @@ import { findNodeRunMark } from "./node-run-mark";
 import { BUS, CARD, END_RADIUS, END_STUB, layOutGraphDrawing } from "./workflow-graph-layout";
 import "./workflow-graph.css";
 import { isTextField } from "../../app/text-field";
+import { isPrimaryModifierHeld } from "../../app/primary-modifier";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 
 /** The space between the drawing and the pane's edges, which `.graph`'s negative margin takes back. */
 const PANE_PADDING = 12;
@@ -64,12 +66,17 @@ const clamp = (value: number, min: number, max: number): number =>
 
 /**
  * Returns the zoom that a key press asks for, or `undefined` for a key that
- * does not zoom: ⌘= or ⌘+ zooms in, ⌘- out, ⌘0 to 100%, and ⇧1 fits the
- * graph, as in Figma. ⇧1 is read from the key's place, because its character
- * is "!".
+ * does not zoom: ⌘= or ⌘+ zooms in, ⌘- out, ⌘0 to 100% (Ctrl instead of ⌘ on
+ * Linux), and ⇧1 fits the graph, as in Figma. ⇧1 is
+ * read from the key's place, because its character is "!".
  */
-const findKeyZoom = (event: KeyboardEvent, scale: number, fitScale: number): number | undefined => {
-  if (event.metaKey) {
+const findKeyZoom = (
+  event: KeyboardEvent,
+  platform: DesktopPlatform,
+  scale: number,
+  fitScale: number,
+): number | undefined => {
+  if (isPrimaryModifierHeld(event, platform)) {
     if (event.key === "=" || event.key === "+") return scale * ZOOM_STEP;
     if (event.key === "-") return scale / ZOOM_STEP;
     if (event.key === "0") return 1;
@@ -214,6 +221,7 @@ export function WorkflowGraph({
   label,
   plugins,
   overlay,
+  platform,
   onOpenSession,
 }: {
   readonly drawing: WorkflowGraphDrawing;
@@ -222,6 +230,8 @@ export function WorkflowGraph({
   readonly label: string;
   readonly plugins: ReadonlyArray<PluginIdentity>;
   readonly overlay?: RunOverlay | undefined;
+  /** The platform the app runs on, which decides the key that zooms: ⌘ on a Mac, Ctrl on Linux. */
+  readonly platform: DesktopPlatform;
   readonly onOpenSession?: ((sessionId: string) => void) | undefined;
 }): JSX.Element {
   const id = useId().replace(/[^\w-]/g, "");
@@ -272,7 +282,7 @@ export function WorkflowGraph({
   };
   const zoomWithKeys = (event: KeyboardEvent) => {
     if (!canZoom) return;
-    const next = findKeyZoom(event, scale, fitScale);
+    const next = findKeyZoom(event, platform, scale, fitScale);
     if (next === undefined) return;
     event.preventDefault();
     zoomTo(next);

@@ -1,7 +1,7 @@
 /**
  * Tests `buildThreadBlocks(rows, agent)`, which turns a thread's transcript
  * into the flat list of blocks the desktop draws, and
- * `appendSendingMessages(blocks, sending)`, which adds the messages on their
+ * `appendSendingMessages(blocks, sending, rows)`, which adds the messages on their
  * way into the session.
  *
  * The fixtures follow the adapters' real shapes: a user message is an
@@ -10,13 +10,21 @@
  * `content.delta` rows. Times are seconds after 09:00.
  */
 import { describe, expect, it } from "vitest";
-import type { Input, OpenRequest, Session, Subagent, TranscriptRow } from "@hercule/contract";
+import {
+  appendPromptContext,
+  type Input,
+  type OpenRequest,
+  type Session,
+  type Subagent,
+  type TranscriptRow,
+} from "@hercule/contract";
 import { buildSessionAgentState, buildSubagentAgentState } from "./agent-state";
 import { appendSendingMessages, buildThreadBlocks, type ThreadBlock } from "./blocks";
+import type { McpServerWarningEntry } from "../mcp-servers/fix";
 import { buildWorkRows } from "./work-rows";
 
-type ProviderEvent = TranscriptRow["event"];
-type ItemKind = Extract<ProviderEvent, { _tag: "item.started" }>["kind"];
+type HarnessEvent = TranscriptRow["event"];
+type ItemKind = Extract<HarnessEvent, { _tag: "item.started" }>["kind"];
 
 const START = Date.parse("2026-09-30T09:00:00.000Z");
 
@@ -26,7 +34,7 @@ const buildInstant = (seconds: number): string => new Date(START + seconds * 100
 let position = 0;
 
 /** Wraps an event in a transcript row at the next position. */
-const buildRow = (event: ProviderEvent): TranscriptRow => ({
+const buildRow = (event: HarnessEvent): TranscriptRow => ({
   position: ++position,
   at: event.at,
   event,
@@ -175,12 +183,14 @@ const buildWarning = (
   seconds: number,
   turnId: string | undefined,
   message: string,
+  mcpServers?: McpServerWarningEntry[],
 ): TranscriptRow =>
   buildRow({
     _tag: "runtime.warning",
     ...buildEnvelope(seconds),
     ...(turnId === undefined ? {} : { turnId }),
     message,
+    ...(mcpServers === undefined ? {} : { mcpServers }),
   });
 
 /** Returns a `runtime.notice` row, in turn `turnId` or, when it is undefined, between turns. */
@@ -245,7 +255,8 @@ const BASE: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "instance-claude-code",
+  providerAccountId: "account-anthropic",
+  harnessId: "claude-code/claude-code",
   runnerId: "runner-1",
   workspaceId: null,
   projectId: null,
@@ -261,6 +272,7 @@ const BASE: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-30T09:00:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 const IDLE = BASE;
@@ -886,6 +898,25 @@ describe("buildThreadBlocks", () => {
     expect(blocks.find((block) => block.kind === "warning")).toMatchObject({
       at: buildInstant(3),
     });
+  });
+
+  it("keeps the MCP Servers a warning names, and gives a warning about nothing else none", () => {
+    const entries: McpServerWarningEntry[] = [
+      { mcpServerId: "s-work", reason: "needs-sign-in" },
+      { mcpServerId: "s-hobby", reason: "missing-grant" },
+    ];
+    const rows = [
+      buildTurnStarted("t1", 0),
+      buildWarning(1, "t1", "Sentry (work) needs sign-in", entries),
+      buildWarning(2, "t1", "retrying after a 529"),
+    ];
+
+    const warnings = buildThreadBlocks(rows, buildSessionAgentState(BUSY)).filter(
+      (block) => block.kind === "warning",
+    );
+
+    expect(warnings[0]?.mcpServers).toEqual(entries);
+    expect(warnings[1]).not.toHaveProperty("mcpServers");
   });
 
   it("places each runtime notice where its row sits, without splitting the work stretch", () => {
@@ -1558,6 +1589,48 @@ describe("buildThreadBlocks: compaction and unknown steps, drawn as work rows", 
   });
 });
 
+describe("buildThreadBlocks: the context block of a user message", () => {
+  const block = appendPromptContext("", {
+    origin: { kind: "one" },
+    things: [
+      {
+        entityId: "01a1317e-d8d3-7402-8971-cfcc37f653cb",
+        ref: "linear:issue:northwind/SHOP-142",
+        fields: [],
+      },
+    ],
+  });
+  const text = `Look into this.\n\n${block}`;
+  const agent = buildSessionAgentState(IDLE);
+
+  it("reads a block in the first message only, and leaves a later one as words", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 1, text),
+      buildTurnCompleted("t1", 2),
+      buildTurnStarted("t2", 3),
+      ...buildUserMessage("t2", "u2", 4, text),
+      buildTurnCompleted("t2", 5),
+    ];
+    const [first, later] = buildThreadBlocks(rows, agent).filter((each) => each.kind === "user");
+    expect(first).toMatchObject({ text: "Look into this.", context: { text: block } });
+    expect(later).toMatchObject({ text });
+    expect(later).not.toHaveProperty("context");
+  });
+
+  it("keeps the whole brief of a subagent, even when it ends in a block", () => {
+    const rows = [
+      buildTurnStarted("t1", 0),
+      ...buildUserMessage("t1", "u1", 1, text),
+      buildTurnCompleted("t1", 2),
+    ];
+    const subagentAgent = { ...agent, isSubagent: true };
+    const [brief] = buildThreadBlocks(rows, subagentAgent).filter((each) => each.kind === "user");
+    expect(brief).toMatchObject({ text });
+    expect(brief).not.toHaveProperty("context");
+  });
+});
+
 describe("appendSendingMessages", () => {
   const SENDING: Input = {
     id: "01a1317e-d8d3-7402-8971-cfcc37f653ca",
@@ -1594,14 +1667,21 @@ describe("appendSendingMessages", () => {
     steered: false,
     at: buildInstant(0),
   };
+  const EARLIER_ROWS = [
+    buildTurnStarted("t1", 0),
+    ...buildUserMessage("t1", "u1", 0, "Fix the typo."),
+  ];
   const PENDING: ThreadBlock = { kind: "pending", key: "pending", since: buildInstant(1) };
 
   it("adds a sending message after the transcript's blocks", () => {
-    expect(appendSendingMessages([EARLIER], [SENDING])).toEqual([EARLIER, SENT_BLOCK]);
+    expect(appendSendingMessages([EARLIER], [SENDING], EARLIER_ROWS)).toEqual([
+      EARLIER,
+      SENT_BLOCK,
+    ]);
   });
 
   it("keeps the agent's closing status line last", () => {
-    expect(appendSendingMessages([EARLIER, PENDING], [SENDING])).toEqual([
+    expect(appendSendingMessages([EARLIER, PENDING], [SENDING], EARLIER_ROWS)).toEqual([
       EARLIER,
       SENT_BLOCK,
       PENDING,
@@ -1611,15 +1691,33 @@ describe("appendSendingMessages", () => {
   it("names the session whose agent sent the message", () => {
     const sender = "01a12f36-0000-7000-8000-0000000000aa";
     const fromAgent = { ...SENDING, actor: `session:${sender}` };
-    expect(appendSendingMessages([EARLIER], [fromAgent])).toEqual([
+    expect(appendSendingMessages([EARLIER], [fromAgent], EARLIER_ROWS)).toEqual([
       EARLIER,
       { ...SENT_BLOCK, senderSessionId: sender },
     ]);
   });
 
+  it("reads the context block of a sending message apart from the user's words", () => {
+    const block = appendPromptContext("", {
+      origin: { kind: "one" },
+      things: [
+        {
+          entityId: "01a1317e-d8d3-7402-8971-cfcc37f653cb",
+          ref: "linear:issue:northwind/SHOP-142",
+          fields: [],
+        },
+      ],
+    });
+    const withContext = { ...SENDING, text: `Look into this.\n\n${block}` };
+    const [sent] = appendSendingMessages([], [withContext], []);
+    expect(sent).toMatchObject({ text: "Look into this.", context: { text: block, lineCount: 3 } });
+    const [plain] = appendSendingMessages([], [SENDING], []);
+    expect(plain).not.toHaveProperty("context");
+  });
+
   it("returns the same list when nothing is sending", () => {
     const blocks = [EARLIER];
-    expect(appendSendingMessages(blocks, [])).toBe(blocks);
+    expect(appendSendingMessages(blocks, [], [])).toBe(blocks);
   });
 });
 

@@ -66,15 +66,15 @@ export function isLiveSessionTestEnabled(): boolean {
 /**
  * ## The login a live session runs on
  *
- * A session runs against the Provider Instance's own `CLAUDE_CONFIG_DIR` under
- * the runner's storage (spec 06 section 4.2), which in a throwaway Hercule
- * Home is empty, so nothing could start. There are two ways to give it a
+ * A session runs against the Provider Account's own Harness Home under the
+ * runner's storage (spec 06 section 9.1), which in a throwaway Hercule Home is
+ * empty, so nothing could start. There are two ways to give it a
  * login, and a case that has neither is skipped with a message:
  *
  * - `HERCULE_E2E_CLAUDE_CREDENTIALS` names a file holding what the Claude CLI
  *   stores as its credential. `lendCredential` copies it into the throwaway
- *   instance directory as `.credentials.json`, and the caller re-probes the
- *   instance; the whole home, credential included, is deleted when the suite
+ *   Harness Home as `.credentials.json`, and the caller re-probes the
+ *   account; the whole home, credential included, is deleted when the suite
  *   ends. Reading the developer's own login from wherever their machine keeps
  *   it is up to the caller, never this file: a test that reads a personal
  *   credential store takes a secret nobody gave it.
@@ -102,18 +102,21 @@ export function readRunnerStorageDir(home: string): string {
 }
 
 /**
- * Returns `<home>/runner/<storage>/providers/<instanceId>`: the instance's
- * private config directory, inside the storage directory of this runner. The
- * runner writes `runner.json` as it enrols, so nothing may call this before
- * then.
+ * Returns `<home>/runner/<storage>/providers/homes/<accountId>/<harnessId>`:
+ * the Harness Home of an account that was created on this build, inside the
+ * storage directory of this runner (spec 06 section 9.1). The qualified
+ * harness id supplies the last two folder levels. An account carried over from
+ * an older Hercule keeps `providers/<id>` instead, but no account in these
+ * tests is one. The runner writes `runner.json` as it enrols, so nothing may
+ * call this before then.
  */
-export function buildInstanceDir(home: string, instanceId: string): string {
-  return join(readRunnerStorageDir(home), "providers", instanceId);
+export function buildHarnessHomeDir(home: string, accountId: string, harnessId: string): string {
+  return join(readRunnerStorageDir(home), "providers", "homes", accountId, harnessId);
 }
 
-/** Copies the credential the caller named into the throwaway instance, for this run. */
-export function lendCredential(home: string, instanceId: string): void {
-  const dir = buildInstanceDir(home, instanceId);
+/** Copies the credential the caller named into the throwaway Harness Home, for this run. */
+export function lendCredential(home: string, accountId: string, harnessId: string): void {
+  const dir = buildHarnessHomeDir(home, accountId, harnessId);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, ".credentials.json");
   writeFileSync(path, readFileSync(LENT_CREDENTIALS!, "utf8"), { mode: 0o600 });
@@ -156,7 +159,7 @@ export function createTemporaryHome(gitconfig?: string): TemporaryHome {
     home,
     // A process can still write into the home for a moment after the
     // controller has stopped. The runner stops the Claude Code CLI it started
-    // to check the provider, but does not wait for the CLI to exit, and the
+    // to check the harness, but does not wait for the CLI to exit, and the
     // CLI writes its config file into the home. When that file lands in a
     // folder Node has just emptied, the delete fails with ENOTEMPTY. Trying
     // again removes the late file too.
@@ -232,34 +235,39 @@ export interface Page<A> {
 /** Long enough for the runner to enrol and to probe a directory it was just given. */
 export const LOGIN_DEADLINE_MS = 120_000;
 
-/** What a runner reported about one Provider Instance when it last probed it. */
+/** What a runner reported about one Provider Account in one harness when it last probed it. */
 export interface Snapshot {
   readonly auth: { readonly status: string; readonly message?: string };
-  readonly models: ReadonlyArray<{ readonly slug: string }>;
+  /** `imageInput` is `null` for a model that takes no images. */
+  readonly models: ReadonlyArray<{ readonly slug: string; readonly imageInput?: unknown }>;
 }
 
-/** A Provider Instance as `provider.query` returns it. */
-export interface Instance {
+/** A Provider Account as `providerAccount.query` returns it. */
+export interface ProviderAccount {
   readonly id: string;
+  /** The qualified id of the account's Provider, such as `anthropic/anthropic`. */
   readonly providerId: string;
+  readonly label: string | null;
+  /** The qualified id of the harness a session uses when it names none. */
+  readonly defaultHarnessId: string;
   readonly snapshots: ReadonlyArray<Snapshot>;
 }
 
 /**
- * Lists every Provider Instance, over HTTP rather than through the CLI: these
+ * Lists every Provider Account, over HTTP rather than through the CLI: these
  * tests wait on the snapshots, and waiting is a loop, not a command.
  */
-export async function listInstances(options: {
+export async function listProviderAccounts(options: {
   readonly url: string;
   readonly apiKey: string;
-}): Promise<ReadonlyArray<Instance>> {
-  const response = await fetch(`${options.url}/api/v1/providers`, {
+}): Promise<ReadonlyArray<ProviderAccount>> {
+  const response = await fetch(`${options.url}/api/v1/provider-accounts`, {
     headers: { authorization: `Bearer ${options.apiKey}` },
   });
   const body = await response.text();
   if (!response.ok)
-    throw new Error(`GET /api/v1/providers returned ${String(response.status)}: ${body}`);
-  return JSON.parse(body) as ReadonlyArray<Instance>;
+    throw new Error(`GET /api/v1/provider-accounts returned ${String(response.status)}: ${body}`);
+  return JSON.parse(body) as ReadonlyArray<ProviderAccount>;
 }
 
 /**
@@ -288,33 +296,98 @@ export async function waitForEnrolledRunner(options: {
   }
 }
 
-/** Returns the claude-code Provider Instance the controller creates for itself. */
-export async function readClaudeInstance(options: {
+/** The qualified id of the Claude Code harness. */
+export const CLAUDE_CODE = "claude-code/claude-code";
+
+/**
+ * The Provider and account kind that `ensureAccountOfHarness` creates for each
+ * harness. Claude Code, Codex and Antigravity get a subscription that signs in on each
+ * machine, which is created without credentials. pi runs on a Z.ai key, which
+ * the controller checks with Z.ai, so it needs `ZAI_API_KEY` and a network.
+ */
+const ACCOUNT_KIND_OF_HARNESS: Readonly<
+  Record<string, { readonly providerId: string; readonly kind: string }>
+> = {
+  "claude-code/claude-code": {
+    providerId: "anthropic/anthropic",
+    kind: "subscription-per-machine",
+  },
+  "codex/codex": { providerId: "openai/openai", kind: "subscription-per-machine" },
+  "antigravity/antigravity": { providerId: "google/google", kind: "subscription-per-machine" },
+  "pi/pi": { providerId: "zai/zai", kind: "api-key" },
+};
+
+/**
+ * Returns the Provider Account whose default harness is `harnessId`. A fresh
+ * controller has no account, so when there is none this creates one with
+ * `providerAccount.create`, over HTTP so a key is never on a command line.
+ */
+export async function ensureAccountOfHarness(options: {
   readonly url: string;
   readonly apiKey: string;
-}): Promise<Instance> {
-  const found = (await listInstances(options)).find((one) => one.providerId === "claude-code");
-  if (found === undefined) throw new Error("no claude-code Provider Instance was seeded");
-  return found;
+  readonly harnessId: string;
+}): Promise<ProviderAccount> {
+  const existing = (await listProviderAccounts(options)).find(
+    (one) => one.defaultHarnessId === options.harnessId,
+  );
+  if (existing !== undefined) return existing;
+  const made = ACCOUNT_KIND_OF_HARNESS[options.harnessId];
+  if (made === undefined) {
+    throw new Error(`the e2e harness knows no account kind to create for ${options.harnessId}`);
+  }
+  if (made.kind === "api-key" && ZAI_API_KEY === undefined) {
+    throw new Error(`a ${options.harnessId} account needs ZAI_API_KEY on the environment`);
+  }
+  const response = await fetch(`${options.url}/api/v1/provider-accounts`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      ...made,
+      ...(made.kind === "api-key" ? { credentials: { apiKey: ZAI_API_KEY } } : {}),
+    }),
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`POST /api/v1/provider-accounts returned ${String(response.status)}: ${body}`);
+  }
+  return JSON.parse(body) as ProviderAccount;
+}
+
+/** Returns the Claude Code Provider Account, creating it when the controller has none. */
+export function ensureClaudeAccount(options: {
+  readonly url: string;
+  readonly apiKey: string;
+}): Promise<ProviderAccount> {
+  return ensureAccountOfHarness({ ...options, harnessId: CLAUDE_CODE });
 }
 
 /**
- * Probes the instance until a machine reports that its login works, and
- * returns that snapshot. The probe is repeated rather than trusted once: a
- * probe of a directory that was empty a moment ago has been seen to return
- * `unauthenticated`.
+ * Probes the account in its harness until a machine reports that its login
+ * works, and returns that snapshot. The probe is repeated rather than trusted
+ * once: a probe of a directory that was empty a moment ago has been seen to
+ * return `unauthenticated`.
  */
 export async function probeUntilLoggedIn(options: {
   readonly home: string;
   readonly binary: string;
   readonly runnerId: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  readonly harnessId: string;
 }): Promise<Snapshot> {
   const deadline = Date.now() + LOGIN_DEADLINE_MS;
   let last: string;
   for (;;) {
     const ran = await runCli(
-      ["runner", "probe", options.runnerId, "--instance", options.instanceId, "--json"],
+      [
+        "runner",
+        "probe",
+        options.runnerId,
+        "--account",
+        options.providerAccountId,
+        "--harness",
+        options.harnessId,
+        "--json",
+      ],
       options,
     );
     if (ran.code === 0) {
@@ -326,36 +399,41 @@ export async function probeUntilLoggedIn(options: {
     }
     if (Date.now() > deadline) {
       throw new Error(
-        `the instance never probed ok within ${String(LOGIN_DEADLINE_MS / 1000)}s: ${last}`,
+        `the account never probed ok within ${String(LOGIN_DEADLINE_MS / 1000)}s: ${last}`,
       );
     }
     await sleep(2_000);
   }
 }
 
-/** A runner, a Provider Instance and the login it runs on, all ready. */
-export interface LoggedInInstance {
+/** A runner, a Provider Account and the login it runs on, all ready. */
+export interface LoggedInAccount {
   readonly runnerId: string;
-  readonly instance: Instance;
+  readonly account: ProviderAccount;
   readonly snapshot: Snapshot;
 }
 
 /**
  * Prepares everything a live session needs before it can be spawned: the
- * enrolled runner, the claude-code instance, the copied credential when the
+ * enrolled runner, the Claude Code account (created when there is none), the copied credential when the
  * caller named one, and a probe that confirms the login works.
  */
-export async function prepareLoggedInInstance(options: {
+export async function prepareLoggedInAccount(options: {
   readonly home: string;
   readonly binary: string;
   readonly url: string;
   readonly apiKey: string;
-}): Promise<LoggedInInstance> {
+}): Promise<LoggedInAccount> {
   const runnerId = await waitForEnrolledRunner(options);
-  const instance = await readClaudeInstance(options);
-  if (LENT_CREDENTIALS !== undefined) lendCredential(options.home, instance.id);
-  const snapshot = await probeUntilLoggedIn({ ...options, runnerId, instanceId: instance.id });
-  return { runnerId, instance, snapshot };
+  const account = await ensureClaudeAccount(options);
+  if (LENT_CREDENTIALS !== undefined) lendCredential(options.home, account.id, CLAUDE_CODE);
+  const snapshot = await probeUntilLoggedIn({
+    ...options,
+    runnerId,
+    providerAccountId: account.id,
+    harnessId: CLAUDE_CODE,
+  });
+  return { runnerId, account, snapshot };
 }
 
 /** A session as the session operations return it. */
@@ -608,9 +686,9 @@ export interface LoginTarget {
   readonly apiKey: string;
 }
 
-/** One harness (a Provider) that the live skill tests drive, and how they drive it. */
+/** One harness that the live skill tests drive, and how they drive it. */
 export interface LiveHarness {
-  readonly providerId: string;
+  readonly harnessId: string;
   readonly label: string;
   /** Returns the input that runs the library skill or the user's skill `name`. */
   readonly invokeSkill: (name: string) => string;
@@ -618,16 +696,26 @@ export interface LiveHarness {
   readonly invokeRepositorySkill: (checkout: string, name: string) => string;
   /** Checks whether a model slug is one of the cheap models the live tests prefer. */
   readonly isCheapModel: (slug: string) => boolean;
+  /**
+   * The Access Mode its Threads start in when a test names none, or
+   * `undefined` for the default. A harness that declares `auto` unsupported
+   * falls back to a mode where it asks before every command, and a test that
+   * expects commands to run unasked would wait on that question forever.
+   */
+  readonly startAccessMode?: string;
   /** Returns why this harness cannot run on this machine, or `undefined` when it can. */
   readonly findSkipReason: () => string | undefined;
-  /** Gives the instance its login on the runner in `target`. */
-  readonly lendLogin: (target: LoginTarget, instanceId: string) => Promise<void>;
+  /** Gives the account its login in this harness on the runner in `target`. */
+  readonly lendLogin: (target: LoginTarget, accountId: string) => Promise<void>;
 }
 
-/** The Codex `auth.json` lent to the Codex instance, when the developer named one. */
+/** The Codex `auth.json` lent to the OpenAI account, when the developer named one. */
 const LENT_CODEX_AUTH = process.env["HERCULE_E2E_CODEX_AUTH"];
 
-/** The Z.ai key stored as the pi instance's own, when the environment has one. */
+/** The Antigravity `antigravity-oauth-token` file lent to the Google account, when the developer named one. */
+const LENT_ANTIGRAVITY_TOKEN = process.env["HERCULE_E2E_AGY_TOKEN"];
+
+/** The Z.ai key stored as the Z.ai account's own, when the environment has one. */
 const ZAI_API_KEY = process.env["ZAI_API_KEY"];
 
 /**
@@ -654,16 +742,23 @@ function findMissingBinary(name: string): string | undefined {
  *
  * - Claude Code: either of the two routes documented at `LENT_CREDENTIALS`.
  * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
- *   into the instance's `CODEX_HOME`. Two live copies of an OAuth login can
- *   rotate each other out, so prefer a file written by `codex login
+ *   into the account's `CODEX_HOME`. A lent copy of an OAuth login and the
+ *   owner's own copy share one refresh token, and whichever refreshes first can
+ *   invalidate the other (this is not the sign-in against running processes
+ *   that spec 06 section 10.5 says Codex needs no lease for), so prefer a file written by `codex login
  *   --with-api-key`, which holds no refresh token. `codex` must be on the
  *   `PATH`.
- * - pi: `ZAI_API_KEY` on the environment, which is stored as the pi
- *   instance's Z.ai key. `pi` must be on the `PATH`.
+ * - Antigravity: `HERCULE_E2E_AGY_TOKEN` names an `antigravity-oauth-token`
+ *   file, which is copied into the account's Harness Home. `agy` must be on
+ *   the `PATH` of the runner (the e2e runner does not read
+ *   `HERCULE_AGY_TEST_BINARY`; link `agy` into a folder at the front of the
+ *   `PATH` instead).
+ * - pi: `ZAI_API_KEY` on the environment, which is stored as the Z.ai
+ *   account's key. `pi` must be on the `PATH`.
  */
 export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
   {
-    providerId: "claude-code",
+    harnessId: "claude-code/claude-code",
     label: "Claude Code",
     invokeSkill: (name) => `/${name}`,
     invokeRepositorySkill: (checkout, name) => `/repo-${checkout}:${name}`,
@@ -671,29 +766,32 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
     findSkipReason: () =>
       isLoginAvailable()
         ? undefined
-        : "no login for the claude-code instance: name a credentials file in " +
+        : "no login for the claude-code account: name a credentials file in " +
           "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
-    lendLogin: (target, instanceId) => {
+    lendLogin: (target, accountId) => {
       // With ANTHROPIC_API_KEY instead, the key reaches the runner through its
       // environment.
-      if (LENT_CREDENTIALS !== undefined) lendCredential(target.runnerHome, instanceId);
+      if (LENT_CREDENTIALS !== undefined) lendCredential(target.runnerHome, accountId, CLAUDE_CODE);
       return Promise.resolve();
     },
   },
   {
-    providerId: "codex",
+    harnessId: "codex/codex",
     label: "Codex",
     invokeSkill: (name) => `$${name}`,
     invokeRepositorySkill: (_checkout, name) => `$${name}`,
     isCheapModel: (slug) => slug.includes("mini"),
     findSkipReason: () =>
       LENT_CODEX_AUTH === undefined
-        ? "no login for the codex instance: name a Codex auth.json in HERCULE_E2E_CODEX_AUTH."
+        ? "no login for the codex account: name a Codex auth.json in HERCULE_E2E_CODEX_AUTH."
         : findMissingBinary("codex"),
-    lendLogin: (target, instanceId) => {
+    lendLogin: (target, accountId) => {
       // The Codex adapter runs every process with `CODEX_HOME` set to the
-      // instance's `codex` folder, where Codex keeps its login.
-      const codexHome = join(buildInstanceDir(target.runnerHome, instanceId), "codex");
+      // `codex` folder of the account's Harness Home, where Codex keeps its login.
+      const codexHome = join(
+        buildHarnessHomeDir(target.runnerHome, accountId, "codex/codex"),
+        "codex",
+      );
       mkdirSync(codexHome, { recursive: true, mode: 0o700 });
       // Written with the mode a login needs, not the mode of the file lent.
       const auth = join(codexHome, "auth.json");
@@ -703,53 +801,92 @@ export const LIVE_HARNESSES: ReadonlyArray<LiveHarness> = [
     },
   },
   {
-    providerId: "pi",
+    harnessId: "antigravity/antigravity",
+    label: "Antigravity",
+    // An input that starts with a slash is sent to `agy` as it is, and `agy`
+    // runs the command (spec 06 section 8, `available_commands_update`).
+    invokeSkill: (name) => `/${name}`,
+    invokeRepositorySkill: (_checkout, name) => `/${name}`,
+    isCheapModel: (slug) => slug.includes("flash"),
+    startAccessMode: "full-access",
+    findSkipReason: () =>
+      LENT_ANTIGRAVITY_TOKEN === undefined
+        ? "no login for the antigravity account: name an antigravity-oauth-token file in " +
+          "HERCULE_E2E_AGY_TOKEN. `agy` must also be on the PATH."
+        : findMissingBinary("agy"),
+    lendLogin: (target, accountId) => {
+      // The runner's Antigravity adapter keeps the login in the
+      // `antigravity-acp` folder of the account's Harness Home. It refuses a
+      // link, so the file is copied. A copy is safe: Google does not rotate
+      // the refresh token (measured 2026-11-26: it stayed the same across
+      // refreshes), so the lent login and the developer's own do not
+      // invalidate each other.
+      const appData = join(
+        buildHarnessHomeDir(target.runnerHome, accountId, "antigravity/antigravity"),
+        "antigravity-acp",
+      );
+      mkdirSync(appData, { recursive: true, mode: 0o700 });
+      chmodSync(appData, 0o700);
+      const token = join(appData, "antigravity-oauth-token");
+      writeFileSync(token, readFileSync(LENT_ANTIGRAVITY_TOKEN!, "utf8"), { mode: 0o600 });
+      chmodSync(token, 0o600);
+      return Promise.resolve();
+    },
+  },
+  {
+    harnessId: "pi/pi",
     label: "pi",
     invokeSkill: (name) => `/skill:${name}`,
     invokeRepositorySkill: (_checkout, name) => `/skill:${name}`,
     isCheapModel: (slug) => slug.includes("flash"),
     findSkipReason: () =>
       ZAI_API_KEY === undefined
-        ? "no login for the pi instance: put ZAI_API_KEY on the environment."
+        ? "no login for the pi account: put ZAI_API_KEY on the environment."
         : findMissingBinary("pi"),
-    lendLogin: async (target, instanceId) => {
-      // A provider instance's secret field is stored in the secrets table, not
-      // in its config, so it is set through `secret.set`. Over HTTP rather
-      // than `hercule secret set`, so the key is never on a command line other
+    lendLogin: async (target, accountId) => {
+      // The account's key is stored in the secrets table and is written with
+      // `providerAccount.update`. Over HTTP rather than through the CLI's
+      // `--credentials-stdin`, so the key is never on a command line other
       // processes can read.
-      const response = await fetch(
-        `${target.url}/api/v1/secrets/provider-instance/${instanceId}/zaiApiKey`,
-        {
-          method: "PUT",
-          headers: {
-            authorization: `Bearer ${target.apiKey}`,
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({ value: ZAI_API_KEY }),
+      const response = await fetch(`${target.url}/api/v1/provider-accounts/${accountId}`, {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${target.apiKey}`,
+          "content-type": "application/json",
         },
-      );
+        body: JSON.stringify({ credentials: { apiKey: ZAI_API_KEY } }),
+      });
       const body = await response.text();
       if (!response.ok) {
         throw new Error(
-          `PUT the pi instance's secret returned ${String(response.status)}: ${body}`,
+          `PATCH the Z.ai account's credentials returned ${String(response.status)}: ${body}`,
         );
       }
     },
   },
 ];
 
-/** A harness's Provider Instance, logged in on a runner. */
+/** The Provider Account of a harness, logged in on a runner. */
 export interface PreparedHarness {
-  readonly instanceId: string;
-  /** The cheapest model the runner reported, or `undefined` for the instance's default. */
+  readonly providerAccountId: string;
+  readonly harnessId: string;
+  /** The cheapest model the runner reported, or `undefined` for the account's default. */
   readonly model: string | undefined;
+  /** The Access Mode its Threads start in when a test names none, or `undefined` for the default. */
+  readonly accessMode: string | undefined;
+  /**
+   * Whether `model` takes images, as the runner's model list declares it. It is
+   * `true` when no model was picked, because the account's default model is
+   * not known here. The controller refuses an image for a model that takes none.
+   */
+  readonly modelTakesImages: boolean;
 }
 
 /**
- * Gives the harness's Provider Instance its login on the runner `runnerId`,
- * whose Hercule Home is `runnerHome`, and waits until that runner's probe
- * reports it logged in. Returns the instance with the cheapest model the
- * runner reports. `home` is the Hercule Home the CLI is logged in from.
+ * Gives the Provider Account whose default harness is `harness` its login on
+ * the runner `runnerId`, whose Hercule Home is `runnerHome`, and waits until
+ * that runner's probe reports it logged in. Returns the account and harness
+ * with the cheapest model the runner reports. `home` is the Hercule Home the CLI is logged in from.
  */
 export async function prepareHarness(
   harness: LiveHarness,
@@ -763,14 +900,24 @@ export async function prepareHarness(
   },
 ): Promise<PreparedHarness> {
   const { home, binary, url, apiKey, runnerId, runnerHome } = options;
-  const instance = (await listInstances({ url, apiKey })).find(
-    (one) => one.providerId === harness.providerId,
-  );
-  if (instance === undefined) throw new Error(`no ${harness.providerId} instance was seeded`);
-  await harness.lendLogin({ runnerHome, url, apiKey }, instance.id);
-  const snapshot = await probeUntilLoggedIn({ home, binary, runnerId, instanceId: instance.id });
+  const account = await ensureAccountOfHarness({ url, apiKey, harnessId: harness.harnessId });
+  await harness.lendLogin({ runnerHome, url, apiKey }, account.id);
+  const snapshot = await probeUntilLoggedIn({
+    home,
+    binary,
+    runnerId,
+    providerAccountId: account.id,
+    harnessId: harness.harnessId,
+  });
   const model = snapshot.models.map((one) => one.slug).find(harness.isCheapModel);
-  return { instanceId: instance.id, model };
+  const picked = snapshot.models.find((one) => one.slug === model);
+  return {
+    modelTakesImages: picked === undefined || picked.imageInput !== null,
+    providerAccountId: account.id,
+    harnessId: harness.harnessId,
+    model,
+    accessMode: harness.startAccessMode,
+  };
 }
 
 /**
@@ -792,11 +939,14 @@ export async function spawnThread(options: {
       [
         "session",
         "spawn",
-        "--instance",
-        prepared.instanceId,
+        "--account",
+        prepared.providerAccountId,
+        "--harness",
+        prepared.harnessId,
         "--runner",
         options.runnerId,
         ...(prepared.model === undefined ? [] : ["--model", prepared.model]),
+        ...(prepared.accessMode === undefined ? [] : ["--access-mode", prepared.accessMode]),
         ...(workspace === undefined ? [] : ["--workspace", JSON.stringify(workspace)]),
         "--json",
       ],

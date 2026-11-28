@@ -10,8 +10,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, within } from "@testing-library/react";
-import type { Profile, ProviderInstance, Runner, Subagent, TranscriptRow } from "@hercule/contract";
-import { readPageText, renderApp, stubApi } from "../../../../app/testing";
+import type { Profile, ProviderAccount, Runner, Subagent, TranscriptRow } from "@hercule/contract";
+import { buildCatalogFields, readPageText, renderApp, stubApi } from "../../../../app/testing";
 import {
   SESSION_ID,
   buildController,
@@ -23,29 +23,19 @@ import {
 /** The moment the tests run at: 16 minutes 57 seconds after the iDEAL check started. */
 const NOW = new Date("2026-09-08T10:17:00.000Z");
 
-const INSTANCE: ProviderInstance = {
+const ACCOUNT: ProviderAccount = {
   id: "01a06d02-1000-7000-8000-000000000001",
-  providerId: "claude-code",
-  secretFields: [],
-  name: "personal",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: {
-    steering: "native",
-    fork: "native",
-    modelSwitch: "in-session",
-    accessModes: {
-      "approval-required": "native",
-      "auto-accept-edits": "native",
-      auto: "native",
-      "full-access": "native",
-    },
-    mcpPassthrough: "native",
-    disallowedTools: "native",
-    structuredOutput: "supported",
-  },
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: null,
+  identity: null,
+  planLabel: null,
+  defaultHarnessId: "claude-code/claude-code",
+  expiresAt: null,
+  usage: [],
+  failure: null,
   snapshots: [],
+  ...buildCatalogFields([]),
   createdAt: "2026-09-08T09:00:00.000Z",
   updatedAt: "2026-09-08T09:00:00.000Z",
 };
@@ -59,7 +49,8 @@ const RUNNER: Runner = {
   version: "0.4.2",
   labels: [],
   facts: null,
-  watermark: null,
+  metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: "2026-09-08T09:50:00.000Z",
@@ -243,7 +234,7 @@ const ROUTES = buildController(
   {
     "GET /api/v1/sessions": { body: { items: [SESSION] } },
     [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: { body: { items: ROWS } },
-    "GET /api/v1/providers": { body: [INSTANCE] },
+    "GET /api/v1/provider-accounts": { body: [ACCOUNT] },
     "GET /api/v1/runners": { body: { items: [RUNNER] } },
     "GET /api/v1/profiles": { body: { items: [PROFILE] } },
   },

@@ -19,6 +19,7 @@ import {
   type RunOverlay,
 } from "@hercule/client-core/graph-model";
 import type { NodeCard } from "@hercule/client-core/node-details";
+import type { DesktopPlatform } from "../../../ipc/platform/desktop-platform";
 import { WorkflowGraph } from "./workflow-graph";
 import { layOutGraphDrawing } from "./workflow-graph-layout";
 
@@ -93,8 +94,8 @@ const stubPaneWidth = (width: number) => {
   vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(width);
 };
 
-/** Renders the graph of `DRAWING` beside a button outside it. */
-const renderGraph = () =>
+/** Renders the graph of `DRAWING` beside a button outside it, on a Mac unless `platform` says otherwise. */
+const renderGraph = (platform: DesktopPlatform = "mac") =>
   render(
     <>
       <WorkflowGraph
@@ -103,6 +104,7 @@ const renderGraph = () =>
         timezone="UTC"
         label="The steps of Review"
         plugins={[{ id: "github", displayName: "GitHub", mark: { paths: [GITHUB_MARK_PATH] } }]}
+        platform={platform}
       />
       <button type="button">Outside</button>
       <input aria-label="Search" />
@@ -292,6 +294,17 @@ describe("the graph's zoom", () => {
     expect(press({ key: "f", metaKey: true })).toBe(true);
   });
 
+  it("zooms with Ctrl instead of ⌘ on Linux", () => {
+    stubPaneWidth(Math.round(SIZE.width * 0.5) + 24);
+    renderGraph("linux");
+    const pane = screen.getByRole("group", { name: "The steps of Review" });
+
+    expect(fireEvent.keyDown(pane, { key: "=", metaKey: true })).toBe(true);
+    expect(readZoom()).toBe("80%");
+    expect(fireEvent.keyDown(pane, { key: "=", ctrlKey: true })).toBe(false);
+    expect(readZoom()).toBe("100%");
+  });
+
   it("ignores the keys outside the graph", () => {
     stubPaneWidth(Math.round(SIZE.width * 0.5) + 24);
     renderGraph();
@@ -358,6 +371,7 @@ const renderRun = (overlay: RunOverlay | undefined) => {
       label="The steps of Review"
       plugins={[]}
       overlay={next}
+      platform="mac"
     />
   );
   const { rerender, container } = render(graph(overlay));

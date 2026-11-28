@@ -2,9 +2,11 @@ import { Effect, Option, Redacted, Schema } from "effect";
 import type { PluginManifest } from "./manifest";
 import type {
   EventSourceContribution,
-  ProviderDefinition,
+  HarnessDefinition,
   WorkflowActionContribution,
 } from "./contributions";
+import type { McpServerContribution } from "./mcp-servers";
+import type { ParseCatalogBody, ParseUsageBody, ProviderDefinition } from "./providers";
 import type {
   ConnectionRegistration,
   ConnectionsRuntime,
@@ -19,8 +21,34 @@ export class PluginError extends Schema.TaggedError<PluginError>()("PluginError"
 /** Stops everything `activate` started. */
 export type Deactivate = Effect.Effect<void, PluginError>;
 
+export interface HarnessRegistration {
+  readonly register: (definition: HarnessDefinition) => Effect.Effect<void, PluginError>;
+}
+
+/**
+ * The code a plugin passes beside a `ProviderDefinition`, which is data. The
+ * host keeps it in its live registry only, never in the stored catalog.
+ */
+export interface ProviderRegistrationOptions {
+  /**
+   * The parser of each account kind that reads its usage from an endpoint,
+   * keyed by the kind's id. Every such kind needs one, and no other kind may
+   * have one.
+   */
+  readonly parseUsageBody?: Readonly<Record<string, ParseUsageBody>>;
+  /**
+   * The parser of the provider's catalog body. A provider whose `catalogSource`
+   * is a `provider-api` needs one, and no other provider may have one. It is
+   * one per provider, not per account kind, because a provider has one catalog.
+   */
+  readonly parseCatalogBody?: ParseCatalogBody;
+}
+
 export interface ProviderRegistration {
-  readonly register: (definition: ProviderDefinition) => Effect.Effect<void, PluginError>;
+  readonly register: (
+    definition: ProviderDefinition,
+    options?: ProviderRegistrationOptions,
+  ) => Effect.Effect<void, PluginError>;
 }
 
 export interface EventSourceRegistration {
@@ -31,6 +59,10 @@ export interface WorkflowActionRegistration {
   readonly register: (contribution: WorkflowActionContribution) => Effect.Effect<void, PluginError>;
 }
 
+export interface McpServerRegistration {
+  readonly register: (contribution: McpServerContribution) => Effect.Effect<void, PluginError>;
+}
+
 /**
  * The services `register` may call. A service is present only when the
  * manifest requested its capability, so a plugin that did not request one has
@@ -38,10 +70,12 @@ export interface WorkflowActionRegistration {
  * receives a runtime service.
  */
 export interface RegistrationHost {
+  readonly harnesses?: HarnessRegistration;
   readonly providers?: ProviderRegistration;
   readonly connections?: ConnectionRegistration;
   readonly eventSources?: EventSourceRegistration;
   readonly workflowActions?: WorkflowActionRegistration;
+  readonly mcpServers?: McpServerRegistration;
 }
 
 /** The plugin's durable state, namespaced by plugin id. Values are JSON. */
@@ -84,22 +118,31 @@ export interface Plugin {
 }
 
 /**
- * Registers a provider through the host. Fails with a `PluginError` when the
- * manifest did not request the `providers` capability.
+ * Registers a harness through the host. Fails with a `PluginError` when the
+ * manifest did not request the `harnesses` capability.
  *
  * Every service on `RegistrationHost` is optional, because the host builds one
  * only for a capability the manifest lists. A plugin still has to handle the
  * missing case, and the right handling is always the same: fail, with a
- * message the user reads in Settings. The three functions below do the same
+ * message the user reads in Settings. The functions below do the same
  * for the other registration services.
  */
+export const registerHarness = (
+  host: RegistrationHost,
+  definition: HarnessDefinition,
+): Effect.Effect<void, PluginError> =>
+  host.harnesses === undefined
+    ? Effect.fail(new PluginError({ message: "the harnesses capability was not granted" }))
+    : host.harnesses.register(definition);
+
 export const registerProvider = (
   host: RegistrationHost,
   definition: ProviderDefinition,
+  options?: ProviderRegistrationOptions,
 ): Effect.Effect<void, PluginError> =>
   host.providers === undefined
     ? Effect.fail(new PluginError({ message: "the providers capability was not granted" }))
-    : host.providers.register(definition);
+    : host.providers.register(definition, options);
 
 export const registerConnectionType = (
   host: RegistrationHost,
@@ -124,3 +167,11 @@ export const registerWorkflowAction = (
   host.workflowActions === undefined
     ? Effect.fail(new PluginError({ message: "the workflow-actions capability was not granted" }))
     : host.workflowActions.register(contribution);
+
+export const registerMcpServer = (
+  host: RegistrationHost,
+  contribution: McpServerContribution,
+): Effect.Effect<void, PluginError> =>
+  host.mcpServers === undefined
+    ? Effect.fail(new PluginError({ message: "the mcp-servers capability was not granted" }))
+    : host.mcpServers.register(contribution);

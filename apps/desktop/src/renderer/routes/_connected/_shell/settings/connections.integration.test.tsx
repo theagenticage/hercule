@@ -54,6 +54,7 @@ const buildPlugin = (
   config: {},
   contributions,
   intake: { eventKinds: [], signalKinds: [] },
+  entityKinds: [],
 });
 
 /** The GitHub plugin, declaring its Connection type with a device flow and a pasted token. */
@@ -501,10 +502,10 @@ describe("the ways into Settings > Connections", () => {
     const { router } = await openProfile();
     await userEvent.click(
       within(screen.getByRole("tablist", { name: "Sidebar" })).getByRole("tab", {
-        name: "Hercule",
+        name: "Work",
       }),
     );
-    const face = screen.getByRole("navigation", { name: "Hercule" });
+    const face = screen.getByRole("navigation", { name: "Work" });
 
     await userEvent.click(within(face).getByRole("link", { name: "Connections" }));
 

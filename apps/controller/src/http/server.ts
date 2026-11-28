@@ -15,10 +15,18 @@
  * 6. the credential middleware and the static grant check (`./middleware.ts`);
  * 7. the derived route's decoding, then the one-line handler.
  *
- * Nine paths are not derived from the contract's HttpApi declaration. None
+ * Ten paths are not derived from the contract's HttpApi declaration. None
  * of them reaches steps 6 and 7 or gets the span of step 5, and they differ
  * in which of the two gates they pass:
  *
+ * - The MCP Gateway at `POST`, `GET` and `DELETE /mcp` (`./mcp.ts`) is
+ *   matched before step 1, so it passes none of the wrappers: not CORS (no
+ *   browser may call it), not the envelope, not the body limit and not the
+ *   compression of answers, which would hold a stream back. It checks the
+ *   `Origin` header, the method and the Session Token itself, before it reads
+ *   any JSON. It passes neither gate: `tools/list` must keep answering while
+ *   the controller is frozen, so the gateway admits each `tools/call` through
+ *   the promotion state itself.
  * - The live socket at `GET /ws` passes both gates. It then authenticates in
  *   its own first frame, because a browser cannot put a credential on a
  *   WebSocket handshake.
@@ -100,21 +108,34 @@ import {
   Pipeline,
   forwardTargetChanges,
   PromotionFleetRouteLayer,
+  ProviderAccountProbing,
   Provisioning,
   checkSchedulerInterval,
   recordDeparturesAfterThaws,
+  runAccountUsageReadingLoop,
   runAttachmentSweepLoop,
+  runMcpServerChecksScheduler,
   runIngestReconciler,
+  runHarnessReleaseCheckLoop,
+  runClaimResolverLoop,
+  runEntityPruneLoop,
+  runRunnerMetricsPruneLoop,
   runSkillUpdateCheckLoop,
   runScheduler,
+  runTaskSummaryLoop,
   sweepSessionsOnLostRunners,
   sweepUnreachableRunners,
+  TaskRunsLayer,
   thawExpiredFreezes,
 } from "../daemon";
 import { stopWrites } from "../db";
+import { ClaimResolutionLayer } from "../external-entities";
+import { runMcpGatewayFollower } from "../mcp-gateway";
+import { runConnectionFollower } from "../mcp-servers";
+import { EntityLookupsLayer } from "../plugins";
+import { TaskSummariesLayer } from "../tasks";
 import { PromotionState, PromotionTransferRouteLayer } from "../promotion";
 import { LiveSocketLayer } from "../live";
-import { ProviderProbes } from "../providers";
 import {
   RunnerAttachmentRoutesLayer,
   RunnerJoinRouteLayer,
@@ -123,6 +144,7 @@ import {
   RunnerSocketRouteLayer,
 } from "../runners";
 import { resumeUnfinishedRuns } from "../runs";
+import { withMcpRoute } from "./mcp";
 import { handlerLayers } from "./routes";
 import { withWebBundle, type WebBundle } from "./static";
 
@@ -159,16 +181,40 @@ export const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
 export const MAX_UPLOAD_BODY_BYTES = Math.max(MAX_ATTACHMENT_BYTES, MAX_SKILL_BYTES);
 
 /**
- * The listener options that enforce the limits, on request bodies and on
- * socket frames. Bun does not apply `maxRequestBodySize` to WebSocket frames,
- * so without the `websocket` option an unauthenticated connection could send
- * the controller a frame many times the documented size. A frame never
- * carries an image, so sockets are held to `MAX_FRAME_BYTES`, which the
- * runner also reads, so it never sends an event too large for one frame.
- * Bun closes a socket whose frame is larger.
+ * How long, in seconds, Bun lets an HTTP connection go without sending or
+ * receiving a byte before it closes it: 255, the most Bun allows. Bun's
+ * default is 10. The timeout covers two cases:
+ *
+ * - **A kept-alive connection between requests.** This is the one the value is
+ *   chosen for. Chromium, and so the desktop app, keeps an idle connection for
+ *   minutes and sends its next request on it. With the default, the controller
+ *   had already closed it, so after any pause of ten seconds the next read
+ *   first paid for a new TCP connection: one extra round trip, which over a
+ *   remote link takes about as long as the read itself (#1038).
+ * - **A request in flight that has gone quiet,** such as an upload whose
+ *   client stopped sending. Such a request now holds its connection for up to
+ *   255 seconds instead of 10. A graceful stop of the listener waits for it,
+ *   but the controller's drain deadline (`DRAIN_DEADLINE_MS` in `../index.ts`)
+ *   still ends the process ten seconds after a stop signal.
+ *
+ * Bun's graceful stop does not wait for a kept-alive connection that is idle,
+ * so the first case never delays a shutdown. WebSocket connections have their
+ * own timeout and heartbeat and are not affected.
  */
-export const bodyLimits = {
+export const HTTP_IDLE_TIMEOUT_SECONDS = 255;
+
+/**
+ * The listener's options: the limits on request bodies and on socket frames,
+ * and the idle timeout (`HTTP_IDLE_TIMEOUT_SECONDS`). Bun does not apply
+ * `maxRequestBodySize` to WebSocket frames, so without the `websocket` option
+ * an unauthenticated connection could send the controller a frame many times
+ * the documented size. A frame never carries an image, so sockets are held to
+ * `MAX_FRAME_BYTES`, which the runner also reads, so it never sends an event
+ * too large for one frame. Bun closes a socket whose frame is larger.
+ */
+export const listenerOptions = {
   maxRequestBodySize: MAX_UPLOAD_BODY_BYTES,
+  idleTimeout: HTTP_IDLE_TIMEOUT_SECONDS,
   websocket: { maxPayloadLength: MAX_FRAME_BYTES },
 } as const;
 
@@ -176,12 +222,13 @@ export const bodyLimits = {
  * The routes whose body may exceed `MAX_REQUEST_BODY_BYTES`, as
  * `<method> <path>`: a user's image upload (`attachment.create`), a runner's
  * upload of a tool result's attachment, and a skill's archive
- * (`skill.import`).
+ * (`skill.import` and `skill.propose`).
  */
 const UPLOAD_ROUTES: ReadonlySet<string> = new Set([
   `${OPERATIONS["attachment.create"].method} ${OPERATIONS["attachment.create"].path}`,
   `POST ${RUNNER_ATTACHMENTS_PATH}`,
   `${OPERATIONS["skill.import"].method} ${OPERATIONS["skill.import"].path}`,
+  `${OPERATIONS["skill.propose"].method} ${OPERATIONS["skill.propose"].path}`,
 ]);
 
 /**
@@ -215,9 +262,10 @@ const refuseUnreadBody = (status: 411 | 413): HttpServerResponse.HttpServerRespo
  * Both refusals close the connection. The body was never read, so the
  * connection cannot be trusted for another request. Bun also keeps such a
  * connection counted as busy once a large unread body has arrived: a graceful
- * `server.stop()` then waits for it until Bun's idle timeout, about 10
- * seconds, ends it. Closing the connection is what HTTP asks of a server that
- * answers without reading the body (RFC 9112, section 9.6).
+ * `server.stop()` then waits for it until Bun's idle timeout
+ * (`HTTP_IDLE_TIMEOUT_SECONDS`) ends it. Closing the connection is what HTTP
+ * asks of a server that answers without reading the body (RFC 9112, section
+ * 9.6).
  *
  * It sits inside `withCors`, so the desktop app can read the refusal.
  */
@@ -402,10 +450,12 @@ const buildApplication = (bundle: WebBundle | undefined) =>
       ),
     ),
     (routes) =>
-      compressJsonAnswers(
-        withCors(
-          limitRequestBody(
-            withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
+      withMcpRoute(
+        compressJsonAnswers(
+          withCors(
+            limitRequestBody(
+              withEnvelope(withWebBundle(bundle)(rewriteUnsupportedMediaType(routes))),
+            ),
           ),
         ),
       ),
@@ -437,12 +487,24 @@ export const serve = (bundle: WebBundle | undefined) =>
     // reported once it has been gone for the grace, like any other.
     yield* Effect.forkScoped(sweepUnreachableRunners);
     // Forked before the listener binds, and the arrivals stream replays the
-    // rest, so no runner's hello is missed. The probe driver also runs on a
+    // rest, so no runner's hello is missed. Probing also runs on a
     // timer, because logins expire and harnesses are upgraded outside Hercule.
-    yield* Effect.forkScoped(Effect.flatMap(ProviderProbes, (probes) => probes.driving));
+    yield* Effect.forkScoped(Effect.flatMap(ProviderAccountProbing, (probing) => probing.driving));
+    // Credentials about to expire are warned about, and the usage of accounts
+    // nobody is running a session for is read, each at most once per 15
+    // minutes. It needs the runners, so it starts beside the probing.
+    yield* Effect.forkScoped(runAccountUsageReadingLoop);
+    // The MCP Servers' status follows their Connections and plugins, and the
+    // tools of every enabled server are listed again once a day, with retries
+    // for a server that cannot be reached.
+    yield* Effect.forkScoped(runConnectionFollower);
+    yield* Effect.forkScoped(runMcpServerChecksScheduler);
+    // The MCP Gateway tells each session's open streams when the tools it is
+    // served change, and forgets the Session Tokens that ended.
+    yield* Effect.forkScoped(runMcpGatewayFollower);
     // A runner that connects is sent the work owed to it: its pending
     // provisioning and its running workspace steps. Forked before the
-    // listener binds, like the probe driver, so no arrival is missed.
+    // listener binds, like the probing, so no arrival is missed.
     yield* Effect.forkScoped(Effect.flatMap(Arrival, (arrival) => arrival.driving));
     // A stored provider snapshot or a write of the text generation setting
     // wakes the text generations waiting for a runner.
@@ -451,9 +513,29 @@ export const serve = (bundle: WebBundle | undefined) =>
     yield* Effect.forkScoped(Effect.flatMap(Provisioning, (provisioning) => provisioning.driving));
     // Images nobody sent within a day of their upload are deleted, with their files.
     yield* Effect.forkScoped(runAttachmentSweepLoop);
+    // Runner Metrics rows older than the retention window are deleted once an hour.
+    yield* Effect.forkScoped(runRunnerMetricsPruneLoop);
+    // Task Summaries that are due are written, at most two at a time. The model
+    // call reads the Task's runs through the port the tasks domain declares,
+    // which only the controller daemon can answer.
+    yield* Effect.forkScoped(
+      runTaskSummaryLoop.pipe(Effect.provide(Layer.mergeAll(TaskRunsLayer, TaskSummariesLayer))),
+    );
+    // External Entities nothing needs are deleted once a day.
+    yield* Effect.forkScoped(runEntityPruneLoop);
+    // Claims that point at a thing no plugin could place yet are resolved
+    // through the plugins' lookups, up to 20 for each Connection every 30 seconds.
+    yield* Effect.forkScoped(
+      runClaimResolverLoop.pipe(
+        Effect.provide(Layer.mergeAll(ClaimResolutionLayer, EntityLookupsLayer)),
+      ),
+    );
     // Skills with a GitHub source are checked for updates at start and then
     // every 3 hours.
     yield* Effect.forkScoped(runSkillUpdateCheckLoop);
+    // The newest release of each harness is read from its publisher at start,
+    // then every hour.
+    yield* Effect.forkScoped(runHarnessReleaseCheckLoop);
     // The controller daemon's two inbound drivers, also before the listener:
     // the queues they read are created with the layer, so nothing a runner
     // reports while these fibers start is missed. Each has its own fiber, so a

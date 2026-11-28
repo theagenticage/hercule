@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { DeviceCodeSteps, FormField, MarkedRow } from ".";
+import { CredentialFields, DeviceCodeSteps, FormField, MarkedRow } from ".";
 
 describe("MarkedRow", () => {
   it("draws the steps under the head only when it is given some", () => {
@@ -70,6 +70,64 @@ describe("FormField", () => {
       container.querySelector("input"),
     );
     expect(screen.getByRole("button", { name: "Create one" })).toBeTruthy();
+  });
+});
+
+describe("CredentialFields", () => {
+  const FIELDS = [
+    { name: "apiKey", label: "API key", help: "Starts with sk-." },
+    { name: "orgId", label: "Organization" },
+  ];
+
+  it("draws a masked field for each credential and focuses the first", () => {
+    render(
+      <CredentialFields
+        fields={FIELDS}
+        values={{ apiKey: "sk-1" }}
+        errors={{}}
+        readOnly={false}
+        onChange={() => undefined}
+      />,
+    );
+
+    const apiKey = screen.getByLabelText<HTMLInputElement>("API key");
+    expect(apiKey.getAttribute("type")).toBe("password");
+    expect(apiKey.value).toBe("sk-1");
+    expect(screen.getByText("Starts with sk-.")).toBeTruthy();
+    expect(screen.getByLabelText<HTMLInputElement>("Organization").value).toBe("");
+    expect(document.activeElement).toBe(apiKey);
+  });
+
+  it("names the field and its new text when one changes, and shows the error under its field", async () => {
+    const onChange = vi.fn<(name: string, value: string) => void>();
+    render(
+      <CredentialFields
+        fields={FIELDS}
+        values={{}}
+        errors={{ orgId: "Not an organization." }}
+        readOnly={false}
+        onChange={onChange}
+      />,
+    );
+
+    await userEvent.type(screen.getByLabelText("Organization"), "x");
+
+    expect(onChange).toHaveBeenCalledWith("orgId", "x");
+    expect(screen.getByRole("alert").textContent).toBe("Not an organization.");
+  });
+
+  it("cannot be edited while read only", () => {
+    render(
+      <CredentialFields
+        fields={FIELDS}
+        values={{}}
+        errors={{}}
+        readOnly
+        onChange={() => undefined}
+      />,
+    );
+
+    expect(screen.getByLabelText<HTMLInputElement>("API key").readOnly).toBe(true);
   });
 });
 

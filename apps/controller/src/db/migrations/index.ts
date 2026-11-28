@@ -101,6 +101,45 @@ import handoffRun from "./0090-handoff-run";
 import sessionRole from "./0091-session-role";
 import sessionKind from "./0092-session-kind";
 import sessionDedupKeys from "./0093-session-dedup-keys";
+import qualifiedHarnessIds from "./0094-qualified-harness-ids";
+import providerAccounts from "./0095-provider-accounts";
+import providerAccountCredentialState from "./0096-provider-account-credential-state";
+import accountUsage from "./0097-account-usage";
+import providerAccountFailure from "./0098-provider-account-failure";
+import sessionProcessStart from "./0099-session-process-start";
+import modelCatalogsAndProfiles from "./0100-model-catalogs-and-profiles";
+import projectModelProfile from "./0101-project-model-profile";
+import catalogFirstRead from "./0102-catalog-first-read";
+import runnerMetrics from "./0103-runner-metrics";
+import archivedSessions from "./0104-archived-sessions";
+import runnerMetricsHistory from "./0105-runner-metrics-history";
+import eventsRunnerId from "./0106-events-runner-id";
+import harnessReleases from "./0107-harness-releases";
+import diskUsage from "./0108-disk-usage";
+import planLabelProbedAt from "./0109-plan-label-probed-at";
+import taskStages from "./0110-task-stages";
+import threadTasks from "./0111-thread-tasks";
+import taskBoardRank from "./0112-task-board-rank";
+import taskSummaries from "./0113-task-summaries";
+import externalEntities from "./0114-external-entities";
+import signalThreadIndex from "./0115-signal-thread-index";
+import entityHandoffs from "./0116-entity-handoffs";
+import stageFacts from "./0117-stage-facts";
+import initiativesAndBlockers from "./0118-initiatives-and-blockers";
+import entityFields from "./0120-entity-fields";
+import linkTakenAt from "./0121-link-taken-at";
+import entityTakeOns from "./0122-entity-take-ons";
+import sessionTaint from "./0123-session-taint";
+import connectionCredentialsGeneration from "./0124-connection-credentials-generation";
+import mcpServers from "./0125-mcp-servers";
+import mcpGrants from "./0126-mcp-grants";
+import mcpServerLists from "./0127-mcp-server-lists";
+import sessionMcpGateway from "./0129-session-mcp-gateway";
+import mcpServerUrlSource from "./0130-mcp-server-url-source";
+import dropIntakeIndexes from "./0131-drop-intake-indexes";
+import dropSignalSnoozes from "./0132-drop-signal-snoozes";
+import mcpServerSignInGeneration from "./0133-mcp-server-sign-in-generation";
+import wikiPageArchive from "./0134-wiki-page-archive";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -196,6 +235,45 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [91, "session-role", Effect.succeed(sessionRole)],
   [92, "session-kind", Effect.succeed(sessionKind)],
   [93, "session-dedup-keys", Effect.succeed(sessionDedupKeys)],
+  [94, "qualified-harness-ids", Effect.succeed(qualifiedHarnessIds)],
+  [95, "provider-accounts", Effect.succeed(providerAccounts)],
+  [96, "provider-account-credential-state", Effect.succeed(providerAccountCredentialState)],
+  [97, "account-usage", Effect.succeed(accountUsage)],
+  [98, "provider-account-failure", Effect.succeed(providerAccountFailure)],
+  [99, "session-process-start", Effect.succeed(sessionProcessStart)],
+  [100, "model-catalogs-and-profiles", Effect.succeed(modelCatalogsAndProfiles)],
+  [101, "project-model-profile", Effect.succeed(projectModelProfile)],
+  [102, "catalog-first-read", Effect.succeed(catalogFirstRead)],
+  [103, "runner-metrics", Effect.succeed(runnerMetrics)],
+  [104, "archived-sessions", Effect.succeed(archivedSessions)],
+  [105, "runner-metrics-history", Effect.succeed(runnerMetricsHistory)],
+  [106, "events-runner-id", Effect.succeed(eventsRunnerId)],
+  [107, "harness-releases", Effect.succeed(harnessReleases)],
+  [108, "disk-usage", Effect.succeed(diskUsage)],
+  [109, "plan-label-probed-at", Effect.succeed(planLabelProbedAt)],
+  [110, "task-stages", Effect.succeed(taskStages)],
+  [111, "thread-tasks", Effect.succeed(threadTasks)],
+  [112, "task-board-rank", Effect.succeed(taskBoardRank)],
+  [113, "task-summaries", Effect.succeed(taskSummaries)],
+  [114, "external-entities", Effect.succeed(externalEntities)],
+  [115, "signal-thread-index", Effect.succeed(signalThreadIndex)],
+  [116, "entity-handoffs", Effect.succeed(entityHandoffs)],
+  [117, "stage-facts", Effect.succeed(stageFacts)],
+  [118, "initiatives-and-blockers", Effect.succeed(initiativesAndBlockers)],
+  [120, "entity-fields", Effect.succeed(entityFields)],
+  [121, "link-taken-at", Effect.succeed(linkTakenAt)],
+  [122, "entity-take-ons", Effect.succeed(entityTakeOns)],
+  [123, "session-taint", Effect.succeed(sessionTaint)],
+  [124, "connection-credentials-generation", Effect.succeed(connectionCredentialsGeneration)],
+  [125, "mcp-servers", Effect.succeed(mcpServers)],
+  [126, "mcp-grants", Effect.succeed(mcpGrants)],
+  [127, "mcp-server-lists", Effect.succeed(mcpServerLists)],
+  [129, "session-mcp-gateway", Effect.succeed(sessionMcpGateway)],
+  [130, "mcp-server-url-source", Effect.succeed(mcpServerUrlSource)],
+  [131, "drop-intake-indexes", Effect.succeed(dropIntakeIndexes)],
+  [132, "drop-signal-snoozes", Effect.succeed(dropSignalSnoozes)],
+  [133, "mcp-server-sign-in-generation", Effect.succeed(mcpServerSignInGeneration)],
+  [134, "wiki-page-archive", Effect.succeed(wikiPageArchive)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

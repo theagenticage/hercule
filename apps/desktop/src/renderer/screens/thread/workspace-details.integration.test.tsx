@@ -8,7 +8,7 @@ import {
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   renderApp,
   RUNNING_ITEM_ID,
   SIDEBAR_FIXTURE,
@@ -56,7 +56,7 @@ const callsTo = (calls: readonly Call[], method: string, path: string) =>
 const openDetails = async (workspace: Workspace = retained, thread: ThreadRecords = stopped) => {
   let current = workspace;
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
     ...buildThreadHandlers(thread),
     "GET /api/v1/workspaces": () => ({
       body: {

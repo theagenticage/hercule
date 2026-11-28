@@ -1,57 +1,173 @@
 import { describe, expect, it } from "vitest";
-import type { ProviderInstance, Runner } from "@hercule/contract";
+import type { ProviderAccount, ProviderAccountReadinessState, Runner } from "@hercule/contract";
 import { buildProviderRows } from "./provider-rows";
-import { buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
+import {
+  HARNESSES,
+  PROVIDERS,
+  buildProviderAccount,
+  buildSnapshot,
+  ANTHROPIC_IDENTITY,
+  OPENAI_IDENTITY,
+  ZAI_IDENTITY,
+  WITH_CLAUDE,
+} from "./providers.testing";
 
-const buildProviderRow = (runner: Runner, one: ProviderInstance) =>
-  buildProviderRows(runner, [one])[0]!;
+const buildProviderRow = (runner: Runner, one: ProviderAccount) =>
+  buildProviderRows(runner, [one], PROVIDERS, HARNESSES)[0]!;
 
 describe("buildProviderRows", () => {
-  it("shows a logged-in harness's account and what it offers", () => {
+  it("shows a signed-in account and what it offers", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code", "Claude Code", [buildSnapshot()]),
+      buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot()]),
     );
 
     expect(row).toMatchObject({
-      name: "Claude Code",
+      id: ANTHROPIC_IDENTITY.id,
+      harnessId: "claude-code/claude-code",
+      name: "Anthropic",
+      harnessName: "Claude Code",
       version: "2.1.263",
       verdict: null,
-      account: "rogier@example.com · Claude Max",
+      signedInAs: "rogier@example.com · Claude Max",
       models: "1 model",
       install: "none",
-      logIn: true,
-      logInLabel: "Log in again",
+      signIn: true,
+      signInLabel: "Sign in again",
       probe: true,
     });
   });
 
-  it("shows signed in when the harness reports neither an identity nor a plan", () => {
-    // A harness that gets its credential from the environment: the login
-    // works, but there is no account name, and an empty line looks like a fault.
+  it("offers the token flow, not a typed credential, to a kind that makes a token", () => {
+    const providers = PROVIDERS.map((provider) =>
+      provider.id === "anthropic/anthropic"
+        ? {
+            ...provider,
+            kinds: [
+              {
+                id: "subscription-token",
+                title: "Claude subscription, every machine",
+                description: "Sign in once.",
+                setup: [{ kind: "harness-login" as const, method: "create-token" as const }],
+                harnesses: ["claude-code/claude-code"],
+              },
+            ],
+          }
+        : provider,
+    );
+    const account = buildProviderAccount({ ...ANTHROPIC_IDENTITY, kind: "subscription-token" }, []);
+
+    const row = buildProviderRows(WITH_CLAUDE, [account], providers, HARNESSES)[0]!;
+
+    expect(row).toMatchObject({
+      signIn: true,
+      signInLabel: "Make the token",
+      credentialFields: [],
+    });
+  });
+
+  describe("a token account whose probe found it signed in, once the controller has judged the token", () => {
+    const tokenProviders = PROVIDERS.map((provider) =>
+      provider.id === "anthropic/anthropic"
+        ? {
+            ...provider,
+            kinds: [
+              {
+                id: "subscription-token",
+                title: "Claude subscription, every machine",
+                description: "Sign in once.",
+                setup: [{ kind: "harness-login" as const, method: "create-token" as const }],
+                harnesses: ["claude-code/claude-code"],
+              },
+            ],
+          }
+        : provider,
+    );
+    const buildTokenRow = (state: ProviderAccountReadinessState) =>
+      buildProviderRows(
+        WITH_CLAUDE,
+        [
+          {
+            ...buildProviderAccount(
+              ANTHROPIC_IDENTITY,
+              [buildSnapshot()],
+              [{ runnerId: WITH_CLAUDE.id, state }],
+            ),
+            kind: "subscription-token",
+          },
+        ],
+        tokenProviders,
+        HARNESSES,
+      )[0]!;
+
+    it("is signed in while the token lasts", () => {
+      expect(buildTokenRow("ready")).toMatchObject({
+        signedIn: true,
+        signInLabel: "Make a new token",
+      });
+    });
+
+    it("is not signed in once the token expired, so the row offers to make a new one", () => {
+      expect(buildTokenRow("token-expired")).toMatchObject({
+        signedIn: false,
+        signIn: true,
+        signInLabel: "Make the token",
+      });
+    });
+
+    it("is not signed in while no token was made", () => {
+      expect(buildTokenRow("credential-missing").signedIn).toBe(false);
+    });
+  });
+
+  it("is not signed in when the controller says the login belongs to someone else, whatever the probe found", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code", "Claude Code", [buildSnapshot({ auth: { status: "ok" } })]),
+      buildProviderAccount(
+        ANTHROPIC_IDENTITY,
+        [buildSnapshot()],
+        [{ runnerId: WITH_CLAUDE.id, state: "not-signed-in" }],
+      ),
     );
 
-    expect(row.account).toBe("signed in");
+    expect(row).toMatchObject({ signedIn: false, signInLabel: "Sign in" });
+  });
+
+  it("names a labelled account by its provider and label", () => {
+    const row = buildProviderRow(
+      WITH_CLAUDE,
+      buildProviderAccount({ ...ANTHROPIC_IDENTITY, label: "work" }, []),
+    );
+
+    expect(row.name).toBe("Anthropic · work");
+  });
+
+  it("shows signed in when the harness reports neither an identity nor a plan", () => {
+    // A harness that gets its credential from the environment: the sign-in
+    // works, but there is no identity, and an empty line looks like a fault.
+    const row = buildProviderRow(
+      WITH_CLAUDE,
+      buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot({ auth: { status: "ok" } })]),
+    );
+
+    expect(row.signedInAs).toBe("signed in");
   });
 
   it("shows the token source when the harness reports one", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code", "Claude Code", [
+      buildProviderAccount(ANTHROPIC_IDENTITY, [
         buildSnapshot({ auth: { status: "ok", backend: "ANTHROPIC_API_KEY" } }),
       ]),
     );
 
-    expect(row.account).toBe("ANTHROPIC_API_KEY");
+    expect(row.signedInAs).toBe("ANTHROPIC_API_KEY");
   });
 
   it("flags a version this build was not tested with", () => {
     const row = buildProviderRow(
       WITH_CLAUDE,
-      buildInstance("claude-code", "Claude Code", [
+      buildProviderAccount(ANTHROPIC_IDENTITY, [
         buildSnapshot({ harnessVersion: "2.0.9", versionVerdict: "below-floor" }),
       ]),
     );
@@ -59,77 +175,95 @@ describe("buildProviderRows", () => {
     expect(row.verdict).toMatch(/below/);
   });
 
-  it("offers the install, and no login, for a harness that is not installed on the runner", () => {
-    const row = buildProviderRow(WITH_CLAUDE, buildInstance("codex", "Codex", []));
+  it("offers the install, and no sign-in, for a harness that is not installed on the runner", () => {
+    const row = buildProviderRow(WITH_CLAUDE, buildProviderAccount(OPENAI_IDENTITY, []));
 
-    expect(row).toMatchObject({ install: "blocked", logIn: false, version: "not reported" });
-    expect(row.account).toBe("no adapter in this runner build");
+    expect(row).toMatchObject({ install: "blocked", signIn: false, version: "not reported" });
+    expect(row.signedInAs).toBe("this machine's Hercule cannot run the harness");
+  });
+
+  it("reads the snapshot of the account's default harness only", () => {
+    const account = buildProviderAccount(ANTHROPIC_IDENTITY, []);
+    const row = buildProviderRow(WITH_CLAUDE, {
+      ...account,
+      snapshots: [buildSnapshot({ harnessId: "pi/pi", harnessVersion: "9.9.9" })],
+    });
+
+    expect(row).toMatchObject({ version: "not reported", signedIn: false });
+  });
+
+  it("has no row for an account whose default harness no plugin registers", () => {
+    const account = buildProviderAccount(ANTHROPIC_IDENTITY, []);
+
+    expect(
+      buildProviderRows(
+        WITH_CLAUDE,
+        [{ ...account, defaultHarnessId: "gone/gone" }],
+        PROVIDERS,
+        HARNESSES,
+      ),
+    ).toEqual([]);
   });
 
   it("offers no action on an offline runner", () => {
     const row = buildProviderRow(
       { ...WITH_CLAUDE, connectivity: "offline" },
-      buildInstance("claude-code", "Claude Code", [buildSnapshot()]),
+      buildProviderAccount(ANTHROPIC_IDENTITY, [buildSnapshot()]),
     );
 
-    expect(row).toMatchObject({ install: "none", logIn: false, probe: false });
+    expect(row).toMatchObject({ install: "none", signIn: false, probe: false });
   });
 });
 
 /**
- * A provider that signs in with a credential the user types in. The action's
- * label is decided here, so the fleet row and the Sessions screen cannot word
- * the same action differently.
+ * An account whose kind has a credentials step: the user types the key in.
+ * The action's label is decided here, so the fleet row and the Sessions
+ * screen cannot word the same action differently.
  */
-describe("buildProviderRows for a provider with a secret field", () => {
-  const FIELD = {
-    name: "zaiApiKey",
-    title: "Z.ai API key",
-    description: "From your Z.ai Coding Plan subscription.",
-  };
+describe("buildProviderRows for an account with a credentials step", () => {
+  const FIELD = { name: "apiKey", title: "API key", description: "" };
 
-  const buildKeyedInstance = (set: boolean): ProviderInstance => ({
-    ...buildInstance("pi", "pi", [buildSnapshot({ auth: { status: "unauthenticated" } })]),
-    binaryName: "pi",
-    secretFields: [{ ...FIELD, set }],
-  });
+  const buildKeyedProviderAccount = (signedIn: boolean): ProviderAccount =>
+    buildProviderAccount(ZAI_IDENTITY, [
+      buildSnapshot(signedIn ? {} : { auth: { status: "unauthenticated" } }),
+    ]);
 
   const WITH_PI: Runner = {
     ...WITH_CLAUDE,
     facts: {
       ...WITH_CLAUDE.facts!,
-      providers: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
-      adapters: ["pi"],
+      harnesses: [{ name: "pi", present: true, path: "/usr/local/bin/pi" }],
+      adapters: ["pi/pi"],
     },
   };
 
-  it("labels the key with the plugin's title, and offers to replace a key that is set", () => {
-    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).secretFields).toEqual([
-      { ...FIELD, set: false, label: `Enter ${FIELD.title}` },
+  it("labels the key with the kind's field label, and offers to replace a key that works", () => {
+    expect(buildProviderRow(WITH_PI, buildKeyedProviderAccount(false)).credentialFields).toEqual([
+      { ...FIELD, set: false, label: "Enter API key" },
     ]);
-    expect(buildProviderRow(WITH_PI, buildKeyedInstance(true)).secretFields).toEqual([
-      { ...FIELD, set: true, label: `Replace ${FIELD.title}` },
+    expect(buildProviderRow(WITH_PI, buildKeyedProviderAccount(true)).credentialFields).toEqual([
+      { ...FIELD, set: true, label: "Replace API key" },
     ]);
   });
 
-  it("offers the key instead of a login, because there is no vendor login page", () => {
-    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false)).logIn).toBe(false);
+  it("offers the key instead of a sign-in, because there is no vendor sign-in page", () => {
+    expect(buildProviderRow(WITH_PI, buildKeyedProviderAccount(false)).signIn).toBe(false);
   });
 
   it("gives where the runner found the harness, and no path where it is not installed", () => {
-    expect(buildProviderRow(WITH_PI, buildKeyedInstance(false))).toMatchObject({
+    expect(buildProviderRow(WITH_PI, buildKeyedProviderAccount(false))).toMatchObject({
       path: "/usr/local/bin/pi",
       location: "/usr/local/bin/pi",
     });
-    expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false))).toMatchObject({
+    expect(buildProviderRow(WITH_CLAUDE, buildKeyedProviderAccount(false))).toMatchObject({
       path: null,
-      location: "no adapter in this runner build",
+      location: "this machine's Hercule cannot run the harness",
     });
     const withPiAdapter: Runner = {
       ...WITH_CLAUDE,
-      facts: { ...WITH_CLAUDE.facts!, adapters: ["claude-code", "pi"] },
+      facts: { ...WITH_CLAUDE.facts!, adapters: ["claude-code/claude-code", "pi/pi"] },
     };
-    expect(buildProviderRow(withPiAdapter, buildKeyedInstance(false)).location).toBe(
+    expect(buildProviderRow(withPiAdapter, buildKeyedProviderAccount(false)).location).toBe(
       "not installed",
     );
   });
@@ -137,18 +271,18 @@ describe("buildProviderRows for a provider with a secret field", () => {
   it("says installed when the runner found the harness but did not say where", () => {
     const pathless: Runner = {
       ...WITH_PI,
-      facts: { ...WITH_PI.facts!, providers: [{ name: "pi", present: true }] },
+      facts: { ...WITH_PI.facts!, harnesses: [{ name: "pi", present: true }] },
     };
-    expect(buildProviderRow(pathless, buildKeyedInstance(false))).toMatchObject({
+    expect(buildProviderRow(pathless, buildKeyedProviderAccount(false))).toMatchObject({
       path: null,
       location: "installed",
     });
   });
 
   it("offers neither on a runner where the harness is not installed", () => {
-    expect(buildProviderRow(WITH_CLAUDE, buildKeyedInstance(false))).toMatchObject({
-      secretFields: [],
-      logIn: false,
+    expect(buildProviderRow(WITH_CLAUDE, buildKeyedProviderAccount(false))).toMatchObject({
+      credentialFields: [],
+      signIn: false,
     });
   });
 });

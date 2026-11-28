@@ -2,6 +2,7 @@ import { GITHUB_CONNECTION_TYPE, type Assistant, type Connection } from "@hercul
 import { describe, expect, it } from "vitest";
 import {
   addPutOffStep,
+  buildAllSetAccountOffer,
   buildAllSetRecap,
   findDoneSteps,
   buildFirstRunHost,
@@ -16,7 +17,17 @@ import {
   type FirstRunReads,
 } from "./first-run";
 import { buildProviderRows } from "./provider-rows";
-import { BARE, buildInstance, buildSnapshot, WITH_CLAUDE } from "./providers.testing";
+import {
+  BARE,
+  HARNESSES,
+  PROVIDERS,
+  buildProviderAccount,
+  buildSnapshot,
+  ANTHROPIC_IDENTITY,
+  OPENAI_IDENTITY,
+  ZAI_IDENTITY,
+  WITH_CLAUDE,
+} from "./providers.testing";
 import { buildProject, buildRepo } from "./threads/workspaces.testing";
 
 const GITHUB: Connection = {
@@ -33,13 +44,17 @@ const GITHUB: Connection = {
   updatedAt: "2026-09-05T09:00:00.000Z",
 };
 
-const LOGGED_IN = buildInstance("claude-code", "Claude", [buildSnapshot()]);
+const SIGNED_IN = buildProviderAccount({ ...ANTHROPIC_IDENTITY, label: "Claude" }, [
+  buildSnapshot(),
+]);
 
 /** Reads with nothing done yet. */
 const NOTHING: FirstRunReads = {
   setupComplete: false,
   localRunner: null,
-  instances: [],
+  accounts: [],
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
   connections: [],
   projects: [],
 };
@@ -48,7 +63,9 @@ const NOTHING: FirstRunReads = {
 const EVERYTHING: FirstRunReads = {
   setupComplete: true,
   localRunner: { ...BARE, maxConcurrentSessions: 6 },
-  instances: [LOGGED_IN],
+  accounts: [SIGNED_IN],
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
   connections: [GITHUB],
   projects: [buildProject("01a06d02-7000-7000-8000-000000000001", "webshop")],
 };
@@ -75,20 +92,20 @@ describe("findDoneSteps", () => {
   });
 
   it("counts only a login on the controller's local runner", () => {
-    const elsewhere = buildInstance("claude-code", "Claude", [
+    const elsewhere = buildProviderAccount({ ...ANTHROPIC_IDENTITY, label: "Claude" }, [
       buildSnapshot({ runnerId: "01a06d02-beff-7037-9f5b-000000000000" }),
     ]);
 
-    expect(findDoneSteps({ ...EVERYTHING, instances: [elsewhere] }).providers).toBe(false);
+    expect(findDoneSteps({ ...EVERYTHING, accounts: [elsewhere] }).providers).toBe(false);
     expect(findDoneSteps({ ...EVERYTHING, localRunner: null }).providers).toBe(false);
   });
 
   it("does not count a login that failed", () => {
-    const loggedOut = buildInstance("claude-code", "Claude", [
+    const signedOut = buildProviderAccount({ ...ANTHROPIC_IDENTITY, label: "Claude" }, [
       buildSnapshot({ auth: { status: "unauthenticated" } }),
     ]);
 
-    expect(findDoneSteps({ ...EVERYTHING, instances: [loggedOut] }).providers).toBe(false);
+    expect(findDoneSteps({ ...EVERYTHING, accounts: [signedOut] }).providers).toBe(false);
   });
 
   it("counts only a GitHub Connection", () => {
@@ -145,7 +162,8 @@ describe("buildRoomContents", () => {
     id: "01a06d02-a000-7000-8000-000000000001",
     name: "Hercule",
     systemPrompt: "You are Hercule.",
-    instanceId: "01a06d02-1000-7000-8000-000000000001",
+    providerAccountId: "01a06d02-1000-7000-8000-000000000001",
+    harnessId: null,
     permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
     accessMode: "auto-accept-edits",
     model: null,
@@ -273,7 +291,7 @@ describe("buildRoomContents", () => {
     expect(room.assistant).toEqual({ id: HERCULE.id, name: "Hercule" });
   });
 
-  it("draws the first thread only when a provider is logged in, in the oldest project", () => {
+  it("draws the first thread only when a provider is signed in, in the oldest project", () => {
     const older = {
       ...buildProject("01a06d02-7000-7000-8000-000000000002", "ops"),
       createdAt: "2026-09-01T09:00:00.000Z",
@@ -286,7 +304,7 @@ describe("buildRoomContents", () => {
 
     expect(room.wing?.firstThread?.projectName).toBe("ops");
     expect(
-      buildRoomContents({ ...EVERYTHING, ...ROOM, instances: [] }).wing?.firstThread,
+      buildRoomContents({ ...EVERYTHING, ...ROOM, accounts: [] }).wing?.firstThread,
     ).toBeNull();
   });
 });
@@ -311,10 +329,10 @@ describe("buildFirstRunHost", () => {
 });
 
 describe("buildProvidersStepText", () => {
-  const INSTANCES = [
-    buildInstance("claude-code", "Claude Code"),
-    buildInstance("codex", "Codex"),
-    buildInstance("pi", "pi"),
+  const ACCOUNTS = [
+    buildProviderAccount(ANTHROPIC_IDENTITY),
+    buildProviderAccount(OPENAI_IDENTITY),
+    buildProviderAccount(ZAI_IDENTITY),
   ];
   const THIS_MAC = { name: "this Mac", isThisMac: true };
 
@@ -326,45 +344,33 @@ describe("buildProvidersStepText", () => {
     expect(text.rows).toEqual([]);
   });
 
-  it("names and lists only the harnesses found on the machine", () => {
-    const text = buildProvidersStepText(buildProviderRows(WITH_CLAUDE, INSTANCES), THIS_MAC);
-
-    expect(text.heading).toBe("Claude Code is on this Mac");
-    expect(text.subheading).toBe(
-      "Log in to the ones you want your agents to use. The login runs on this Mac and its credential stays here.",
-    );
-    expect(text.rows.map((row) => row.name)).toEqual(["Claude Code"]);
-  });
-
-  it("joins several found harnesses with and, and says the credential stays on another machine", () => {
-    const runner = {
-      ...WITH_CLAUDE,
-      facts: {
-        ...WITH_CLAUDE.facts!,
-        providers: [
-          { name: "claude", present: true, path: "/usr/local/bin/claude" },
-          { name: "codex", present: true },
-          { name: "pi", present: false },
-        ],
-      },
-    };
-    const text = buildProvidersStepText(buildProviderRows(runner, INSTANCES), {
-      name: "moss",
-      isThisMac: false,
+  it("asks to add an account and lists none while there is none", () => {
+    const text = buildProvidersStepText(buildProviderRows(WITH_CLAUDE, [], PROVIDERS, HARNESSES), {
+      name: "this Mac",
+      isThisMac: true,
     });
 
-    expect(text.heading).toBe("Claude Code and Codex are on moss");
-    expect(text.subheading).toContain("The login runs on moss and its credential stays there.");
+    expect(text.heading).toBe("Add an account");
+    expect(text.subheading).toBe(
+      "An account is how your agents pay for their models: a subscription you sign in to, or an API key. A sign-in runs on this Mac and stays here.",
+    );
+    expect(text.rows).toEqual([]);
   });
 
-  it("lists every harness when none was found", () => {
-    const text = buildProvidersStepText(buildProviderRows(BARE, INSTANCES), THIS_MAC);
-
-    expect(text.heading).toBe("Your agents need a coding tool");
-    expect(text.subheading).toBe(
-      "Hercule drives Claude Code, Codex or pi, and found none of them on this Mac. Install one and log in to it; Hercule can install it for you.",
+  it("lists every account, also one whose harness is not on the machine", () => {
+    const text = buildProvidersStepText(
+      buildProviderRows(WITH_CLAUDE, ACCOUNTS, PROVIDERS, HARNESSES),
+      THIS_MAC,
     );
-    expect(text.rows).toHaveLength(3);
+
+    expect(text.heading).toBe("Add an account");
+    expect(text.rows.map((row) => row.name)).toEqual(["Anthropic", "OpenAI", "Z.ai"]);
+  });
+
+  it("says that a sign-in stays on another machine when Hercule runs there", () => {
+    const text = buildProvidersStepText([], { name: "moss", isThisMac: false });
+
+    expect(text.subheading).toContain("A sign-in runs on moss and stays there.");
   });
 });
 
@@ -399,7 +405,7 @@ describe("buildFirstRunLadder", () => {
 describe("buildAllSetRecap", () => {
   const PROJECT_ID = "01a06d02-7000-7000-8000-000000000001";
 
-  it("lists the providers logged in, the GitHub account, and the project with its repository", () => {
+  it("lists the accounts signed in, the GitHub account, and the project with its repository", () => {
     const recap = buildAllSetRecap({
       ...EVERYTHING,
       resources: [
@@ -410,8 +416,9 @@ describe("buildAllSetRecap", () => {
     });
 
     expect(recap).toEqual({
-      providerNames: "Claude",
-      providerId: "claude-code",
+      hasAccount: true,
+      providerNames: "Anthropic · Claude",
+      harnessId: "claude-code/claude-code",
       gitHubAccount: "rogier",
       project: { id: PROJECT_ID, name: "webshop", repository: "rogier/webshop" },
     });
@@ -428,19 +435,36 @@ describe("buildAllSetRecap", () => {
     expect(recap.project?.repository).toBe("webshop on the NAS");
   });
 
-  it("leaves everything empty when nothing is logged in and the project has no repository", () => {
+  it("leaves everything empty when nothing is signed in and the project has no repository", () => {
     const recap = buildAllSetRecap({
       ...EVERYTHING,
-      instances: [buildInstance("claude-code", "Claude Code")],
+      accounts: [buildProviderAccount(ANTHROPIC_IDENTITY)],
       connections: [],
       resources: [],
     });
 
     expect(recap.providerNames).toBeNull();
-    // The row still draws a mark: the first provider listed.
-    expect(recap.providerId).toBe("claude-code");
+    expect(recap.hasAccount).toBe(true);
+    // The row still draws a mark: the first harness listed.
+    expect(recap.harnessId).toBe("claude-code/claude-code");
     expect(recap.gitHubAccount).toBeNull();
     expect(recap.project?.repository).toBeNull();
+  });
+});
+
+describe("buildAllSetAccountOffer", () => {
+  it("offers to add an account when the user has none", () => {
+    const recap = buildAllSetRecap({ ...EVERYTHING, accounts: [], resources: [] });
+
+    expect(recap.hasAccount).toBe(false);
+    expect(buildAllSetAccountOffer(recap)).toEqual({
+      button: "Add an account",
+      line: "Agents need an account before they can take a desk. Add one from your first thread’s draft, and it can start.",
+    });
+  });
+
+  it("offers to sign in when an account exists but none is signed in", () => {
+    expect(buildAllSetAccountOffer({ hasAccount: true }).button).toBe("Sign in to an account");
   });
 });
 

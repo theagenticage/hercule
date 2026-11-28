@@ -24,6 +24,7 @@ import {
   type SkillNotPicked,
 } from "../picked-skill-folders";
 import { RunnerIdentity } from "../runner-identity";
+import { type AuthorizationUrlHasNoState, SignInReturn } from "../sign-in-return";
 import { openInBrowser } from "../security";
 import { StoredToken } from "../stored-token";
 import { UrgentSignalNotifications } from "../urgent-signal-notifications";
@@ -41,6 +42,7 @@ type IpcHandlerServices =
   | MainWindow
   | PickedSkillFolders
   | RunnerIdentity
+  | SignInReturn
   | StoredToken
   | ThisMac
   | UrgentSignalNotifications
@@ -56,7 +58,8 @@ type IpcHandlerError =
   | ControllerAlreadySaved
   | NoLogsFolderSeen
   | SkillNotPicked
-  | SkillArchiveBuildRunning;
+  | SkillArchiveBuildRunning
+  | AuthorizationUrlHasNoState;
 
 /**
  * What main does for each channel, given the decoded request. The table is
@@ -109,6 +112,11 @@ const IPC_HANDLERS: {
       ),
     ),
   "link.open": ({ url }) => openInBrowser(url),
+  "signInReturn.listen": () => SignInReturn.use((signInReturn) => signInReturn.listen),
+  "signInReturn.wait": ({ listenerId, authorizationUrl }) =>
+    SignInReturn.use((signInReturn) => signInReturn.wait(listenerId, authorizationUrl)),
+  "signInReturn.cancel": ({ listenerId }) =>
+    SignInReturn.use((signInReturn) => signInReturn.cancel(listenerId)),
 };
 
 /**

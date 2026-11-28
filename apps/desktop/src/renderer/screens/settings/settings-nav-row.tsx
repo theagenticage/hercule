@@ -9,8 +9,8 @@ const CONNECTION_ATTENTION = "A Connection needs attention";
 
 /**
  * The Machines section's route, or `null` while the section is not built.
- * Both Settings' Machines row and the Hercule face's Fleet row lead here, so
- * building the section turns both into links.
+ * Settings' Machines row leads here, so building the section turns it into a
+ * link. The Hercule face's Fleet row opens the Fleet screen instead.
  */
 export const MACHINES_SECTION: SettingsSectionPath | null = null;
 

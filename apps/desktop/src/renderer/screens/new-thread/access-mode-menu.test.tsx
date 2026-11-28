@@ -26,7 +26,7 @@ describe("the access-mode menu", () => {
     },
   ];
 
-  it("lists the modes with their meaning, checks the current one, and keeps a mode the provider lacks pickable", async () => {
+  it("lists the modes with their meaning, checks the current one, and keeps a mode the harness lacks pickable", async () => {
     const onPick = vi.fn<(mode: AccessMode) => void>();
     render(<AccessModeMenu value="approval-required" rows={ROWS} onPick={onPick} />);
 
@@ -42,5 +42,19 @@ describe("the access-mode menu", () => {
     await userEvent.click(screen.getByRole("button", { name: /harness-side reviewer/ }));
 
     expect(onPick.mock.calls).toEqual([["auto"]]);
+  });
+
+  it("draws the reason above the rows when there is one, and no line otherwise", () => {
+    const view = render(
+      <AccessModeMenu
+        value="approval-required"
+        rows={ROWS}
+        reason="Your default."
+        onPick={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Your default.")).toBeTruthy();
+    view.rerender(<AccessModeMenu value="approval-required" rows={ROWS} onPick={vi.fn()} />);
+    expect(document.querySelector(".pop-reason")).toBeNull();
   });
 });

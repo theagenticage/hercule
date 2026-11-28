@@ -39,7 +39,7 @@ class LiveWireTest {
         assertEquals("eyJwIjo0Mn0", delta.cursor)
         val row = WireJson.decodeFromJsonElement(TranscriptRow.serializer(), delta.items.single())
         assertEquals(42L, row.position)
-        assertIs<ProviderEvent.ContentDelta>(row.event)
+        assertIs<HarnessEvent.ContentDelta>(row.event)
     }
 
     @Test

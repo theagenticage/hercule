@@ -6,7 +6,7 @@ Hercule is a self-hosted agent orchestration platform: one always-on controller,
 
 ## The system in one breath
 
-Three roles ship in one self-contained Bun binary: the **controller** (always-on brain; all state in one SQLite database; receives every event, matches triggers, interprets execution plans, places sessions, serves the public API and the web app), **runners** (daemons that dial the controller over one WebSocket and host agent sessions as bare processes in workspaces), and **clients** (the static web app, the `hercule` CLI, and the agents themselves - all clients of the same public API). Channels, event sources, providers, and workflow actions are all built internally as plugins. Work enters as events, is triaged by agents into Tasks and Proposals before the user sees it, and is executed by workflows whose runs freeze an immutable execution plan.
+Three roles ship in one self-contained Bun binary: the **controller** (always-on brain; all state in one SQLite database; receives every event, matches triggers, interprets execution plans, places sessions, serves the public API and the web app), **runners** (daemons that dial the controller over one WebSocket and host agent sessions as bare processes in workspaces), and **clients** (the static web app, the `hercule` CLI, and the agents themselves - all clients of the same public API). Channels, event sources, harnesses, and workflow actions are all built internally as plugins. Work enters as events, is triaged by agents into Tasks and Proposals before the user sees it, and is executed by workflows whose runs freeze an immutable execution plan.
 
 ## Read this first, per task
 
@@ -75,9 +75,9 @@ These come from the spec and ADRs; restated here because violating them is expen
 - **Never edit generated files by hand** (derived clients, OpenAPI documents, lockfiles).
 - **Every operation has a CLI row.** An operation added to `packages/contract` lands its row in the CLI table beside the operation table in the same change: spelling, purpose, examples and a line per field, or `hidden: true` with the reason. The row type and the tree tests refuse a contract without it. (Spec 11 §6.3)
 - **Never silently substitute behaviour.** Access-mode fallback, trigger pauses, dropped events: the system tells the user; so do you. One exception, decided by Rogier on 2026-10-18 (#749): the edit watch of spec 19 §4.1 is best effort, so what it cannot observe goes to the runner's log, never to a thread. A second, decided by Rogier on 2026-10-26 (#613): a session whose GitHub Connection has no usable token at start gets no `GH_TOKEN`, and `gh` then falls back to the machine's own login without a message.
-- **In the desktop app, performance and resource use come first.** Before a desktop change is built, its plan states what it will cost and how that cost is measured: processes, memory, work while idle, work per streamed token, and bundle bytes. Afterwards the measurement is recorded in spec 17 §Performance. A change that misses a budget does not merge. (ADR 0037)
+- **In the desktop app, performance and resource use come first** (ADR 0037, spec 17 §Performance). How to measure a change: `apps/desktop/AGENTS.md`.
 - **Never touch `~/.hercule`.** That is the user's live Hercule Home: its database, credentials, runner state and backups. Any run you start (a proof run, an e2e check, a migration try-out, a `hercule` command that writes) uses a throwaway home: `HERCULE_HOME=<scratch dir>` or `--home <scratch dir>`, created for that run and deleted after. Reading `~/.hercule/config.toml` to learn a port is fine; running a controller, runner, or migration against it is not, even when you believe the change is additive. A migration edited in place is the standing example: the live database already ran the old version and would break on the new one.
-- **A migration that rewrites existing rows adds a fixture to the upgrade test.** The upgrade test (`e2e/upgrade.test.ts`) fills a database with the previous edge build and migrates it to the new binary. A migration that transforms data (the provider remodel, qualified provider ids, any UPDATE or data-shape change) must add test coverage for the rows it rewrites: create those rows with the edge binary, verify they migrate and are still readable. A migration that only adds tables, columns, or indexes needs no new fixture.
+- **A migration that rewrites existing rows adds a fixture to the upgrade test.** The upgrade test (`e2e/upgrade.test.ts`) fills a database with the previous edge build and migrates it to the new binary. A migration that transforms data (the provider remodel, qualified harness ids, any UPDATE or data-shape change) must add test coverage for the rows it rewrites: create those rows with the edge binary, verify they migrate and are still readable. A migration that only adds tables, columns, or indexes needs no new fixture.
 - **Never kill processes by pattern.** `pkill -f vite`, `pkill -f node`, `killall bun` and the like reach every worktree and every session on this machine, not just yours; another agent's dev server, controller or test run dies with no trace of why. Stop only what you started, by the PID you captured when you started it (or the port you bound), and leave anything you did not start alone.
 
 ## Working conventions
@@ -98,14 +98,15 @@ One pnpm workspace. Every package is `@hercule/*`, `"type": "module"`, and expor
 | `packages/cli` | `@hercule/cli` | The CLI role. HTTP only |
 | `packages/home` | `@hercule/home` | The Hercule Home: the global options that locate it, the layout inside it, the bootstrap config in its `config.toml`, the compiled binary every role runs as, and the build-time version (`@hercule/home/version`). A leaf every role links |
 | `packages/process-log` | `@hercule/process-log` | The log file the controller and every runner write, each its own: `<home>/logs/controller.log` or `runner.log`, rotated by size |
+| `packages/acp` | `@hercule/acp` | The ACP (Agent Client Protocol) client. `src/` is ours; `vendor/effect-acp/` is a copy of T3 Code's client, unchanged and excluded from lint and formatting, and only `src/connection.ts` imports it (an eslint rule enforces that). The runner links it, so its import graph reaches no controller package and no npm package but `effect` |
 | `packages/service` | `@hercule/service` | The service role (`hercule service`): the Service Unit on launchd and systemd that keeps the controller or a runner running. `hercule runner join` installs the runner's unit through it, so it links nothing of the controller |
 | `packages/contract` | `@hercule/contract` | The public API contract in Effect Schema |
 | `packages/protocol` | `@hercule/protocol` | The controller-runner WebSocket protocol in Effect Schema |
-| `packages/plugin-host` | `@hercule/plugin-host` | The API a plugin is written against: its manifest, its hooks and the services the host passes them, and the contributions it registers (providers, event sources, Connection types, workflow actions with `ActionContext` and `ActionError`). Uses no controller internals |
+| `packages/plugin-host` | `@hercule/plugin-host` | The API a plugin is written against: its manifest, its hooks and the services the host passes them, and the contributions it registers (harnesses, event sources, Connection types, workflow actions with `ActionContext` and `ActionError`). Uses no controller internals |
 | `packages/client-core` | `@hercule/client-core` | The client library. The only client package that writes Effect code |
 | `packages/ui` | `@hercule/ui` | The React component library |
 | `apps/web` | `@hercule/web` | The web app. Routes and presentation only |
-| `apps/desktop` | `@hercule/desktop` | The macOS desktop app on Electron (spec 17): main on Effect, a typed preload bridge, and a React renderer drawn in Crew Bureau. Links only `@hercule/contract` and `@hercule/client-core` |
+| `apps/desktop` | `@hercule/desktop` | The desktop app on Electron, for macOS and Linux (spec 17): main on Effect, a typed preload bridge, and a React renderer drawn in Crew Bureau. Links only `@hercule/contract` and `@hercule/client-core` |
 | `apps/android` | | The Android app (spec 18): a Gradle project in Kotlin and Compose, not a pnpm package. No `pnpm` command builds it |
 | `plugins/*` | | One package per plugin, added by its own ticket |
 
@@ -128,9 +129,9 @@ Source is organized **by domain**, not by type: one folder per domain, named wit
 5. Reads are `queryOptions`, writes are `useMutation`; no component hand-rolls fetch state.
 6. Anything that interprets domain data goes to `@hercule/client-core` with its own test.
 7. A component is either presentational or orchestrating. A presentational component takes values and callbacks and reads nothing: no query cache, no router, no live connection. An orchestrating component reads the cache where it uses the data, never higher, and never forwards what it does not read; it earns its place by owning a mutation or a piece of client state, not by routing data. The route file is the first orchestrator: its loader prefetches everything the screen reads, so nothing below it suspends in practice. Interpretation of what is read is a client-core function (point 6), so two orchestrators reading one record can never disagree about what it means.
-8. Data the shell needs on every screen stays cached because its query options say so, never because some always-mounted component happens to read it. Query removes a read five minutes after the last component reading it unmounts, and a component that then reads it again suspends until the read answers, which hides the whole app. So the shell's loader loads that data, its query options keep it for the life of the window, and each component reads it where it draws it, by point 7. Never read it in the sidebar, the shell or any other parent only to keep it cached and pass it down. In the desktop renderer, every read `ensureShellData` loads uses `SHELL_READ_OPTIONS`, and a test fails when one does not.
+8. Data the shell needs on every screen stays cached because its query options say so, never because some always-mounted component happens to read it. Query removes a read five minutes after the last component reading it unmounts, and a component that then reads it again suspends until the read answers, which hides the whole app. So the shell's loader loads that data, its query options keep it for the life of the window, and each component reads it where it draws it, by point 7. Never read it in the sidebar, the shell or any other parent only to keep it cached and pass it down.
 
-The desktop renderer (`apps/desktop/src/renderer`) follows the same rules, with its own components in place of `@hercule/ui` and `screens/`: it never imports `@hercule/ui` (spec 17).
+The desktop renderer follows the same rules; `apps/desktop/AGENTS.md` says where it differs.
 
 ### Check commands
 
@@ -142,8 +143,17 @@ pnpm install
 pnpm typecheck   # bun check (TypeScript 7) over the backend, packages/ui, apps/web, and apps/desktop
 pnpm lint        # oxlint for the rules that need types, eslint --max-warnings 0 for the rest, then oxfmt --check
 pnpm test        # vitest across every package: the backend on Bun, the React packages on Node
-pnpm dep-lint    # the runner entrypoint links no controller package; each desktop layer links only what spec 17 allows; only sessions/context.ts imports the runner's user-material/; the controller's domains, and the controller daemon's folders, form a DAG
+pnpm dep-lint    # the runner entrypoint links no controller package; each desktop layer links only what spec 17 allows; the ACP client links no npm package but `effect`; only sessions/context.ts imports the runner's user-material/; the controller's domains, and the controller daemon's folders, form a DAG
 ```
+
+To run only some tests, pass paths to one half of `pnpm test`. Plain `vitest run <path>` fails on backend files, which need Bun.
+
+```
+pnpm test:react apps/web packages/ui apps/desktop   # these three folders run on Node, with jsdom for the React code
+pnpm test:node <any other path>                     # everything else, on Bun
+```
+
+CI splits each half, and the desktop end-to-end suite, into shards by each file's recorded run time (`scripts/test-shards.ts`). The times are kept in the Actions cache and updated after every run on `main`, so nobody refreshes them. A new file weighs the median until then. To run CI's second shard locally, put the run's `test-shard-weights` artifact at the repository root and run `pnpm test:react --shard=2/4`; without that file, `--shard` splits by file count.
 
 Then the packaging pair, which CI runs in a job of its own. `pnpm test:binary` runs the
 release binary rather than building one, so it needs the build before it and fails
@@ -155,23 +165,7 @@ pnpm build:binary  # vite build, the bundle budget check, then bun build --compi
 pnpm test:binary   # ./hercule serves the embedded web app beside the API
 ```
 
-The desktop pair works the same way. `pnpm test:desktop` launches the packaged app, so it needs the build before it, and `pnpm build:binary` too, because the app signs in to the compiled controller. On a pull request, CI runs `pnpm build:desktop` and `pnpm compare:bureau` on macOS, and `pnpm --filter @hercule/desktop ui:metrics` on Linux; on `main`, the `edge-build` job also runs `e2e/desktop/package.test.ts` on the signed app it builds for the `edge` prerelease. The rest of the end-to-end suite checks windows, pixels and timing, and CI's virtual Macs differ from a user's Mac in all three, so run `pnpm test:desktop` on a Mac before a PR that changes the desktop app.
-
-```
-pnpm build:desktop # vite build of main, preload and renderer, the bundle budget check, then the release and test packages
-pnpm test:desktop  # Playwright drives the test package: window, security, fuses, IPC
-```
-
-The desktop app's looks are checked in two places. The app is its own pixel reference (ADR 0047):
-
-- **The goldens** are 72 PNGs in `apps/desktop/ui-goldens/`: the 12 screens of `capture:ui` at 1x, in the six themes. `ui:metrics` records them on Linux and compares every pixel exactly, in the same pass as its metrics and their ratchet. When a golden fails on a screen you meant to change, re-record with `--write-goldens`, then look at every golden that moved in the diff before committing it, as for the Android goldens below. Rendering that only a Mac shows, such as font smoothing, is not in them: check it by eye on a Mac.
-- **The piece sheet** (faces, marks, icons) is compared with the frozen Crew Bureau book by `pnpm compare:bureau`, on macOS. The book is not edited.
-
-```
-pnpm --filter @hercule/desktop ui:metrics                   # the metrics, the ratchet, and the goldens
-pnpm --filter @hercule/desktop ui:metrics --write-goldens   # re-record the goldens (never bypasses the ratchet)
-pnpm --filter @hercule/desktop ui:metrics --write-baseline  # re-write the metrics baseline; a worse number needs its reason in the PR body
-```
+The desktop app's own checks (its packaging pair, end-to-end suite, goldens and UI metrics) are in `apps/desktop/AGENTS.md`.
 
 The Android app has a check of its own, which no `pnpm` command runs. CI runs it in a job of its own, `android`, on a macOS runner: the screenshot goldens are recorded on a Mac, and Linux rasterises vector shapes slightly differently. It needs JDK 21 (newer JDKs are too new for the Android Gradle plugin) and the Android SDK with platforms 36 and 37 and build-tools 37, located by `JAVA_HOME` and `ANDROID_HOME`; `apps/android/README.md` has the paths. Run it before a PR that changes `apps/android`:
 

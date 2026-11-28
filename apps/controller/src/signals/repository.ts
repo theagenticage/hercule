@@ -5,9 +5,11 @@
  * blocks, the actions, the match values, the task, the Ignore Rule and the
  * resolution are stored as JSON, because a signal is read and written whole.
  * The events a signal is about are also kept in `signal_events`, so a prune
- * of the event log can find them by index. A snooze is kept in
- * `signal_snoozes`, beside the signal rather than on it, and every read joins
- * it in. Nothing here decides policy; it only reads and writes.
+ * of the event log can find them by index. Nothing here decides policy; it
+ * only reads and writes.
+ *
+ * It also answers the questions other domains ask about the signals on a
+ * thread ref (the External Entities domain draws them inside a card).
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -17,7 +19,6 @@ import type { Fragment } from "effect/sql/Statement";
 import { DONE_ACTION_ID } from "@hercule/contract";
 import type { OpenSignal } from "@hercule/plugin-host";
 import type {
-  Actor,
   Block,
   BoundAction,
   Signal,
@@ -40,8 +41,11 @@ import {
   type Page,
 } from "../db";
 
-/** A signal as it is written. The caller mints the id, because the actions may name it. */
-export type NewSignal = Omit<Signal, "snooze">;
+/**
+ * A signal as it is written. The caller mints the id, because the actions may
+ * name it. `entity` is read beside the record and never stored.
+ */
+export type NewSignal = Omit<Signal, "entity">;
 
 interface SignalRow {
   readonly id: Uint8Array;
@@ -61,8 +65,6 @@ interface SignalRow {
   readonly resolution: string | null;
   readonly replaced_by: Uint8Array | null;
   readonly created_at: string;
-  readonly snooze_until: string | null;
-  readonly snoozed_at: string | null;
 }
 
 /** A signal without its blocks and actions; see `readSummary`. */
@@ -86,12 +88,9 @@ export interface SignalPageRequest {
   readonly cursor: string | undefined;
 }
 
-/**
- * The columns of a signal and of its snooze, if it has one, read from
- * `SIGNALS_WITH_SNOOZES`.
- */
+/** The columns of a signal, read from `signals s`. */
 const COLUMNS =
-  "s.id, s.kind, s.origin, s.title, s.asker, s.place, s.priority, s.blocks, s.actions, s.match, s.build_error, s.task, s.ignore_rule, s.status, s.resolution, s.replaced_by, s.created_at, z.until AS snooze_until, z.snoozed_at";
+  "s.id, s.kind, s.origin, s.title, s.asker, s.place, s.priority, s.blocks, s.actions, s.match, s.build_error, s.task, s.ignore_rule, s.status, s.resolution, s.replaced_by, s.created_at";
 
 /**
  * Writes `match` as the JSON it is stored as: its fields sorted by name. Two
@@ -103,14 +102,62 @@ const COLUMNS =
 export const encodeSignalMatch = (match: SignalMatch): string =>
   JSON.stringify(Object.fromEntries(Object.entries(match).sort(([a], [b]) => (a < b ? -1 : 1))));
 
-/** The signals, each beside its snooze row, or beside nulls when it has none. */
-const SIGNALS_WITH_SNOOZES = "signals s LEFT JOIN signal_snoozes z ON z.signal_id = s.id";
+/**
+ * The refs of every open signal that has a thread ref, as a `SELECT` of one
+ * `ref` column. A thing with an open signal is kept by the sweep and wanted
+ * by the refresh, so an open signal never loses its card. Every poll reads it, so it names the partial index of the open signals
+ * (`signals_open_thread`) to keep the resolved signals, which are most of the
+ * table, unread. Without the name the planner scans `signals_thread_ref`, which
+ * also holds them.
+ */
+export const OPEN_THREAD_REFS_SQL =
+  "SELECT thread_ref AS ref FROM signals INDEXED BY signals_open_thread WHERE status = 'open' AND thread_ref IS NOT NULL";
 
-/** The Later view's order: soonest `until` first. */
-const LATER_SCOPE: CursorScope = {
-  op: "signal.query",
-  sort: [{ field: "until", direction: "asc" }],
-};
+/** A signal on a thread, with the fields a card or a line of its detail shows. */
+export interface ThreadSignal {
+  readonly id: string;
+  readonly kind: string;
+  readonly title: string;
+  readonly asker?: string;
+  readonly priority: TaskPriority;
+  readonly status: SignalStatus;
+  readonly createdAt: string;
+  /** What the signal ended with; only a resolved signal has one. */
+  readonly outcome?: string;
+}
+
+/** What the detail of one thread shows of its signals. */
+export interface ThreadSignalLines {
+  /** At most `limit` signals, oldest first by `createdAt`, then `id`. */
+  readonly signals: ReadonlyArray<ThreadSignal>;
+  /** The open signals. */
+  readonly openCount: number;
+  /** Every signal on the thread, open and resolved. */
+  readonly signalCount: number;
+}
+
+interface ThreadSignalRow {
+  readonly id: Uint8Array;
+  readonly kind: string;
+  readonly title: string;
+  readonly asker: string | null;
+  readonly priority: string;
+  readonly status: string;
+  readonly created_at: string;
+  readonly outcome: string | null;
+}
+
+/** Converts a row of the thread reads into a `ThreadSignal`. */
+const parseThreadSignalRow = (row: ThreadSignalRow): ThreadSignal => ({
+  id: uuidToString(row.id),
+  kind: row.kind,
+  title: row.title,
+  ...(row.asker === null ? {} : { asker: row.asker }),
+  priority: row.priority as TaskPriority,
+  status: row.status as SignalStatus,
+  createdAt: row.created_at,
+  ...(row.outcome === null ? {} : { outcome: row.outcome }),
+});
 
 /** The Done view's order: newest resolution first. */
 const DONE_SCOPE: CursorScope = {
@@ -143,9 +190,6 @@ const parseRow = (row: SignalRow): Signal => ({
     : { resolution: JSON.parse(row.resolution) as SignalResolution }),
   ...(row.replaced_by === null ? {} : { replacedBy: uuidToString(row.replaced_by) }),
   createdAt: row.created_at,
-  ...(row.snooze_until === null || row.snoozed_at === null
-    ? {}
-    : { snooze: { until: row.snooze_until, snoozedAt: row.snoozed_at } }),
 });
 
 /** An open signal raised from an event, as the lookups by thread return it. */
@@ -232,8 +276,8 @@ const make = Effect.gen(function* () {
    *
    * - `scope` is the view's cursor scope, so a cursor from another view is
    *   refused with `CursorError`;
-   * - `from` is the view's `FROM` clause, which names the signal `s` and its
-   *   snooze `z`, and `idColumn` is the id column the view seeks on;
+   * - `from` is the view's `FROM` clause, which names the signal `s`, and
+   *   `idColumn` is the id column the view seeks on;
    * - `condition` keeps the view's rows;
    * - `readSortValue` returns a signal's value in `sortColumn`, for the next
    *   page's cursor.
@@ -273,16 +317,6 @@ const make = Effect.gen(function* () {
         (last) => encodeCursor(view.scope, [view.readSortValue(last)], last.id),
       );
     });
-
-  /**
-   * Builds the conditions of To do at `now` over `SIGNALS_WITH_SNOOZES`: the
-   * signal is open, and it has no snooze or its snooze ran out at or before
-   * `now`.
-   */
-  const buildToDoConditions = (now: string) => [
-    sql`s.status = 'open'`,
-    sql`(z.until IS NULL OR z.until <= ${now})`,
-  ];
 
   /** Builds the condition that a signal's id is one of `ids`, which may be empty. */
   const buildIdIn = (column: string, ids: ReadonlyArray<string>) =>
@@ -331,7 +365,7 @@ const make = Effect.gen(function* () {
     read: (id: string): Effect.Effect<Option.Option<Signal>, SqlError> =>
       Effect.map(
         sql<SignalRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
+          SELECT ${sql.literal(COLUMNS)} FROM signals s
           WHERE s.id = ${uuidFromString(id)}`,
         (rows) => Option.map(Option.fromNullishOr(rows[0]), parseRow),
       ),
@@ -343,7 +377,7 @@ const make = Effect.gen(function* () {
     readMany: (ids: ReadonlyArray<string>): Effect.Effect<ReadonlyArray<Signal>, SqlError> =>
       Effect.map(
         sql<SignalRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
+          SELECT ${sql.literal(COLUMNS)} FROM signals s
           WHERE ${buildIdIn("s.id", ids)}`,
         (rows) => rows.map(parseRow),
       ),
@@ -401,70 +435,20 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the signals on To do at `now`: the open signals with no snooze,
-     * or whose snooze ran out at or before `now`. The signals back from a
-     * snooze come first, soonest `until` first, then the rest oldest first.
-     * `kind` keeps the signals of one kind, and `source` the signals of one
-     * plugin's kinds, whose kind starts with `<source>/`. The list is short,
-     * so it is not paged.
+     * Returns the signals on To do: the open signals, oldest first. `kind`
+     * keeps the signals of one kind, and `source` the signals of one plugin's
+     * kinds, whose kind starts with `<source>/`. The list is short, so it is
+     * not paged.
      */
-    listToDo: (
-      filter: SignalListFilter,
-      now: string,
-    ): Effect.Effect<ReadonlyArray<Signal>, SqlError> =>
+    listToDo: (filter: SignalListFilter): Effect.Effect<ReadonlyArray<Signal>, SqlError> =>
       Effect.map(
         sql<SignalRow>`
-          SELECT ${sql.literal(COLUMNS)} FROM ${sql.literal(SIGNALS_WITH_SNOOZES)}
-          WHERE ${sql.and([...buildToDoConditions(now), ...buildFilterClauses(filter)])}
-          ORDER BY z.until IS NULL, z.until, s.created_at, s.id
+          SELECT ${sql.literal(COLUMNS)} FROM signals s
+          WHERE ${sql.and([sql`s.status = 'open'`, ...buildFilterClauses(filter)])}
+          ORDER BY s.created_at, s.id
         `,
         (rows) => rows.map(parseRow),
       ),
-
-    /**
-     * Returns the id and thread ref of every open signal, snoozed or not.
-     * Only a signal that came from an event has a thread ref, so a core
-     * signal is left out. It reads two narrow columns, never a signal's
-     * blocks or actions, and it scans one of the partial indexes that hold
-     * the open signals only, so the resolved signals, which are most of the
-     * table, are never read.
-     */
-    listOpenThreads: (): Effect.Effect<
-      ReadonlyArray<{ readonly signalId: string; readonly threadRef: string }>,
-      SqlError
-    > =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array; readonly thread_ref: string }>`
-          SELECT id, thread_ref FROM signals
-          WHERE status = 'open' AND thread_ref IS NOT NULL
-        `,
-        (rows) =>
-          rows.map((row) => ({ signalId: uuidToString(row.id), threadRef: row.thread_ref })),
-      ),
-
-    /**
-     * Returns one page of the Later view at `now`: the signals snoozed until
-     * after `now`, soonest first. Only an open signal has a snooze, because
-     * resolving a signal deletes it. Fails with `CursorError` when the cursor
-     * does not belong to this view.
-     */
-    listLater: (
-      filter: SignalListFilter,
-      request: SignalPageRequest,
-      now: string,
-    ): Effect.Effect<Page<Signal>, CursorError | SqlError> =>
-      listPage({
-        scope: LATER_SCOPE,
-        from: "signal_snoozes z JOIN signals s ON s.id = z.signal_id",
-        sortColumn: "z.until",
-        idColumn: "z.signal_id",
-        direction: "asc",
-        condition: sql`z.until > ${now}`,
-        filter,
-        request,
-        // Every row of this view has a snooze, joined from `signal_snoozes`.
-        readSortValue: (signal) => signal.snooze!.until,
-      }),
 
     /**
      * Returns one page of the Done view: the resolved signals, newest
@@ -477,7 +461,7 @@ const make = Effect.gen(function* () {
     ): Effect.Effect<Page<Signal>, CursorError | SqlError> =>
       listPage({
         scope: DONE_SCOPE,
-        from: SIGNALS_WITH_SNOOZES,
+        from: "signals s",
         sortColumn: "s.resolved_at",
         idColumn: "s.id",
         direction: "desc",
@@ -489,92 +473,157 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Resolves an open signal and deletes its snooze, so a snooze never
-     * holds a resolved signal. Returns false, and writes nothing, when the
+     * Resolves an open signal. Returns false, and writes nothing, when the
      * signal is not open, so two resolutions racing each other cannot both
-     * win. Run it inside a transaction, so both writes commit together.
+     * win.
      */
     resolve: (id: string, resolution: SignalResolution): Effect.Effect<boolean, SqlError> =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ readonly id: Uint8Array }>`
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
           UPDATE signals SET status = 'resolved', resolution = ${JSON.stringify(resolution)}
           WHERE id = ${uuidFromString(id)} AND status = 'open'
           RETURNING id
-        `;
-        if (rows.length === 0) return false;
-        yield* sql`DELETE FROM signal_snoozes WHERE signal_id = ${uuidFromString(id)}`;
-        return true;
-      }),
+        `,
+        (rows) => rows.length > 0,
+      ),
 
     /**
      * Resolves the open signals among these ids, all with one resolution,
-     * deletes their snoozes, and returns the ids it resolved. A signal that
-     * is not open is left as it is. Run it inside a transaction, so both
-     * writes commit together.
+     * and returns the ids it resolved. A signal that is not open is left as
+     * it is.
      */
     resolveMany: (
       ids: ReadonlyArray<string>,
       resolution: SignalResolution,
     ): Effect.Effect<ReadonlySet<string>, SqlError> =>
-      Effect.gen(function* () {
-        const rows = yield* sql<{ readonly id: Uint8Array }>`
-          UPDATE signals SET status = 'resolved', resolution = ${JSON.stringify(resolution)}
-          WHERE ${buildIdIn("id", ids)} AND status = 'open'
-          RETURNING id
-        `;
-        const resolved = rows.map((row) => uuidToString(row.id));
-        yield* sql`DELETE FROM signal_snoozes WHERE ${buildIdIn("signal_id", resolved)}`;
-        return new Set(resolved);
-      }),
-
-    /**
-     * Snoozes the signals with these ids until `until`, a UTC ISO time, in
-     * one statement. A signal that is already snoozed gets the new time, and
-     * the new `snoozedAt` and actor. The caller passes only open signals, at
-     * least one.
-     */
-    snooze: (
-      ids: ReadonlyArray<string>,
-      snooze: { readonly until: string; readonly snoozedAt: string; readonly actor: Actor },
-    ): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        INSERT INTO signal_snoozes (signal_id, until, snoozed_at, actor)
-        VALUES ${sql.csv(
-          ids.map(
-            (id) =>
-              sql`(${uuidFromString(id)}, ${snooze.until}, ${snooze.snoozedAt}, ${snooze.actor})`,
-          ),
-        )}
-        ON CONFLICT (signal_id) DO UPDATE SET
-          until = excluded.until, snoozed_at = excluded.snoozed_at, actor = excluded.actor
-      `),
-
-    /**
-     * Deletes the snoozes of the signals with these ids, and returns the ids
-     * of the signals that had one.
-     */
-    unsnooze: (ids: ReadonlyArray<string>): Effect.Effect<ReadonlySet<string>, SqlError> =>
-      Effect.map(
-        sql<{ readonly signal_id: Uint8Array }>`
-          DELETE FROM signal_snoozes WHERE ${buildIdIn("signal_id", ids)}
-          RETURNING signal_id
-        `,
-        (rows) => new Set(rows.map((row) => uuidToString(row.signal_id))),
-      ),
-
-    /**
-     * Moves the open, `urgent` signals among these ids to `high`, marks them
-     * lowered, and returns their ids. Every other signal is left as it is.
-     */
-    lowerPriority: (ids: ReadonlyArray<string>): Effect.Effect<ReadonlySet<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
-          UPDATE signals SET priority = 'high', priority_lowered = 1
-          WHERE ${buildIdIn("id", ids)} AND status = 'open' AND priority = 'urgent'
+          UPDATE signals SET status = 'resolved', resolution = ${JSON.stringify(resolution)}
+          WHERE ${buildIdIn("id", ids)} AND status = 'open'
           RETURNING id
         `,
         (rows) => new Set(rows.map((row) => uuidToString(row.id))),
       ),
+
+    /**
+     * Returns, for each of `threadRefs` that holds an open signal, the
+     * distinct kinds of those signals, sorted, at most
+     * `limitPerRef` for each ref (the first ones in that order). A ref with
+     * no open signal is left out. One statement however many refs there are,
+     * none for no refs.
+     */
+    listOpenKindsByThread: (
+      threadRefs: ReadonlyArray<string>,
+      limitPerRef: number,
+    ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<string>>, SqlError> =>
+      threadRefs.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly ref: string; readonly kind: string }>`
+              SELECT ref, kind FROM (
+                SELECT ref, kind, ROW_NUMBER() OVER (PARTITION BY ref ORDER BY kind) AS position
+                FROM (
+                  SELECT DISTINCT thread_ref AS ref, kind FROM signals
+                  WHERE status = 'open'
+                    AND thread_ref IN (SELECT value FROM json_each(${JSON.stringify(threadRefs)}))))
+              WHERE position <= ${limitPerRef}
+              ORDER BY ref, position`,
+            (rows) => {
+              const kinds = new Map<string, Array<string>>();
+              for (const row of rows) {
+                const found = kinds.get(row.ref);
+                if (found === undefined) kinds.set(row.ref, [row.kind]);
+                else found.push(row.kind);
+              }
+              return kinds;
+            },
+          ),
+
+    /**
+     * Returns the ids of the open signals whose thread ref is one of
+     * `threadRefs`, sorted. One statement, none for no refs.
+     */
+    listOpenSignalIds: (
+      threadRefs: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      threadRefs.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM signals
+              WHERE status = 'open'
+                AND thread_ref IN (SELECT value FROM json_each(${JSON.stringify(threadRefs)}))`,
+            (rows) => rows.map((row) => uuidToString(row.id)).sort(),
+          ),
+
+    /**
+     * Returns the ids of the open signals on exactly the thread `threadRef`
+     * whose kind is one of `kinds`, sorted. It is the set
+     * of signals a handoff of that thread may end. None for no kinds.
+     */
+    listOpenSignalIdsOfKinds: (
+      threadRef: string,
+      kinds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      kinds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<{ readonly id: Uint8Array }>`
+              SELECT id FROM signals
+              WHERE status = 'open' AND thread_ref = ${threadRef}
+                AND kind IN (SELECT value FROM json_each(${JSON.stringify(kinds)}))`,
+            (rows) => rows.map((row) => uuidToString(row.id)).sort(),
+          ),
+
+    /**
+     * Returns the signals on `threadRef` that a detail shows, with the counts.
+     * At most `limit` signals: the newest open ones first, then the newest
+     * resolved ones in whatever room is left. The selected signals are returned oldest first, by `createdAt`,
+     * then by id.
+     *
+     * Three statements, all served by the index `signals_thread_ref`, so the
+     * work is bounded by the limit however many signals the thread has: the
+     * two counts, the open signals, and the resolved ones (not read when the
+     * open ones fill the room).
+     */
+    readThreadSignals: (
+      threadRef: string,
+      limit: number,
+    ): Effect.Effect<ThreadSignalLines, SqlError> =>
+      Effect.gen(function* () {
+        const counts = yield* sql<{ readonly status: string; readonly total: number }>`
+          SELECT status, COUNT(*) AS total FROM signals
+          WHERE thread_ref = ${threadRef} GROUP BY status`;
+        const openCount = counts.find((row) => row.status === "open")?.total ?? 0;
+        const signalCount = counts.reduce((sum, row) => sum + row.total, 0);
+        const open =
+          openCount === 0
+            ? []
+            : yield* sql<ThreadSignalRow>`
+              SELECT id, kind, title, asker, priority, status, created_at, NULL AS outcome
+              FROM signals
+              WHERE thread_ref = ${threadRef} AND status = 'open'
+              ORDER BY created_at DESC, id DESC LIMIT ${limit}`;
+        const room = limit - open.length;
+        const resolved =
+          room <= 0 || signalCount === openCount
+            ? []
+            : yield* sql<ThreadSignalRow>`
+              SELECT id, kind, title, asker, priority, status, created_at,
+                json_extract(resolution, '$.outcome') AS outcome
+              FROM signals
+              WHERE thread_ref = ${threadRef} AND status = 'resolved'
+              ORDER BY created_at DESC, id DESC LIMIT ${room}`;
+        // The ids are lowercase hex, so comparing them as text orders them as SQLite orders the bytes.
+        const signals = [...open, ...resolved]
+          .map(parseThreadSignalRow)
+          .sort(
+            (a, b) =>
+              (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0) ||
+              (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+          );
+        return { signals, openCount, signalCount };
+      }),
 
     /**
      * Returns the open signals raised from the events of one Connection,
@@ -655,7 +704,7 @@ const make = Effect.gen(function* () {
      * Counts the Done streak of a group: the signals of `kind` with exactly
      * the values `match`. The count is the number of the group's newest
      * signals the user resolved with Done, back to the newest one that was
-     * not: one still open, snoozed or not, or one answered another way, in
+     * not: one still open, or one answered another way, in
      * Hercule or on the source. Withdrawn signals are skipped, so they
      * neither count nor end the streak. Signals created at the same time are
      * ordered by id. Returns 0 when `match` is empty, because such a signal

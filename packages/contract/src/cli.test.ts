@@ -14,9 +14,16 @@ interface FieldRow {
   readonly hidden?: true;
   readonly stdin?: true;
   readonly skillFolder?: true;
+  readonly oneSkillOnly?: true;
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
+  readonly oneOf?: ReadonlyArray<ObjectRow & { readonly help?: string }>;
+}
+
+interface ObjectRow {
+  readonly fixed: Record<string, string>;
+  readonly flags: Record<string, FieldRow>;
 }
 
 interface Row {
@@ -40,13 +47,25 @@ const visible = rows.filter(([, row]) => row.hidden !== true);
 /**
  * Returns every field that a visible row puts on the command line, as
  * `[operation id, field name, row]`, so the name of a failing test includes the
- * field. Hidden fields are left out, like hidden rows.
+ * field. Hidden fields are left out, like hidden rows. A field filled from
+ * several flags is listed once per flag, named `<field>.<key>`, and so is a
+ * field of several shapes, once per flag of each entry.
  */
 const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>
     Object.entries(row.fields ?? {})
       .filter(([, field]) => field.hidden !== true)
-      .map(([name, field]) => [id, name, field] as [string, string, FieldRow]),
+      .flatMap(([name, field]): Array<[string, string, FieldRow]> => {
+        return field.oneOf === undefined
+          ? [[id, name, field]]
+          : field.oneOf.flatMap((object) =>
+              Object.entries(object.flags).map(([key, keyRow]): [string, string, FieldRow] => [
+                id,
+                `${name}.${key}`,
+                keyRow,
+              ]),
+            );
+      }),
   );
 
 /** Returns the `resolves` value of every visible field, keyed `<operation> <field>`. */
@@ -63,6 +82,15 @@ const HIDDEN = [
   "attachment.create",
   "attachment.readContent",
   "attachment.delete",
+  "task.undoTryAgain",
+  "task.readAttention",
+  "externalEntity.countInbox",
+  "externalEntity.readInboxOutline",
+  "externalEntity.suggestInboxValues",
+  "externalEntity.readCards",
+  "externalEntity.undoTakeOn",
+  "externalEntity.undoTakeOnTogether",
+  "mcpServer.finishSignIn",
 ];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */
@@ -91,12 +119,18 @@ const COMMANDS: Record<string, string> = {
   "secret.delete": "secret delete",
 
   "task.query": "task list",
-  "task.queryTracking": "task tracking",
-  "task.queryLegs": "task legs",
+  "task.queryBoard": "task board",
   "task.read": "task read",
-  "task.readTracking": "task read-tracking",
+  "task.readDetail": "task details",
   "task.create": "task create",
   "task.update": "task update",
+  "task.move": "task move",
+  "task.merge": "task merge",
+  "task.linkEntity": "task link",
+  "task.unlinkEntity": "task unlink",
+  "task.addBlocker": "task block",
+  "task.removeBlocker": "task unblock",
+  "task.checkMerge": "task check-merge",
   "task.delete": "task delete",
 
   "notification.query": "notification list",
@@ -107,16 +141,28 @@ const COMMANDS: Record<string, string> = {
   "permission.request": "permission request",
   "notification.act": "notification act",
   "signal.query": "signal list",
-  "signal.queryYourWork": "signal your-work",
   "signal.read": "signal read",
   "signal.raise": "signal raise",
   "signal.act": "signal act",
   "signal.handOff": "signal hand-off",
   "signal.withdraw": "signal withdraw",
   "signal.markDone": "signal done",
-  "signal.snooze": "signal snooze",
-  "signal.unsnooze": "signal unsnooze",
-  "signal.lowerPriority": "signal lower-priority",
+  "externalEntity.queryInbox": "entity list",
+  "externalEntity.read": "entity read",
+  "externalEntity.readInboxGroup": "entity group",
+  "externalEntity.readBlocks": "entity blocks",
+  "externalEntity.takeOn": "entity take-on",
+  "externalEntity.matchProject": "entity match-project",
+  "externalEntity.takeOnTogether": "entity take-on-together",
+  "externalEntity.handOff": "entity hand-off",
+  "externalEntity.undoHandOff": "entity undo-hand-off",
+  "externalEntity.dismiss": "entity dismiss",
+  "externalEntity.restore": "entity restore",
+  "externalEntity.search": "entity search",
+  "externalEntity.listSuggestions": "entity suggestions",
+  "externalEntity.addToWork": "entity add-to-work",
+  "externalEntity.link": "entity link",
+  "externalEntity.unlink": "entity unlink",
   "ignoreRule.query": "ignore-rule list",
   "ignoreRule.create": "ignore-rule create",
   "ignoreRule.delete": "ignore-rule delete",
@@ -124,6 +170,14 @@ const COMMANDS: Record<string, string> = {
   "discussion.read": "discussion read",
   "discussion.create": "discussion create",
   "discussion.post": "discussion post",
+
+  "initiative.query": "initiative list",
+  "initiative.read": "initiative read",
+  "initiative.create": "initiative create",
+  "initiative.update": "initiative update",
+  "initiative.close": "initiative close",
+  "initiative.reopen": "initiative reopen",
+  "initiative.delete": "initiative delete",
 
   "project.query": "project list",
   "project.read": "project read",
@@ -143,6 +197,7 @@ const COMMANDS: Record<string, string> = {
   "workspace.attach": "workspace attach",
   "workspace.inspect": "workspace inspect",
   "workspace.dispose": "workspace dispose",
+  "workspace.disposeMany": "workspace dispose-many",
   "workspace.detach": "workspace detach",
 
   "event.query": "event list",
@@ -178,6 +233,7 @@ const COMMANDS: Record<string, string> = {
   "runner.query": "runner list",
   "runner.read": "runner read",
   "runner.update": "runner update",
+  "runnerMetrics.query": "runner metrics",
   "runner.drain": "runner drain",
   "runner.undrain": "runner undrain",
   "runner.retire": "runner retire",
@@ -197,13 +253,22 @@ const COMMANDS: Record<string, string> = {
   "plugin.configure": "plugin configure",
   "plugin.updateIntake": "plugin update-intake",
 
+  "harness.query": "harness list",
   "provider.query": "provider list",
-  "provider.read": "provider read",
-  "provider.create": "provider create",
-  "provider.update": "provider update",
-  "provider.delete": "provider delete",
-  "provider.login": "provider login",
-  "provider.submitLoginCode": "provider submit-login-code",
+  "providerAccount.query": "provider-account list",
+  "providerAccount.read": "provider-account read",
+  "providerAccount.create": "provider-account create",
+  "providerAccount.update": "provider-account update",
+  "providerAccount.delete": "provider-account delete",
+  "providerAccount.signIn": "provider-account sign-in",
+  "providerAccount.submitSignInCode": "provider-account submit-sign-in-code",
+  "providerAccount.readCatalog": "provider-account read-catalog",
+  "providerAccount.refresh": "provider-account refresh",
+  "modelProfile.create": "model-profile create",
+  "modelProfile.delete": "model-profile delete",
+  "modelProfile.query": "model-profile list",
+  "modelProfile.read": "model-profile read",
+  "modelProfile.update": "model-profile update",
 
   "connection.query": "connection list",
   "connection.read": "connection read",
@@ -237,15 +302,28 @@ const COMMANDS: Record<string, string> = {
   "wikiPage.read": "wiki-page read",
   "wikiPage.create": "wiki-page create",
   "wikiPage.update": "wiki-page update",
+  "wikiPage.archive": "wiki-page archive",
+  "wikiPage.restore": "wiki-page restore",
 
   "skill.query": "skill list",
   "skill.read": "skill read",
   "skill.import": "skill import",
+  "skill.propose": "skill propose",
   "skill.delete": "skill delete",
   "skill.check": "skill check",
   "skill.diff": "skill diff",
   "skill.apply": "skill apply",
+  "skill.reject": "skill reject",
   "skill.applyUpdates": "skill apply-updates",
+
+  "mcpServer.query": "mcp-server list",
+  "mcpServer.read": "mcp-server read",
+  "mcpServer.create": "mcp-server create",
+  "mcpServer.update": "mcp-server update",
+  "mcpServer.delete": "mcp-server delete",
+  "mcpServer.check": "mcp-server check",
+  "mcpServer.setToken": "mcp-server set-token",
+  "mcpServer.startSignIn": "mcp-server sign-in",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -265,8 +343,10 @@ const COMMANDS: Record<string, string> = {
   "session.respondToQuestion": "session respond-to-question",
   "session.stop": "session stop",
   "session.continue": "session continue",
+  "session.moveToTask": "session move-to-task",
   "session.markDone": "session done",
   "session.reopen": "session reopen",
+  "session.archive": "session archive",
 
   "input.query": "input list",
   "input.update": "input update",
@@ -284,8 +364,8 @@ const COMMANDS: Record<string, string> = {
 /**
  * Every field whose value is read from stdin rather than given inline, keyed
  * `<operation> <field>`. A command has one stdin channel, so `user.setPassword`
- * is left out here and checked on its own below: it is the one command that
- * reads two fields, one per line.
+ * and `modelProfile.update` are left out here and checked on their own below:
+ * they are the two commands that read two fields, one per line.
  */
 const STDIN_FIELDS = [
   "setup.complete password",
@@ -310,8 +390,11 @@ const STDIN_FIELDS = [
   "session.continue prompt",
   "session.input text",
   "input.update text",
+  "mcpServer.create source.token",
+  "mcpServer.setToken token",
   "plugin.configure config",
-  "provider.create config",
+  "providerAccount.create credentials",
+  "providerAccount.update credentials",
   "workflow.create source",
   "workflow.update source",
   "workflow.validate source",
@@ -331,10 +414,29 @@ const RESOLVES: Record<string, string> = {
   "profile.delete id": "profile.query",
 
   "task.read id": "task.query",
-  "task.readTracking id": "task.query",
   "task.update id": "task.query",
+  "task.readDetail id": "task.query",
+  "task.linkEntity id": "task.query",
+  "task.unlinkEntity id": "task.query",
+  "task.merge id": "task.query",
+  "task.merge intoTaskId": "task.query",
+  "task.move id": "task.query",
+  "task.move projectId": "project.query",
+  "task.move afterTaskId": "task.query",
+  "task.move initiativeId": "initiative.query",
+  "task.query projectId": "project.query",
+  "task.create projectId": "project.query",
+  "task.update projectId": "project.query",
+  "task.query initiativeId": "initiative.query",
+  "task.create initiativeId": "initiative.query",
+  "task.update initiativeId": "initiative.query",
+  "task.addBlocker id": "task.query",
+  "task.addBlocker blockedByTaskId": "task.query",
+  "task.removeBlocker id": "task.query",
+  "task.removeBlocker blockedByTaskId": "task.query",
+  "task.checkMerge id": "task.query",
+  "task.checkMerge intoTaskId": "task.query",
   "task.delete id": "task.query",
-  "task.queryLegs runIds": "run.query",
 
   "notification.read id": "notification.query",
   "notification.withdraw id": "notification.query",
@@ -345,21 +447,37 @@ const RESOLVES: Record<string, string> = {
   "signal.handOff workflowId": "workflow.query",
   "signal.withdraw id": "signal.query",
   "signal.markDone signalIds": "signal.query",
-  "signal.snooze signalIds": "signal.query",
-  "signal.unsnooze signalIds": "signal.query",
-  "signal.lowerPriority signalIds": "signal.query",
+  "externalEntity.handOff workflowId": "workflow.query",
+  "externalEntity.handOff connectionId": "connection.query",
+  "externalEntity.undoHandOff runId": "run.query",
+  "externalEntity.addToWork projectId": "project.query",
   "ignoreRule.delete id": "ignoreRule.query",
   "discussion.read id": "discussion.query",
   "discussion.post id": "discussion.query",
 
+  "initiative.read id": "initiative.query",
+  "initiative.update id": "initiative.query",
+  "initiative.close id": "initiative.query",
+  "initiative.reopen id": "initiative.query",
+  "initiative.delete id": "initiative.query",
+  "initiative.query projectId": "project.query",
+  "initiative.create projectId": "project.query",
+  "initiative.update projectId": "project.query",
+
   "project.read id": "project.query",
   "project.update id": "project.query",
   "project.delete id": "project.query",
+  "project.create modelProfileId": "modelProfile.query",
+  "project.update modelProfileId": "modelProfile.query",
+  "project.create mcpServerIds": "mcpServer.query",
+  "project.update mcpServerIds": "mcpServer.query",
 
+  "resource.query projectId": "project.query",
   "resource.read id": "resource.query",
   "resource.update id": "resource.query",
   "resource.delete id": "resource.query",
 
+  "workspace.query projectId": "project.query",
   "workspace.read id": "workspace.query",
   "workspace.inspect id": "workspace.query",
   "workspace.provision resourceId": "resource.query",
@@ -367,11 +485,14 @@ const RESOLVES: Record<string, string> = {
   "workspace.attach resourceId": "resource.query",
   "workspace.attach runnerId": "runner.query",
   "workspace.dispose id": "workspace.query",
+  "workspace.disposeMany items": "workspace.query",
   "workspace.detach id": "workspace.query",
 
   "workflow.read id": "workflow.query",
   "workflow.update id": "workflow.query",
   "workflow.delete id": "workflow.query",
+
+  "event.query runnerId": "runner.query",
 
   "event.query workflowId": "workflow.query",
 
@@ -388,19 +509,28 @@ const RESOLVES: Record<string, string> = {
 
   "runner.read id": "runner.query",
   "runner.update id": "runner.query",
+  "runnerMetrics.query runnerId": "runner.query",
   "runner.drain id": "runner.query",
   "runner.undrain id": "runner.query",
   "runner.retire id": "runner.query",
   "runner.probe id": "runner.query",
+  "runner.probe providerAccountId": "providerAccount.query",
   "runner.refreshFacts id": "runner.query",
   "runner.installHarness id": "runner.query",
   "runner.revokeJoinToken id": "runner.queryJoinTokens",
 
-  "provider.read id": "provider.query",
-  "provider.update id": "provider.query",
-  "provider.delete id": "provider.query",
-  "provider.login id": "provider.query",
-  "provider.submitLoginCode id": "provider.query",
+  "providerAccount.read id": "providerAccount.query",
+  "providerAccount.update id": "providerAccount.query",
+  "providerAccount.delete id": "providerAccount.query",
+  "providerAccount.signIn id": "providerAccount.query",
+  "providerAccount.submitSignInCode id": "providerAccount.query",
+  "providerAccount.readCatalog id": "providerAccount.query",
+  "providerAccount.refresh id": "providerAccount.query",
+
+  "modelProfile.create copyFromId": "modelProfile.query",
+  "modelProfile.delete id": "modelProfile.query",
+  "modelProfile.read id": "modelProfile.query",
+  "modelProfile.update id": "modelProfile.query",
 
   "connection.read id": "connection.query",
   "connection.update id": "connection.query",
@@ -410,18 +540,18 @@ const RESOLVES: Record<string, string> = {
 
   "agent.query permissionProfileId": "profile.query",
   "agent.read id": "agent.query",
-  "agent.create instanceId": "provider.query",
+  "agent.create providerAccountId": "providerAccount.query",
   "agent.create permissionProfileId": "profile.query",
   "agent.update id": "agent.query",
-  "agent.update instanceId": "provider.query",
+  "agent.update providerAccountId": "providerAccount.query",
   "agent.update permissionProfileId": "profile.query",
   "agent.delete id": "agent.query",
 
   "assistant.read id": "assistant.query",
-  "assistant.create instanceId": "provider.query",
+  "assistant.create providerAccountId": "providerAccount.query",
   "assistant.create permissionProfileId": "profile.query",
   "assistant.update id": "assistant.query",
-  "assistant.update instanceId": "provider.query",
+  "assistant.update providerAccountId": "providerAccount.query",
   "assistant.update permissionProfileId": "profile.query",
   "assistant.delete id": "assistant.query",
 
@@ -433,6 +563,17 @@ const RESOLVES: Record<string, string> = {
   "memory.delete id": "assistant.query",
   "wikiPage.read id": "wikiPage.query",
   "wikiPage.update id": "wikiPage.query",
+  "wikiPage.archive id": "wikiPage.query",
+  "wikiPage.restore id": "wikiPage.query",
+
+  "mcpServer.create source.connectionId": "connection.query",
+  "mcpServer.read id": "mcpServer.query",
+  "mcpServer.update id": "mcpServer.query",
+  "mcpServer.update source.connectionId": "connection.query",
+  "mcpServer.delete id": "mcpServer.query",
+  "mcpServer.check id": "mcpServer.query",
+  "mcpServer.setToken id": "mcpServer.query",
+  "mcpServer.startSignIn id": "mcpServer.query",
 
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",
@@ -444,11 +585,15 @@ const RESOLVES: Record<string, string> = {
   "session.query permissionProfileId": "profile.query",
   "session.query runId": "run.query",
   "session.query runnerId": "runner.query",
+  "session.query taskId": "task.query",
   "session.spawn agentId": "agent.query",
-  "session.spawn instanceId": "provider.query",
+  "session.spawn providerAccountId": "providerAccount.query",
   "session.spawn permissionProfileId": "profile.query",
   "session.spawn projectId": "project.query",
   "session.spawn runnerId": "runner.query",
+  "session.spawn taskId": "task.query",
+  "session.spawn mcpServerIds": "mcpServer.query",
+  "session.update mcpServerIds": "mcpServer.query",
   "session.read id": "session.query",
   "session.querySubagents id": "session.query",
   "session.querySkills id": "session.query",
@@ -461,7 +606,11 @@ const RESOLVES: Record<string, string> = {
   "session.respondToQuestion id": "session.query",
   "session.stop id": "session.query",
   "session.continue id": "session.query",
+  "session.moveToTask id": "session.query",
+  "session.moveToTask taskId": "task.query",
   "session.markDone sessionIds": "session.query",
+  "session.archive sessionIds": "session.query",
+  "session.query workspaceId": "workspace.query",
   "session.reopen sessionIds": "session.query",
 
   "input.query id": "session.query",
@@ -483,7 +632,7 @@ describe("the CLI table", () => {
     expect(Object.keys(table).sort()).toEqual(Object.keys(OPERATIONS).sort());
   });
 
-  it("hides exactly the five operations with no command", () => {
+  it("hides exactly the operations with no command", () => {
     const hidden = rows.filter(([, row]) => row.hidden === true).map(([id]) => id);
     expect(hidden.sort()).toEqual([...HIDDEN].sort());
   });
@@ -547,7 +696,10 @@ describe("the nouns", () => {
 describe("the stdin fields", () => {
   it("marks exactly the fields the spec lists", () => {
     const marked = listVisibleFields()
-      .filter(([id, , field]) => field.stdin === true && id !== "user.setPassword")
+      .filter(
+        ([id, , field]) =>
+          field.stdin === true && id !== "user.setPassword" && id !== "modelProfile.update",
+      )
       .map(([id, name]) => `${id} ${name}`);
     expect(marked.sort()).toEqual([...STDIN_FIELDS].sort());
   });
@@ -557,6 +709,13 @@ describe("the stdin fields", () => {
       .filter(([, field]) => field.stdin === true)
       .map(([name]) => name);
     expect(marked.sort()).toEqual(["current", "next"]);
+  });
+
+  it("reads the sections and the dismissed models of model-profile update from stdin", () => {
+    const marked = Object.entries(table["modelProfile.update"]?.fields ?? {})
+      .filter(([, field]) => field.stdin === true)
+      .map(([name]) => name);
+    expect(marked.sort()).toEqual(["accounts", "dismissedNewModels"]);
   });
 });
 
@@ -690,7 +849,13 @@ const USER_ONLY = [
   "signal.act",
   "signal.handOff",
   "signal.markDone",
-  "signal.lowerPriority",
+  "task.merge",
+  "initiative.create",
+  "initiative.update",
+  "initiative.close",
+  "initiative.reopen",
+  "initiative.delete",
+  "session.moveToTask",
 ];
 
 /**
@@ -745,7 +910,23 @@ describe("the skill import row", () => {
 
   it("tells a session to ask the user, because only the user imports", () => {
     expect(row?.errors?.["forbidden"]).toBe(
-      "Only the user imports skills, so a session token is refused whatever grants its profile holds. Ask the user to import the skill.",
+      "Only the user imports skills, so a session token is refused whatever grants its profile holds. Propose the skill instead with `hercule skill propose <folder>`; the user applies it on the Skills screen.",
+    );
+  });
+});
+
+/** `hercule skill propose <folder>` takes one skill folder, and a session is the only caller. */
+describe("the skill propose row", () => {
+  const row = table["skill.propose"];
+
+  it("takes one skill folder in place of the name", () => {
+    expect(row?.fields?.["name"]?.skillFolder).toBe(true);
+    expect(row?.fields?.["name"]?.oneSkillOnly).toBe(true);
+  });
+
+  it("tells the user to import instead, because only a session proposes", () => {
+    expect(row?.errors?.["forbidden"]).toContain(
+      "Only a session proposes a skill revision. Import your own skills instead",
     );
   });
 });

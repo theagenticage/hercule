@@ -30,6 +30,13 @@
   max-height: calc(100% - 16px);
   overflow-y: auto;
 }
+/* The model menu scrolls inside its list (model-menu-list.css), never as a
+   whole: two scroll areas inside each other would each show a scroll bar. */
+.menu:popover-open:has(> .model-menu) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 .menu--end {
   position-area: block-start span-inline-start;
 }
@@ -44,7 +51,7 @@
 }
 
 /* Not in the book. A menu of items, such as a Connection row's ⋯ menu,
-   Add a Connection's menu, Intake's pane menu and the snooze menu. Each
+   Add a Connection's menu and the Inbox's pane menu. Each
    menu sets only its own width, placement and item columns. The book
    highlights an item on `:hover` and `:focus-visible`; these menus mark
    one active item instead, under the pointer or with the focus, so two
@@ -60,7 +67,7 @@
 .pop.popover-menu {
   padding: 6px;
 }
-.popover-menu :where([role="menuitem"]) {
+.popover-menu :where([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]) {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -73,13 +80,15 @@
   text-align: left;
   text-decoration: none;
 }
-.popover-menu [role="menuitem"].is-active {
+.popover-menu :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]).is-active {
   background: var(--hover);
 }
-.popover-menu [role="menuitem"]:focus-visible {
+.popover-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):focus-visible {
   outline: none;
 }
-.popover-menu [role="menuitem"][aria-disabled="true"] {
+.popover-menu
+  :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"])[aria-disabled="true"] {
   color: var(--faint);
   cursor: default;
 }
@@ -99,6 +108,12 @@
 }
 .pop-h span {
   margin-left: auto;
+  color: var(--muted);
+  font-size: var(--t-12);
+}
+.pop-reason {
+  margin: 0;
+  padding: 10px 14px 8px;
   color: var(--muted);
   font-size: var(--t-12);
 }
@@ -152,11 +167,41 @@ button.line:hover {
 .line--dimmed {
   opacity: 0.5;
 }
+/* Not in the book. A dimmed row with an action, such as Sign in, fades its
+   own content and keeps the action at full strength, so the one thing the
+   user can do on the row reads as clickable. */
+.line--acting {
+  opacity: 1;
+}
+.line--acting > :not(.line-action) {
+  opacity: 0.5;
+}
+.line-action {
+  flex: none;
+  /* The padding gives the focus ring room around the word, and the negative
+     margin keeps the word where it was. */
+  margin-inline: -5px;
+  padding-inline: 5px;
+  white-space: nowrap;
+}
+/* Not in the book. What stands in a lane while its account's models are
+   still being read, in the place of its rows. */
+.menu-note {
+  padding: 6px;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
 /* Not in the book. The filter spans its section. The section's top padding
    matches its sides, so the focus ring, 4px outside the field, keeps an even
    gap to the menu's edge. */
 .menu-filter {
   width: 100%;
+}
+/* The filter has the focus while its menu is open, and the section around it
+   leaves only 8px to the popover's edge. With the page's 2px offset, the ring
+   would nearly touch the rim, so here it hugs the field. */
+.menu-filter:focus-visible {
+  outline-offset: 0;
 }
 .pop-sec:has(> .menu-filter) {
   padding-top: 8px;
@@ -195,7 +240,7 @@ button.line:hover {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-/* In a row that cannot be picked, the note says why ("not logged in"), so it
+/* In a row that cannot be picked, the note says why ("not signed in"), so it
    is content, not metadata. */
 .line--dimmed .line-note {
   color: var(--muted);
@@ -217,4 +262,62 @@ button.line:hover {
   border-top: 1px solid var(--divider);
   color: var(--muted);
   font-size: var(--t-12);
+}
+
+/* ---------- The composer's `+` menu ---------- */
+/* Not in the book. The menu is two glass panels side by side, the rows and
+   the submenu of the thread's MCP servers, with their feet on one line, so
+   the popover draws nothing itself: its own panel is taken off. The panels
+   stretch to the popover's height, which anchor positioning limits to the
+   room above the `+`, so a long submenu scrolls inside itself. */
+.menu--bare {
+  width: max-content;
+  overflow: visible;
+  border-radius: 0;
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+}
+.menu--bare:popover-open {
+  display: flex;
+  gap: 6px;
+}
+.plus-main {
+  align-self: flex-end;
+  width: 268px;
+}
+.plus-main .ic {
+  flex: none;
+  color: var(--muted);
+}
+.plus-main [role="menuitem"]:focus,
+.plus-main [role="menuitem"].is-open {
+  background: var(--hover);
+}
+.plus-main [role="menuitem"][aria-disabled="true"] .ic {
+  color: var(--faint);
+}
+.plus-label {
+  flex: 1;
+  min-width: 0;
+}
+.plus-fine {
+  flex: none;
+  color: var(--faint);
+  font-size: var(--t-12);
+}
+.plus-fine.is-fail {
+  color: var(--fail-ink);
+}
+/* The dot on the `+` while one of the thread's servers needs sign-in. The
+   ring is the card's colour, so the dot reads as laid on the button. */
+.plus-button {
+  position: relative;
+}
+.plus-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  box-shadow: 0 0 0 2px var(--raised);
 }

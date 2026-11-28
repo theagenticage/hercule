@@ -385,7 +385,7 @@ export function mountOfficeScene(
 
   const stopCommands = onOfficeCommand((command) => {
     switch (command.kind) {
-      case "overview":
+      case "show-whole-office":
         setOffice({ selectedId: null, roomId: null, drawer: false });
         camera.flyTo(building.office.overview);
         break;

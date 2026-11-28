@@ -23,7 +23,7 @@ import {
 } from "../scripts/controller-process";
 import {
   readApiKey,
-  listInstances,
+  listProviderAccounts,
   parseJsonOutput,
   createTemporaryHome,
   type TemporaryHome,
@@ -162,7 +162,7 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     }
   }, 30_000);
 
-  it("lists the five shipped plugins, each one active", async () => {
+  it("lists the fourteen shipped plugins, each one active", async () => {
     // There is no CLI command for this, so the route is called the way the
     // web app calls it: over HTTP, with the key the login above created.
     const response = await fetch(`${url}/api/v1/plugins`, {
@@ -179,6 +179,14 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "claude-code",
       "codex",
       "pi",
+      "antigravity",
+      "anthropic",
+      "openai",
+      "google",
+      "zai",
+      "openrouter",
+      "opencode",
+      "minimax",
       "github",
       "sentry",
       "linear",
@@ -186,10 +194,12 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
     for (const plugin of plugins) {
       expect(plugin.status, plugin.id).toEqual({ _tag: "active" });
     }
-    // The three harnesses are providers. github is the connection type, the
+    // The four harness plugins and the seven provider plugins have no capabilities asserted here. github is the connection type, the
     // event source with the GitHub event kinds it emits, the reader of the
-    // linked repo Resources it watches, and the GitHub workflow actions.
-    // sentry is the same without Resources, and linear is sentry without
+    // linked repo Resources it watches, the reader of the issues and pull
+    // requests that concern the user (entities), and the GitHub workflow
+    // actions.
+    // sentry is github without Resources, and linear is sentry without
     // workflow actions.
     const findCapabilities = (id: string) =>
       plugins.find((plugin) => plugin.id === id)?.capabilities;
@@ -198,15 +208,25 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
       "event-sources",
       "events",
       "resources",
+      "entities",
       "workflow-actions",
+      "mcp-servers",
     ]);
     expect(findCapabilities("sentry")).toEqual([
       "connections",
       "event-sources",
       "events",
+      "entities",
       "workflow-actions",
+      "mcp-servers",
     ]);
-    expect(findCapabilities("linear")).toEqual(["connections", "event-sources", "events"]);
+    expect(findCapabilities("linear")).toEqual([
+      "connections",
+      "event-sources",
+      "events",
+      "entities",
+      "mcp-servers",
+    ]);
   }, 30_000);
 
   it("lists the five task verbs in help, each with its grant and a line of its own", async () => {
@@ -239,49 +259,78 @@ describe("tasks, projects, the log and the plugins through the binary", () => {
 interface AssistantRow {
   readonly id: string;
   readonly name: string;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
   readonly reply: string;
 }
 
 describe("assistants through the binary", () => {
-  it("lists the default assistant, then a created one after it, each with its instance and reply mode", async () => {
-    const first = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
+  it("has no assistant on a fresh install, and a sign-in Provider Account creates none", async () => {
+    const before = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
       items: ReadonlyArray<AssistantRow>;
     };
-    expect(first.items.map((assistant) => assistant.name)).toEqual(["Hercule"]);
+    expect(before.items).toEqual([]);
 
-    const created = expectJsonOutput(
-      await runLoggedInCli(["assistant", "create", "--name", "Ada", "--json"]),
-    ) as AssistantRow;
-    expect(created.name).toBe("Ada");
+    // A subscription that signs in on each machine is created with no
+    // credentials, so the controller checks no key with a real provider.
+    // The default assistant waits for the first account that is ready, and a
+    // sign-in account is ready only after its first successful sign-in, which
+    // needs a real provider. So neither account makes an assistant here.
+    for (const provider of ["anthropic/anthropic", "openai/openai"]) {
+      expectJsonOutput(
+        await runLoggedInCli([
+          "provider-account",
+          "create",
+          "--provider",
+          provider,
+          "--kind",
+          "subscription-per-machine",
+          "--json",
+        ]),
+      );
+      const after = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
+        items: ReadonlyArray<AssistantRow>;
+      };
+      expect(after.items, provider).toEqual([]);
+    }
+  }, 60_000);
+
+  it("lists assistants oldest first, each with its account and reply mode", async () => {
+    // No default assistant exists without a ready account, so both are created
+    // here. They run on the oldest account that can run an assistant.
+    for (const name of ["Hercule", "Ada"]) {
+      const created = expectJsonOutput(
+        await runLoggedInCli(["assistant", "create", "--name", name, "--json"]),
+      ) as AssistantRow;
+      expect(created.name).toBe(name);
+    }
 
     const second = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
       items: ReadonlyArray<AssistantRow>;
     };
     expect(second.items.map((assistant) => assistant.name)).toEqual(["Hercule", "Ada"]);
-    const instances = await listInstances({ url, apiKey: readApiKey(state.home) });
+    const accounts = await listProviderAccounts({ url, apiKey: readApiKey(state.home) });
     for (const assistant of second.items) {
       expect(
-        instances.map((instance) => instance.id),
+        accounts.map((account) => account.id),
         assistant.name,
-      ).toContain(assistant.instanceId);
+      ).toContain(assistant.providerAccountId);
       expect(assistant.reply, assistant.name).toBe("turn-end");
     }
 
     // The table a person reads shows the same: one row per assistant, oldest
-    // first, with the tail of its instance and its reply mode.
+    // first, with the tail of its account and its reply mode.
     const table = await runLoggedInCli(["assistant", "list"]);
     expect(table.code, table.stderr).toBe(0);
     const rows = table.stdout.split("\n").filter((line) => /Hercule|Ada/.test(line));
     expect(rows).toHaveLength(2);
     for (const [index, assistant] of second.items.entries()) {
       expect(rows[index], assistant.name).toContain(assistant.name);
-      expect(rows[index], assistant.name).toContain(assistant.instanceId.slice(-8));
+      expect(rows[index], assistant.name).toContain(assistant.providerAccountId.slice(-8));
       expect(rows[index], assistant.name).toContain("turn-end");
     }
   }, 60_000);
 
-  it("reads the default assistant with its reply mode", async () => {
+  it("reads an assistant with its reply mode", async () => {
     const listed = expectJsonOutput(await runLoggedInCli(["assistant", "list", "--json"])) as {
       items: ReadonlyArray<AssistantRow>;
     };

@@ -23,6 +23,7 @@
  * for when the focused item leaves the list.
  */
 import {
+  Fragment,
   memo,
   useId,
   type ComponentProps,
@@ -31,9 +32,16 @@ import {
   type ReactNode,
 } from "react";
 import { Link } from "@tanstack/react-router";
-import { describePose, type SessionDot } from "@hercule/client-core";
+import {
+  buildRowSecondLine,
+  describePose,
+  findArchiveBlockReason,
+  type RowLinePart,
+  type SessionDot,
+} from "@hercule/client-core";
 import { useAgeWords } from "../app/age-clock";
 import { buildAssistantLook, buildLook, Face } from "../faces";
+import { ArchiveIcon } from "../icons/archive";
 import { CheckIcon } from "../icons/check";
 import { ChevronRightIcon } from "../icons/chevron-right";
 import { ComposeIcon } from "../icons/compose";
@@ -42,8 +50,8 @@ import { UndoIcon } from "../icons/undo";
 import { Mark } from "../marks";
 import { ProjectTile } from "../screens/project-tile";
 import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
+import { AgeLabel } from "../screens/age-label";
 import { AgentLabel, StatusSlot } from "../screens/session-status";
-import { ProviderLogo } from "../screens/thread/provider-logo";
 import { buildItemHeight, type SectionKey, type SidebarItemOf } from "./sidebar-items";
 
 /**
@@ -361,11 +369,17 @@ export const WaitingRunRow = memo(function WaitingRunRow({
  * are `null`) draws an empty outline where a project's tile sits, so its name
  * lines up with the other projects' names. Its `+` opens a new thread in no
  * project.
+ *
+ * A right-click on a project's heading calls `onOpenMenu` with the project's
+ * id and the point clicked, in window coordinates. The heading of the
+ * threads in no project opens no menu.
  */
 export const ProjectHeader = memo(function ProjectHeader({
   item,
+  onOpenMenu,
 }: {
   readonly item: SidebarItemOf<"project-header">;
+  readonly onOpenMenu: (projectId: string, x: number, y: number) => void;
 }): JSX.Element {
   const { projectId, name, tint, waitingCount } = item;
   return (
@@ -374,6 +388,14 @@ export const ProjectHeader = memo(function ProjectHeader({
       data-key={item.key}
       tabIndex={-1}
       style={{ marginTop: item.leading, height: buildItemHeight("project-header") }}
+      onContextMenu={
+        projectId === null
+          ? undefined
+          : (event) => {
+              event.preventDefault();
+              onOpenMenu(projectId, event.clientX, event.clientY);
+            }
+      }
     >
       <ProjectTile tint={tint} name={name} />
       {/* The space keeps the heading's name "webshop 2 need you", not
@@ -404,49 +426,26 @@ export const ProjectHeader = memo(function ProjectHeader({
 /** The size of the pencil before an unsent row's title, in CSS pixels. */
 const UNSENT_ICON_SIZE = 12;
 
-/** The size of the provider's mark that leads a row's second line, and of a row's action icon, in CSS pixels. */
+/** The size of a row's action icon, in CSS pixels. */
 const ROW_GLYPH_SIZE = 12;
 
 /** How many characters at the end of a row's kept part always show. */
 const KEEP_TAIL_LENGTH = 8;
 
 /**
- * Renders a row's second line after the provider's mark: `clip`, which may be
- * cut short with an ellipsis, then `keep`, which never is. A branch name
+ * Renders where a thread works on its row's second line: `clip`, which may
+ * be cut short with an ellipsis, then `keep`, which never is. A branch name
  * keeps its end, a main workspace its machine. `keep` is "" when there is
  * nothing to keep.
- *
- * - `asking` draws `clip` in the colour of a question to the user.
- * - `done` draws a green check where the provider's mark goes, for a
- *   finished group.
  *
  * A `keep` wider than the whole line, such as a long machine name in a
  * narrow sidebar, is cut in the middle: its last `KEEP_TAIL_LENGTH`
  * characters always show, and an ellipsis takes the place of what does not
  * fit before them.
  */
-function DetailLine({
-  providerId,
-  clip,
-  keep,
-  asking = false,
-  done = false,
-}: {
-  readonly providerId: string | null;
-  readonly clip: ReactNode;
-  readonly keep: string;
-  readonly asking?: boolean;
-  readonly done?: boolean;
-}): JSX.Element {
+function PlaceText({ clip, keep }: { readonly clip: string; readonly keep: string }): JSX.Element {
   return (
-    <span className={asking ? "side-detail side-detail--ask" : "side-detail"}>
-      <span className={done ? "side-glyph side-glyph--done" : "side-glyph"}>
-        {done ? (
-          <CheckIcon size={ROW_GLYPH_SIZE} />
-        ) : providerId === null ? null : (
-          <ProviderLogo providerId={providerId} size={ROW_GLYPH_SIZE} />
-        )}
-      </span>
+    <>
       <span className="side-detail-clip">{clip}</span>
       {keep === "" ? null : (
         <span className="side-detail-keep">
@@ -454,17 +453,81 @@ function DetailLine({
           <span className="side-detail-keep-tail">{keep.slice(-KEEP_TAIL_LENGTH)}</span>
         </span>
       )}
+    </>
+  );
+}
+
+/**
+ * Renders a row's second line: `parts`, in their order, with a faint " · "
+ * between each two.
+ */
+function DetailLine({ parts }: { readonly parts: readonly ReactNode[] }): JSX.Element {
+  return (
+    <span className="side-detail">
+      {/* The parts never change places within a row, so the index is a stable key. */}
+      {parts.map((part, index) => (
+        <Fragment key={index}>
+          {index === 0 ? null : <span className="side-sep">{" · "}</span>}
+          {part}
+        </Fragment>
+      ))}
     </span>
   );
 }
 
 /**
- * Renders the button that sits over a row's status slot and shows in its
- * place while the pointer is on the row or the keyboard's focus is in it:
- * Done, which marks the thread done, or Reopen, on the Done shelf. A click
- * leaves the focus in the row without showing it, so a row the user clicked
- * shows its status. It carries the row's `data-key`, so the list keeps it
- * mounted while it holds focus.
+ * Renders one part of a group's row's second line (see `RowLinePart`). The
+ * state word and the age carry the id `statusId`, and the question `askId`,
+ * which the row's description points at. `onScreen` says whether the row is
+ * in the visible part of the list, where its age is kept current.
+ */
+function RowLinePartText({
+  part,
+  statusId,
+  askId,
+  onScreen,
+}: {
+  readonly part: RowLinePart;
+  readonly statusId: string;
+  readonly askId: string;
+  readonly onScreen: boolean;
+}): JSX.Element {
+  switch (part.kind) {
+    case "state":
+      return (
+        <span id={statusId} className={`side-state side-state--${part.state}`}>
+          {part.word}
+        </span>
+      );
+    case "ask":
+      return (
+        <span id={askId} className="side-detail-clip side-detail-ask">
+          <AskText askerLabel={part.ask.askerLabel} question={part.ask.question} />
+        </span>
+      );
+    case "place":
+      return <PlaceText clip={part.label.clip} keep={part.label.keep} />;
+    case "age":
+      return (
+        <AgeLabel
+          at={part.at}
+          onScreen={onScreen}
+          descriptionId={statusId}
+          as="span"
+          className="side-age"
+        />
+      );
+  }
+}
+
+/**
+ * Renders the button that sits at the end of a row's first line and shows
+ * while the pointer is on the row or the keyboard's focus is in it: Done,
+ * which marks the thread done, or Reopen, on the Done shelf. The title is
+ * then cut short before it. A click leaves the focus in the row without
+ * showing the button, so a row the user clicked keeps its whole title. It
+ * carries the row's `data-key`, so the list keeps it mounted while it holds
+ * focus.
  */
 function RowAction({
   itemKey,
@@ -490,6 +553,39 @@ function RowAction({
     >
       {icon}
       {word}
+    </button>
+  );
+}
+
+/**
+ * Renders the Archive button beside Reopen on a Done shelf row: an icon with
+ * no word, so the pair fits where Reopen alone sat. It is drawn and shown as
+ * `RowAction` is. While `blockReason` is a string, the row works: the button
+ * is disabled with that reason as its tooltip, and pressing it does nothing.
+ * It stays focusable so the keyboard user can read the tooltip too.
+ */
+function ArchiveAction({
+  itemKey,
+  blockReason,
+  onPress,
+}: {
+  readonly itemKey: string;
+  readonly blockReason: string | null;
+  readonly onPress: () => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      className="side-act side-act--icon"
+      data-key={itemKey}
+      aria-label="Archive"
+      aria-disabled={blockReason === null ? undefined : true}
+      title={blockReason ?? "Archive"}
+      onClick={() => {
+        if (blockReason === null) onPress();
+      }}
+    >
+      <ArchiveIcon size={ROW_GLYPH_SIZE} />
     </button>
   );
 }
@@ -642,16 +738,15 @@ const buildToggleOnArrow =
  * - `modifier` is the class that sets the row's look, or `null`.
  * - `label` and `describedBy` are the link's accessible name and the ids of
  *   the text that describes it, or `undefined` for none.
- * - `status` ends the first line, `secondLine` is the second, and `action` is
- *   the button that takes the status's place while the pointer is on the row,
- *   or `null`.
+ * - `secondLine` is the second line, and `action` is the button that shows
+ *   at the end of the first line while the pointer is on the row, or `null`.
+ *   The title takes the whole first line otherwise.
  */
 function GroupRowFrame({
   item,
   modifier,
   label,
   describedBy,
-  status,
   secondLine,
   action,
   officeOpen,
@@ -661,7 +756,6 @@ function GroupRowFrame({
   readonly modifier: "is-receded" | "is-done" | null;
   readonly label: string;
   readonly describedBy: string | undefined;
-  readonly status: ReactNode;
   readonly secondLine: ReactNode;
   readonly action: ReactNode;
   readonly officeOpen: boolean;
@@ -710,7 +804,6 @@ function GroupRowFrame({
               {unsent ? <ComposeIcon size={UNSENT_ICON_SIZE} /> : null}
               {row.title}
             </span>
-            {status}
           </span>
           {secondLine}
         </span>
@@ -733,10 +826,12 @@ function GroupRowFrame({
 
 /**
  * Renders a group in its project, in two lines: a thread, or a lead with its
- * partners. The first line holds its title and its status slot
- * (`StatusSlot`); the second, the mark of its provider and, while a session
- * of the group asks something (`item.row.ask`, see `AskText`), the question,
- * else where the lead works (`item.row.placeLabel`, see `DetailLine`).
+ * partners. The first line is its title, at the row's full width. The second
+ * says, in the order `buildRowSecondLine` decides: the state in words while
+ * the row has one, such as "Working" or "Question"; then the question while
+ * a session of the group asks something (`item.row.ask`, see `AskText`),
+ * else where the lead works (`item.row.placeLabel`, see `PlaceText`); then,
+ * for a row with no state, its age.
  *
  * - While `item.receded` is true, the row's title is drawn in the muted ink
  *   instead of the ink, and comes back while the pointer is on the row or
@@ -746,7 +841,7 @@ function GroupRowFrame({
  * - When `item.unsent` is true, a composer of the group holds work the user
  *   has not sent: the row is tinted and a pencil sits before the title.
  * - While the pointer is on the row, or the keyboard's focus is in it, a
- *   Done button shows in the status slot's place. Pressing it calls
+ *   Done button shows at the end of the first line. Pressing it calls
  *   `onMarkDone` with `item.row.doneIds`, the Threads of the group not yet
  *   Done. It is not drawn when there are none.
  * - A group of two or more sessions has a dots button at the end of the
@@ -761,11 +856,11 @@ function GroupRowFrame({
  * is described by the question, when one is asked, the lead's model
  * (`item.details.model`), when it is known, and `row.placeDescription`, which
  * together name what the card shown on hover holds: the model, the project,
- * the workspace, the machine and the branch. Then by the status in words,
- * such as "Approval" or "20 minutes ago", except "Working", which the name
- * already says. It opens the session `item.openId`: in the Office's drawer
- * while `officeOpen` is true and the session has a colleague there
- * (`item.seated`), on its own screen if not.
+ * the workspace, the machine and the branch. Then by the state in words,
+ * such as "Approval", or the age, such as "20 minutes ago", except
+ * "Working", which the name already says. It opens the session
+ * `item.openId`: in the Office's drawer while `officeOpen` is true and the
+ * session has a colleague there (`item.seated`), on its own screen if not.
  */
 export const GroupRow = memo(function GroupRow({
   item,
@@ -798,29 +893,18 @@ export const GroupRow = memo(function GroupRow({
       modifier={item.receded ? "is-receded" : null}
       label={`${row.title}, ${describePose(row.pose)}${unsent ? ", unsent message" : ""}`}
       describedBy={describedBy}
-      status={
-        <StatusSlot
-          id={statusId}
-          status={row.status}
-          activityAt={row.activityAt}
-          onScreen={onScreen}
-        />
-      }
       secondLine={
         <>
           <DetailLine
-            providerId={row.providerId}
-            clip={
-              ask === null ? (
-                row.placeLabel.clip
-              ) : (
-                <span id={askId}>
-                  <AskText askerLabel={ask.askerLabel} question={ask.question} />
-                </span>
-              )
-            }
-            keep={ask === null ? row.placeLabel.keep : ""}
-            asking={ask !== null}
+            parts={buildRowSecondLine(row).map((part) => (
+              <RowLinePartText
+                key={part.kind}
+                part={part}
+                statusId={statusId}
+                askId={askId}
+                onScreen={onScreen}
+              />
+            ))}
           />
           {/* A screen reader reads the model and where the thread works
               from this text, which is never drawn: the model, the project,
@@ -922,7 +1006,7 @@ export const GroupLine = memo(function GroupLine({
       >
         <SessionMark dot={member.dot} done={member.done} />
         <span className="side-m-name">{member.label}</span>
-        <AgentLabel providerId={member.providerId} model={member.model} />
+        <AgentLabel harnessId={member.harnessId} model={member.model} />
         <StatusSlot
           id={statusId}
           status={member.status}
@@ -979,13 +1063,19 @@ export const QuietLine = memo(function QuietLine({
 /**
  * Renders the Done shelf's heading: "Done" and the count of Done groups, as
  * a button that opens and closes the shelf. Pressing it calls `onToggle`.
+ *
+ * While the shelf is open, "Archive all" ends the heading and calls
+ * `onArchiveAll`. It is disabled, with the reason as its tooltip, when
+ * `item.canArchiveAll` is false because every row on the shelf works.
  */
 export const DoneHeader = memo(function DoneHeader({
   item,
   onToggle,
+  onArchiveAll,
 }: {
   readonly item: SidebarItemOf<"done-header">;
   readonly onToggle: () => void;
+  readonly onArchiveAll: () => void;
 }): JSX.Element {
   return (
     <h3
@@ -997,6 +1087,22 @@ export const DoneHeader = memo(function DoneHeader({
         <ChevronRightIcon size={12} />
         <span>Done</span> <b className="count">{item.count}</b>
       </button>
+      {item.open && (
+        <button
+          type="button"
+          className="side-h-act"
+          data-key={item.key}
+          aria-disabled={item.canArchiveAll ? undefined : true}
+          title={
+            item.canArchiveAll ? undefined : "No row can be archived now: each one is working."
+          }
+          onClick={() => {
+            if (item.canArchiveAll) onArchiveAll();
+          }}
+        >
+          Archive all
+        </button>
+      )}
     </h3>
   );
 }, areSameData);
@@ -1006,14 +1112,15 @@ export const DoneHeader = memo(function DoneHeader({
  * row's two lines: its title, then how long ago it was marked Done
  * (`item.doneAt`). The title is drawn in the muted ink, and comes back to the
  * ink while the pointer is on the row or focus is in it. While the pointer is
- * on it or the keyboard's focus is in it, a Reopen button shows in the status
- * slot's place. Pressing
+ * on it or the keyboard's focus is in it, a Reopen button shows at the end of
+ * the first line. Pressing
  * it calls `onReopen` with `item.row.threadIds`, every Thread of the group.
+ * Beside it, an Archive button calls `onArchive` with the group's key. It is disabled,
+ * with the reason as its tooltip, while a session of the group works.
  *
- * - A group of one Thread is a Done thread's row: the second line starts with
- *   the mark of its provider and reads "Done 2 hours ago".
- * - A group of several starts it with a green check and reads "3 threads ·
- *   done 2 hours ago".
+ * - A group of one Thread is a Done thread's row: the second line reads
+ *   "Done 2 hours ago".
+ * - A group of several reads "3 threads · done 2 hours ago".
  * - A group of several sessions has a dots button, as a group's row in a
  *   project has (`GroupRowFrame`), which unfolds its lines so an ended Agent
  *   session can still be opened. Nothing on the shelf is counted, so the
@@ -1031,12 +1138,14 @@ export const DoneGroupRow = memo(function DoneGroupRow({
   onScreen,
   officeOpen,
   onReopen,
+  onArchive,
   onToggleGroup,
 }: {
   readonly item: SidebarItemOf<"done-group-row">;
   readonly onScreen: boolean;
   readonly officeOpen: boolean;
   readonly onReopen: (sessionIds: readonly string[]) => void;
+  readonly onArchive: (groupKey: string) => void;
   readonly onToggleGroup: (groupKey: string, unfold: boolean) => void;
 }): JSX.Element {
   const { row } = item;
@@ -1049,27 +1158,34 @@ export const DoneGroupRow = memo(function DoneGroupRow({
       modifier="is-done"
       label={`${row.title}, ${several ? `${String(threadCount)} threads, ` : ""}done${item.unsent ? ", unsent message" : ""}`}
       describedBy={undefined}
-      status={<span className="side-end" />}
       secondLine={
         <DetailLine
-          providerId={row.providerId}
-          clip={
-            several ? `${String(threadCount)} threads · done ${doneWords}` : `Done ${doneWords}`
-          }
-          keep=""
-          done={several}
+          parts={[
+            <span key="done" className="side-detail-clip">
+              {several ? `${String(threadCount)} threads · done ${doneWords}` : `Done ${doneWords}`}
+            </span>,
+          ]}
         />
       }
       action={
-        <RowAction
-          itemKey={item.key}
-          label="Reopen"
-          word="Reopen"
-          icon={<UndoIcon size={ROW_GLYPH_SIZE} />}
-          onPress={() => {
-            onReopen(row.threadIds);
-          }}
-        />
+        <span className="side-acts">
+          <RowAction
+            itemKey={item.key}
+            label="Reopen"
+            word="Reopen"
+            icon={<UndoIcon size={ROW_GLYPH_SIZE} />}
+            onPress={() => {
+              onReopen(row.threadIds);
+            }}
+          />
+          <ArchiveAction
+            itemKey={item.key}
+            blockReason={findArchiveBlockReason(row)}
+            onPress={() => {
+              onArchive(row.key);
+            }}
+          />
+        </span>
       }
       officeOpen={officeOpen}
       onToggleGroup={onToggleGroup}
@@ -1079,9 +1195,9 @@ export const DoneGroupRow = memo(function DoneGroupRow({
 
 /**
  * Renders the row of the Draft Thread open in the main pane, drawn as a
- * thread row: "New thread" after a pencil and "draft" in the status slot,
- * then where it will work (`item.placeClip` and `item.placeKeep`, see
- * `DetailLine`), as the thread's row will say once it starts. It is tinted
+ * thread row: "New thread", then "Draft" in the accent's ink and where it
+ * will work (`item.placeClip` and `item.placeKeep`, see `PlaceText`), as the
+ * thread's row will say once it starts. It is tinted
  * as a row with unsent work is, because a draft is unsent work, and marked
  * as the open screen, like the open thread's row. It is not a link, because
  * it leads to the screen it marks.
@@ -1104,13 +1220,16 @@ export const DraftRow = memo(function DraftRow({
       >
         <span className="side-text">
           <span className="side-line">
-            <span className="side-name">
-              <ComposeIcon size={UNSENT_ICON_SIZE} />
-              New thread
-            </span>
-            <span className="side-end">draft</span>
+            <span className="side-name">New thread</span>
           </span>
-          <DetailLine providerId={null} clip={item.placeClip} keep={item.placeKeep} />
+          <DetailLine
+            parts={[
+              <span key="state" className="side-state side-state--draft">
+                Draft
+              </span>,
+              <PlaceText key="place" clip={item.placeClip} keep={item.placeKeep} />,
+            ]}
+          />
         </span>
       </div>
     </div>

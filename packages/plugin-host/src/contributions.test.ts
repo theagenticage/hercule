@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Effect, Schema } from "effect";
-import type { WorkflowActionContribution } from "./contributions";
+import { HarnessReleaseSource, type WorkflowActionContribution } from "./contributions";
 
 const FIELDS = {
   id: "issue.comment",
@@ -31,5 +31,51 @@ describe("WorkflowActionContribution", () => {
     // @ts-expect-error An action bound as an answer must write its own describe line.
     const action: WorkflowActionContribution = { ...FIELDS, usableIn: ["signal.answer"] };
     expect(action.id).toBe("issue.comment");
+  });
+});
+
+describe("HarnessReleaseSource", () => {
+  const decode = Schema.decodeUnknownOption(HarnessReleaseSource);
+
+  it.each(["@openai/codex", "plain-tool", "a.b_c~d", "@scope/a"])(
+    "accepts the package %s",
+    (name) => {
+      expect(decode({ kind: "npm", package: name })._tag).toBe("Some");
+    },
+  );
+
+  it.each([
+    "..",
+    ".hidden",
+    "_private",
+    "Upper",
+    "@Scope/name",
+    "@scope/",
+    "a/b",
+    "a b",
+    "",
+    "a".repeat(215),
+  ])("refuses the package name %j", (name) => {
+    expect(decode({ kind: "npm", package: name })._tag).toBe("None");
+  });
+
+  it.each(["owner/name", "a.b/c_d-e"])("accepts the GitHub repository %s", (repository) => {
+    expect(decode({ kind: "github-releases", repository })._tag).toBe("Some");
+  });
+
+  it.each([
+    "owner",
+    "owner/",
+    "/name",
+    "a/b/c",
+    "../x",
+    "./x",
+    "owner/..",
+    "owner/.",
+    "owner/na me",
+    "https://github.com/a/b",
+    `${"a".repeat(39)}/${"b".repeat(101)}`,
+  ])("refuses the GitHub repository %j", (repository) => {
+    expect(decode({ kind: "github-releases", repository })._tag).toBe("None");
   });
 });

@@ -1,17 +1,21 @@
 /**
- * Tests how the arrow keys step through a popover menu: down and up,
- * wrapping at both ends, and passing over a disabled item.
+ * Tests how the keys step through a popover menu: the arrows down and up,
+ * wrapping at both ends, Home and End, and passing over a disabled item.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { moveMenuFocus } from "./move-menu-focus";
 
 /** Builds a menu with one item per label, adds it to the page and returns it. */
-const buildMenu = (labels: ReadonlyArray<string>, disabled: ReadonlyArray<string> = []) => {
+const buildMenu = (
+  labels: ReadonlyArray<string>,
+  disabled: ReadonlyArray<string> = [],
+  role = "menuitem",
+) => {
   const menu = document.createElement("div");
   menu.setAttribute("role", "menu");
   for (const label of labels) {
     const item = document.createElement("button");
-    item.setAttribute("role", "menuitem");
+    item.setAttribute("role", role);
     item.textContent = label;
     if (disabled.includes(label)) item.setAttribute("aria-disabled", "true");
     menu.append(item);
@@ -46,8 +50,30 @@ describe("moveMenuFocus", () => {
     expect(moveMenuFocus(menu, "ArrowDown")?.textContent).toBe("Three");
   });
 
+  it("moves to the first item on Home and the last on End, from anywhere", () => {
+    const menu = buildMenu(["One", "Two", "Three"]);
+    expect(moveMenuFocus(menu, "End")?.textContent).toBe("Three");
+    expect(moveMenuFocus(menu, "End")?.textContent).toBe("Three");
+    expect(moveMenuFocus(menu, "Home")?.textContent).toBe("One");
+    expect(document.activeElement?.textContent).toBe("One");
+  });
+
+  it("passes over a disabled first or last item on Home and End", () => {
+    const menu = buildMenu(["One", "Two", "Three", "Four"], ["One", "Four"]);
+    expect(moveMenuFocus(menu, "Home")?.textContent).toBe("Two");
+    expect(moveMenuFocus(menu, "End")?.textContent).toBe("Three");
+  });
+
+  it.each(["menuitemradio", "menuitemcheckbox"])("steps through %s items too", (role) => {
+    const menu = buildMenu(["One", "Two"], [], role);
+    expect(moveMenuFocus(menu, "ArrowDown")?.textContent).toBe("One");
+    expect(moveMenuFocus(menu, "ArrowDown")?.textContent).toBe("Two");
+  });
+
   it("returns undefined when no item can take the focus", () => {
     const menu = buildMenu(["One"], ["One"]);
     expect(moveMenuFocus(menu, "ArrowDown")).toBeUndefined();
+    expect(moveMenuFocus(menu, "Home")).toBeUndefined();
+    expect(moveMenuFocus(menu, "End")).toBeUndefined();
   });
 });

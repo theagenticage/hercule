@@ -4,20 +4,49 @@
  * plugin.
  */
 export { EventKindCatalogLayer } from "./event-kinds";
-export { PluginConfigsLayer, PluginHost, PluginHostLayer } from "./host";
+export { PluginConfigsLayer, PluginHost, PluginHostLayer, type LoadedPlugin } from "./host";
 export {
   computeIngestFingerprint,
   IngestLoops,
   IngestLoopsLayer,
   type RunningIngest,
 } from "./ingest";
+export type { RegisteredHarness } from "./harnesses";
+export type { RegisteredMcpServer } from "./mcp-servers";
+export {
+  decideProviderAccountHarness,
+  decideTextGenerationHarness,
+  listCredentialVariables,
+} from "./harness-support";
+export { findAccountKind, findCredentialSecretName, type RegisteredProvider } from "./providers";
 export { IngestExecutor } from "./ingest-executor";
 export { deriveCatalogJsonSchema } from "./json-schema";
+export {
+  EntityLookups,
+  EntityLookupsLayer,
+  type BlocksOutcome,
+  type DecidedResolution,
+  type LookupObservation,
+  type SearchOutcome,
+} from "./entity-lookups";
+export { EntityObservations, type EntityReporter } from "./entity-observations";
+export {
+  buildRecognizedTarget,
+  buildScopedRecognition,
+  findUrlTarget,
+  type ListActiveSources,
+  type PluginRecognition,
+  type RecognizedTarget,
+  type RecognizeText,
+  type ScopedTarget,
+} from "./entity-recognition";
 export { OpenSignals } from "./open-signals";
 export { PluginObserver } from "./observer";
 export type { RegisteredEventSource } from "./event-sources";
 export { BUILD_TIMEOUT_SECONDS, signalBuilds } from "./signal-build";
-export type { RegisteredSignalKind } from "./signal-kinds";
+export type { RegisteredSavedQuery } from "./saved-queries";
+export { listAskingKinds, type RegisteredSignalKind } from "./signal-kinds";
+export { pluginRepository, type CatalogEntityKind } from "./repository";
 export { registry } from "./registry";
 export { Plugins, PluginsLayer } from "./service";
 export {

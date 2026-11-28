@@ -9,7 +9,17 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Runner, Session } from "@hercule/contract";
-import { BARE, buildInstance, buildSnapshot } from "../providers.testing";
+import {
+  WITH_AGENTS,
+  buildModelProfile,
+  buildProfileEntry,
+  buildProfileSection,
+  buildProviderAccount,
+  ANTHROPIC_IDENTITY,
+  OPENAI_IDENTITY,
+  HARNESSES,
+  PROVIDERS,
+} from "../providers.testing";
 import { addFilesToShelf, markShelfItemUploaded } from "../attachments/shelf";
 import type { MessageDraft, ThreadCatalogs, ThreadConfig, ThreadPicks } from "./config";
 import { resolveThreadConfig } from "./resolve-thread";
@@ -17,7 +27,14 @@ import { buildSubmission } from "./submission";
 import { applyThreadChoice } from "./thread-choice";
 import { WEBSHOP, WEBSHOP_PROJECT } from "./workspaces.testing";
 
-const NO_CATALOGS: ThreadCatalogs = { instances: [], runners: [], thisMacRunnerId: null };
+const NO_CATALOGS: ThreadCatalogs = {
+  accounts: [],
+  runners: [],
+  thisMacRunnerId: null,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
+  modelProfiles: [],
+};
 
 /** Returns the spawn request for a draft that starts from `config` and holds `picks`. */
 const buildDraftSubmission = (
@@ -36,7 +53,8 @@ const buildInputSubmission = (
 ) => buildSubmission(resolveThreadConfig(catalogs, { kind: "active", session }, picks), message);
 
 const CONFIG: ThreadConfig = {
-  instanceId: "instance-claude-code",
+  providerAccountId: "account-anthropic",
+  harnessId: null,
   model: "claude-sonnet-5",
   accessMode: "approval-required",
   runnerId: "r-local",
@@ -58,7 +76,8 @@ const SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "instance-claude-code",
+  providerAccountId: "account-anthropic",
+  harnessId: "claude-code/claude-code",
   runnerId: "r-local",
   workspaceId: null,
   projectId: null,
@@ -74,17 +93,15 @@ const SESSION: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-08T09:05:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 const MESSAGE = { text: "ship it", attachments: [] };
 
-const LOCAL: Runner = { ...BARE, id: "r-local" };
-const REMOTE: Runner = { ...BARE, id: "r-remote" };
-const SONNET = {
-  slug: "claude-sonnet-5",
+const LOCAL: Runner = { ...WITH_AGENTS, id: "r-local" };
+const REMOTE: Runner = { ...WITH_AGENTS, id: "r-remote" };
+const SONNET = buildProfileEntry(ANTHROPIC_IDENTITY, "claude-sonnet-5", {
   name: "Claude Sonnet 5",
-  imageInput: { maxBytes: null },
-  isDefault: true,
   options: [
     {
       id: "effort",
@@ -97,16 +114,31 @@ const SONNET = {
       default: "low",
     },
   ],
-};
-const OPUS = { ...SONNET, slug: "claude-opus-5", name: "Claude Opus 5", isDefault: false };
-const CLAUDE = buildInstance("claude-code", "Claude Code", [
-  buildSnapshot({ runnerId: LOCAL.id, models: [SONNET, OPUS] }),
-  buildSnapshot({ runnerId: REMOTE.id, models: [SONNET, OPUS] }),
-]);
+});
+const OPUS = { ...SONNET, model: "claude-opus-5", name: "Claude Opus 5" };
+const GPT = buildProfileEntry(OPENAI_IDENTITY, "gpt-5", { name: "GPT-5" });
+const CLAUDE = buildProviderAccount(
+  ANTHROPIC_IDENTITY,
+  [],
+  [{ runnerId: LOCAL.id }, { runnerId: REMOTE.id }],
+);
+const CODEX = buildProviderAccount(
+  OPENAI_IDENTITY,
+  [],
+  [{ runnerId: LOCAL.id, state: "not-signed-in" }, { runnerId: REMOTE.id }],
+);
 const CATALOGS: ThreadCatalogs = {
-  instances: [CLAUDE],
+  accounts: [CLAUDE, CODEX],
   runners: [LOCAL, REMOTE],
   thisMacRunnerId: LOCAL.id,
+  providers: PROVIDERS,
+  harnesses: HARNESSES,
+  modelProfiles: [
+    buildModelProfile([
+      buildProfileSection(ANTHROPIC_IDENTITY, [SONNET, OPUS]),
+      buildProfileSection(OPENAI_IDENTITY, [GPT]),
+    ]),
+  ],
 };
 
 describe("buildSubmission: a draft thread", () => {
@@ -115,7 +147,7 @@ describe("buildSubmission: a draft thread", () => {
       kind: "spawn",
       input: {
         prompt: "ship it",
-        instanceId: "instance-claude-code",
+        providerAccountId: "account-anthropic",
         model: "claude-sonnet-5",
         options: {},
         accessMode: "approval-required",
@@ -125,33 +157,61 @@ describe("buildSubmission: a draft thread", () => {
     });
   });
 
-  it("sends the default runner and model of the account picked, not the draft's own", () => {
-    // The draft runs Claude on the local runner. Codex is logged in on the
-    // remote runner only, and the picks hold the account alone.
-    const codex = buildInstance("codex", "Codex", [
-      buildSnapshot({ runnerId: LOCAL.id, auth: { status: "unauthenticated" }, models: [] }),
-      buildSnapshot({
-        runnerId: REMOTE.id,
-        models: [{ slug: "gpt-5", name: "GPT-5", imageInput: { maxBytes: null }, options: [] }],
-      }),
-    ]);
-    const catalogs = { ...CATALOGS, instances: [CLAUDE, codex] };
+  it("names the Task a start card pointed the message at, and leaves it out otherwise", () => {
+    const joined = buildDraftSubmission(NO_CATALOGS, CONFIG, {}, { ...MESSAGE, taskId: "task-1" });
+    expect(joined).toMatchObject({ kind: "spawn", input: { prompt: "ship it", taskId: "task-1" } });
 
+    const alone = buildDraftSubmission(NO_CATALOGS, CONFIG, {}, MESSAGE);
+    expect(alone.kind === "spawn" && "taskId" in alone.input).toBe(false);
+  });
+
+  it("sends the harness the draft names, and leaves it out while the account's default applies", () => {
+    const named = buildDraftSubmission(CATALOGS, { ...CONFIG, harnessId: "pi/pi" }, {}, MESSAGE);
+    expect(named).toMatchObject({
+      input: { providerAccountId: "account-anthropic", harnessId: "pi/pi" },
+    });
+
+    const unnamed = buildDraftSubmission(CATALOGS, CONFIG, {}, MESSAGE);
+    expect(unnamed.kind === "spawn" && "harnessId" in unnamed.input).toBe(false);
+  });
+
+  it("sends the account, harness and model of the entry picked, and the default runner of that account", () => {
+    // The draft runs Claude on the local runner. Codex is signed in on the
+    // remote runner only.
     expect(
       buildDraftSubmission(
-        catalogs,
+        CATALOGS,
         CONFIG,
-        applyThreadChoice({}, { kind: "account", instanceId: codex.id }),
+        applyThreadChoice(
+          {},
+          {
+            kind: "model",
+            providerAccountId: CODEX.id,
+            harnessId: GPT.resolvedHarnessId,
+            model: GPT.model,
+          },
+        ),
         MESSAGE,
       ),
     ).toMatchObject({
-      input: { instanceId: codex.id, model: "gpt-5", runnerId: "r-remote", options: {} },
+      input: {
+        providerAccountId: CODEX.id,
+        harnessId: "codex/codex",
+        model: "gpt-5",
+        runnerId: "r-remote",
+        options: {},
+      },
     });
   });
 
   it("sends what the user picked: model, options, access mode and runner", () => {
     const picks = [
-      { kind: "model", instanceId: CLAUDE.id, model: OPUS.slug },
+      {
+        kind: "model",
+        providerAccountId: CLAUDE.id,
+        harnessId: OPUS.resolvedHarnessId,
+        model: OPUS.model,
+      },
       { kind: "option", id: "effort", value: "high" },
       { kind: "accessMode", value: "full-access" },
       { kind: "runner", runnerId: REMOTE.id },
@@ -159,7 +219,7 @@ describe("buildSubmission: a draft thread", () => {
     expect(
       buildDraftSubmission(
         CATALOGS,
-        { ...CONFIG, instanceId: CLAUDE.id },
+        { ...CONFIG, providerAccountId: CLAUDE.id },
         picks.reduce(applyThreadChoice, {} as ThreadPicks),
         MESSAGE,
       ),
@@ -167,8 +227,9 @@ describe("buildSubmission: a draft thread", () => {
       kind: "spawn",
       input: {
         prompt: "ship it",
-        instanceId: CLAUDE.id,
-        model: OPUS.slug,
+        providerAccountId: CLAUDE.id,
+        harnessId: OPUS.resolvedHarnessId,
+        model: OPUS.model,
         options: { effort: "high" },
         accessMode: "full-access",
         runnerId: REMOTE.id,
@@ -178,8 +239,49 @@ describe("buildSubmission: a draft thread", () => {
   });
 });
 
+describe("buildSubmission: the draft's list of MCP Servers", () => {
+  const pick = (projectId: string | null, mcpServerIds: string[]): ThreadPicks =>
+    applyThreadChoice(
+      {},
+      { kind: "mcpServers", projectId, decideMcpServerIds: () => mcpServerIds },
+    );
+  const KNOWN = new Set(["s-linear"]);
+  const send = (picks: ThreadPicks, projectId: string | null = null, known = KNOWN) =>
+    buildSubmission(
+      resolveThreadConfig(NO_CATALOGS, { kind: "draft", config: { ...CONFIG, projectId } }, picks),
+      MESSAGE,
+      known,
+    );
+  const sendBeforeServersAreRead = (picks: ThreadPicks) =>
+    buildSubmission(
+      resolveThreadConfig(NO_CATALOGS, { kind: "draft", config: CONFIG }, picks),
+      MESSAGE,
+    );
+
+  it("sends no list for an untouched draft, so the controller picks the project's or the default", () => {
+    const sent = send({});
+    expect(sent.input).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("sends the picked list, an empty one included", () => {
+    expect(send(pick(null, ["s-linear"])).input.mcpServerIds).toEqual(["s-linear"]);
+    expect(send(pick(null, [])).input.mcpServerIds).toEqual([]);
+  });
+
+  it("sends no list once the draft moved to another project than the pick was made under", () => {
+    expect(send(pick("p-shop", ["s-linear"]), "p-blog").input).not.toHaveProperty("mcpServerIds");
+  });
+
+  it("drops a server deleted since the pick, and nothing while the servers are not read", () => {
+    expect(send(pick(null, ["s-gone", "s-linear"])).input.mcpServerIds).toEqual(["s-linear"]);
+    expect(sendBeforeServersAreRead(pick(null, ["s-gone", "s-linear"])).input.mcpServerIds).toEqual(
+      ["s-gone", "s-linear"],
+    );
+  });
+});
+
 describe("buildSubmission: an active thread", () => {
-  const session: Session = { ...SESSION, instanceId: CLAUDE.id, runnerId: LOCAL.id };
+  const session: Session = { ...SESSION, providerAccountId: CLAUDE.id, runnerId: LOCAL.id };
 
   it("sends the text alone when nothing was picked", () => {
     expect(buildInputSubmission(CATALOGS, session, {}, MESSAGE)).toEqual({
@@ -190,10 +292,10 @@ describe("buildSubmission: an active thread", () => {
   });
 
   it("sends a picked model with the text", () => {
-    expect(buildInputSubmission(CATALOGS, session, { model: OPUS.slug }, MESSAGE)).toEqual({
+    expect(buildInputSubmission(CATALOGS, session, { model: OPUS.model }, MESSAGE)).toEqual({
       kind: "input",
       sessionId: SESSION.id,
-      payload: { text: "ship it", model: OPUS.slug },
+      payload: { text: "ship it", model: OPUS.model },
     });
   });
 
@@ -212,13 +314,13 @@ describe("buildSubmission: an active thread", () => {
       buildInputSubmission(
         CATALOGS,
         session,
-        { model: OPUS.slug, options: { effort: "high" } },
+        { model: OPUS.model, options: { effort: "high" } },
         MESSAGE,
       ),
     ).toEqual({
       kind: "input",
       sessionId: SESSION.id,
-      payload: { text: "ship it", model: OPUS.slug, options: { effort: "high" } },
+      payload: { text: "ship it", model: OPUS.model, options: { effort: "high" } },
     });
   });
 
@@ -262,7 +364,7 @@ describe("buildSubmission: the project and the workspace", () => {
       kind: "spawn",
       input: {
         prompt: "ship it",
-        instanceId: "instance-claude-code",
+        providerAccountId: "account-anthropic",
         model: "claude-sonnet-5",
         options: {},
         accessMode: "approval-required",

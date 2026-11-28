@@ -13,36 +13,60 @@ const timeScan = (text: string): number => {
   return performance.now() - startedAt;
 };
 
+/** Measures the time of one scan of `text` as the best of a few, in milliseconds. */
+const timeBestScan = (text: string): number =>
+  Math.min(...Array.from({ length: 5 }, () => timeScan(text)));
+
 /** The largest ratio of scan times that still counts as linear growth. See `measureGrowth`. */
 const maxLinearGrowth = 64;
 
 /**
- * Measures how the scan time of a text grows when the text becomes 16 times as long. Each
- * timing repeats the scan until it has run for a few milliseconds, and the result is the best of
- * many timings, so neither the timer resolution nor a busy machine (a timing that the system
- * paused is simply not the best one) decides the result. A linear scan gives a ratio near 16 and a
- * quadratic one near 256, so a bound of `maxLinearGrowth` leaves a factor of four of noise on
- * each side. The step is this large because a scan of the smaller text takes well under a
- * millisecond, and with a step of 4 the noise in that one timing was enough to push a linear scan
- * past the bound.
+ * Measures how the scan time of a text grows when the text becomes 16 times as long. A linear
+ * scan gives a ratio near 16 and a quadratic one near 256, so a bound of `maxLinearGrowth`
+ * leaves a factor of four of noise on each side. The step is 16 because a scan of the smaller
+ * text takes well under a millisecond, and with a step of 4 the noise in that one timing was
+ * enough to push a linear scan past the bound.
+ *
+ * The result is the best time of the larger text divided by the best time of the smaller one.
+ * Four things keep a busy machine from deciding it:
+ * - A timing is the CPU time of the process, not the wall-clock time, so the time that the system
+ *   gives to other processes does not count. On a machine with a load far above its core count,
+ *   wall-clock timings of a linear scan gave ratios above 100.
+ * - Every timing runs the scan for about the same time (`timingMs`), whatever the text. A single
+ *   scan of the larger text is ten times as long as a batch of the smaller one, so with unequal
+ *   timings the larger text suffers more interruptions.
+ * - The two texts are timed in turns, so a change in load hits both of them.
+ * - Timing goes on until the ratio is below the bound, up to `maxRounds`. More timings can only
+ *   lower a best time, so a linear scan gets below the bound as soon as it has had a few quiet
+ *   timings for each text, while a quadratic scan never does.
  */
 const measureGrowth = (build: (size: number) => string): number => {
-  const size = 20_000;
-  const measureBestTime = (text: string) => {
-    const repeats = Math.min(200, Math.ceil(3 / Math.max(timeScan(text), 0.01)));
-    const timings = Array.from({ length: 15 }, () => {
-      const startedAt = performance.now();
-      for (let repeat = 0; repeat < repeats; repeat += 1) findSkillReferences(text);
-      return (performance.now() - startedAt) / repeats;
-    });
-    return Math.min(...timings);
+  const timingMs = 8;
+  const minRounds = 5;
+  const maxRounds = 40;
+  const smallText = build(20_000);
+  const largeText = build(20_000 * 16);
+  const scansPerTiming = (text: string) => Math.ceil(timingMs / Math.max(timeBestScan(text), 0.01));
+  const smallScans = scansPerTiming(smallText);
+  const largeScans = scansPerTiming(largeText);
+  const timeBatch = (text: string, scans: number) => {
+    const startedAt = process.cpuUsage();
+    for (let scan = 0; scan < scans; scan += 1) findSkillReferences(text);
+    const used = process.cpuUsage(startedAt);
+    return (used.user + used.system) / 1000 / scans;
   };
-  return measureBestTime(build(size * 16)) / measureBestTime(build(size));
-};
 
-/** Measures the time of one scan of `text` as the best of a few, in milliseconds. */
-const timeBestScan = (text: string): number =>
-  Math.min(...Array.from({ length: 5 }, () => timeScan(text)));
+  let bestSmall = Infinity;
+  let bestLarge = Infinity;
+  let ratio = Infinity;
+  for (let round = 1; round <= maxRounds; round += 1) {
+    bestSmall = Math.min(bestSmall, timeBatch(smallText, smallScans));
+    bestLarge = Math.min(bestLarge, timeBatch(largeText, largeScans));
+    ratio = bestLarge / bestSmall;
+    if (round >= minRounds && ratio < maxLinearGrowth) break;
+  }
+  return ratio;
+};
 
 const listReferenceNames = (text: string) =>
   findSkillReferences(text).map((reference) => reference.name);

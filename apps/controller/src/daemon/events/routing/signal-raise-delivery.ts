@@ -24,7 +24,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import { PromotionState } from "../../../promotion";
 import { SignalRaises } from "../../../signals";
 import { workflowRepository } from "../../../workflows";
-import { absorbFailures } from "../../absorbing";
+import { absorbFailures } from "../../../absorbing";
 import type { Delivery } from "../event-router";
 
 export const signalRaiseDelivery: Effect.Effect<

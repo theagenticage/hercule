@@ -5,7 +5,17 @@
 // only the client's small chunk and never the dispatcher's.
 if (process.argv[2] === "github-token") {
   const { runGithubToken } = await import("@hercule/runner/github-token");
-  await runGithubToken();
+  await runGithubToken(process.argv.slice(3));
+} else if (process.argv[2] === "measure-disk-usage") {
+  // The runner starts this verb in a child process to walk a folder. It reads
+  // no Home, so it is chosen here, before the dispatcher is imported.
+  const { runMeasureDiskUsage } = await import("@hercule/runner/measure-disk-usage");
+  runMeasureDiskUsage(process.argv.slice(3));
+} else if (process.argv[2] === "antigravity-pre-tool-hook") {
+  // `agy` starts this verb before every tool call of an Antigravity session,
+  // so it is chosen here, before the dispatcher is imported.
+  const { runPreToolHook } = await import("@hercule/runner/antigravity-pre-tool-hook");
+  await runPreToolHook();
 } else {
   const { dispatch } = await import("./index");
   await dispatch(process.argv.slice(2));

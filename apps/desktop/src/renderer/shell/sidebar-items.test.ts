@@ -118,7 +118,7 @@ const buildFixtureSidebar = ({
     workspaces,
     resources: [WEBSHOP, INFRA, RUNBOOKS],
     runners: [MOSS],
-    instances: [],
+    accounts: [],
   });
   return buildSidebar({
     presentation,

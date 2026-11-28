@@ -5,19 +5,20 @@
  * layout route loads this module lazily, the first time a pane opens, so
  * its code stays out of the first screen's chunk.
  */
-import { useId, useRef, type JSX, type KeyboardEvent, type PointerEvent } from "react";
+import { useId, useRef, type JSX } from "react";
 import {
+  DEFAULT_SIDE_PANE_WIDTH,
   MIN_MAIN_PANE_WIDTH,
   MIN_SIDE_PANE_WIDTH,
   SIDE_PANE_SURFACES,
   closeSidePaneSurface,
-  fitSidePaneWidth,
   openSidePaneSurface,
   type SidePaneSurface,
 } from "@hercule/client-core";
 import { CloseIcon } from "../../icons/close";
 import { CrewIcon } from "../../icons/crew";
 import { PlusIcon } from "../../icons/plus";
+import { useResizablePane } from "../desk/use-resizable-pane";
 import { SubagentsSurface } from "./subagents-surface";
 import { useSidePaneLayout, useSidePaneWidth } from "./use-side-pane";
 import "../thread/menus.css";
@@ -29,9 +30,6 @@ declare module "react" {
     "--side-pane-width"?: string;
   }
 }
-
-/** How far one arrow key press moves the pane's edge, in pixels. */
-const KEYBOARD_STEP = 16;
 
 /** The icon each surface's tab and picker line show. */
 const SURFACE_ICONS: Readonly<Record<SidePaneSurface, JSX.Element>> = {
@@ -50,7 +48,7 @@ const nameSurface = (surface: SidePaneSurface): string =>
  * is open in the main pane, whose row the Subagents surface marks.
  *
  * The user resizes the pane by dragging its left edge, or with the arrow
- * keys once that edge has focus. The pane is never narrower than
+ * keys, Home, End and a double click once that edge has focus. The pane is never narrower than
  * `MIN_SIDE_PANE_WIDTH` and never leaves the main pane narrower than
  * `MIN_MAIN_PANE_WIDTH`. CSS fits the stored width to the window each time
  * the pane is laid out, so a window made smaller never pushes the main pane
@@ -75,50 +73,20 @@ export function SidePane({
   // opening it shows a surface.
   const shown = layout.shown ?? "subagents";
 
-  /**
-   * Measures the pane and the width it shares with the main pane. Read once
-   * per drag or key press, never per pointer move, because a read after a
-   * style write forces a layout.
-   */
-  const measurePane = (): { readonly pane: DOMRect; readonly available: number } => {
-    const pane = paneRef.current!;
-    return {
-      pane: pane.getBoundingClientRect(),
-      available: pane.parentElement!.getBoundingClientRect().width,
-    };
-  };
-
-  const startDrag = (event: PointerEvent<HTMLDivElement>): void => {
-    const handle = event.currentTarget;
-    const pane = paneRef.current!;
-    handle.setPointerCapture(event.pointerId);
-    const { pane: box, available } = measurePane();
-    let latest: number | undefined;
-    const move = (moved: globalThis.PointerEvent): void => {
-      latest = fitSidePaneWidth(Math.round(box.right - moved.clientX), available);
-      pane.style.setProperty("--side-pane-width", `${String(latest)}px`);
-      handle.setAttribute("aria-valuenow", String(latest));
-    };
-    const end = (): void => {
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", end);
-      handle.removeEventListener("pointercancel", end);
-      if (latest !== undefined) storeWidth(latest);
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", end);
-    handle.addEventListener("pointercancel", end);
-  };
-
-  const resizeWithKeys = (event: KeyboardEvent<HTMLDivElement>): void => {
-    // The handle is the pane's left edge, so the left arrow widens the pane.
-    const step =
-      event.key === "ArrowLeft" ? KEYBOARD_STEP : event.key === "ArrowRight" ? -KEYBOARD_STEP : 0;
-    if (step === 0) return;
-    event.preventDefault();
-    const { pane, available } = measurePane();
-    storeWidth(fitSidePaneWidth(Math.round(pane.width) + step, available));
-  };
+  const separator = useResizablePane({
+    paneRef,
+    paneSide: "right",
+    width,
+    defaultWidth: DEFAULT_SIDE_PANE_WIDTH,
+    min: MIN_SIDE_PANE_WIDTH,
+    // The widest width depends on the window, which only layout knows.
+    measureMax: () =>
+      paneRef.current!.parentElement!.getBoundingClientRect().width - MIN_MAIN_PANE_WIDTH,
+    draw: (next) => {
+      paneRef.current!.style.setProperty("--side-pane-width", `${String(next)}px`);
+    },
+    onCommit: storeWidth,
+  });
 
   return (
     <aside
@@ -132,17 +100,7 @@ export function SidePane({
         width: `max(${String(MIN_SIDE_PANE_WIDTH)}px, min(var(--side-pane-width), 100% - ${String(MIN_MAIN_PANE_WIDTH)}px))`,
       }}
     >
-      <div
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the side pane"
-        aria-valuenow={width}
-        aria-valuemin={MIN_SIDE_PANE_WIDTH}
-        tabIndex={0}
-        className="side-pane-handle"
-        onPointerDown={startDrag}
-        onKeyDown={resizeWithKeys}
-      />
+      <div {...separator} aria-label="Resize the side pane" className="side-pane-handle" />
       <header className="side-pane-head">
         <div className="side-pane-tabs">
           <div role="tablist" aria-label="Surfaces" className="side-pane-tablist">

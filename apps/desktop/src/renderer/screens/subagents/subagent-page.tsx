@@ -50,7 +50,11 @@ const drawSubagentParts: DrawSubagentParts = ({ session, subagent, subagents, br
       <div className="fold tally-fold">
         <TallyPill sessionId={subagent.sessionId} />
       </div>
-      <AgentRequestDock sessionId={subagent.sessionId} pageSubagentId={subagent.id} />
+      <AgentRequestDock
+        sessionId={subagent.sessionId}
+        pageSubagentId={subagent.id}
+        composerBelow={false}
+      />
       <StatusCard sessionId={subagent.sessionId} subagentId={subagent.id} />
     </>
   ),

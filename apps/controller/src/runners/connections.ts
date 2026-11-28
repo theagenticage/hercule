@@ -22,7 +22,7 @@
  *   The controller daemon calls `recordHeldDepartures` each time the
  *   controller serves again. Once sealed, it is never written.
  * - The writes a frame causes while the connection is open (a pong, a facts
- *   report, a watermark report) are skipped. They are handled one at a time
+ *   report, a metrics report) are skipped. They are handled one at a time
  *   with every other frame, so a write that waited would hold up the pongs,
  *   and the socket would close the connection as silent.
  * - The boot's correction of stranded rows is skipped on a sealed controller.
@@ -41,7 +41,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import type { RunnerConnectivity, RunnerFacts, RunnerWatermark } from "@hercule/contract";
+import type { RunnerConnectivity, RunnerFacts, RunnerMetrics } from "@hercule/contract";
 import {
   GOING_AWAY_CLOSE_CODE,
   RETIRED_CLOSE_CODE,
@@ -70,6 +70,7 @@ import {
   type ProbeReport,
   type ProbeRequest,
   type FrameCarryingInput,
+  type AccountUsageReported,
   type FilesEdited,
   type SessionEvent,
   type SessionInputResult,
@@ -78,6 +79,7 @@ import {
   type SessionsReport,
   type CredentialRequest,
   type GithubTokenRequest,
+  type RunnerDiskUsageReport,
   type WorkspaceReport,
   type WorkspaceStepResult,
   type WorkspaceStepsReport,
@@ -88,6 +90,8 @@ import { announce, nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
 import { Notifier } from "../notifications";
 import { PromotionState } from "../promotion";
+import { RunnerMetricsService } from "../runner-metrics";
+import { announceProviderRunnerChange } from "./announce-provider-change";
 import { runnerRepository, type RunnerHelloRecord } from "./repository";
 
 export type Connection = symbol;
@@ -169,13 +173,19 @@ const readRequiredCapability = (request: Request): string | undefined => {
  * input opened a turn changes the session's status, and a status must be
  * written in the order the runner reported things.
  *
- * A `filesEdited` frame has no sequence number, but it joins the queue so it
- * never runs at the same time as the session's own events.
+ * A `filesEdited` or `accountUsageReported` frame has no sequence number, but
+ * it joins the queue so it never runs at the same time as the session's own
+ * events.
  */
 export interface SessionTraffic {
   readonly runnerId: string;
   readonly connection: Connection;
-  readonly frame: SessionEvent | SessionsReport | SessionInputResult | FilesEdited;
+  readonly frame:
+    | SessionEvent
+    | SessionsReport
+    | SessionInputResult
+    | FilesEdited
+    | AccountUsageReported;
 }
 
 /**
@@ -216,7 +226,18 @@ export type FleetTraffic =
       readonly runnerId: string;
       readonly ended: LoginEnded;
     }
-  | { readonly _tag: "placementsChanged"; readonly runnerId: string };
+  | {
+      readonly _tag: "diskUsageReported";
+      readonly runnerId: string;
+      readonly diskUsage: RunnerDiskUsageReport;
+    }
+  | { readonly _tag: "placementsChanged"; readonly runnerId: string }
+  /**
+   * A facts report changed which harnesses the runner has: a binary appeared,
+   * disappeared or moved, or the runner build's adapter list changed. The
+   * controller daemon probes the runner's accounts again.
+   */
+  | { readonly _tag: "harnessesChanged"; readonly runnerId: string };
 
 /** A runner's answer to a `Request`, matched to it by the id `readAnswerKey` reads. */
 export type Answer =
@@ -247,6 +268,26 @@ const readAnswerKey = (frame: Request | Answer): string =>
  * work, because a runner could send an answer with that word as its id.
  */
 const FACTS_KEY = "";
+
+/**
+ * Returns whether the two facts differ in the harnesses they list: any
+ * harness binary's presence or path, or the adapter list. Facts that differ in
+ * anything else (memory, toolchains) return false. A runner without earlier
+ * facts counts as changed.
+ */
+const hasHarnessSetChanged = (before: RunnerFacts | null, after: RunnerFacts): boolean => {
+  if (before === null) return true;
+  const describeBinaries = (facts: RunnerFacts): string =>
+    JSON.stringify(
+      facts.harnesses
+        .map((binary) => [binary.name, binary.present, binary.path ?? null])
+        .toSorted((left, right) => String(left[0]).localeCompare(String(right[0]))),
+    );
+  return (
+    describeBinaries(before) !== describeBinaries(after) ||
+    JSON.stringify(before.adapters.toSorted()) !== JSON.stringify(after.adapters.toSorted())
+  );
+};
 
 /**
  * How many recent arrivals a late subscriber still receives. One is enough for
@@ -304,6 +345,7 @@ const make = Effect.gen(function* () {
   const audit = yield* AuditLog;
   const notifier = yield* Notifier;
   const promotion = yield* PromotionState;
+  const runnerMetrics = yield* RunnerMetricsService;
 
   const reachable = new Map<string, Reachable>();
   // The departures whose write a promotion freeze is holding, by runner id.
@@ -447,6 +489,7 @@ const make = Effect.gen(function* () {
   const changeConnectivity = (id: string, connectivity: RunnerConnectivity, at: string) =>
     Effect.gen(function* () {
       if (!(yield* runners.setConnectivity(id, connectivity, at))) return;
+      yield* announceProviderRunnerChange(id);
       yield* audit.append({
         kind: "runner.stateChanged",
         actor: SYSTEM_ACTOR,
@@ -560,6 +603,7 @@ const make = Effect.gen(function* () {
             // not the connectivity changed, so the row can change without an
             // audit entry. Announce it either way.
             yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
+            yield* announceProviderRunnerChange(id);
             // A departure a freeze held for an earlier connection is no longer
             // true. It is dropped inside the transaction, so that it is ordered
             // with `recordHeldDepartures`, and after the writes, so that a
@@ -779,6 +823,18 @@ const make = Effect.gen(function* () {
       publish(id, connection, { _tag: "workspaceReported", runnerId: id, report }),
 
     /**
+     * Publishes a runner's disk usage report. The controller daemon stores it,
+     * because the entries belong to workspaces and the totals to the runner,
+     * and this domain knows nothing of workspaces.
+     */
+    reportedDiskUsage: (
+      id: string,
+      connection: Connection,
+      diskUsage: RunnerDiskUsageReport,
+    ): Effect.Effect<void> =>
+      publish(id, connection, { _tag: "diskUsageReported", runnerId: id, diskUsage }),
+
+    /**
      * Publishes a runner's request for the credential git needs. The answer
      * is a frame back to the runner, which the controller daemon sends, so the
      * request is published rather than answered here.
@@ -826,7 +882,7 @@ const make = Effect.gen(function* () {
 
     /**
      * Publishes that a device login on a runner ended. The controller daemon
-     * probes the instance again, and the probe says whether the login worked.
+     * probes the Provider Account again, and the probe says whether the login worked.
      */
     reportedLoginEnded: (
       id: string,
@@ -884,7 +940,9 @@ const make = Effect.gen(function* () {
     /**
      * Stores a runner's facts report and wakes the callers of
      * `refreshedFacts`. A report from a replaced connection is ignored, so an
-     * old connection cannot overwrite the current one's facts.
+     * old connection cannot overwrite the current one's facts. A report that
+     * changes which harnesses the runner has also publishes `harnessesChanged`;
+     * one that changes nothing about harnesses publishes nothing.
      *
      * Skipped while a promotion freezes the controller, and once it is
      * sealed, and then wakes nobody: a caller of `refreshedFacts` gets
@@ -903,37 +961,53 @@ const make = Effect.gen(function* () {
           const recorded = yield* withTransaction(
             sql,
             Effect.gen(function* () {
-              if (reachable.get(id)?.connection !== connection) return false;
-              yield* runners.recordFacts(id, facts, yield* nowIso);
+              if (reachable.get(id)?.connection !== connection) return undefined;
+              const previous = yield* runners.recordFacts(id, facts, yield* nowIso);
               // No audit entry: what a runner has installed is not an event anyone
               // reads back, so clients watching the fleet are notified instead.
               yield* announce({ _tag: "record", topic: "runner", id, kind: "updated" });
-              return true;
+              yield* announceProviderRunnerChange(id);
+              return { harnessesChanged: hasHarnessSetChanged(previous, facts) };
             }),
           );
           // After the commit, so a woken caller reads the new facts rather than
           // the old ones. The connection is checked again in case the runner
           // reconnected in between: callers on the new connection are waiting
           // for its own report, which has not arrived yet.
-          const held = recorded ? reachable.get(id) : undefined;
+          const held = recorded === undefined ? undefined : reachable.get(id);
           if (held?.connection === connection) wakeWaiters(held, FACTS_KEY, FACTS_REPORTED);
+          // Published after the commit, so the sweep it starts reads the new
+          // facts. The sweep is the controller daemon's: this domain sends no
+          // probes.
+          if (recorded?.harnessesChanged === true) {
+            yield* publish(id, connection, { _tag: "harnessesChanged", runnerId: id });
+          }
         }),
       ),
 
     /**
-     * Stores a runner's watermark report. An audit entry is written only when
-     * the runner starts or stops accepting placements, because that is what
-     * placement acts on.
+     * Stores a runner's Runner Metrics as the runner's latest report, and
+     * adds them to the runner's history of Runner Metrics. An audit entry is
+     * written only when the runner starts or stops accepting placements,
+     * because that is what placement acts on.
+     *
+     * Every routine report writes its history row, and announces the runner
+     * on the `runnerMetrics` live topic once the write commits. It does not
+     * publish on the `runner` topic: a routine report changes no Runner
+     * record that a screen lists, and every client holding a runner read
+     * would read it again once a minute per runner.
      *
      * Skipped while a promotion freezes the controller, and once it is
-     * sealed. The runner reports its watermark every minute, and each report
-     * is compared with the stored one, so the first report after a thaw
-     * records any change the skipped ones carried.
+     * sealed, so a frozen controller writes no history and pushes nothing.
+     * The runner reports its metrics every minute, and each report is
+     * compared with the stored one, so the first report after a thaw
+     * records any change the skipped ones carried. The history keeps a gap
+     * for the minutes that were skipped.
      */
-    reportedWatermark: (
+    reportedMetrics: (
       id: string,
       connection: Connection,
-      watermark: RunnerWatermark,
+      metrics: RunnerMetrics,
     ): Effect.Effect<void, SqlError> =>
       promotion.runIfServing(
         Effect.gen(function* () {
@@ -942,7 +1016,8 @@ const make = Effect.gen(function* () {
             Effect.gen(function* () {
               if (reachable.get(id)?.connection !== connection) return false;
               const at = yield* nowIso;
-              const result = yield* runners.recordWatermark(id, watermark, at);
+              const result = yield* runners.recordMetrics(id, metrics, at);
+              yield* runnerMetrics.record(id, metrics, at);
               if (!result.crossed) return false;
               yield* audit.append({
                 kind: "runner.placementsChanged",
@@ -1057,5 +1132,5 @@ export class RunnerConnections extends Context.Service<
 export const RunnerConnectionsLayer: Layer.Layer<
   RunnerConnections,
   never,
-  SqlClient.SqlClient | AuditLog | Notifier | PromotionState
+  SqlClient.SqlClient | AuditLog | Notifier | PromotionState | RunnerMetricsService
 > = Layer.effect(RunnerConnections)(make);

@@ -6,8 +6,11 @@
  * the choices already made.
  */
 import type {
+  Harness,
+  ModelProfile,
   Project,
-  ProviderInstance,
+  Provider,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -42,8 +45,25 @@ export interface ThreadConfig extends ThreadDefaults {
  * while the current account, runner or model cannot honour it, and applies
  * again when it can (see `resolveThreadConfig`). The permission profile is not
  * included, because the composer has no control for it.
+ *
+ * Picking a row of the model menu sets the account, the harness and the model
+ * together (`buildEntryPicks`), so a draft never runs a model in another
+ * harness than the menu showed. A harness named for one account is never
+ * carried to another: only the pick that names the account names its harness.
  */
-export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
+export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">> & {
+  /**
+   * The Draft Thread's own list of MCP Servers, once the user has changed it.
+   * It holds the project the pick was made under, and applies only while the
+   * draft is still in that project: a list chosen for one project must not
+   * decide the servers of a thread started in another. Absent while the list
+   * is untouched, so the draft sends none and the controller picks the list.
+   */
+  readonly mcpServers?: {
+    readonly projectId: string | null;
+    readonly mcpServerIds: readonly string[];
+  };
+};
 
 /**
  * The unsent content the composer holds for one thread: its text and the
@@ -52,6 +72,11 @@ export type ThreadPicks = Partial<Omit<ThreadConfig, "profileId">>;
 export interface MessageDraft {
   readonly text: string;
   readonly attachments: readonly ShelfItem[];
+  /**
+   * The Task a start card pointed the message at. A Draft Thread that starts
+   * with it joins that Task, instead of getting one of its own.
+   */
+  readonly taskId?: string;
 }
 
 /**
@@ -75,7 +100,17 @@ export type ThreadKind = Thread["kind"];
  * with no project on screen passes only what it has.
  */
 export interface ThreadCatalogs {
-  readonly instances: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
+  /** The providers, whose display names name the accounts. */
+  readonly providers: readonly Provider[];
+  /** The harnesses, whose display names and declared capabilities the composer shows. */
+  readonly harnesses: readonly Harness[];
+  /**
+   * The Model Profiles with every entry resolved. The composer reads the
+   * models it offers, their options and whether they can run from these, and
+   * never from the accounts' capability snapshots.
+   */
+  readonly modelProfiles: readonly ModelProfile[];
   readonly runners: readonly Runner[];
   readonly thisMacRunnerId: string | null;
   readonly projects?: readonly Project[];
@@ -93,7 +128,8 @@ export const readThreadConfig = (thread: Thread): ThreadConfig =>
   thread.kind === "draft"
     ? thread.config
     : {
-        instanceId: thread.session.instanceId,
+        providerAccountId: thread.session.providerAccountId,
+        harnessId: thread.session.harnessId,
         model: thread.session.modelSelection.model,
         options: thread.session.modelSelection.options,
         accessMode: thread.session.accessMode,

@@ -31,10 +31,11 @@ import { buildRunContext } from "./run-context";
 import { isUnfinished } from "./step-records";
 
 /**
- * The part of a run that routing reads: its plan, its inputs, its step records
- * in the order they were created, and how often it has followed each edge.
+ * The part of a run that routing reads: its id and Task, its plan, its inputs,
+ * its step records in the order they were created, and how often it has
+ * followed each edge.
  */
-export type RoutedRun = Pick<Run, "plan" | "inputs" | "steps" | "edgeTraversals">;
+export type RoutedRun = Pick<Run, "id" | "taskId" | "plan" | "inputs" | "steps" | "edgeTraversals">;
 
 /** How the run goes on after a routing decision. */
 export type RoutingEnding =

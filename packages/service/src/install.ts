@@ -6,8 +6,7 @@ import { statSync } from "node:fs";
 import { dirname } from "node:path";
 import { Effect } from "effect";
 import {
-  BOOTSTRAP_KEYS,
-  buildEnvName,
+  BOOTSTRAP_ENV_VARIABLES,
   locateConfigFile,
   type ConfigOverrides,
   type Env,
@@ -46,17 +45,21 @@ export const refuseConfigFlags = (
 };
 
 /**
- * Fails when the environment sets a bootstrap key. The unit runs with none of
- * them, so the service would quietly run with other settings than the ones
- * the user has.
+ * Fails when the environment sets a bootstrap key, through its `HERCULE_`
+ * variable or the OpenTelemetry standard's (`BOOTSTRAP_ENV_VARIABLES`). The
+ * unit runs with none of them, so the service would quietly run with other
+ * settings than the ones the user has.
  *
  * `HERCULE_HOME` is not a bootstrap key: it chooses the Home, and the unit
  * carries the Home it was installed for.
  */
 const refuseConfigVariables = (home: string, env: Env): Effect.Effect<void, ServiceError> => {
-  const key = BOOTSTRAP_KEYS.find((each) => env[buildEnvName(each)] !== undefined);
-  if (key === undefined) return Effect.void;
-  const name = buildEnvName(key);
+  const variable = BOOTSTRAP_ENV_VARIABLES.find((each) => {
+    const value = env[each.name];
+    return value !== undefined && !(each.emptyIsUnset && value === "");
+  });
+  if (variable === undefined) return Effect.void;
+  const { key, name } = variable;
   return Effect.fail(
     new ServiceError({
       message: `${name} is set, and the service reads only ${locateConfigFile(home)}. Put ${key} in that file instead, then unset ${name} and run this again.`,

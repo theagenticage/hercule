@@ -45,7 +45,7 @@ import {
   isLiveSessionTestEnabled,
   LOGIN_DEADLINE_MS,
   isLoginAvailable,
-  prepareLoggedInInstance,
+  prepareLoggedInAccount,
   createTemporaryHome,
   waitForTranscriptTag,
   type Page,
@@ -82,14 +82,14 @@ let ready: Ready | undefined;
 
 /**
  * Prepares everything that has to exist before a session can be spawned from
- * an Agent: a logged-in instance, the shipped profile its sessions carry, and
+ * an Agent: a logged-in account, the shipped profile its sessions carry, and
  * the Agent itself. Built once, because both cases spawn from the same Agent.
- * The Agent sets no model, so its sessions run on the instance's default: the
+ * The Agent sets no model, so its sessions run on the account's default: the
  * verdict in the prompt is an instruction to follow, and the cheapest model
  * available has been seen to give its own verdict instead.
  */
 const prepare = async (): Promise<Ready> => {
-  const { instance } = await prepareLoggedInInstance({ home: state.home, binary, url, apiKey });
+  const { account } = await prepareLoggedInAccount({ home: state.home, binary, url, apiKey });
   const profiles = parseJsonOutputOrFail<Page<{ readonly id: string; readonly name: string }>>(
     await runCli(["profile", "list", "--json"], { home: state.home, binary }),
   ).items;
@@ -101,8 +101,8 @@ const prepare = async (): Promise<Ready> => {
         "create",
         "--name",
         "e2e-assessor",
-        "--instance",
-        instance.id,
+        "--account",
+        account.id,
         "--profile",
         profile.id,
         "--json",
@@ -199,7 +199,7 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
     async (ctx) => {
       if (ready === undefined) {
         ctx.skip(
-          "no login for the claude-code instance: name a credentials file in " +
+          "no login for the claude-code account: name a credentials file in " +
             "HERCULE_E2E_CLAUDE_CREDENTIALS, or put ANTHROPIC_API_KEY on the environment.",
         );
         return;
@@ -221,7 +221,7 @@ describe.skipIf(!wanted)("a session spawned from an Agent under an output schema
     "says the schema could not be satisfied rather than runSessionUnderSchema prose",
     async (ctx) => {
       if (ready === undefined) {
-        ctx.skip("no login for the claude-code instance");
+        ctx.skip("no login for the claude-code account");
         return;
       }
 

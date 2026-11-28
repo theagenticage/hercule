@@ -50,6 +50,12 @@ export interface PendingSubmissions {
   /** Replaces the text at `key`, and keeps its images, its picks and its failure. */
   readonly writeText: (key: string, text: string) => void;
   /**
+   * Records that the message at `key` points at the Task `taskId`, as a start
+   * card does, so the thread it starts joins that Task. Keeps everything
+   * else. The Task is forgotten when the message is sent or emptied.
+   */
+  readonly writeTask: (key: string, taskId: string) => void;
+  /**
    * Replaces the images at `key` with what `update` returns for the images
    * there now. An upload that ends after the user changed the shelf changes
    * the shelf as it is then, not as it was when the upload started.
@@ -65,8 +71,8 @@ export interface PendingSubmissions {
   /** Removes the failure at `key`, as a new submission starts. Does nothing when there is none. */
   readonly clearFailure: (key: string) => void;
   /**
-   * Clears what a submission that succeeded sent from `key`: the text, if it
-   * is still `sent.text`, the images in `sent.attachments`, and the picks,
+   * Clears what a submission that succeeded sent from `key`: the Task the
+   * message pointed at, the text, if it is still `sent.text`, the images in `sent.attachments`, and the picks,
    * if no pick was made since, so they are still the object `sent.picks`.
    * Also removes the failure, since the submission succeeded.
    *
@@ -148,6 +154,10 @@ export const createPendingSubmissions = (): PendingSubmissions => {
     writeText: (key, text) => {
       const pending = read(key);
       write(key, { ...pending, message: { ...pending.message, text } });
+    },
+    writeTask: (key, taskId) => {
+      const pending = read(key);
+      write(key, { ...pending, message: { ...pending.message, taskId } });
     },
     updateAttachments: (key, update) => {
       const pending = read(key);

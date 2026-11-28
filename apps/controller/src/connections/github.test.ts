@@ -24,9 +24,12 @@ import type * as SqlClient from "effect/sql/SqlClient";
 import { GITHUB_CONNECTION_TYPE } from "@hercule/contract";
 import { buildHomePaths, HerculeHome } from "../config";
 import { TestDatabase, inTransaction } from "../db/testing";
+import { AuditLogLayer } from "../events";
+import { NotifierLayer } from "../notifications";
 import { ServingPromotionStateLayer } from "../promotion/testing";
 import { masterKeyLayer, Secrets, secretsLayer } from "../secrets";
-import { OAUTH_TOKENS, serializeTokens, type TokenSet } from "./oauth";
+import { serializeTokens, type TokenSet } from "../oauth";
+import { OAUTH_TOKENS } from "./oauth";
 import { PluginConfigs } from "./plugin-configs";
 import { connectionRepository } from "./repository";
 import { githubTokens } from "./github";
@@ -55,6 +58,8 @@ const buildStack = () => {
   return ConnectionTypesLayer.pipe(
     Layer.provideMerge(Layer.succeed(PluginConfigs)({ of: () => Effect.succeed({}) })),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
+    Layer.provideMerge(NotifierLayer),
+    Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(TestDatabase),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),

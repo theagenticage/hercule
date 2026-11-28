@@ -6,13 +6,16 @@ import type { Run } from "@hercule/contract";
 
 /**
  * Builds the context that conditions and templates are evaluated against:
- * the run's `inputs`, and under `steps.<id>` the output of each step's latest
- * finished iteration. A step is absent from `steps` when it has not finished
- * yet, when it never runs, and when its latest finished iteration was
- * skipped, even if an earlier one completed. So `has(steps.x)` tells whether
- * the latest `x` produced an output.
+ * the run's `inputs`, the run itself as `run` (its `id`, and its `taskId`
+ * when it works on a Task), and under `steps.<id>` the output of each step's
+ * latest finished iteration. A step is absent from `steps` when it has not
+ * finished yet, when it never runs, and when its latest finished iteration
+ * was skipped, even if an earlier one completed. So `has(steps.x)` tells
+ * whether the latest `x` produced an output.
  */
-export const buildRunContext = (run: Pick<Run, "inputs" | "steps">): Record<string, unknown> => {
+export const buildRunContext = (
+  run: Pick<Run, "id" | "taskId" | "inputs" | "steps">,
+): Record<string, unknown> => {
   const latest = new Map<string, Run["steps"][number]>();
   for (const record of run.steps) {
     if (record.status !== "completed" && record.status !== "skipped") continue;
@@ -25,5 +28,9 @@ export const buildRunContext = (run: Pick<Run, "inputs" | "steps">): Record<stri
   for (const [stepId, record] of latest) {
     if (record.status === "completed") steps[stepId] = { output: record.output };
   }
-  return { inputs: run.inputs, steps };
+  return {
+    inputs: run.inputs,
+    run: { id: run.id, ...(run.taskId === undefined ? {} : { taskId: run.taskId }) },
+    steps,
+  };
 };

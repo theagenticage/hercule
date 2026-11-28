@@ -49,7 +49,7 @@ export function ChoiceInput({
         className={cn(
           "peer size-3.5 cursor-pointer appearance-none border border-line bg-raised checked:border-ink",
           "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
-          "disabled:cursor-not-allowed disabled:opacity-50",
+          "disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:opacity-50",
           // A radio's dot is a ring of the background inside an ink fill, so
           // it needs no second element.
           type === "checkbox"

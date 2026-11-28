@@ -45,15 +45,7 @@ const CONTROLLER = {
 };
 
 /** The rows of the Settings list that lead nowhere yet. */
-const INERT_ROWS = [
-  "Threads",
-  "Providers",
-  "Machines",
-  "Identities",
-  "Secrets",
-  "Bounds",
-  "Plugins",
-];
+const INERT_ROWS = ["Threads", "Machines", "Identities", "Secrets", "Bounds", "Plugins"];
 
 /** Starts the app signed in at `path`, with the sidebar fixture and `handlers` on top. */
 const startApp = async ({
@@ -137,9 +129,10 @@ describe("the Settings list", () => {
       "Profile",
       "Appearance",
       "Threads",
-      "Intake",
+      "Signals",
       "Assistants",
       "Skills",
+      "MCP servers",
       "Connections",
       "Providers",
       "Machines",

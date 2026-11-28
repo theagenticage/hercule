@@ -1,11 +1,41 @@
 import { Schema } from "effect";
+import { withPluginColor } from "./drawing";
 
 /**
  * The version of the host API a plugin is built against. A plugin that
  * declares another version is refused at load, rather than run against an API
  * it does not know.
+ *
+ * - Version 3 changed `HarnessDefinition` (it declares the providers it runs and
+ *   no longer has a config schema) and added `ProviderDefinition`.
+ * - Version 4 made `defaultHarnessId` and the `method` of a `harness-login`
+ *   step required, and added the `keyCheck` of an account kind. A plugin built
+ *   against version 3 declares neither, so the host refuses it at load.
+ * - Version 5 made `catalogSource` and `defaultSelection` required on
+ *   `ProviderDefinition`. A provider plugin built against version 4 declares
+ *   neither, so the host refuses it at load.
+ * - Version 6 moved `modelArgument` from the provider entry of a harness's
+ *   `runs` onto each account kind in it. A harness plugin built against
+ *   version 5 declares it in the wrong place, so the host refuses it at load.
+ * - Version 7 made `catalogSource` a union: a `provider-api` source reads the
+ *   catalog from the provider's API, with a `parseCatalogBody` passed at
+ *   registration. A usage parser may also return `expiresAt`. A plugin built
+ *   against version 6 does not know either, so the host refuses it at load.
+ * - Version 8 made `releaseSource` required on `HarnessDefinition`: where the
+ *   harness's releases are published. A harness plugin built against version 7
+ *   declares none, so the host refuses it at load.
+ * - Version 9 added MCP servers as an extension point: the `mcp-servers`
+ *   capability and `registerMcpServer`. The set of extension points is part of
+ *   the host contract, so a plugin built against version 8 is refused at load.
+ * - Version 10 widened `HarnessDefinition.releaseSource` to a union that also
+ *   takes GitHub releases, and added the optional `defaultSelectionMaker` of
+ *   `ProviderDefinition`. A host that does not read them cannot run a plugin
+ *   that uses them.
+ * - Version 11 made `textGeneration` required in the `declared` capabilities of
+ *   `HarnessDefinition`. A plugin built against version 10 is refused at load,
+ *   because the host requires the exact version.
  */
-export const HOST_API = 2;
+export const HOST_API = 11;
 
 /**
  * The named parts of the host API a plugin may request. Only some of them are
@@ -14,14 +44,20 @@ export const HOST_API = 2;
  * they are implemented.
  */
 export const PLUGIN_CAPABILITIES = [
+  "harnesses",
+  // The model provider's registration point.
   "providers",
   "channels",
   "event-sources",
   "workflow-actions",
+  // Offering one vendor's MCP server to sessions.
+  "mcp-servers",
   "connections",
   "events",
   "notifications",
   "resources",
+  // Reporting External Entities from a poll, and declaring their kinds.
+  "entities",
   "secrets",
   "kv",
   "public-api",
@@ -40,26 +76,40 @@ export type PluginCapability = Schema.Schema.Type<typeof PluginCapability>;
 export const SchemaValue = Schema.declare(Schema.isSchema);
 
 /**
+ * The regular expression source of a plugin id, without anchors. A qualified
+ * contribution id starts with a plugin id, so it is built from the same text.
+ */
+export const PLUGIN_ID_SOURCE = "[a-z0-9]+(-[a-z0-9]+)*";
+
+/**
  * A plugin id: a lowercase slug. It is the namespace for the plugin's KV keys,
  * its secrets and its contribution ids, and it is written into the associated
  * data that binds a secret to its owner, so a separator or an empty string in
  * it would make one of those ambiguous.
  */
 export const PluginId = Schema.String.check(
-  Schema.isPattern(/^[a-z0-9]+(-[a-z0-9]+)*$/, {
+  Schema.isPattern(new RegExp(`^${PLUGIN_ID_SOURCE}$`), {
     title: "plugin id",
     description: "lowercase letters and digits, single dashes between them",
   }),
 );
 
 /**
- * The plugin's mark: SVG path `d` strings drawn on a fixed 16x16 viewBox, in
- * the theme's colour. It holds path data only, so a mark can carry no script,
- * style or colour. The host checks the strings when it loads the plugin: at
- * most 16 paths, and at most 4 KB of them together. It drops a mark that
- * fails the check rather than the plugin.
+ * The plugin's mark: SVG path `d` strings drawn on a fixed 16x16 viewBox. It
+ * holds path data only, so a mark can carry no script or style. The host
+ * checks the strings when it loads the plugin: at most 16 paths, and at most
+ * 4 KB of them together. It drops a mark that fails the check rather than the
+ * plugin, and it drops a mark whose colour is not a CSS colour too.
+ *
+ * - `hue` tints the mark at the lightness and strength of the theme, and
+ *   `color` draws it in an exact colour (see `withPluginColor`). With neither,
+ *   the mark takes the text colour.
+ * - `solid` marks a heavy mark, which the app draws a little smaller.
  */
-export const PluginMark = Schema.Struct({ paths: Schema.Array(Schema.String) });
+export const PluginMark = withPluginColor({
+  paths: Schema.Array(Schema.String),
+  solid: Schema.optionalKey(Schema.Boolean),
+});
 
 export type PluginMark = Schema.Schema.Type<typeof PluginMark>;
 

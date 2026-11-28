@@ -62,9 +62,10 @@ import {
   type SessionStart,
 } from "@hercule/protocol";
 import type { Plugin } from "@hercule/plugin-host";
+import { mintUuid, uuidToString, withTransaction } from "../db";
 import { readEvent } from "../events/testing";
 import { buildRunnerSocketUrl } from "../runners/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   collectMessages,
   collectPushes,
@@ -546,7 +547,7 @@ describe("what a task subscription receives", () => {
     });
   });
 
-  it("coalesces a burst into one message per kind, naming each id once", async () => {
+  it("names every created and deleted task of a burst, and no message names an id twice", async () => {
     await withServer(async ({ base, live: reader }) => {
       const token = await completeSetup(base);
       const ticket = await fetchTicket(base, token);
@@ -567,26 +568,30 @@ describe("what a task subscription receives", () => {
           const doomed = expectPresent(created[0]);
           yield* Effect.promise(() => deleteTask(base, token, doomed.id));
 
-          // Two messages and no more: the window holds three creates and a
-          // delete, and each kind is sent once.
+          // How many messages carry the ids depends on how many of the four
+          // commits land inside one 50 ms window, which a loaded machine does
+          // not keep. So wait for the ids, not for a message count. How a
+          // window groups changes is checked on a test clock in `topics.test.ts`.
+          const namedIds = (kind: "created" | "deleted"): ReadonlyArray<string> =>
+            tasks.received.flatMap((message) =>
+              message._tag === "invalidate" && message.kind === kind ? message.ids : [],
+            );
           expect(
-            yield* Effect.promise(() => waitWithin(1000, () => tasks.received.length >= 2)),
+            yield* Effect.promise(() =>
+              waitWithin(
+                2000,
+                () =>
+                  namedIds("created").length >= created.length && namedIds("deleted").length >= 1,
+              ),
+            ),
           ).toBe(true);
-          yield* Effect.promise(() => waitWithin(200, () => tasks.received.length >= 3));
-          expect(tasks.received).toHaveLength(2);
+          // Let any further message arrive, so a repeated id would show.
+          yield* Effect.promise(() => waitForLiveToSettle());
 
-          const creates = tasks.received.filter(
-            (message) => message._tag === "invalidate" && message.kind === "created",
+          expect([...namedIds("created")].sort()).toEqual(
+            [...created.map((task) => task.id)].sort(),
           );
-          const deletes = tasks.received.filter(
-            (message) => message._tag === "invalidate" && message.kind === "deleted",
-          );
-          expect(creates).toHaveLength(1);
-          expect(deletes).toHaveLength(1);
-
-          const createdIds = (creates[0] as { ids: ReadonlyArray<string> }).ids;
-          expect([...createdIds].sort()).toEqual([...created.map((task) => task.id)].sort());
-          expect((deletes[0] as { ids: ReadonlyArray<string> }).ids).toEqual([doomed.id]);
+          expect(namedIds("deleted")).toEqual([doomed.id]);
 
           // No message repeats an id, whatever the window collected.
           for (const message of tasks.received) {
@@ -621,6 +626,64 @@ const readWebConversation = async (
   );
   return expectPresent(found);
 };
+
+describe("what an external entity subscription receives", () => {
+  it("names the entity when the user dismisses it and when the user restores it", async () => {
+    await withServer(async ({ base, live: reader, sql }) => {
+      const token = await completeSetup(base);
+      const id = mintUuid();
+      const now = new Date().toISOString();
+      await Effect.runPromise(
+        withTransaction(
+          sql,
+          sql`
+          INSERT INTO external_entities
+            (id, ref, kind, noun, card, pace, patience, completeness, identifier, title, url,
+             lifecycle, facts, first_observed_at, updated_at)
+          VALUES (${id}, 'acme:ticket:1', 'acme/ticket', 'Ticket', 'compact', 'fast', 24, 'full',
+                  'ACME-1', 'A ticket', 'https://tracker.example/1', 'open', '[]', ${now}, ${now})`,
+        ),
+      );
+      const entityId = uuidToString(id);
+      const ticket = await fetchTicket(base, token);
+
+      await onSocket(base, (client) =>
+        Effect.gen(function* () {
+          yield* client.hello({ v: 1, ticket });
+          const entities = yield* collectPushes(client, "externalEntity");
+          yield* Effect.promise(() => expectHeld(reader, 1, "externalEntity"));
+
+          const dismissed = yield* Effect.promise(() =>
+            post(base, "/api/v1/external-entities/dismiss", { ids: [entityId] }, token),
+          );
+          expect(dismissed.status).toBe(200);
+          expect(
+            yield* Effect.promise(() => waitWithin(200, () => entities.received.length >= 1)),
+          ).toBe(true);
+          expect(entities.received[0]).toEqual({
+            _tag: "invalidate",
+            ids: [entityId],
+            kind: "updated",
+          });
+
+          const restored = yield* Effect.promise(() =>
+            post(base, "/api/v1/external-entities/restore", { ids: [entityId] }, token),
+          );
+          expect(restored.status).toBe(200);
+          expect(
+            yield* Effect.promise(() => waitWithin(200, () => entities.received.length >= 2)),
+          ).toBe(true);
+          expect(entities.received[1]).toEqual({
+            _tag: "invalidate",
+            ids: [entityId],
+            kind: "updated",
+          });
+          yield* Fiber.interrupt(entities.fiber);
+        }),
+      );
+    });
+  });
+});
 
 describe("what an assistant subscription receives", () => {
   it("names the assistant once on a create, an update and a delete", async () => {
@@ -1167,8 +1230,8 @@ describe("what a runner subscription receives", () => {
     totalMemoryBytes: 68719476736,
     docker: false,
     toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-    providers: [],
-    adapters: ["claude-code"],
+    harnesses: [],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   };
 
@@ -1351,7 +1414,7 @@ describe("what a runner subscription receives", () => {
 
 /**
  * The smallest fleet that can spawn one session and write its transcript: one
- * provider, and one runner that answers hello and probes and sends nothing
+ * harness, and one runner that answers hello and probes and sends nothing
  * else on its own. Placement, access modes and input are tested in
  * `sessions.integration.test.ts`. This suite only needs a session that exists
  * and a wire to report its events on, so its two live topics have something
@@ -1364,8 +1427,8 @@ const SESSION_TOPIC_FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["session-topic-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  adapters: ["session-topics/session-topic"],
   identityPort: 4939,
 };
 
@@ -1374,10 +1437,7 @@ const SESSION_TOPIC_MODELS = [
 ];
 
 const buildSessionTopicPlugins = (): ReadonlyArray<Plugin> => [
-  createPluginFixture({
-    id: "session-topics",
-    definitions: [buildProviderDefinition("session-topic-provider", { token: "t" })],
-  }).plugin,
+  buildPluginWithProviderPerHarness("session-topics", [buildHarnessDefinition("session-topic")]),
 ];
 
 const withSessionTopicFleet = (body: (arranged: Arranged) => Promise<void>): Promise<void> =>
@@ -1441,6 +1501,7 @@ describe("what a session's stream subscription receives", () => {
             sessionId: session.id,
             at: AT,
             _tag: "session.started",
+            raw: { source: "claude.sdk.message", payload: { type: "system" } },
           });
           expect(
             yield* Effect.promise(() => waitWithin(2000, () => stream.received.length >= 2)),
@@ -1449,6 +1510,9 @@ describe("what a session's stream subscription receives", () => {
           const row = expectPresent(listTranscriptItems(pushed)[0]);
           expect(row.position).toBe(1);
           expect(row.event._tag).toBe("session.started");
+          // The stream never sends the vendor's payload; `transcript.read`
+          // sends it on request, for debugging.
+          expect(row.event).not.toHaveProperty("raw");
           expect(pushed.cursor).toBe("1");
 
           reportEvent(arranged.wire, 2, {

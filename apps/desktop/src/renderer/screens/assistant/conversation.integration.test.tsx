@@ -279,6 +279,32 @@ describe("an assistant's Conversation", () => {
     expect(search.get("sort")).toContain("desc");
   });
 
+  it("draws a notice a message follows as a quiet row, and the newest notice filled", async () => {
+    await openConversation({
+      messages: [
+        buildFixtureMessage(ADA, {
+          position: 1,
+          text: "Ada was interrupted: her turn failed.",
+          senderRole: "notice",
+          createdAt: "2026-09-09T16:00:00.000Z",
+        }),
+        buildFixtureMessage(ADA, { position: 2, text: "How did last night's backup go?" }),
+        buildFixtureMessage(ADA, {
+          position: 3,
+          text: "Ada could not answer: the runner is offline.",
+          senderRole: "notice",
+        }),
+      ],
+    });
+
+    const notices = [...findConversation().querySelectorAll(".notice")];
+    expect(notices.map((notice) => notice.classList.contains("is-past"))).toEqual([true, false]);
+    // The quiet row keeps the failed face, led by the alert icon; the newest notice has no icon.
+    expect(notices[0]!.querySelector(".cr")?.classList).toContain("cr--failed");
+    expect(notices[0]!.firstElementChild?.classList).toContain("ic");
+    expect(notices[1]!.querySelector(".ic")).toBeNull();
+  });
+
   it("ends with one notice when the controller sent a row the app cannot read, and keeps the messages drawn", async () => {
     const { live } = await openConversation({
       readSession: () => buildAdaSession({ status: "idle" }),
@@ -298,8 +324,14 @@ describe("an assistant's Conversation", () => {
     });
     expect(readBlocks().slice(0, -1)).toEqual(drawn);
     expect(findConversation().querySelectorAll(".notice")).toHaveLength(1);
-    expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
-    expect(live.readTopics()).not.toContain(buildSessionTapTopic(SESSION_ID));
+    // The live connection ends a subscription in a task of its own, after the
+    // component asked for it, and the tap is left only in the effect that
+    // runs after the notice is drawn. So the tap may still be joined when the
+    // notice first shows, and the stream, left a step earlier, may be too.
+    await waitFor(() => {
+      expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
+      expect(live.readTopics()).not.toContain(buildSessionTapTopic(SESSION_ID));
+    });
   });
 
   it("streams the reply being written, then hands it over to the stored reply when the turn ends", async () => {
@@ -558,6 +590,152 @@ describe("an assistant's Conversation", () => {
     expect(screen.getByText("2 of 2")).toBeTruthy();
   });
 
+  describe("a question in the composer", () => {
+    const ASKED: OpenRequest = {
+      requestId: "req-1",
+      itemId: "tool-1",
+      kind: "question",
+      detail: {
+        questions: [
+          {
+            question: "Run the backup again?",
+            header: "Rerun",
+            options: [{ label: "Yes" }, { label: "No" }],
+            multiSelect: false,
+          },
+        ],
+      },
+    };
+    const RESPOND = `/api/v1/sessions/${SESSION_ID}/respond-to-question`;
+
+    it("answers the question in the Conversation's composer and keeps the message", async () => {
+      const user = userEvent.setup();
+      const { calls, context } = await openConversation({
+        readSession: () => buildAdaSession({ openRequests: [ASKED] }),
+        messages: [QUESTION],
+        transcript: buildAdaTranscript(TURN_STARTED),
+        handlers: { [`POST ${RESPOND}`]: { body: buildAdaSession() } },
+      });
+      const draftKey = buildAssistantDraftKey(ADA.id);
+      const { pendingSubmissions } = context.controller!;
+      act(() => {
+        pendingSubmissions.writeText(draftKey, "Half a mess");
+      });
+      const field = screen.getByRole("textbox", { name: "Message" });
+      expect(readFieldPlaceholder(field)).toBe("Or type your own answer");
+      expect(readFieldText(field)).toBe("");
+      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Attach" }).title).toBe(
+        "An answer takes text only",
+      );
+
+      fireEvent.paste(field, {
+        clipboardData: {
+          files: [new File(["png"], "shot.png", { type: "image/png" })],
+          types: ["Files"],
+          getData: () => "",
+        },
+      });
+      expect(document.querySelector(".composer-notice")?.textContent).toBe(
+        "An answer takes text only. Images can be sent in a message.",
+      );
+
+      await user.type(field, "Only the Sunday one{Enter}");
+
+      await waitFor(() => {
+        expect(calls.filter((call) => call.path === RESPOND).map((call) => call.body)).toEqual([
+          { requestId: "req-1", answers: { Rerun: "Only the Sunday one" } },
+        ]);
+      });
+      expect(pendingSubmissions.read(draftKey).message.text).toBe("Half a mess");
+    });
+
+    it("waits for the user to leave the field before a question takes the composer over", async () => {
+      const user = userEvent.setup();
+      let session = buildAdaSession();
+      const { live } = await openConversation({
+        readSession: () => session,
+        messages: [QUESTION],
+        transcript: buildAdaTranscript(TURN_STARTED),
+      });
+      const field = screen.getByRole("textbox", { name: "Message" });
+      await user.type(field, "Half a mes");
+
+      session = buildAdaSession({ openRequests: [ASKED] });
+      act(() => {
+        live.pushInvalidation("session", [SESSION_ID], {
+          conversationIds: { [SESSION_ID]: ADA.mainConversationId },
+        });
+      });
+      await waitFor(() => {
+        expect(document.querySelector(".dock")).not.toBeNull();
+      });
+      expect(readFieldText(field)).toBe("Half a mes");
+      expect(screen.getByRole("button", { name: "Stop" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
+
+      fireEvent.blur(field);
+
+      expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+      expect(readFieldText(field)).toBe("");
+    });
+
+    it("keeps the answer in the field while an IME composition starts and ends in it", async () => {
+      const user = userEvent.setup();
+      const { context } = await openConversation({
+        readSession: () => buildAdaSession({ openRequests: [ASKED] }),
+        messages: [QUESTION],
+        transcript: buildAdaTranscript(TURN_STARTED),
+      });
+      act(() => {
+        context.controller!.pendingSubmissions.writeText(buildAssistantDraftKey(ADA.id), "Half");
+      });
+      const field = screen.getByRole("textbox", { name: "Message" });
+      await user.type(field, "Sunday");
+
+      // A composition in the answer must not hold off the question, or the
+      // field would show the saved message instead of the answer.
+      fireEvent.compositionStart(field);
+      expect(readFieldText(field)).toBe("Sunday");
+      expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+      fireEvent.compositionEnd(field);
+      expect(readFieldText(field)).toBe("Sunday");
+      expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+    });
+
+    it("keeps a question off the message while an IME composition is open in it", async () => {
+      const user = userEvent.setup();
+      let session = buildAdaSession();
+      const { live } = await openConversation({
+        readSession: () => session,
+        messages: [QUESTION],
+        transcript: buildAdaTranscript(TURN_STARTED),
+      });
+      const field = screen.getByRole("textbox", { name: "Message" });
+      await user.type(field, "Half a mes");
+      fireEvent.compositionStart(field);
+
+      session = buildAdaSession({ openRequests: [ASKED] });
+      act(() => {
+        live.pushInvalidation("session", [SESSION_ID], {
+          conversationIds: { [SESSION_ID]: ADA.mainConversationId },
+        });
+      });
+      await waitFor(() => {
+        expect(document.querySelector(".dock")).not.toBeNull();
+      });
+      expect(readFieldText(field)).toBe("Half a mes");
+      expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
+
+      fireEvent.compositionEnd(field);
+      fireEvent.blur(field);
+
+      expect(screen.getByRole("button", { name: "Send answers" })).toBeTruthy();
+    });
+  });
+
   it("answers the current session's Permission Request in the dock, naming its profile", async () => {
     const user = userEvent.setup();
     const session = buildAdaSession({
@@ -677,10 +855,71 @@ describe("the Conversation's pages", () => {
     expect(findPageReads(calls)).toHaveLength(3);
   });
 
+  /**
+   * Opens the Conversation with sixty messages, at the bottom of a list of
+   * 4000px, and holds the read of the page of earlier messages until the
+   * test answers it. Returns a function that scrolls the list, and the
+   * function that answers the held read with the ten earlier messages.
+   */
+  const openWithHeldEarlierPage = async () => {
+    const messages = buildSixtyMessages();
+    const earlierPage = holdAnswer();
+    const opened = await openConversation({
+      messages,
+      handlers: {
+        [`GET ${MESSAGES_PATH}`]: (call) =>
+          call.search.includes("cursor")
+            ? earlierPage.handler()
+            : { body: { items: messages.slice(10).reverse(), nextCursor: "11" } },
+      },
+    });
+    const scrollTo = sizeConversation(4000, 3200);
+    // The reader notes the bottom first, as in the app, where the list has
+    // scrolled to the bottom on its own.
+    scrollTo(3200);
+    return {
+      ...opened,
+      scrollTo,
+      answerWithEarlierMessages: () => {
+        earlierPage.answer({ body: { items: messages.slice(0, 10).reverse() } });
+      },
+    };
+  };
+
+  it("moves the view of a reader by the height of the earlier messages that are added above", async () => {
+    const { context, scrollTo, answerWithEarlierMessages } = await openWithHeldEarlierPage();
+    scrollTo(700);
+    answerWithEarlierMessages();
+
+    await waitFor(() => {
+      expect(readHeldPositions(context.queryClient)).toEqual(range(1, 60));
+    });
+    expect(findConversation().scrollTop).toBeGreaterThan(700);
+  });
+
+  it("does not move the view of a reader who is back at the bottom when the earlier messages are added", async () => {
+    const { context, scrollTo, answerWithEarlierMessages } = await openWithHeldEarlierPage();
+    // Scrolling up starts the read of the earlier page; the reader returns
+    // to the bottom before it answers.
+    scrollTo(700);
+    scrollTo(3200);
+    answerWithEarlierMessages();
+
+    await waitFor(() => {
+      expect(readHeldPositions(context.queryClient)).toEqual(range(1, 60));
+    });
+    expect(findConversation().scrollTop).toBe(3200);
+  });
+
   it("reads only the newest page on a push, however many pages are held, also on a push that names no conversation", async () => {
     const messages = buildSixtyMessages();
     const { calls, live, context } = await openConversation({ messages });
-    sizeConversation(4000, 3200)(0);
+    const scrollTo = sizeConversation(4000, 3200);
+    // A list that follows the bottom is not moved when earlier messages are
+    // added, so the reader first notes the bottom and then scrolls up, as in
+    // the app, where the list has scrolled to the bottom on its own.
+    scrollTo(3200);
+    scrollTo(0);
     await waitFor(() => {
       expect(readHeldPositions(context.queryClient)).toEqual(range(1, 60));
     });
@@ -824,15 +1063,21 @@ describe("the Conversation's live topics", () => {
 
     session = buildAdaSession({ id: NEXT_ID });
     act(() => {
-      live.pushInvalidation("session", [NEXT_ID], { [NEXT_ID]: ADA.mainConversationId });
+      live.pushInvalidation("session", [NEXT_ID], {
+        conversationIds: { [NEXT_ID]: ADA.mainConversationId },
+      });
     });
 
     await waitFor(() => {
       expect(live.readTopics()).toContain(buildSessionStreamTopic(NEXT_ID));
     });
-    expect(live.readTopics()).toContain(buildSessionTapTopic(NEXT_ID));
-    expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
-    expect(live.readTopics()).not.toContain(buildSessionTapTopic(SESSION_ID));
+    // The live connection ends a subscription in a task of its own, so the
+    // old session's topics may be joined a moment longer.
+    await waitFor(() => {
+      expect(live.readTopics()).toContain(buildSessionTapTopic(NEXT_ID));
+      expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
+      expect(live.readTopics()).not.toContain(buildSessionTapTopic(SESSION_ID));
+    });
     // Only the current session's running turn is kept.
     await waitFor(() => {
       expect(context.queryClient.getQueryData(queryKeys.runningTurn(SESSION_ID))).toBe(undefined);
@@ -854,8 +1099,8 @@ describe("the Conversation's live topics", () => {
 
     await waitFor(() => {
       expect(live.readTopics()).not.toContain("conversation");
+      expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
     });
-    expect(live.readTopics()).not.toContain(buildSessionStreamTopic(SESSION_ID));
     const { queryClient } = context;
     await waitFor(() => {
       expect(queryClient.getQueryData(queryKeys.conversationMessages(ADA.mainConversationId))).toBe(

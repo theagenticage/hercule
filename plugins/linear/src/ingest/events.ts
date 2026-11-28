@@ -26,6 +26,22 @@ const LINEAR_SYSTEM = "linear";
 export const buildIssueRef = (workspace: WorkspaceBlock, issueId: string): string =>
   `linear:issue:${workspace.id}/${issueId}`;
 
+/** Returns a project's External Ref, `linear:project:<workspace id>/<project id>`, as the notifications feed spells a project thread. */
+export const buildProjectRef = (workspace: WorkspaceBlock, projectId: string): string =>
+  `linear:project:${workspace.id}/${projectId}`;
+
+/** Returns a project milestone's External Ref, `linear:milestone:<workspace id>/<milestone id>`. */
+export const buildMilestoneRef = (workspace: WorkspaceBlock, milestoneId: string): string =>
+  `linear:milestone:${workspace.id}/${milestoneId}`;
+
+/** Returns a team's External Ref, `linear:team:<workspace id>/<team id>`. */
+export const buildTeamRef = (workspace: WorkspaceBlock, teamId: string): string =>
+  `linear:team:${workspace.id}/${teamId}`;
+
+/** Returns an initiative's External Ref, `linear:initiative:<workspace id>/<initiative id>`. */
+export const buildInitiativeRef = (workspace: WorkspaceBlock, initiativeId: string): string =>
+  `linear:initiative:${workspace.id}/${initiativeId}`;
+
 /** Returns the `url` field of an event: the link, or nothing when it is empty or too long for the host. */
 const buildUrlField = (url: string): { readonly url?: string } =>
   url === "" || url.length > MAX_EVENT_URL_LENGTH ? {} : { url };

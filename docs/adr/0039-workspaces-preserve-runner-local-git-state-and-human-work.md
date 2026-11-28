@@ -6,6 +6,8 @@ Date: 2026-10-07
 
 Accepted by [Workspace lifecycle (#459)](https://github.com/theagenticage/hercule/issues/459). Supersedes the managed-only main workspace, standalone-primary clone, ephemeral-only setup and Thread TTL behavior in specs 02, 03, 11, 14 and 17. Amends [ADR 0036](./0036-a-workspace-is-kept-by-leases-its-holders-release.md) by separating retention from active use. Keeps ADRs 0004, 0016, 0017, 0031, 0033 and 0037: one controller database, Connection-derived credentials, client-core interpretation, Effect services, the domain DAG and typed desktop IPC.
 
+**Amended 2026-11-02 ([#972](https://github.com/theagenticage/hercule/issues/972), [ADR 0050](./0050-archived-threads-and-their-workspaces.md)):** a Thread workspace stays manually retained only until every Thread in it is Archived, a final state the user sets. It then returns to automatic cleanup after 7 days without use, with the new retention `archived`. An archived workspace, and a finished workflow run's, is removed whole: the check below for tracked changes, untracked and ignored files no longer runs for them, which reverses this ADR's "Remove only authorized files" and "Force automatic cleanup of ignored files" for those two kinds. Every other removal keeps them.
+
 ## Context
 
 Each runner previously used a bare cache for ephemeral worktrees and a standalone clone for main. Branch discovery in main therefore offered local branches absent from the repository used to create a new worktree. Desktop folder selection discovered the remote and then left the user's checkout aside. Provisioning could treat existing directories as successful setup after restart. Thread workspaces could eventually be removed after session exit despite unfinished human work.

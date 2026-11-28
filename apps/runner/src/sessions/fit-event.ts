@@ -4,15 +4,15 @@
  * The controller closes the runner's socket on a frame larger than
  * `MAX_FRAME_BYTES`, and that ends the stream of every session on the runner.
  * Most fields of an event are bounded by the protocol, but `raw`, the native
- * ids in `providerRefs`, an item's `detail`, a `content.delta` and a turn's
+ * ids in `harnessRefs`, an item's `detail`, a `content.delta` and a turn's
  * structured result are not: a Claude `Read` of a large image puts its bytes
  * in `detail` and again in `raw`. So the supervisor passes every event through
  * `fitEventToFrame` before it numbers it (spec 06 section 6).
  */
-import { MAX_FRAME_BYTES, type ProviderEvent } from "@hercule/protocol";
+import { MAX_FRAME_BYTES, type HarnessEvent } from "@hercule/protocol";
 import { describeExcessSize, measureFrameBytes } from "../frame-size";
 
-type ContentDelta = Extract<ProviderEvent, { readonly _tag: "content.delta" }>;
+type ContentDelta = Extract<HarnessEvent, { readonly _tag: "content.delta" }>;
 
 /**
  * The most bytes one UTF-16 code unit can take in a frame. JSON escapes a
@@ -27,7 +27,7 @@ const MAX_BYTES_PER_UNIT = 6;
  * The frame is measured with the largest possible sequence number, so the
  * result holds for whatever number the event gets.
  */
-const measureEventBytes = (event: ProviderEvent): number =>
+const measureEventBytes = (event: HarnessEvent): number =>
   measureFrameBytes({ _tag: "sessionEvent", seq: Number.MAX_SAFE_INTEGER, event });
 
 /** Checks whether a UTF-16 code unit is the first half of a surrogate pair. */
@@ -74,7 +74,7 @@ const withArticle = (noun: string): string => `${/^[aeiou]/i.test(noun) ? "An" :
 
 /** What each event that is not about an item is, as words a user reads. */
 const EVENT_SUBJECTS: Record<
-  Exclude<ProviderEvent["_tag"], "item.started" | "item.updated" | "item.completed">,
+  Exclude<HarnessEvent["_tag"], "item.started" | "item.updated" | "item.completed">,
   string
 > = {
   "session.started": "The session's start",
@@ -97,7 +97,7 @@ const EVENT_SUBJECTS: Record<
  * the update or the result of an item, by its kind written as words ("A tool call
  * result"), or the kind of event.
  */
-const describeEventSubject = (event: ProviderEvent): string => {
+const describeEventSubject = (event: HarnessEvent): string => {
   switch (event._tag) {
     case "item.started":
       return withArticle(`${event.kind.replace(/_/g, " ")} input`);
@@ -119,7 +119,7 @@ const describeEventSubject = (event: ProviderEvent): string => {
  * `subagentId` names the new subagent, so its warning goes to the parent:
  * `parentSubagentId`, or the session's own agent when that is absent.
  */
-const buildWarning = (event: ProviderEvent, sentence: string): ProviderEvent => {
+const buildWarning = (event: HarnessEvent, sentence: string): HarnessEvent => {
   const subagentId =
     event._tag === "subagent.started"
       ? event.parentSubagentId
@@ -155,7 +155,7 @@ const joinAsList = (words: ReadonlyArray<string>): string =>
  * 4. A `turn.completed` has an `ok` structured result replaced by a schema
  *    failure that gives the result's size, so an agent step fails with a
  *    reason instead of a value too large to send.
- * 5. Its `providerRefs` are dropped.
+ * 5. Its `harnessRefs` are dropped.
  * 6. Anything still too big is not sent at all. Every field left on a
  *    `turn.completed` or a `session.exited` is bounded by the protocol, so
  *    neither ever reaches this step: a turn or a session left open would never
@@ -166,7 +166,7 @@ const joinAsList = (words: ReadonlyArray<string>): string =>
  * arrives. A loss is never silent. After a `session.exited` the warning is
  * still stored, because the controller records events after a session's end.
  */
-export const fitEventToFrame = (event: ProviderEvent): ReadonlyArray<ProviderEvent> => {
+export const fitEventToFrame = (event: HarnessEvent): ReadonlyArray<HarnessEvent> => {
   const bytes = measureEventBytes(event);
   if (bytes <= MAX_FRAME_BYTES) return [event];
 
@@ -174,7 +174,7 @@ export const fitEventToFrame = (event: ProviderEvent): ReadonlyArray<ProviderEve
   // What was left out, as nouns after "its", and whether each is plural.
   const leftOut: Array<{ readonly noun: string; readonly plural: boolean }> = [];
   let replacedResult = false;
-  const buildLossWarning = (): ProviderEvent => {
+  const buildLossWarning = (): HarnessEvent => {
     const clauses: Array<string> = [];
     if (replacedResult) clauses.push("its structured result was replaced by a failure");
     if (leftOut.length > 0) {
@@ -185,7 +185,7 @@ export const fitEventToFrame = (event: ProviderEvent): ReadonlyArray<ProviderEve
   };
 
   const { raw, ...withoutRaw } = event;
-  let shrunk: ProviderEvent = withoutRaw;
+  let shrunk: HarnessEvent = withoutRaw;
   if (raw !== undefined) {
     leftOut.push({ noun: "raw data", plural: false });
     if (measureEventBytes(shrunk) <= MAX_FRAME_BYTES) return [shrunk, buildLossWarning()];
@@ -229,8 +229,8 @@ export const fitEventToFrame = (event: ProviderEvent): ReadonlyArray<ProviderEve
     if (measureEventBytes(shrunk) <= MAX_FRAME_BYTES) return [shrunk, buildLossWarning()];
   }
 
-  const { providerRefs, ...withoutRefs } = shrunk;
-  if (providerRefs !== undefined) {
+  const { harnessRefs, ...withoutRefs } = shrunk;
+  if (harnessRefs !== undefined) {
     leftOut.push({ noun: "native ids", plural: true });
     shrunk = withoutRefs;
     if (measureEventBytes(shrunk) <= MAX_FRAME_BYTES) return [shrunk, buildLossWarning()];

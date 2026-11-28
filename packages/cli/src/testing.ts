@@ -3,7 +3,7 @@
  *
  * The CLI reaches the outside world only through `Io`, so a stub controller is
  * a function from a request to a response, and a stub terminal is three
- * arrays. No test in this package starts a server.
+ * arrays. No test in this package starts a controller.
  */
 import type { ErrorCode } from "@hercule/contract";
 import type { FetchLike } from "@hercule/client-core";

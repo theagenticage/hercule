@@ -234,6 +234,7 @@ export const connectionType: ConnectionTypeContribution = {
         {
           name: "token",
           label: "Auth token",
+          secret: true,
           help: "A personal or organization token with the scopes org:read, project:read, team:read, member:read, event:read and event:write.",
         },
         {

@@ -22,11 +22,19 @@ import { buildWorkspaceActionCapability, WORKSPACE_LIFECYCLE_CAPABILITY } from "
 import { SessionTokensLayer } from "../permissions";
 import { EventKindCatalogLayer, PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { buildPluginStack, USER } from "../plugins/testing";
+import { ProviderAccountRunnersLayer } from "../provider-accounts";
 import { resourceRepository } from "../resources";
 import { SettingsLayer } from "../settings";
+import { AccountUsageLayer } from "../usage";
 import { TaskServiceLayer } from "../tasks";
 import { TextGeneration } from "../text-generation";
-import { WorkflowRuns, WorkflowService, WorkflowServiceLayer, WorkflowSignals } from "../workflows";
+import {
+  WorkflowRuns,
+  WorkflowService,
+  WorkflowServiceLayer,
+  WorkflowSignals,
+  WorkflowEntities,
+} from "../workflows";
 import { WorkspaceService, WorkspaceServiceLayer } from "../workspaces";
 import { RunWorkspaceStepActivityLayer } from "./workspace-step-activity";
 import { RunExecutorLayer } from "../daemon/runs";
@@ -36,6 +44,7 @@ import {
   type WorkspaceStepToStart,
   type WorkspaceStepToSettle,
 } from "./workspace-steps";
+import { TaskServicePortsLayer } from "../daemon/tasks";
 
 const at = "2026-09-25T10:00:00.000Z";
 
@@ -125,9 +134,10 @@ const runTest = <A, E>(
           Layer.succeed(WorkflowRuns)({ hasUnfinishedRun: () => Effect.succeed(false) }),
         ),
         Layer.provide(Layer.succeed(WorkflowSignals)({ readKind: () => Effect.succeedNone })),
+        Layer.provide(Layer.succeed(WorkflowEntities)({ readKind: () => Effect.succeedNone })),
       ),
     ),
-    Layer.provideMerge(TaskServiceLayer),
+    Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(
       hookedWorkspaces.pipe(
         Layer.provide(
@@ -148,6 +158,8 @@ const runTest = <A, E>(
         generate: () => Effect.die("these tests run no text generation step"),
       }),
     ),
+    Layer.provideMerge(ProviderAccountRunnersLayer),
+    Layer.provideMerge(AccountUsageLayer),
     Layer.provideMerge(buildPluginStack()),
   );
   return Effect.runPromise(
@@ -433,7 +445,7 @@ describe("a workspace step", () => {
         yield* withTransaction(
           sql,
           sql`
-            INSERT INTO sessions (id, permission_profile_id, instance_id, runner_id,
+            INSERT INTO sessions (id, permission_profile_id, provider_account_id, runner_id,
                                   requested_access_mode, access_mode, spec, title, status,
                                   created_at, last_activity_at, run_id, step_id)
             VALUES (${mintUuid()}, ${mintUuid()}, ${mintUuid()}, ${uuidFromString(runnerId)},

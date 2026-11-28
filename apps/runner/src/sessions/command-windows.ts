@@ -25,7 +25,7 @@
  *   (`mayImportContent`). The attribution rule credits nobody for what changed
  *   in such a window.
  */
-import type { ProviderEvent } from "@hercule/protocol";
+import type { HarnessEvent } from "@hercule/protocol";
 import type { StartMark } from "../edit-marks";
 import type { CommandWindow } from "./edit-attribution";
 import { mayImportContent } from "./content-imports";
@@ -218,7 +218,7 @@ export const makeCommandWindows = (options: {
      * Returns whether an item completed with no start known, because no gate
      * mark and no allow mark was recorded for it.
      */
-    recordEvent: (event: ProviderEvent): { readonly startWasUnknown: boolean } => {
+    recordEvent: (event: HarnessEvent): { readonly startWasUnknown: boolean } => {
       const { sessionId } = event;
       switch (event._tag) {
         case "request.opened": {

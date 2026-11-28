@@ -294,7 +294,7 @@ describe("the turns of a Thread", () => {
         sessionId: thread.id,
         at,
         _tag: "session.started",
-        providerRefs: { nativeSessionId: "native-thread" },
+        harnessRefs: { nativeSessionId: "native-thread" },
       });
       await waitForSession(arranged, thread.id, (one) => one.status === "busy");
 

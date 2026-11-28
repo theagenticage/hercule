@@ -10,7 +10,7 @@
  */
 import type {
   Project,
-  ProviderInstance,
+  ProviderAccount,
   Resource,
   Runner,
   Session,
@@ -18,7 +18,12 @@ import type {
 } from "@hercule/contract";
 import { decideGroupProjectId } from "./groups";
 import { findOldestOpenRequest } from "./oldest-request";
-import type { Pose, ThreadRowStatus } from "./pose";
+import {
+  describeThreadRowState,
+  type Pose,
+  type ThreadRowState,
+  type ThreadRowStatus,
+} from "./pose";
 import { buildThreadPlaceLabel } from "./project-rows";
 import { formatRequestQuestion } from "./request-question";
 import { buildGroupKey, buildWorkspaceGroupKey, type SessionGroup } from "./session-groups";
@@ -28,6 +33,7 @@ import {
   labelWorkspaceSessions,
   type SessionTab,
 } from "./siblings";
+import { WORKING_STATUSES } from "./status";
 import { describeThreadPlace } from "./thread-place";
 import { buildWorkspaceLabelParts, type WorkspaceLabel } from "./workspaces";
 
@@ -60,6 +66,12 @@ export interface GroupMember extends SessionTab {
   readonly counted: boolean;
   /** Whether the Office seats the session at work, as `isSessionSeated` decides it. */
   readonly seated: boolean;
+  /**
+   * Whether the session is queued, starting or busy, which is what stops the
+   * controller archiving it. Unlike `dot`, it holds for a Done Thread and for
+   * a session that waits on the user too.
+   */
+  readonly working: boolean;
   readonly dot: SessionDot;
   /** The oldest open Request's question, or `null` when nothing waits in this session. */
   readonly question: string | null;
@@ -112,6 +124,8 @@ export interface GroupRow {
   readonly key: string;
   /** The project the row sits under: the lead's, or `null` when the lead has none or its project no longer exists. */
   readonly projectId: string | null;
+  /** The workspace the row's sessions work in, or `null` for a Thread with no workspace, which is a row of its own. */
+  readonly workspaceId: string | null;
   /** The session the row opens: the lead. */
   readonly leadId: string;
   /** The row's name: the lead's title. */
@@ -130,8 +144,6 @@ export interface GroupRow {
   readonly activityAt: string;
   /** What waits on the user, or `null` when no counted session waits and the row's second line shows the place. */
   readonly ask: GroupAsk | null;
-  /** The provider whose mark leads the second line: the asking session's while one asks, otherwise the lead's. */
-  readonly providerId: string | null;
   /** Where the lead works, as the second line shows it when nothing asks. */
   readonly placeLabel: WorkspaceLabel;
   /** Where the lead works, in words, for the row's accessible description. */
@@ -170,7 +182,7 @@ export interface GroupRowSources {
   readonly workspaces: readonly Workspace[];
   readonly resources: readonly Resource[];
   readonly runners: readonly Runner[];
-  readonly instances: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
 }
 
 /**
@@ -258,13 +270,13 @@ export const describeGroupRows = ({
   workspaces,
   resources,
   runners,
-  instances,
+  accounts,
 }: GroupRowSources): readonly GroupRow[] => {
   const listedProjectIds = new Set(projects.map((each) => each.id));
   const projectNames = new Map(projects.map((each) => [each.id, each.name]));
   const workspacesById = new Map(workspaces.map((each) => [each.id, each]));
   const runnersById = new Map(runners.map((each) => [each.id, each]));
-  const instancesById = new Map(instances.map((each) => [each.id, each]));
+  const accountsById = new Map(accounts.map((each) => [each.id, each]));
 
   return groups.map((group): GroupRow => {
     const labels = labelWorkspaceSessions(group.sessions);
@@ -277,7 +289,7 @@ export const describeGroupRows = ({
         label: labels.get(session.id) ?? session.title,
         pose,
         runner: runnersById.get(session.runnerId),
-        instance: instancesById.get(session.instanceId),
+        account: accountsById.get(session.providerAccountId),
       });
       return {
         ...tab,
@@ -285,6 +297,7 @@ export const describeGroupRows = ({
         askerLabel: session.id === group.lead.id ? null : tab.label,
         counted,
         seated: seatedIds.has(session.id),
+        working: WORKING_STATUSES.has(session.status),
         dot: decideDot(counted, pose),
         question: oldest === null ? null : formatRequestQuestion(oldest),
       };
@@ -323,6 +336,7 @@ export const describeGroupRows = ({
     return {
       key: group.key,
       projectId,
+      workspaceId: group.lead.workspaceId,
       leadId: group.lead.id,
       title: group.lead.title,
       pose: statusMember.pose,
@@ -335,7 +349,6 @@ export const describeGroupRows = ({
               askerLabel: asker.member.askerLabel,
               question: asker.question,
             },
-      providerId: (asker?.member ?? lead).providerId,
       placeLabel: buildThreadPlaceLabel({ workspace, branch, machine, resources, runners }),
       placeDescription: describeThreadPlace({
         projectName,
@@ -395,4 +408,42 @@ export const findWorkspaceGroupRow = (
 ): GroupRow | undefined => {
   const key = buildWorkspaceGroupKey(workspaceId);
   return groupRows.find((row) => row.key === key);
+};
+
+/**
+ * One part of a sidebar row's second line. The row draws the parts in the
+ * order `buildRowSecondLine` returns them, with " · " between them:
+ *
+ * - `state`: the status in words, such as "Working", in the status's colour;
+ * - `ask`: what waits on the user, see `GroupAsk`;
+ * - `place`: where the lead works, see `GroupRow.placeLabel`;
+ * - `age`: how long ago `at` was, which the row formats with its own clock.
+ */
+export type RowLinePart =
+  | { readonly kind: "state"; readonly state: ThreadRowState; readonly word: string }
+  | { readonly kind: "ask"; readonly ask: GroupAsk }
+  | { readonly kind: "place"; readonly label: WorkspaceLabel }
+  | { readonly kind: "age"; readonly at: string };
+
+/**
+ * Returns the parts of the second line of `row`, in the order the sidebar
+ * draws them:
+ *
+ * 1. the state word, when the row has a state (every status but `age`);
+ * 2. the detail: the question while a counted session waits, else where the
+ *    lead works;
+ * 3. the age, only when the row has no state. The age of a working or
+ *    waiting row says nothing the state word does not.
+ *
+ * So a working row reads "Working · studio-mac", a waiting row "Question ·
+ * Keep the old Grafana folder?" and an idle row "studio-mac · 1h".
+ */
+export const buildRowSecondLine = (
+  row: Pick<GroupRow, "status" | "activityAt" | "ask" | "placeLabel">,
+): readonly RowLinePart[] => {
+  const detail: RowLinePart =
+    row.ask === null ? { kind: "place", label: row.placeLabel } : { kind: "ask", ask: row.ask };
+  return row.status === "age"
+    ? [detail, { kind: "age", at: row.activityAt }]
+    : [{ kind: "state", state: row.status, word: describeThreadRowState(row.status) }, detail];
 };

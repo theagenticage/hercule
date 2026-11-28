@@ -696,10 +696,17 @@ describe("typing", () => {
     // the result is for.
     moveCursorToLine(16);
     await user.keyboard("{End}e: x");
-    expect(hasErrorOnLine(16)).toBe(true);
+    // The editor sends each typed text up, and the parent draws the underline
+    // from it in a later render. That render is not part of `user.keyboard`,
+    // so the test waits for the underline before it deletes the text.
+    await waitFor(() => {
+      expect(hasErrorOnLine(16)).toBe(true);
+    });
     await user.keyboard("{Backspace}{Backspace}{Backspace}");
 
-    expect(hasErrorOnLine(16)).toBe(false);
+    await waitFor(() => {
+      expect(hasErrorOnLine(16)).toBe(false);
+    });
     expect(onIssuesChange.mock.lastCall?.[0]).toEqual([]);
   });
 

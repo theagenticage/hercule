@@ -9,9 +9,6 @@
  * `BoundOperations` port, and the controller daemon's port calls this
  * service for `signal.handOff`. A `SignalService` method would make
  * `SignalService` call `BoundOperations`, which would call `SignalService`.
- *
- * The Task lookup is exported because the describe line of the answer needs
- * the same lookup to say which Task the handoff would continue.
  */
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -19,7 +16,6 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { SqlError } from "effect/sql/SqlError";
 import {
   createInvalidStateError,
   createNotFoundError,
@@ -32,7 +28,6 @@ import {
   type Signal,
   type SignalHandOffCall,
   type SignalOrigin,
-  type Task,
 } from "@hercule/contract";
 import { requireUserActor } from "../actor";
 import type { BoundOperationError } from "../bound-actions";
@@ -76,8 +71,6 @@ export const checkOffersHandoff = (
   );
 };
 
-type TaskRepository = Effect.Success<typeof taskRepository>;
-
 const isExternalRef = Schema.is(ExternalRef);
 
 /**
@@ -90,35 +83,6 @@ export const readThreadRef = (origin: SignalOrigin): Option.Option<ExternalRef> 
   origin.type === "event" && isExternalRef(origin.threadRef)
     ? Option.some(origin.threadRef)
     : Option.none();
-
-/**
- * Returns the open Task (status `open` or `in-progress`) whose provenance
- * carries `ref`, or none. When several do, it returns the one updated most
- * recently. A deleted Task is never returned.
- *
- * It takes the task repository, not `TaskService`, because the describe line
- * runs this same lookup and reads rows directly (see the describer's module
- * comment). Sharing one lookup means the describe line names the Task the
- * handoff then continues.
- */
-export const findTaskToContinue = (
-  tasks: TaskRepository,
-  ref: ExternalRef,
-): Effect.Effect<Option.Option<Task>, SqlError> =>
-  tasks
-    .list(
-      { refs: [ref], status: ["open", "in-progress"] },
-      {
-        limit: 1,
-        cursor: undefined,
-        order: { _tag: "column", sort: [{ field: "updatedAt", direction: "desc" }] },
-      },
-    )
-    .pipe(
-      // No cursor is given, so the listing has none to refuse.
-      Effect.catchTag("CursorError", (error) => Effect.die(error)),
-      Effect.map((page) => Option.fromNullishOr(page.items[0])),
-    );
 
 const make = Effect.gen(function* () {
   const signals = yield* signalRepository;
@@ -139,8 +103,13 @@ const make = Effect.gen(function* () {
      *    caller is checked, so a caller inside the controller cannot skip it;
      * 2. reads the workflow, and finds its input for signals of the signal's
      *    kind;
-     * 3. finds the Task to continue by the signal's thread ref (see
-     *    `findTaskToContinue`), or decides the id of a new Task;
+     * 3. finds the Task to continue: the active Task of the signal's thread
+     *    ref (`findActiveTaskForRef`: the live Task with the oldest link to
+     *    the ref, never a finished or deleted one), or decides the id of a
+     *    new Task. The describe line runs the same lookup, so it names the
+     *    Task the handoff then continues. A continued Task that already has
+     *    a pending or running run of this workflow refuses the handoff, so
+     *    the workflow works on a Task once at a time;
      * 4. starts the run linked to that Task, with the signal as the
      *    workflow's signal input. Placing the run's first session waits until
      *    the transaction commits;
@@ -154,11 +123,11 @@ const make = Effect.gen(function* () {
      *
      * Fails with `Forbidden` for any caller but the user, `NotFound` when the
      * signal or the workflow does not exist or the signal does not offer the
-     * workflow, `InvalidState` when the signal is resolved, `Validation` when
-     * the answer names another signal or the workflow takes no signal of the
-     * signal's kind, and with whatever starting the run fails with, such as a
-     * workflow that is invalid or has no capable runner. The caller's
-     * transaction then rolls back.
+     * workflow, `InvalidState` when the signal is resolved or the workflow is
+     * already working on the Task, `Validation` when the answer names another
+     * signal or the workflow takes no signal of the signal's kind, and with
+     * whatever starting the run fails with, such as a workflow that is invalid
+     * or has no capable runner. The caller's transaction then rolls back.
      *
      * The run is started before the Task is written, so a new Task has the id
      * chosen in step 3: the run names the Task, and the Task's first entry
@@ -204,8 +173,18 @@ const make = Effect.gen(function* () {
 
         const ref = readThreadRef(signal.origin);
         const existing = Option.isSome(ref)
-          ? Option.getOrUndefined(yield* findTaskToContinue(taskRows, ref.value))
+          ? Option.getOrUndefined(yield* taskRows.findActiveTaskForRef(ref.value))
           : undefined;
+        if (
+          existing !== undefined &&
+          Option.isSome(
+            yield* runs.findLiveRunOnTask({ taskId: existing.id, workflowId: input.workflowId }),
+          )
+        ) {
+          return yield* Effect.fail(
+            createInvalidStateError(`${definition.name} is already working on this.`),
+          );
+        }
         const taskId = existing?.id ?? uuidToString(mintUuid());
 
         const started = yield* runs.startOnTask(

@@ -12,14 +12,13 @@ import * as Option from "effect/Option";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { InvalidState, NotFound, Validation } from "@hercule/contract";
-import type { ProviderDefinition } from "@hercule/plugin-host";
+import { InvalidState, NotFound } from "@hercule/contract";
+import type { HarnessDefinition } from "@hercule/plugin-host";
 import { CurrentActor } from "../../actor";
 import { withTransaction } from "../../db";
 import { DiscussionService, type DiscussionInputDraft } from "../../discussions";
-import type { PluginHost } from "../../plugins";
+import { PluginHost } from "../../plugins";
 import { PromotionState } from "../../promotion";
-import { resolvedInstance } from "../../providers";
 import {
   SessionService,
   sessionRepository,
@@ -43,7 +42,7 @@ const make = Effect.gen(function* () {
   const sessions = yield* SessionService;
   const rows = yield* sessionRepository;
   const discussions = yield* DiscussionService;
-  const resolved = yield* resolvedInstance;
+  const host = yield* PluginHost;
   const promotion = yield* PromotionState;
   const { deliverClaimed, interruptTurn } = yield* Live;
 
@@ -118,37 +117,32 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Returns how the session's provider steers a running turn, or `none`,
-   * logged, when this build cannot resolve the session's provider instance.
-   * A stored configuration that no longer decodes is a bug, so it is a
-   * defect.
+   * Returns how the session's harness steers a running turn, or `none`,
+   * logged, when this build carries no harness of the session's.
    */
   const readSteering = (
     session: StoredSession,
-  ): Effect.Effect<Option.Option<ProviderDefinition["declared"]["steering"]>, SqlError> =>
-    resolved(session.instanceId).pipe(
-      Effect.map(({ definition }) => Option.some(definition.declared.steering)),
-      Effect.catchIf(
-        (error): error is Validation => error instanceof Validation,
-        (error) =>
-          Effect.as(
+  ): Effect.Effect<Option.Option<HarnessDefinition["declared"]["steering"]>, SqlError> =>
+    Effect.flatMap(host.harnesses(), (registered) => {
+      const definition = registered.find((candidate) => candidate.id === session.harnessId);
+      return definition === undefined
+        ? Effect.as(
             Effect.logWarning(
-              "A session was not told about Discussions: its provider is not available",
-              { sessionId: session.id, reason: error.error.message },
+              "A session was not told about Discussions: its harness is not available",
+              { sessionId: session.id, harnessId: session.harnessId },
             ),
             Option.none(),
-          ),
-      ),
-      Effect.catchTag("SchemaError", Effect.die),
-    );
+          )
+        : Effect.succeed(Option.some(definition.declared.steering));
+    });
 
   /**
    * Tells the session what it has not been told about its Discussions, if
    * anything, by the session's status at this moment:
    *
-   * - a busy session is told only at an `entry`. A provider that steers
+   * - a busy session is told only at an `entry`. A harness that steers
    *   natively gets the Discussion Input steered into the running turn. Any
-   *   other provider has the turn interrupted, stamped `system`, and nothing
+   *   other harness has the turn interrupted, stamped `system`, and nothing
    *   is sent: the turn's end tells the session. An interrupt that cannot
    *   reach the runner is logged, and the session is told when its turn
    *   ends;
@@ -167,8 +161,8 @@ const make = Effect.gen(function* () {
    *
    * A send or an interrupt that fails is logged, not returned: nothing is
    * lost, because whatever was not told is drafted again at the session's
-   * next turn end. So does a session whose provider instance this build
-   * cannot resolve. This fails only with a database error.
+   * next turn end. So does a session whose harness this build does not
+   * carry. This fails only with a database error.
    *
    * Tells of one session run one at a time, each from the check of whether
    * the session can receive a Discussion Input to the record of what was

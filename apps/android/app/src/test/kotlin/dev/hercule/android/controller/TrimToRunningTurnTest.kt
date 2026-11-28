@@ -2,7 +2,7 @@ package dev.hercule.android.controller
 
 import dev.hercule.android.wire.ItemKind
 import dev.hercule.android.wire.ItemStatus
-import dev.hercule.android.wire.ProviderEvent
+import dev.hercule.android.wire.HarnessEvent
 import dev.hercule.android.wire.StreamKind
 import dev.hercule.android.wire.TranscriptRow
 import dev.hercule.android.wire.TurnState
@@ -17,22 +17,22 @@ import org.junit.Test
 class TrimToRunningTurnTest {
     private var position = 0L
 
-    private fun buildRow(event: ProviderEvent) = TranscriptRow(++position, "2026-10-07T09:00:00.000Z", event)
+    private fun buildRow(event: HarnessEvent) = TranscriptRow(++position, "2026-10-07T09:00:00.000Z", event)
 
-    private fun buildTurnStarted(turnId: String) = buildRow(ProviderEvent.TurnStarted(turnId = turnId))
+    private fun buildTurnStarted(turnId: String) = buildRow(HarnessEvent.TurnStarted(turnId = turnId))
 
     private fun buildTurnCompleted(turnId: String) =
-        buildRow(ProviderEvent.TurnCompleted(turnId = turnId, state = TurnState.Completed))
+        buildRow(HarnessEvent.TurnCompleted(turnId = turnId, state = TurnState.Completed))
 
     private fun buildItemStarted(turnId: String, itemId: String) =
-        buildRow(ProviderEvent.ItemStarted(turnId = turnId, itemId = itemId, kind = ItemKind.AssistantMessage))
+        buildRow(HarnessEvent.ItemStarted(turnId = turnId, itemId = itemId, kind = ItemKind.AssistantMessage))
 
     private fun buildItemCompleted(turnId: String, itemId: String) = buildRow(
-        ProviderEvent.ItemCompleted(turnId = turnId, itemId = itemId, kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
+        HarnessEvent.ItemCompleted(turnId = turnId, itemId = itemId, kind = ItemKind.AssistantMessage, status = ItemStatus.Completed),
     )
 
     private fun buildTextDelta(turnId: String, itemId: String, delta: String) =
-        buildRow(ProviderEvent.ContentDelta(turnId = turnId, itemId = itemId, streamKind = StreamKind.AssistantText, delta = delta))
+        buildRow(HarnessEvent.ContentDelta(turnId = turnId, itemId = itemId, streamKind = StreamKind.AssistantText, delta = delta))
 
     /** Returns the rows of a whole assistant text: its start, its words, and its end. */
     private fun buildAssistantText(turnId: String, itemId: String, text: String) =

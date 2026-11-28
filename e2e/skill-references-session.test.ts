@@ -50,12 +50,12 @@
  *
  * - Claude Code: either of the two routes `e2e/harness.ts` documents.
  * - Codex: `HERCULE_E2E_CODEX_AUTH` names a Codex `auth.json`, which is copied
- *   into the instance's `CODEX_HOME`. Two live copies of an OAuth login can
+ *   into the account's `CODEX_HOME`. Two live copies of an OAuth login can
  *   rotate each other out, so prefer a file written by `codex login
  *   --with-api-key`, which holds no refresh token. `codex` must be on the
  *   `PATH`.
  * - pi: `ZAI_API_KEY` on the environment, which is stored as the pi
- *   instance's Z.ai key. `pi` must be on the `PATH`.
+ *   account's Z.ai key. `pi` must be on the `PATH`.
  */
 import { randomBytes } from "node:crypto";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -110,12 +110,12 @@ const REMOTE_PREFIX = "https://hercule.test/acme/";
 
 /**
  * The message each runner gives when a skill is steered into a running turn,
- * by provider id. A provider without an entry steers the skill normally.
+ * by harness id. A harness without an entry steers the skill normally.
  */
 const STEER_REFUSALS: Partial<Record<string, string>> = {
-  "claude-code":
+  "claude-code/claude-code":
     "Not steered: Claude Code can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
-  codex:
+  "codex/codex":
     "Not steered: Codex can't start a skill in the middle of a turn. The input stays queued and runs when this turn ends.",
 };
 
@@ -235,7 +235,7 @@ const buildRedPng = (): Buffer => {
   ]);
 };
 
-/** Gives the harness's instance its login, and waits until the runner's probe reports it. */
+/** Gives the harness's account its login, and waits until the runner's probe reports it. */
 const prepareLoggedInHarness = (harness: LiveHarness): Promise<PreparedHarness> =>
   prepareHarness(harness, {
     home: state.home,
@@ -265,14 +265,18 @@ const startThread = async (
       [
         "session",
         "spawn",
-        "--instance",
-        prepared.instanceId,
+        "--account",
+        prepared.providerAccountId,
+        "--harness",
+        prepared.harnessId,
         "--runner",
         runnerId,
         ...(prepared.model === undefined ? [] : ["--model", prepared.model]),
         "--workspace",
         JSON.stringify(options.workspace),
-        ...(options.accessMode === undefined ? [] : ["--access-mode", options.accessMode]),
+        ...((options.accessMode ?? prepared.accessMode) === undefined
+          ? []
+          : ["--access-mode", (options.accessMode ?? prepared.accessMode)!]),
         ...(options.images ?? []).flatMap((path) => ["--image", path]),
         "--json",
       ],
@@ -446,6 +450,11 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
           ctx.skip(skipReason);
           return;
         }
+        if (!prepared.modelTakesImages) {
+          // The controller refuses an image for a model that declares none.
+          ctx.skip(`the model ${prepared.model} takes no images (imageInput is null)`);
+          return;
+        }
         const text = "$alpha $bravo what colour is the image? Answer in one short sentence.";
         // Full access, because a model may read the skill files before it
         // answers, and in approval-required mode that read waits for a person
@@ -472,14 +481,14 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
         // pi runs the first one natively and gives the others as a pointer to
         // read.
         const guaranteed = {
-          "claude-code": [BRAVO_WORD],
-          codex: [ALPHA_WORD, BRAVO_WORD],
-          pi: [ALPHA_WORD],
-        }[harness.providerId] ?? [ALPHA_WORD, BRAVO_WORD];
+          "claude-code/claude-code": [BRAVO_WORD],
+          "codex/codex": [ALPHA_WORD, BRAVO_WORD],
+          "pi/pi": [ALPHA_WORD],
+        }[harness.harnessId] ?? [ALPHA_WORD, BRAVO_WORD];
         for (const word of guaranteed) expect(reply, describeReply(rows)).toContain(word);
         // Whether a harness reads the image is a property of its model, not of
         // the translation; the cheap pi model may not take images.
-        if (harness.providerId !== "pi") {
+        if (harness.harnessId !== "pi/pi") {
           expect(reply.toLowerCase(), describeReply(rows)).toContain("red");
         }
       },
@@ -502,7 +511,7 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
         expect(listUserMessages(first)[0]?.skills).toEqual(["release"]);
         // In pi both skills are called `release` in its own list, so which one
         // `/skill:release` runs is pi's choice. The reply is logged instead.
-        if (harness.providerId !== "pi") {
+        if (harness.harnessId !== "pi/pi") {
           expect(libraryReply, describeReply(first)).toContain(LIBRARY_RELEASE_WORD);
           expect(libraryReply, describeReply(first)).not.toContain(REPOSITORY_RELEASE_WORD);
         }
@@ -512,7 +521,7 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
         expect(listUserMessages(second.rows)[1]?.skills).toEqual(["webshop:release"]);
         // In pi a repository skill is a pointer to its `SKILL.md`, which the
         // model has to read; the reply is logged instead.
-        if (harness.providerId !== "pi") {
+        if (harness.harnessId !== "pi/pi") {
           expect(second.text, describeReply(second.rows)).toContain(REPOSITORY_RELEASE_WORD);
           expect(second.text, describeReply(second.rows)).not.toContain(LIBRARY_RELEASE_WORD);
         }
@@ -548,7 +557,7 @@ describe.skipIf(!wanted).each(LIVE_HARNESSES.map((harness) => [harness.label, ha
       TURN_DEADLINE_MS * 2 + 120_000,
     );
 
-    const steerRefusal = STEER_REFUSALS[harness.providerId];
+    const steerRefusal = STEER_REFUSALS[harness.harnessId];
     if (steerRefusal !== undefined) {
       it(
         "refuses to steer a skill into a running turn, keeps the input queued and runs it when the turn ends",

@@ -22,7 +22,7 @@ import {
   buildThreadHandlers,
   CONTROLLER_URL,
   createFakeBridge,
-  FIXTURE_INSTANCE,
+  FIXTURE_ACCOUNT,
   FIXTURE_SUBAGENT,
   holdAnswer,
   renderApp,
@@ -64,7 +64,7 @@ afterEach(() => {
 /** Starts the app signed in at `path`, with the delegating thread's reads. */
 const openApp = (path: string) => {
   const calls = stubApi({
-    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+    ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
     ...buildThreadHandlers(THREAD),
   });
   return renderApp(createFakeBridge({ controllerUrl: CONTROLLER_URL, token: "bearer" }), {
@@ -198,7 +198,7 @@ describe("the subagent's page opened from the thread's saved copy", () => {
     const newerRows = holdAnswer();
     const answerFromThread = answerTranscriptRead(THREAD);
     const calls = stubApi({
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
       ...buildThreadHandlers(THREAD),
       [`GET /api/v1/sessions/${SESSION_ID}/transcript`]: (call) =>
         new URLSearchParams(call.search).get("subagentId") === SUBAGENT_ID
@@ -261,7 +261,7 @@ describe("the subagent's status card", () => {
     let subagents: readonly Subagent[] = [FIXTURE_SUBAGENT];
     const interrupt = `/api/v1/sessions/${SESSION_ID}/interrupt`;
     const calls = stubApi({
-      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, providers: [FIXTURE_INSTANCE] }),
+      ...buildSidebarHandlers({ ...SIDEBAR_FIXTURE, accounts: [FIXTURE_ACCOUNT] }),
       ...buildThreadHandlers(THREAD),
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: session }),
       [`GET /api/v1/sessions/${SESSION_ID}/subagents`]: () => ({ body: { items: subagents } }),

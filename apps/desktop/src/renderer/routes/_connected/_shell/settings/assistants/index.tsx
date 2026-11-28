@@ -10,6 +10,7 @@ import {
   memoryDocumentQuery,
   memoryIndexQuery,
   profilesQuery,
+  providerAccountsQuery,
   providersQuery,
   readOnOpen,
   settingsQuery,
@@ -29,7 +30,7 @@ import "../../../../../screens/settings/assistants/assistants.css";
  * open the section on one assistant. Without it, or when no assistant has
  * that id, the first tab is picked.
  *
- * The assistants and the provider instances are the shell's reads, which the
+ * The assistants and the Provider Accounts are the shell's reads, which the
  * live connection keeps current. The permission profiles, the settings
  * (whose time zone the heartbeat's day uses) and the picked assistant's
  * memory (its index and its core note, which the Memory column shows) have
@@ -51,6 +52,7 @@ export const Route = createFileRoute("/_connected/_shell/settings/assistants/")(
     const { client } = controller;
     const [assistants] = await Promise.all([
       queryClient.ensureQueryData(assistantsQuery(client)),
+      queryClient.ensureQueryData(providerAccountsQuery(client)),
       queryClient.ensureQueryData(providersQuery(client)),
       readOnOpen(queryClient, profilesQuery(client)),
       readOnOpen(queryClient, settingsQuery(client)),

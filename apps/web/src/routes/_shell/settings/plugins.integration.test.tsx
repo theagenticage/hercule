@@ -37,6 +37,7 @@ interface Fixture {
   readonly config: unknown;
   readonly contributions: readonly Contribution[];
   readonly intake: unknown;
+  readonly entityKinds: readonly unknown[];
 }
 
 const EMPTY_SCHEMA = {
@@ -51,13 +52,14 @@ const ACTIVE: Fixture = {
   id: "quiet-sink",
   displayName: "Quiet Sink",
   hostApi: 1,
-  capabilities: ["providers"],
+  capabilities: ["harnesses"],
   enabled: true,
   status: { _tag: "active" },
   configSchema: EMPTY_SCHEMA,
   config: {},
-  contributions: [{ extensionPoint: "provider", id: "acme", definition: {} }],
+  contributions: [{ extensionPoint: "harness", id: "acme", definition: {} }],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 const ACTIVATION_FAILURE = "the socket at /var/run/borked.sock refused the connection";
@@ -67,13 +69,14 @@ const ERRORED: Fixture = {
   id: "borked-relay",
   displayName: "Borked Relay",
   hostApi: 1,
-  capabilities: ["providers"],
+  capabilities: ["harnesses"],
   enabled: true,
   status: { _tag: "errored", message: ACTIVATION_FAILURE },
   configSchema: EMPTY_SCHEMA,
   config: {},
   contributions: [{ extensionPoint: "channel", id: "chatter", definition: {} }],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 /** A plugin built for a host API this controller does not support, so it was never loaded. */
@@ -81,12 +84,13 @@ const REFUSED: Fixture = {
   id: "ancient-source",
   displayName: "Ancient Source",
   hostApi: 2,
-  capabilities: ["providers"],
+  capabilities: ["harnesses"],
   enabled: true,
   status: { _tag: "refused", reason: { kind: "hostApi", expected: 1, actual: 2 } },
   config: {},
   contributions: [],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 /** A plugin with one config field of every kind the generated form renders, all set. */
@@ -94,7 +98,7 @@ const CONFIGURABLE: Fixture = {
   id: "notes-sink",
   displayName: "Notes Sink",
   hostApi: 1,
-  capabilities: ["providers", "kv"],
+  capabilities: ["harnesses", "kv"],
   enabled: true,
   status: { _tag: "active" },
   configSchema: {
@@ -116,8 +120,9 @@ const CONFIGURABLE: Fixture = {
     mode: "fast",
     tags: ["alpha", "beta"],
   },
-  contributions: [{ extensionPoint: "provider", id: "notes", definition: {} }],
+  contributions: [{ extensionPoint: "harness", id: "notes", definition: {} }],
   intake: NO_INTAKE,
+  entityKinds: [],
 };
 
 const buildWriteRoutes = (plugin: Fixture): Readonly<Record<string, Handler>> => ({
@@ -185,7 +190,7 @@ describe("Settings > Plugins", () => {
 
     const active = readPageText(await findPluginCard(ACTIVE));
     expect(active).toMatch(/active/i);
-    expect(active).toMatch(/provider/i);
+    expect(active).toMatch(/harness/i);
     expect(active).toContain("acme");
 
     const errored = readPageText(await findPluginCard(ERRORED));
@@ -468,7 +473,7 @@ describe("Settings > Plugins > nothing installed", () => {
 
     expect(readPageText()).toContain("No plugins are installed.");
     expect(readPageText()).toContain(
-      "Plugins bring channels, event sources, providers and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that.",
+      "Plugins bring channels, event sources, harnesses and workflow actions. Each one declares what it contributes, and Hercule generates its configuration form from that.",
     );
   });
 });

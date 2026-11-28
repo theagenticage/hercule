@@ -1,6 +1,6 @@
 /**
  * The ingest handle of one GitHub Connection: what the host calls to poll
- * each of the three feeds, `notifications`, `repos` and `checks`.
+ * each of its four feeds, `notifications`, `repos`, `checks` and `entities`.
  *
  * Every poll reads the token and the watch list afresh, so a refreshed token
  * or a newly linked repository is used from the next poll on.
@@ -20,6 +20,7 @@ import { DEFAULT_CHECKS_WINDOW_DAYS, GithubConnectionConfig } from "../connectio
 import type { GithubIdentity } from "../identity";
 import { readWatchList } from "../watch-list";
 import { pollChecks } from "./checks";
+import { pollEntities } from "./entities";
 import { pollNotifications } from "./notifications";
 import { pollRepos } from "./repos";
 import type { FeedError } from "./requests";
@@ -29,8 +30,8 @@ import type { FeedError } from "./requests";
  * credentials hold no token, because only the user can fix that, and with a
  * `PluginError` when the host could not read the credentials at all.
  */
-const readConnectionToken = (
-  context: IngestContext,
+export const readConnectionToken = (
+  context: Pick<IngestContext, "credentials">,
 ): Effect.Effect<string, AuthError | PluginError> =>
   Effect.gen(function* () {
     const credentials = yield* context
@@ -57,7 +58,7 @@ type FeedPoll = (
  * The poll of each feed, by the feed's name. The names are the feeds the
  * event source declares in `../index.ts`, and the host polls no other.
  */
-const FEED_POLLS: Record<"notifications" | "repos" | "checks", FeedPoll> = {
+const FEED_POLLS: Record<"notifications" | "repos" | "checks" | "entities", FeedPoll> = {
   notifications: (token, _config, context) => pollNotifications(token, context),
   repos: (token, config, context, identity) =>
     Effect.flatMap(readWatchList(context.resources, config.repos ?? []), (watchList) =>
@@ -73,6 +74,15 @@ const FEED_POLLS: Record<"notifications" | "repos" | "checks", FeedPoll> = {
         identity,
       ),
     ),
+  entities: (token, _config, context) =>
+    context.entities === undefined
+      ? Effect.fail(
+          new PluginError({
+            message:
+              "The host gave the GitHub plugin no way to report entities, so the entities feed cannot run.",
+          }),
+        )
+      : pollEntities(token, context.entities),
 };
 
 /** The name of one of the event source's feeds, such as `repos`. */

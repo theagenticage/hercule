@@ -22,6 +22,7 @@ import {
   RunCompletedEventPayload,
   RunFailedEventPayload,
   TaskCreatedEventPayload,
+  TaskEntityChangedEventPayload,
   TaskUpdatedEventPayload,
   type Actor,
   type EventId,
@@ -35,6 +36,7 @@ const PLATFORM_EVENT_PAYLOADS = {
   "run.cancelled": RunCancelledEventPayload,
   "task.created": TaskCreatedEventPayload,
   "task.updated": TaskUpdatedEventPayload,
+  "task.entityChanged": TaskEntityChangedEventPayload,
   "permission.decided": PermissionDecidedEventPayload,
 } as const;
 

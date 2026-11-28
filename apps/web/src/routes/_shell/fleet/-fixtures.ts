@@ -25,14 +25,15 @@ export interface Fixture {
     readonly totalMemoryBytes: number;
     readonly docker: boolean;
     readonly toolchains: readonly { name: string; version: string; path: string }[];
-    readonly providers: readonly { name: string; present: boolean }[];
+    readonly harnesses: readonly { name: string; present: boolean }[];
     readonly adapters: readonly string[];
     readonly identityPort: number;
   } | null;
-  readonly watermark: {
+  readonly metrics: {
     readonly diskFreeBytes: number;
     readonly availableMemoryBytes: number;
   } | null;
+  readonly diskUsage: null;
   readonly maxConcurrentSessions: number;
   readonly diskWatermarkBytes: number;
   readonly lastSeenAt: string | null;
@@ -57,14 +58,15 @@ export const MOSS: Fixture = {
       { name: "git", version: "2.50.1", path: "/usr/bin/git" },
       { name: "gh", version: "2.99.0", path: "/opt/homebrew/bin/gh" },
     ],
-    providers: [{ name: "claude", present: true }],
-    adapters: ["claude-code"],
+    harnesses: [{ name: "claude", present: true }],
+    adapters: ["claude-code/claude-code"],
     identityPort: 4939,
   },
-  watermark: {
+  metrics: {
     diskFreeBytes: 128 * GIB,
     availableMemoryBytes: 32 * GIB,
   },
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * GIB,
   lastSeenAt: "2026-09-05T09:14:00.000Z",
@@ -91,7 +93,8 @@ const BASE_SESSION: Session = {
   conversationId: null,
   runId: null,
   stepId: null,
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
+  providerAccountId: "01a06d02-1000-7000-8000-000000000001",
+  harnessId: "claude-code/claude-code",
   runnerId: MOSS.id,
   workspaceId: null,
   projectId: null,
@@ -107,6 +110,7 @@ const BASE_SESSION: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-05T09:00:00.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 /**

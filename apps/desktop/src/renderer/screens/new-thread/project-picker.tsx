@@ -2,6 +2,7 @@ import { useEffect, useRef, type JSX, type KeyboardEvent } from "react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import { buildProjectPickerRows } from "@hercule/client-core";
+import { isPrimaryModifierHeld } from "../../app/primary-modifier";
 import { projectsQuery, resourcesQuery, threadsQuery, workspacesQuery } from "../../app/queries";
 import { GlassDialog } from "../glass-dialog";
 import { pickProjectTint, ProjectTile } from "../project-tile";
@@ -56,7 +57,7 @@ export function ProjectPicker({
   readonly onNewProject: () => void;
   readonly onClose: () => void;
 }): JSX.Element {
-  const { controller } = useRouteContext({ from: "/_connected" });
+  const { controller, bridge } = useRouteContext({ from: "/_connected" });
   const { client } = controller;
   const projects = useSuspenseQuery(projectsQuery(client)).data;
   const resources = useSuspenseQuery(resourcesQuery(client)).data;
@@ -79,7 +80,10 @@ export function ProjectPicker({
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDialogElement>): void => {
-    if (event.metaKey && (/^[1-9]$/.test(event.key) || event.key === "Enter")) {
+    if (
+      isPrimaryModifierHeld(event, bridge.platform) &&
+      (/^[1-9]$/.test(event.key) || event.key === "Enter")
+    ) {
       // The page sees a shortcut before the menu does, and a handled one
       // never reaches the menu. Every ⌘1 to ⌘9 and ⌘↵ is handled, even a
       // number with no project, so that the Go menu does not open a thread and

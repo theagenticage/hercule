@@ -122,8 +122,9 @@ export interface GateState {
 /**
  * How long a freeze waits for running work to finish. An ingest poll may take
  * minutes, but a controller that is that busy is not ready to move anyway.
+ * Work that the gate admits must end well before this, or it fails the freeze.
  */
-const DRAIN_TIMEOUT: Duration.Duration = Duration.seconds(60);
+export const DRAIN_TIMEOUT: Duration.Duration = Duration.seconds(60);
 
 /** One unit of admitted work, which is running until it ends. */
 interface Admission {
@@ -201,6 +202,16 @@ export class PromotionState extends Context.Service<
     readonly admit: <A, E, R>(
       work: Effect.Effect<A, E, R>,
     ) => Effect.Effect<A, E | PromotionInProgress | ControllerSealed, R>;
+
+    /**
+     * Fails at once, like `admit`, while frozen with `PromotionInProgress` and
+     * once sealed with `ControllerSealed`, and succeeds when serving. Unlike
+     * `admit` it also fails inside admitted work, which `admit` and
+     * `whenServing` let through so a freeze can drain it. For work that is
+     * already admitted but must not start a new outside request once the
+     * controller stopped serving.
+     */
+    readonly refuseUnlessServing: Effect.Effect<void, PromotionInProgress | ControllerSealed>;
 
     /**
      * Runs `work` counted once the controller is serving. Waits while frozen.
@@ -466,6 +477,16 @@ export const PromotionStateLayer: Layer.Layer<
               : createPromotionInProgressError(FROZEN),
           ),
         ),
+
+      refuseUnlessServing: Effect.flatMap(
+        SubscriptionRef.get(gate),
+        ({ phase }): Effect.Effect<void, PromotionInProgress | ControllerSealed> =>
+          phase._tag === "Sealed"
+            ? Effect.fail(createSealedError(phase.seal))
+            : phase._tag === "Frozen"
+              ? Effect.fail(createPromotionInProgressError(FROZEN))
+              : Effect.void,
+      ),
 
       whenServing,
 

@@ -9,8 +9,10 @@
 import type {
   Assistant,
   Connection,
-  ProviderInstance,
+  Harness,
   Project,
+  Provider,
+  ProviderAccount,
   Resource,
   Runner,
 } from "@hercule/contract";
@@ -35,7 +37,9 @@ export interface FirstRunReads {
   readonly setupComplete: boolean;
   /** The controller's local runner, or null while it has not joined or when there is none. */
   readonly localRunner: Runner | null;
-  readonly instances: readonly ProviderInstance[];
+  readonly accounts: readonly ProviderAccount[];
+  readonly providers: readonly Provider[];
+  readonly harnesses: readonly Harness[];
   readonly connections: readonly Connection[];
   readonly projects: readonly Project[];
 }
@@ -44,8 +48,8 @@ export interface FirstRunReads {
  * Returns which first-run steps are done:
  *
  * - `account` when setup is complete;
- * - `providers` when a provider instance is logged in on the controller's
- *   local runner (a login on another runner does not count, because the
+ * - `providers` when a Provider Account is signed in on the controller's
+ *   local runner (a sign-in on another runner does not count, because the
  *   first threads run on the local one);
  * - `github` when a GitHub Connection exists;
  * - `project` when a project exists.
@@ -54,7 +58,9 @@ export const findDoneSteps = (reads: FirstRunReads): FirstRunDoneSteps => ({
   account: reads.setupComplete,
   providers:
     reads.localRunner !== null &&
-    buildProviderRows(reads.localRunner, reads.instances).some((row) => row.loggedIn),
+    buildProviderRows(reads.localRunner, reads.accounts, reads.providers, reads.harnesses).some(
+      (row) => row.signedIn,
+    ),
   github: filterGitHubConnections(reads.connections).length > 0,
   project: reads.projects.length > 0,
 });
@@ -133,20 +139,19 @@ export const buildFirstRunHost = (origin: string, localRunner: Runner | null): F
 export interface ProvidersStepText {
   readonly heading: string;
   readonly subheading: string;
-  /** The rows the step lists: the harnesses found, or every harness when none was found. */
+  /** The accounts the step lists, each with its own sign-in. None until the user adds one. */
   readonly rows: readonly ProviderRow[];
 }
 
 /**
  * Builds the providers step's text from the provider rows of the controller's
- * runner, and the machine that runner is on:
+ * runner, and the machine that runs it. The step is "Add an account": it
+ * lists the accounts that exist, each with its Sign in, and the user adds
+ * another with the add-account sheet.
  *
- * - When some harnesses are on that machine, the step names them and lists
- *   them, so the user logs in to the ones they want.
- * - When none is, the step lists every harness, each with its Install.
- * - When `rows` is null, the controller's runner has not joined yet, as
- *   happens in the seconds after Hercule starts, so there is nothing to list
- *   until it does.
+ * When `rows` is null, the controller's runner has not joined yet, as happens
+ * in the seconds after Hercule starts, so the step has nothing to sign in on
+ * and says that it waits.
  */
 export const buildProvidersStepText = (
   rows: readonly ProviderRow[] | null,
@@ -159,25 +164,10 @@ export const buildProvidersStepText = (
       rows: [],
     };
   }
-  // A harness the runner found has its binary's path, or `installed` when the runner did not say where.
-  const found = rows.filter((row) => row.path !== null || row.location === "installed");
-  if (found.length === 0) {
-    return {
-      heading: "Your agents need a coding tool",
-      subheading: `Hercule drives ${formatNameList(
-        rows.map((row) => row.name),
-        "or",
-      )}, and found none of them on ${host.name}. Install one and log in to it; Hercule can install it for you.`,
-      rows,
-    };
-  }
   return {
-    heading: `${formatNameList(
-      found.map((row) => row.name),
-      "and",
-    )} ${found.length === 1 ? "is" : "are"} on ${host.name}`,
-    subheading: `Log in to the ones you want your agents to use. The login runs on ${host.name} and its credential stays ${host.isThisMac ? "here" : "there"}.`,
-    rows: found,
+    heading: "Add an account",
+    subheading: `An account is how your agents pay for their models: a subscription you sign in to, or an API key. A sign-in runs on ${host.name} and stays ${host.isThisMac ? "here" : "there"}.`,
+    rows,
   };
 };
 
@@ -200,7 +190,7 @@ const WING_DESKS = 8;
 
 /**
  * The local runner's wing in the Office. It stands once the runner is known;
- * its desks come in once a provider is logged in there.
+ * its desks come in once an account is signed in there.
  */
 export interface RoomWing {
   /** The runner's name, engraved on the wing's plate. */
@@ -211,7 +201,7 @@ export interface RoomWing {
    * runner's real one, even past the eight desks the wing draws.
    */
   readonly note: string;
-  /** One desk per session the runner can host, at most eight; 0 until a provider is logged in. */
+  /** One desk per session the runner can host, at most eight; 0 until an account is signed in. */
   readonly deskCount: number;
   /**
    * The first thread, at a desk in the oldest project's tint. The screen
@@ -287,7 +277,7 @@ const buildWing = (
  *   at most eight;
  * - once `github` is done or put off: Triage at its desk; the GitHub plaque
  *   and the tube only when GitHub is connected;
- * - after `project`, with a provider logged in: the first thread, in the
+ * - after `project`, with an account signed in: the first thread, in the
  *   oldest project.
  *
  * Each piece follows its step's fact rather than the step the user is on, so
@@ -341,13 +331,15 @@ export const findGitHubAccount = (connections: readonly Connection[]): string | 
 
 /** What All set lists, one entry per step. */
 export interface AllSetRecap {
+  /** Whether the controller holds a Provider Account at all, signed in or not. */
+  readonly hasAccount: boolean;
   /**
-   * The harnesses logged in on the controller's runner, as one name list
-   * ("Claude Code and Codex"), or null when none is.
+   * The accounts signed in on the controller's runner, as one name list
+   * ("Anthropic and OpenAI"), or null when none is.
    */
   readonly providerNames: string | null;
-  /** The provider whose mark stands for the row: the first logged in, else the first listed. */
-  readonly providerId: string | null;
+  /** The harness whose mark stands for the row: that of the first signed-in account, else the first listed. */
+  readonly harnessId: string | null;
   readonly gitHubAccount: string | null;
   /**
    * The first project, with its first repository as `owner/name`, or null
@@ -360,24 +352,54 @@ export interface AllSetRecap {
   } | null;
 }
 
+/** What All set says and offers while no account is signed in. */
+export interface AllSetAccountOffer {
+  /** The main button's label. */
+  readonly button: string;
+  /** The line under the heading. */
+  readonly line: string;
+}
+
+/**
+ * Returns what All set offers while no account is signed in on the
+ * controller's runner: to add one when the user has none, else to sign in to
+ * one. Both buttons open the draft, whose own button is where the user adds
+ * or signs in.
+ */
+export const buildAllSetAccountOffer = (
+  recap: Pick<AllSetRecap, "hasAccount">,
+): AllSetAccountOffer =>
+  recap.hasAccount
+    ? {
+        button: "Sign in to an account",
+        line: "Agents need an account before they can take a desk. Sign in from your first thread’s draft, and it can start.",
+      }
+    : {
+        button: "Add an account",
+        line: "Agents need an account before they can take a desk. Add one from your first thread’s draft, and it can start.",
+      };
+
 /** Builds what All set lists from the first run's reads and every resource. */
 export const buildAllSetRecap = (
   reads: FirstRunReads & { readonly resources: readonly Resource[] },
 ): AllSetRecap => {
   const rows =
-    reads.localRunner === null ? [] : buildProviderRows(reads.localRunner, reads.instances);
-  const loggedIn = rows.filter((row) => row.loggedIn);
+    reads.localRunner === null
+      ? []
+      : buildProviderRows(reads.localRunner, reads.accounts, reads.providers, reads.harnesses);
+  const signedIn = rows.filter((row) => row.signedIn);
   const project = findOldest(reads.projects);
   const repo = project === undefined ? undefined : listProjectRepos(reads.resources, project.id)[0];
   return {
+    hasAccount: reads.accounts.length > 0,
     providerNames:
-      loggedIn.length === 0
+      signedIn.length === 0
         ? null
         : formatNameList(
-            loggedIn.map((row) => row.name),
+            signedIn.map((row) => row.name),
             "and",
           ),
-    providerId: (loggedIn[0] ?? rows[0])?.providerId ?? null,
+    harnessId: (signedIn[0] ?? rows[0])?.harnessId ?? null,
     gitHubAccount: findGitHubAccount(reads.connections),
     project:
       project === undefined

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { MAX_FRAME_BYTES, RunnerToController, type ProviderEvent } from "@hercule/protocol";
+import { MAX_FRAME_BYTES, RunnerToController, type HarnessEvent } from "@hercule/protocol";
 import { fitEventToFrame } from "./fit-event";
 
 const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";
@@ -13,13 +13,13 @@ const encodeFrame = Schema.encodeUnknownSync(RunnerToController);
  * protocol schema, then written as JSON. Encoding also fails on an event the
  * protocol would refuse, such as a warning whose message is too long.
  */
-const measureSentBytes = (event: ProviderEvent): number =>
+const measureSentBytes = (event: HarnessEvent): number =>
   Buffer.byteLength(
     JSON.stringify(encodeFrame({ _tag: "sessionEvent", seq: Number.MAX_SAFE_INTEGER, event })),
   );
 
 /** Fits `event` and checks the guarantee: every returned event fits in one frame. */
-const fitAndCheck = (event: ProviderEvent): ReadonlyArray<ProviderEvent> => {
+const fitAndCheck = (event: HarnessEvent): ReadonlyArray<HarnessEvent> => {
   const fitted = fitEventToFrame(event);
   for (const one of fitted) expect(measureSentBytes(one)).toBeLessThanOrEqual(MAX_FRAME_BYTES);
   return fitted;
@@ -30,7 +30,7 @@ const buildText = (bytes: number): string => "x".repeat(bytes);
 
 const RAW = { source: "claude.sdk.message", payload: { blob: buildText(MAX_FRAME_BYTES) } };
 
-const buildDelta = (delta: string, extra: Partial<ProviderEvent> = {}): ProviderEvent =>
+const buildDelta = (delta: string, extra: Partial<HarnessEvent> = {}): HarnessEvent =>
   ({
     _tag: "content.delta",
     eventId: "e-delta",
@@ -42,9 +42,9 @@ const buildDelta = (delta: string, extra: Partial<ProviderEvent> = {}): Provider
     streamKind: "assistant_text",
     delta,
     ...extra,
-  }) as ProviderEvent;
+  }) as HarnessEvent;
 
-const buildItemCompleted = (extra: Partial<ProviderEvent>): ProviderEvent =>
+const buildItemCompleted = (extra: Partial<HarnessEvent>): HarnessEvent =>
   ({
     _tag: "item.completed",
     eventId: "e-item",
@@ -55,18 +55,18 @@ const buildItemCompleted = (extra: Partial<ProviderEvent>): ProviderEvent =>
     kind: "tool_call",
     status: "completed",
     ...extra,
-  }) as ProviderEvent;
+  }) as HarnessEvent;
 
-type Warning = Extract<ProviderEvent, { readonly _tag: "runtime.warning" }>;
-type Delta = Extract<ProviderEvent, { readonly _tag: "content.delta" }>;
-type TurnCompleted = Extract<ProviderEvent, { readonly _tag: "turn.completed" }>;
+type Warning = Extract<HarnessEvent, { readonly _tag: "runtime.warning" }>;
+type Delta = Extract<HarnessEvent, { readonly _tag: "content.delta" }>;
+type TurnCompleted = Extract<HarnessEvent, { readonly _tag: "turn.completed" }>;
 
 /** Native ids too many to fit in one frame: their number has no bound. */
 const MANY_REFS = Object.fromEntries(
   Array.from({ length: 5000 }, (_, index) => [`ref-${String(index)}`, buildText(500)]),
 );
 
-const expectWarning = (event: ProviderEvent | undefined): Warning => {
+const expectWarning = (event: HarnessEvent | undefined): Warning => {
   expect(event?._tag).toBe("runtime.warning");
   return event as Warning;
 };
@@ -194,7 +194,7 @@ describe("fitting an event into one frame", () => {
   });
 
   it("replaces an ok structured result with a schema failure, so the turn still ends", () => {
-    const event: ProviderEvent = {
+    const event: HarnessEvent = {
       _tag: "turn.completed",
       eventId: "e-turn",
       sessionId: SESSION,
@@ -223,7 +223,7 @@ describe("fitting an event into one frame", () => {
   });
 
   it("drops native ids last, so a turn's end and a session's end are never dropped", () => {
-    const turnEnd: ProviderEvent = {
+    const turnEnd: HarnessEvent = {
       _tag: "turn.completed",
       eventId: "e-turn",
       sessionId: SESSION,
@@ -231,20 +231,20 @@ describe("fitting an event into one frame", () => {
       turnId: "t-1",
       state: "completed",
       structuredResult: { outcome: "ok", value: { text: buildText(MAX_FRAME_BYTES) } },
-      providerRefs: MANY_REFS,
+      harnessRefs: MANY_REFS,
     };
-    const sessionEnd: ProviderEvent = {
+    const sessionEnd: HarnessEvent = {
       _tag: "session.exited",
       eventId: "e-exit",
       sessionId: SESSION,
       at,
       reason: "crash",
-      providerRefs: MANY_REFS,
+      harnessRefs: MANY_REFS,
     };
 
     const [turn, turnWarning] = fitAndCheck(turnEnd);
     expect(turn).toMatchObject({ _tag: "turn.completed", turnId: "t-1" });
-    expect(turn).not.toHaveProperty("providerRefs");
+    expect(turn).not.toHaveProperty("harnessRefs");
     expect(expectWarning(turnWarning).message).toMatch(
       /, so its structured result was replaced by a failure, and its native ids were left out\.$/,
     );
@@ -258,7 +258,7 @@ describe("fitting an event into one frame", () => {
 
   it("replaces an event that cannot be shrunk enough with the warning alone", () => {
     // A request's list of paths has no bound, and no step shortens it.
-    const event: ProviderEvent = {
+    const event: HarnessEvent = {
       _tag: "request.opened",
       eventId: "e-request",
       sessionId: SESSION,
@@ -288,7 +288,7 @@ describe("fitting an event into one frame", () => {
   });
 
   it("puts the warning about a subagent's introduction on the agent that started it", () => {
-    const event: ProviderEvent = {
+    const event: HarnessEvent = {
       _tag: "subagent.started",
       eventId: "e-sub",
       sessionId: SESSION,
@@ -315,7 +315,7 @@ describe("the files an edit changed", () => {
       editedFiles,
       detail: { path: "big.ts", content: buildText(MAX_FRAME_BYTES) },
       raw: RAW,
-      providerRefs: MANY_REFS,
+      harnessRefs: MANY_REFS,
     });
 
     const [fitted, warning] = fitAndCheck(event);

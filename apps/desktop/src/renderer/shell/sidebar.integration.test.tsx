@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describePose } from "@hercule/client-core";
+import { buildInboxCounts } from "@hercule/client-core/inbox/testing";
 import type { Session } from "@hercule/contract";
 import {
   buildErrorBody,
@@ -39,6 +40,7 @@ import {
   type Handler,
   type SidebarRecords,
 } from "../app/testing";
+import { acknowledgeInboxArrival } from "../app/inbox-arrival";
 import { buildDraftKey } from "../app/pending-submissions";
 import {
   buildDiscussionsWikiHandlers,
@@ -255,6 +257,36 @@ describe("the sidebar", () => {
     ).toBeTruthy();
   });
 
+  it("says each row's state on its second line, before where it works, and the age only when it has none", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-10T09:25:00.000Z"), toFake: ["Date"] });
+    const { nav } = await startSidebar();
+    /** Returns the drawn text of the first and the second line of the row in a project named `name`. */
+    const readLines = (name: RegExp): readonly [string, string] => {
+      const row = within(nav).getAllByRole("link", { name }).at(-1)!;
+      const line = row.querySelector(".side-line")!;
+      // The age's words, such as "22 minutes ago", are in a hidden element.
+      const detail = [...row.querySelector(".side-detail")!.childNodes]
+        .filter((node) => !(node instanceof HTMLElement && node.hidden))
+        .map((node) => node.textContent)
+        .join("");
+      return [line.textContent ?? "", detail];
+    };
+
+    // The title is the whole first line: no status slot follows it.
+    expect(readLines(/^Fix flaky webhook tests/)).toEqual([
+      "Fix flaky webhook tests",
+      "Working · moss",
+    ]);
+    expect(readLines(/^Write the retry runbook/)).toEqual([
+      "Write the retry runbook",
+      "Approval · Run git push?",
+    ]);
+    expect(readLines(/^Bump the Bun pin/)).toEqual(["Bump the Bun pin", "main · 22m"]);
+    expect(nav.querySelector(".side-line .side-end")).toBeNull();
+    // The harness's mark left the second line; it stays in the hover card.
+    expect(nav.querySelector(".side-detail svg")).toBeNull();
+  });
+
   it("hides every face, mark and avatar from assistive technology", async () => {
     const { nav } = await startSidebar();
     const sidebar = nav.closest("aside")!;
@@ -406,7 +438,7 @@ describe("the sidebar", () => {
     });
     expect(draft.getAttribute("aria-current")).toBe("page");
     // The worktree's branch was generated, so the row names only its machine.
-    expect(draft.textContent).toBe("New thread" + "draft" + "moss");
+    expect(draft.textContent).toBe("New thread" + "Draft · moss");
     // The draft's project comes first, and the draft is its first row.
     expect(readDraftProject()).toEqual([
       `header:project:${webshop!.id}`,
@@ -425,7 +457,7 @@ describe("the sidebar", () => {
     });
     // The repo's main workspace is on a branch the user chose, so the row names it.
     expect(nav.querySelector('[data-key="draft"]')?.textContent).toBe(
-      "New thread" + "draft" + "main",
+      "New thread" + "Draft · main",
     );
     expect(readDraftProject()[1]).toBe("draft");
   });
@@ -441,12 +473,12 @@ describe("the sidebar", () => {
     const heading = within(nav).getByRole("heading", { name: "No project" });
     const items = [...nav.querySelectorAll(".side-item")];
     expect(items.slice(items.indexOf(heading) + 1).map((item) => item.textContent)).toEqual([
-      "New thread" + "draft" + "moss",
+      "New thread" + "Draft · moss",
       expect.stringContaining("Sketch the pricing page"),
     ]);
   });
 
-  it("tints the draft's row, and a thread's row while its composer holds unsent text, with a pencil before the title", async () => {
+  it("tints the draft's row, and a thread's row while its composer holds unsent text, with a pencil before the thread's title", async () => {
     const { nav, router } = await startSidebar();
     const { pendingSubmissions } = router.options.context.controller!;
     /** Returns whether `row` is tinted and has a pencil before its title. */
@@ -459,7 +491,11 @@ describe("the sidebar", () => {
     });
     const bunPin = () => within(nav).getByRole("link", { name: /^Bump the Bun pin/ });
 
-    expect(isMarkedUnsent(draft)).toBe(true);
+    // The draft's row says "Draft" on its second line in place of a pencil,
+    // so its title starts where every other title does.
+    expect(draft.classList.contains("is-unsent")).toBe(true);
+    expect(draft.querySelector(".side-name svg")).toBeNull();
+    expect(draft.querySelector(".side-state")?.textContent).toBe("Draft");
     expect(isMarkedUnsent(bunPin())).toBe(false);
 
     act(() => {
@@ -695,7 +731,7 @@ describe("the sidebar", () => {
     const { nav } = await startSidebar({ records: NO_SIDEBAR_RECORDS });
 
     const items = [...nav.querySelectorAll(".side-item")].map((item) => item.textContent);
-    expect(items).toEqual(["No project", "New thread" + "draft" + "No workspace"]);
+    expect(items).toEqual(["No project", "New thread" + "Draft · No workspace"]);
     expect(within(nav).queryByText("No threads yet")).toBeNull();
     expect(readCounts()).toBe("0 working · 0 waiting · 0 idle");
   });
@@ -1003,8 +1039,8 @@ describe("the sidebar's Done moves", () => {
 });
 
 describe("the sidebar's faces", () => {
-  /** Returns the face switch's segment named `name`. */
-  const getSegment = (name: "Threads" | "Hercule"): HTMLElement =>
+  /** Returns the face switch's segment whose accessible name is, or matches, `name`. */
+  const getSegment = (name: string | RegExp): HTMLElement =>
     within(screen.getByRole("tablist", { name: "Sidebar" })).getByRole("tab", { name });
 
   /** Returns the names of the segments that are selected. */
@@ -1023,19 +1059,19 @@ describe("the sidebar's faces", () => {
       within(tablist)
         .getAllByRole("tab")
         .map((segment) => segment.textContent),
-    ).toEqual(["Threads", "Hercule"]);
+    ).toEqual(["Threads", "Work"]);
     expect(readSelectedSegments()).toEqual(["Threads"]);
   });
 
   it("shows Waiting on you, Work and the System section on the Hercule face, without leaving the screen", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
 
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
     expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
     expect(screen.queryByRole("navigation", { name: "Threads" })).toBeNull();
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const nav = screen.getByRole("navigation", { name: "Work" });
     expect(
       within(nav)
         .getAllByRole("heading")
@@ -1050,17 +1086,18 @@ describe("the sidebar's faces", () => {
     expect(document.querySelector(".side-foot")).not.toBeNull();
   });
 
-  it("lists The office, Intake, Workflows, Discussions and Wiki, all but Intake with no count, in Work, and marks Workflows while it is open", async () => {
+  it("lists Overview, The office, Inbox, Workflows, Discussions and Wiki, all but Inbox with no count, in Work, and marks Workflows while it is open", async () => {
     const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
     const work = within(nav).getByRole("heading", { name: "Work" }).closest("section")!;
 
     expect(
       within(work)
         .getAllByRole("link")
         .map((row) => row.textContent),
-    ).toEqual(["The office", expect.stringMatching(/^Intake/), "Workflows", "Discussions", "Wiki"]);
+    ).toEqual(["Overview", "The office", "Inbox", "Workflows", "Discussions", "Wiki"]);
+    expect(within(work).getByRole("link", { name: "Overview" }).getAttribute("href")).toBe("/work");
     expect(within(work).getByRole("link", { name: "The office" }).getAttribute("href")).toBe(
       "/office",
     );
@@ -1081,6 +1118,142 @@ describe("the sidebar's faces", () => {
     expect(workflows.classList.contains("is-on")).toBe(true);
   });
 
+  describe("the Work segment's count", () => {
+    const INBOX_COUNT_ROUTE = "GET /api/v1/external-entities/inbox/count";
+
+    it("shows the Inbox's waiting count in the plain grey of the Inbox row, and names it", async () => {
+      await startSidebar({
+        handlers: { [INBOX_COUNT_ROUTE]: { body: buildInboxCounts({ waiting: 7 }) } },
+      });
+      const segment = getSegment("Work, 7 waiting");
+      const count = segment.querySelector(".count");
+      expect(count?.textContent).toBe("7");
+      expect(count?.classList.contains("count--you")).toBe(false);
+    });
+
+    it("hides the count at 0", async () => {
+      await startSidebar({
+        handlers: { [INBOX_COUNT_ROUTE]: { body: buildInboxCounts({ waiting: 0 }) } },
+      });
+      const segment = getSegment("Work");
+      expect(segment.querySelector(".count")).toBeNull();
+      expect(segment.getAttribute("aria-label")).toBeNull();
+    });
+
+    it("follows a live change of the Inbox's count while the Inbox is closed", async () => {
+      let waiting = 2;
+      const { live } = await startSidebar({
+        handlers: { [INBOX_COUNT_ROUTE]: () => ({ body: buildInboxCounts({ waiting }) }) },
+      });
+      await live.waitForFirstPushes();
+      expect(getSegment("Work, 2 waiting")).toBeTruthy();
+
+      waiting = 3;
+      act(() => {
+        live.pushInvalidation("signal", []);
+      });
+
+      expect(await screen.findByRole("tab", { name: "Work, 3 waiting" })).toBeTruthy();
+    });
+  });
+
+  describe("the Inbox row", () => {
+    const INBOX_COUNT_ROUTE = "GET /api/v1/external-entities/inbox/count";
+
+    /** Opens the Hercule face and returns the Inbox's link, with the Inbox's counts as `counts`. */
+    const openInboxRow = async (counts: {
+      readonly waiting: number;
+      readonly newestArrival: number;
+    }) => {
+      const app = await startSidebar({
+        handlers: {
+          [INBOX_COUNT_ROUTE]: {
+            body: buildInboxCounts(counts),
+          },
+        },
+      });
+      // With a count, the segment's name carries it: "Work, 22 waiting".
+      await userEvent.click(getSegment(/^Work/));
+      const nav = screen.getByRole("navigation", { name: "Work" });
+      return { ...app, link: within(nav).getByRole("link", { name: /^Inbox/ }) };
+    };
+
+    it("shows the things someone waits on as a plain grey count", async () => {
+      const { link } = await openInboxRow({ waiting: 22, newestArrival: 0 });
+      const count = link.querySelector(".count");
+      expect(count?.textContent).toBe("22");
+      expect(count?.classList.contains("count--you")).toBe(false);
+      expect(link.getAttribute("href")).toBe("/inbox");
+      expect(link.getAttribute("aria-label")).toBe("Inbox, 22 waiting");
+    });
+
+    it("hides the count at 0", async () => {
+      const { link } = await openInboxRow({ waiting: 0, newestArrival: 0 });
+      expect(link.querySelector(".count")).toBeNull();
+      expect(link.getAttribute("aria-label")).toBeNull();
+    });
+
+    it("shows one dot while an arrival is newer than the last one acknowledged, and none once it is acknowledged", async () => {
+      acknowledgeInboxArrival(CONTROLLER_URL, "rogier", 4);
+      const { link } = await openInboxRow({ waiting: 3, newestArrival: 5 });
+      expect(link.querySelectorAll(".nav-new")).toHaveLength(1);
+      expect(link.getAttribute("aria-label")).toBe("Inbox, 3 waiting, something new");
+
+      act(() => acknowledgeInboxArrival(CONTROLLER_URL, "rogier", 5));
+
+      expect(link.querySelector(".nav-new")).toBeNull();
+      expect(link.getAttribute("aria-label")).toBe("Inbox, 3 waiting");
+    });
+
+    it("shows no dot when nothing ever arrived", async () => {
+      const { link } = await openInboxRow({ waiting: 2, newestArrival: 0 });
+      expect(link.querySelector(".nav-new")).toBeNull();
+    });
+  });
+
+  it("marks Overview on Work only, and The office on the Office as before", async () => {
+    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
+    const overview = within(nav).getByRole("link", { name: "Overview" });
+    const office = within(nav).getByRole("link", { name: "The office" });
+    expect([overview, office].map((row) => row.getAttribute("aria-current"))).toEqual([null, null]);
+
+    await userEvent.click(overview);
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/work");
+    });
+    expect([overview, office].map((row) => row.getAttribute("aria-current"))).toEqual([
+      "page",
+      null,
+    ]);
+
+    await act(() => router.navigate({ to: "/office" }));
+
+    expect([overview, office].map((row) => row.getAttribute("aria-current"))).toEqual([
+      null,
+      "page",
+    ]);
+  });
+
+  it("opens the Office from Overview when the Office was the view used last", async () => {
+    localStorage.setItem(`overview-view:${CONTROLLER_URL}`, "office");
+    const { router } = await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
+
+    await userEvent.click(within(nav).getByRole("link", { name: "Overview" }));
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/office");
+    });
+    // The Office row is the selected one there, not Overview.
+    expect(within(nav).getByRole("link", { name: "Overview" }).getAttribute("aria-current")).toBe(
+      null,
+    );
+  });
+
   it.each([
     ["Discussions", "/discussions", `/discussions/${DISCUSSION_ID}`],
     ["Wiki", "/wiki", `/wiki/${WIKI_PAGE_ID}`],
@@ -1089,8 +1262,8 @@ describe("the sidebar's faces", () => {
       path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
       handlers: buildDiscussionsWikiHandlers(),
     });
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
     const row = within(nav).getByRole("link", { name });
     expect(row.getAttribute("aria-current")).toBeNull();
 
@@ -1104,21 +1277,30 @@ describe("the sidebar's faces", () => {
     expect(row.classList.contains("is-on")).toBe(true);
   });
 
-  it("draws Fleet as a row that does nothing yet", async () => {
-    const { calls, router, live } = await startSidebar({
+  it("opens Fleet from its row, and marks the row on the Fleet page and on a machine's page", async () => {
+    const { router, live } = await startSidebar({
       path: `/threads/${FIXTURE_THREAD_IDS.flaky}`,
     });
     await live.waitForFirstPushes();
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
-    const sent = calls.length;
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
 
-    const row = within(nav).getByRole("button", { name: "Fleet" });
-    expect(row.getAttribute("aria-disabled")).toBe("true");
-    expect(row.getAttribute("title")).toBe("Not built yet");
+    const row = within(nav).getByRole("link", { name: "Fleet" });
+    expect(row.getAttribute("href")).toBe("/fleet");
+    expect(row.getAttribute("aria-current")).toBeNull();
+
     await userEvent.click(row);
-    expect(router.state.location.pathname).toBe(`/threads/${FIXTURE_THREAD_IDS.flaky}`);
-    expect(calls).toHaveLength(sent);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe("/fleet");
+    });
+    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(row.classList.contains("is-on")).toBe(true);
+
+    const runnerId = SINGLE_THREADS_FIXTURE.runners[0]!.id;
+    await act(() => router.navigate({ to: "/fleet/$runnerId", params: { runnerId } }));
+    expect(router.state.location.pathname).toBe(`/fleet/${runnerId}`);
+    expect(row.getAttribute("aria-current")).toBe("page");
+    expect(row.classList.contains("is-on")).toBe(true);
   });
 
   it("marks the Connections row while a Connection needs attention", async () => {
@@ -1129,12 +1311,12 @@ describe("the sidebar's faces", () => {
         },
       },
     });
-    await userEvent.click(getSegment("Hercule"));
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    await userEvent.click(getSegment("Work"));
+    const nav = screen.getByRole("navigation", { name: "Work" });
 
     const row = within(nav).getByRole("link", { name: /Connections/ });
     expect(within(row).getByRole("img", { name: "A Connection needs attention" })).toBeTruthy();
-    expect(within(nav).getByRole("button", { name: "Fleet" })).toBeTruthy();
+    expect(within(nav).getByRole("link", { name: "Fleet" })).toBeTruthy();
   });
 
   it("keeps the app on screen when the Hercule face opens long after the Connections were last drawn", async () => {
@@ -1155,57 +1337,57 @@ describe("the sidebar's faces", () => {
     // Nothing on the Threads face draws the Connections. Query removes a read
     // no component draws after five minutes, unless its options keep it.
     await act(() => vi.advanceTimersByTimeAsync(6 * 60_000));
-    fireEvent.click(getSegment("Hercule"));
+    fireEvent.click(getSegment("Work"));
 
     // A suspended screen is hidden, and a hidden element has no role.
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const nav = screen.getByRole("navigation", { name: "Work" });
     expect(within(nav).getByRole("link", { name: /Connections/ })).toBeTruthy();
   });
 
   it("moves between the segments with the arrow keys, keeping one of them in the tab order", async () => {
     await startSidebar();
     const threads = getSegment("Threads");
-    const orchestration = getSegment("Hercule");
+    const orchestration = getSegment("Work");
     expect([threads.tabIndex, orchestration.tabIndex]).toEqual([0, -1]);
 
     threads.focus();
     await userEvent.keyboard("{ArrowRight}");
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
-    expect(document.activeElement).toBe(getSegment("Hercule"));
-    expect([getSegment("Threads").tabIndex, getSegment("Hercule").tabIndex]).toEqual([-1, 0]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
+    expect(document.activeElement).toBe(getSegment("Work"));
+    expect([getSegment("Threads").tabIndex, getSegment("Work").tabIndex]).toEqual([-1, 0]);
 
     await userEvent.keyboard("{ArrowRight}");
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
 
     await userEvent.keyboard("{ArrowLeft}");
     expect(readSelectedSegments()).toEqual(["Threads"]);
     expect(document.activeElement).toBe(getSegment("Threads"));
   });
 
-  it("switches the face from View › Threads and View › Hercule", async () => {
+  it("switches the face from View › Threads and View › Work", async () => {
     const { fake } = await startSidebar();
 
     fake.sendMenuCommand("showOrchestrationFace");
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
     fake.sendMenuCommand("showThreadsFace");
     expect(readSelectedSegments()).toEqual(["Threads"]);
   });
 
   it("keeps the face when the Office or Settings opens, and shows Threads when a thread opens", async () => {
     const { router } = await startSidebar();
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     await userEvent.click(screen.getByRole("link", { name: "Office ⌘⇧O" }));
     await screen.findByText("The Office");
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
 
     await act(() => router.navigate({ to: "/settings" }));
     await waitFor(() => {
       expect(router.state.location.pathname).toMatch(/^\/settings\//);
     });
-    expect(readSelectedSegments()).toEqual(["Hercule"]);
+    expect(readSelectedSegments()).toEqual(["Work"]);
 
-    const nav = screen.getByRole("navigation", { name: "Hercule" });
+    const nav = screen.getByRole("navigation", { name: "Work" });
     await userEvent.click(
       within(nav).getByRole("link", { name: "Write the retry runbook, waiting on you" }),
     );
@@ -1222,7 +1404,7 @@ describe("the sidebar's faces", () => {
 
   it("opens a new Draft Thread on the Threads face, also from the new-thread screen", async () => {
     const { router } = await startSidebar();
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
 
     // A new Draft Thread opens at "/" again, with other search parameters.
     await act(() =>
@@ -1234,9 +1416,9 @@ describe("the sidebar's faces", () => {
 
   it("keeps the focus on a Waiting on you row opened from the Hercule face", async () => {
     await startSidebar({ path: `/threads/${FIXTURE_THREAD_IDS.flaky}` });
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
     const name = "Write the retry runbook, waiting on you";
-    within(screen.getByRole("navigation", { name: "Hercule" }))
+    within(screen.getByRole("navigation", { name: "Work" }))
       .getByRole("link", { name })
       .focus();
 
@@ -1257,7 +1439,7 @@ describe("the sidebar's faces", () => {
     const nav = screen.getByRole("navigation", { name: "Threads" });
 
     expect(nav.id).not.toBe("");
-    for (const name of ["Threads", "Hercule"] as const) {
+    for (const name of ["Threads", "Work"] as const) {
       expect(getSegment(name).getAttribute("aria-controls")).toBe(nav.id);
     }
   });
@@ -1270,7 +1452,7 @@ describe("the sidebar's faces", () => {
     });
     const sent = fake.goMenus.length;
 
-    await userEvent.click(getSegment("Hercule"));
+    await userEvent.click(getSegment("Work"));
     expect(fake.goMenus).toHaveLength(sent);
 
     // A thread that does not wait, so the Hercule face does not show it.

@@ -3,6 +3,16 @@
  * Nothing here decides policy: placement, the access-mode fallback and status
  * changes are decided by the service and by the fold in `stream.ts`.
  *
+ * Every write that changes a session's status announces the card of the
+ * session's Task (`announceTaskCardChange`), here and nowhere else, so no path
+ * that changes a status can forget it. Writes that change a status are
+ * `insert`, `moved`, `started`, `resume`, `undoResume` and the `end*` methods.
+ * `setTaskId` announces too, because the session moves from one card to
+ * another. A write that does not change the status announces nothing, however
+ * often it runs. The announcement is sent once the caller's transaction
+ * commits (`db/after-commit.ts`). A question opening or closing changes no
+ * status, so the service announces that (`replaceOpenRequests`).
+ *
  * `resumable` is computed in the SELECT rather than stored, because a stored
  * copy would be out of date as soon as a runner is retired.
  */
@@ -17,22 +27,28 @@ import {
   type AccessMode,
   type DisallowedTool,
   type ModelSelection,
-  type ProviderEvent,
+  type HarnessEvent,
+  type McpServerWarningReason,
   type SubagentId,
 } from "@hercule/protocol";
 import {
   createNotFoundError,
   LIVE_SESSION_STATUSES,
   type NotFound,
+  type McpServerLeftOutReason,
   type Passage,
   type PermissionRequest,
+  type SessionMcpServer,
+  type SessionArchived,
   type SessionKind,
   type SessionRequest,
   type SessionStatus,
   type SortDirection,
   type ThreadDone,
+  WORKING_SESSION_STATUSES,
 } from "@hercule/contract";
 import {
+  announceTaskCardChange,
   decodeCursor,
   decodeIntegerKeyCursor,
   encodeCursor,
@@ -40,12 +56,14 @@ import {
   buildKeyset,
   buildPage,
   uuidFromString,
+  uuidHexToString,
   uuidToString,
   type CursorError,
   type CursorScope,
   type Page,
 } from "../db";
 import { buildOpenPermissionRequestsColumn, parseOpenPermissionRequests } from "../permissions";
+import type { NoGatewayReason } from "../mcp-servers";
 import { SessionLibrarySkill } from "../skills";
 import { buildReadyClause } from "../workspaces";
 import type { SessionEndReason } from "./observer";
@@ -58,12 +76,18 @@ const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(SessionLibrarySkill)),
 );
 
+/** What `sessions.mcp_gateway` holds: `given`, or the reason the start gave no gateway entry. */
+const decodeMcpGateway = Schema.decodeUnknownEffect(
+  Schema.Literals(["given", "runner-too-old", "harness-unsupported"]),
+);
+
 /**
  * Builds a SQL expression, over a row of `sessions` under the given alias,
  * that is true when the session can be resumed. All of these must hold:
  *
  * - the session has exited
- * - its provider-native transcript is known
+ * - its harness-native transcript is known
+ * - it is not archived
  * - its runner is not retired
  * - its workspace is ready (see `buildReadyClause`)
  * - it answers no assistant's conversation, or that conversation still
@@ -72,6 +96,7 @@ const decodeSessionLibrarySkills = Schema.decodeUnknownEffect(
  */
 const buildResumableClause = (alias: string): string =>
   `${alias}.status = 'exited' AND ${alias}.native_session_id IS NOT NULL ` +
+  `AND ${alias}.archived_at IS NULL ` +
   `AND EXISTS (SELECT 1 FROM runners WHERE runners.id = ${alias}.runner_id ` +
   `AND runners.lifecycle <> 'retired') ` +
   `AND ${buildReadyClause(alias)} ` +
@@ -103,10 +128,14 @@ export interface StoredSession {
   readonly runId: string | null;
   /** The agent step's id in the run's plan; `null` when `runId` is. */
   readonly stepId: string | null;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  /** The qualified id of the harness the session runs in. Chosen when the session was placed, and kept by every resume and fork. */
+  readonly harnessId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
   readonly projectId: string | null;
+  /** The Task the session belongs to; `null` when it belongs to none. */
+  readonly taskId: string | null;
   /** The GitHub account this session pushes as, chosen when it was spawned. */
   readonly githubConnectionId: string | null;
   readonly requestedAccessMode: AccessMode;
@@ -138,6 +167,12 @@ export interface StoredSession {
   readonly toolCalls: number;
   readonly createdAt: string;
   readonly startedAt: string | null;
+  /**
+   * When dispatch last started the session's process, which is when the
+   * process got its credentials. A resume sets it again. It is `null` for a
+   * session started before the column existed (migration 0099).
+   */
+  readonly processStartedAt: string | null;
   readonly exitedAt: string | null;
   /**
    * Why the session last exited, kept like `exitedAt` through a resume. It is
@@ -154,6 +189,8 @@ export interface StoredSession {
   readonly crashGuardArmed: boolean;
   /** When the Thread was marked Done and by whom; `null` while it is not Done. */
   readonly done: ThreadDone | null;
+  /** When the Thread was archived and by whom; `null` while it is not archived. */
+  readonly archived: SessionArchived | null;
   /** The last time the Thread was reopened; `null` until it first is. */
   readonly reopenedAt: string | null;
   /** Whether an input still waits on the session, sent to the runner or not. Computed on read. */
@@ -165,14 +202,14 @@ export interface StoredSession {
    */
   readonly conversationDeleted: boolean;
   /**
-   * The provider behind the session's instance, and the tool families its
-   * spec disallowed. Both are used to work out whether the provider enforces
-   * the restriction. They are read on every read, not stored, because the
-   * adapter in a later binary may enforce what this one ignores. `providerId`
-   * is `null` once the instance is deleted.
+   * The tool families the session's spec disallowed. With `harnessId`, they
+   * are used to work out whether the harness enforces the restriction. They
+   * are read on every read, not stored, because the adapter in a later binary
+   * may enforce what this one ignores.
    */
-  readonly providerId: string | null;
   readonly disallowedTools: ReadonlyArray<DisallowedTool>;
+  /** The session's own list of MCP Servers, in list order. Empty for a session that has none. */
+  readonly mcpServers: ReadonlyArray<SessionMcpServer>;
 }
 
 export interface NewSession {
@@ -192,10 +229,14 @@ export interface NewSession {
   readonly conversationId: string | undefined;
   /** The run and agent step that started the session; `undefined` for any other session. */
   readonly step: { readonly runId: string; readonly stepId: string } | undefined;
-  readonly instanceId: string;
+  readonly providerAccountId: string;
+  /** The qualified id of the harness the session runs in; see `StoredSession.harnessId`. */
+  readonly harnessId: string;
   readonly runnerId: string;
   readonly workspaceId: string | null;
   readonly projectId: string | undefined;
+  /** The Task the session belongs to; `undefined` when it belongs to none. */
+  readonly taskId: string | undefined;
   /** The branch the main workspace is switched to before the harness starts. */
   readonly checkoutBranch: string | undefined;
   /** The GitHub account this session pushes as, chosen when it was spawned. */
@@ -213,7 +254,7 @@ export interface NewSession {
 
 /**
  * What a session may do: the access mode it asked for, the one it runs under
- * after the provider's fallback, and the permission profile its token is
+ * after the harness's fallback, and the permission profile its token is
  * bound to.
  */
 export interface SessionAccess {
@@ -234,10 +275,16 @@ export interface SessionPageRequest {
   readonly conversationId: string | undefined;
   /** Only the sessions these runs' agent steps started. */
   readonly runId: string | ReadonlyArray<string> | undefined;
+  /** Only the sessions of this Task. */
+  readonly taskId: string | undefined;
   /** Only the sessions of these kinds. */
   readonly kind: SessionKind | ReadonlyArray<SessionKind> | undefined;
+  /** Only the sessions placed in this workspace, or in one of these workspaces. */
+  readonly workspaceId: string | ReadonlyArray<string> | undefined;
   /** `true` lists only the Threads marked Done; `false` lists every session that is not. */
   readonly done: boolean | undefined;
+  /** `true` lists only the archived sessions; `false` lists every session that is not. */
+  readonly archived: boolean | undefined;
   /** Only the sessions that are not exited, or that exited at or after this instant. */
   readonly activeSince: string | undefined;
   /** Only the sessions not marked Done, and those marked Done at or after this instant. */
@@ -254,13 +301,14 @@ interface SessionRow {
   readonly conversation_id: Uint8Array | null;
   readonly run_id: Uint8Array | null;
   readonly step_id: string | null;
-  readonly provider_id: string | null;
+  readonly harness_id: string;
   /** The spec's disallowed tool families as a JSON array, or null for none. */
   readonly disallowed_tools: string | null;
-  readonly instance_id: Uint8Array;
+  readonly provider_account_id: Uint8Array;
   readonly runner_id: Uint8Array;
   readonly workspace_id: Uint8Array | null;
   readonly project_id: Uint8Array | null;
+  readonly task_id: Uint8Array | null;
   readonly github_connection_id: Uint8Array | null;
   readonly requested_access_mode: string;
   readonly access_mode: string;
@@ -283,15 +331,20 @@ interface SessionRow {
   readonly tool_calls: number;
   readonly created_at: string;
   readonly started_at: string | null;
+  readonly process_started_at: string | null;
   readonly exited_at: string | null;
   readonly exit_reason: string | null;
   readonly last_activity_at: string;
   readonly crash_guard_armed: number;
   readonly done_at: string | null;
   readonly done_by: string | null;
+  readonly archived_at: string | null;
+  readonly archived_by: string | null;
   readonly reopened_at: string | null;
   readonly input_waiting: number;
   readonly conversation_deleted: number;
+  /** A JSON array of `{ id, name, leftOut }`, in list order; `id` is the hex of the server's id. */
+  readonly mcp_servers: string;
 }
 
 /**
@@ -302,16 +355,14 @@ interface SessionRow {
  * that depends only on which domain was imported first.
  */
 const buildColumnList = (): string =>
-  "id, kind, title, role, permission_profile_id, agent_id, conversation_id, run_id, step_id, instance_id, runner_id, " +
-  "workspace_id, project_id, " +
+  "id, kind, title, role, permission_profile_id, agent_id, conversation_id, run_id, step_id, provider_account_id, harness_id, runner_id, " +
+  "workspace_id, project_id, task_id, " +
   "github_connection_id, requested_access_mode, " +
-  // Both are read to compute `unenforced`: the provider behind the instance,
-  // and the tool families this session's spec disallowed.
-  "(SELECT provider_id FROM provider_instances WHERE id = sessions.instance_id) AS provider_id, " +
+  // Read to compute `unenforced`: the tool families this session's spec disallowed.
   "json_extract(spec, '$.disallowedTools') AS disallowed_tools, " +
   "access_mode, native_session_id, model_selection, parent_session_id, status, " +
-  "open_requests, usage, usage_process, tool_calls, created_at, started_at, exited_at, exit_reason, " +
-  "last_activity_at, crash_guard_armed, done_at, done_by, reopened_at, " +
+  "open_requests, usage, usage_process, tool_calls, created_at, started_at, process_started_at, exited_at, exit_reason, " +
+  "last_activity_at, crash_guard_armed, done_at, done_by, archived_at, archived_by, reopened_at, " +
   "EXISTS (SELECT 1 FROM session_inputs WHERE session_inputs.session_id = sessions.id " +
   "AND session_inputs.status = 'queued') AS input_waiting, " +
   "(conversation_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM conversations " +
@@ -323,7 +374,12 @@ const buildColumnList = (): string =>
   "FROM session_subagents WHERE session_subagents.session_id = sessions.id " +
   "AND subagent_id IN (SELECT json_extract(value, '$.subagentId') " +
   "FROM json_each(sessions.open_requests))) AS subagent_names, " +
-  `${buildOpenPermissionRequestsColumn("sessions")} AS open_permission_requests`;
+  `${buildOpenPermissionRequestsColumn("sessions")} AS open_permission_requests, ` +
+  // The list is one subquery on the primary key, so a page of sessions costs one query.
+  "(SELECT json_group_array(json_object('id', hex(mcp_server_id), 'name', name, " +
+  "'leftOut', left_out)) FROM (SELECT entry.mcp_server_id, server.name, entry.left_out " +
+  "FROM session_mcp_servers AS entry JOIN mcp_servers AS server ON server.id = entry.mcp_server_id " +
+  "WHERE entry.session_id = sessions.id ORDER BY entry.position)) AS mcp_servers";
 
 /**
  * Parses a nullable JSON column that holds Token Usage. Returns `undefined`
@@ -343,10 +399,12 @@ const toSession = (row: SessionRow): StoredSession => ({
   conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
   runId: row.run_id === null ? null : uuidToString(row.run_id),
   stepId: row.step_id,
-  instanceId: uuidToString(row.instance_id),
+  providerAccountId: uuidToString(row.provider_account_id),
+  harnessId: row.harness_id,
   runnerId: uuidToString(row.runner_id),
   workspaceId: row.workspace_id === null ? null : uuidToString(row.workspace_id),
   projectId: row.project_id === null ? null : uuidToString(row.project_id),
+  taskId: row.task_id === null ? null : uuidToString(row.task_id),
   githubConnectionId:
     row.github_connection_id === null ? null : uuidToString(row.github_connection_id),
   requestedAccessMode: row.requested_access_mode as AccessMode,
@@ -369,20 +427,34 @@ const toSession = (row: SessionRow): StoredSession => ({
   toolCalls: row.tool_calls,
   createdAt: row.created_at,
   startedAt: row.started_at,
+  processStartedAt: row.process_started_at,
   exitedAt: row.exited_at,
   exitReason: row.exit_reason as SessionEndReason | null,
   lastActivityAt: row.last_activity_at,
   crashGuardArmed: row.crash_guard_armed === 1,
   // The migration's check stores `done_by` exactly when `done_at` is set.
   done: row.done_at === null ? null : { at: row.done_at, by: row.done_by as string },
+  // The migration's check stores `archived_by` exactly when `archived_at` is set.
+  archived:
+    row.archived_at === null ? null : { at: row.archived_at, by: row.archived_by as string },
   reopenedAt: row.reopened_at,
   inputWaiting: row.input_waiting === 1,
   conversationDeleted: row.conversation_deleted === 1,
-  providerId: row.provider_id,
   disallowedTools:
     row.disallowed_tools === null
       ? []
       : (JSON.parse(row.disallowed_tools) as ReadonlyArray<DisallowedTool>),
+  mcpServers: (
+    JSON.parse(row.mcp_servers) as ReadonlyArray<{
+      readonly id: string;
+      readonly name: string;
+      readonly leftOut: McpServerLeftOutReason | null;
+    }>
+  ).map((entry) => ({
+    mcpServerId: uuidHexToString(entry.id),
+    name: entry.name,
+    leftOut: entry.leftOut,
+  })),
 });
 
 const buildCursorScope = (direction: SortDirection): CursorScope => ({
@@ -441,8 +513,8 @@ export interface QueuedSession {
   readonly spec: string;
   readonly checkoutBranch: string | null;
   readonly githubConnectionId: string | null;
-  readonly providerId: string;
-  readonly config: unknown;
+  readonly providerAccountId: string;
+  readonly harnessId: string;
   /** The Agent the session was spawned from; `null` for a Thread. */
   readonly agentId: string | null;
   /** The assistant's conversation the session answers; `null` for any other session. */
@@ -466,7 +538,7 @@ export interface IngestState {
 export interface StoredStreamRow {
   readonly position: number;
   readonly at: string;
-  readonly event: ProviderEvent;
+  readonly event: HarnessEvent;
 }
 
 export interface TranscriptPageRequest {
@@ -517,6 +589,26 @@ const buildPassageScope = (direction: SortDirection): CursorScope => ({
   sort: [{ field: "at", direction }],
 });
 
+/** What the Work board reads of all the sessions of one Task. */
+export interface BoardSessionTotals {
+  readonly taskId: string;
+  /** How many of the Task's sessions are Threads. */
+  readonly threadCount: number;
+  /** When the latest of the Task's sessions ended a turn, or `undefined` if none did. */
+  readonly lastTurnEndedAt: string | undefined;
+}
+
+/** A session of a Task that the Work board looks into; see `listBoardFacts`. */
+export interface BoardSession {
+  readonly id: string;
+  readonly taskId: string;
+  readonly kind: SessionKind;
+  readonly status: SessionStatus;
+  readonly createdAt: string;
+  /** The Requests the session has open, oldest first. */
+  readonly openRequests: ReadonlyArray<SessionRequest>;
+}
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const COLUMNS = buildColumnList();
@@ -550,6 +642,19 @@ const make = Effect.gen(function* () {
         CROSS JOIN sessions ON id = active_id`;
 
   /**
+   * Announces the card of each Task that the given session rows belong to,
+   * once per Task. A row with no Task changes no card.
+   */
+  const announceCardChanges = (
+    rows: ReadonlyArray<{ readonly task_id: Uint8Array | null }>,
+  ): Effect.Effect<void> =>
+    Effect.forEach(
+      new Set(rows.flatMap((row) => (row.task_id === null ? [] : [uuidToString(row.task_id)]))),
+      announceTaskCardChange,
+      { discard: true },
+    );
+
+  /**
    * Moves every session that matches `condition` and has not exited to
    * `exited`, and returns those rows as they were just before, oldest first.
    * The caller needs the old rows, because what an end means depends on the
@@ -576,6 +681,7 @@ const make = Effect.gen(function* () {
           exited_at = ${at}
         WHERE id IN ${sql.in(rows.map((row) => row.id))} AND status <> 'exited'
       `;
+      yield* announceCardChanges(rows);
       return rows.map(toSession);
     });
 
@@ -593,6 +699,7 @@ const make = Effect.gen(function* () {
           session.parentSessionId === undefined ? null : uuidFromString(session.parentSessionId);
         const workspace = session.workspaceId === null ? null : uuidFromString(session.workspaceId);
         const project = session.projectId === undefined ? null : uuidFromString(session.projectId);
+        const task = session.taskId === undefined ? null : uuidFromString(session.taskId);
         const connection =
           session.githubConnectionId === undefined
             ? null
@@ -607,20 +714,22 @@ const make = Effect.gen(function* () {
         const run = session.step === undefined ? null : uuidFromString(session.step.runId);
         yield* sql`
           INSERT INTO sessions (id, title, role, permission_profile_id, agent_id, conversation_id,
-                                run_id, step_id, instance_id, runner_id,
-                                workspace_id, project_id, checkout_branch, github_connection_id,
+                                run_id, step_id, provider_account_id, harness_id, runner_id,
+                                workspace_id, project_id, task_id, checkout_branch, github_connection_id,
                                 requested_access_mode, access_mode, spec,
                                 model_selection, parent_session_id, status,
                                 created_by, created_at, last_activity_at)
           VALUES (${id}, ${session.title}, ${session.role ?? null},
                   ${uuidFromString(session.permissionProfileId)}, ${agent},
                   ${conversation}, ${run}, ${session.step?.stepId ?? null},
-                  ${uuidFromString(session.instanceId)}, ${uuidFromString(session.runnerId)},
-                  ${workspace}, ${project}, ${session.checkoutBranch ?? null}, ${connection},
+                  ${uuidFromString(session.providerAccountId)}, ${session.harnessId},
+                  ${uuidFromString(session.runnerId)},
+                  ${workspace}, ${project}, ${task}, ${session.checkoutBranch ?? null}, ${connection},
                   ${session.requestedAccessMode}, ${session.accessMode},
                   ${session.spec}, ${JSON.stringify(session.modelSelection)}, ${parent},
                   'queued', ${session.createdBy}, ${session.at}, ${session.at})
         `;
+        yield* announceCardChanges([{ task_id: task }]);
       }),
 
     one: (id: string): Effect.Effect<Option.Option<StoredSession>, SqlError> =>
@@ -674,15 +783,19 @@ const make = Effect.gen(function* () {
         (rows) => rows.length > 0,
       ),
 
-    /** Returns the ids of the exited sessions of one conversation that have a workspace. */
-    listExitedWithWorkspaceInConversation: (
+    /**
+     * Returns the ids of the exited sessions of one conversation that have a
+     * workspace and are not archived. An archived session's lease is released
+     * as `archived`, and a caller that releases these again must not change it.
+     */
+    listExitedUnarchivedWithWorkspaceInConversation: (
       conversationId: string,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
       Effect.map(
         sql<{ readonly id: Uint8Array }>`
           SELECT id FROM sessions
           WHERE conversation_id = ${uuidFromString(conversationId)} AND status = 'exited'
-            AND workspace_id IS NOT NULL
+            AND workspace_id IS NOT NULL AND archived_at IS NULL
         `,
         (rows) => rows.map((row) => uuidToString(row.id)),
       ),
@@ -705,8 +818,9 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the ids among `ids` of sessions that have ended for good: the
-     * process has exited and the session cannot be resumed. Uses one query for
+     * Returns the ids among `ids` of sessions that have ended for good: they
+     * are archived, or the process has exited and the session cannot be
+     * resumed. Uses one query for
      * the whole list, because the caller asks about many sessions at once and
      * a query per id would grow with the list.
      */
@@ -719,7 +833,8 @@ const make = Effect.gen(function* () {
             sql<{ readonly id: Uint8Array }>`
               SELECT id FROM sessions
               WHERE id IN ${sql.in(ids.map(uuidFromString))}
-                AND status = 'exited' AND NOT (${sql.literal(buildResumableClause("sessions"))})
+                AND (archived_at IS NOT NULL
+                  OR (status = 'exited' AND NOT (${sql.literal(buildResumableClause("sessions"))})))
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),
           ),
@@ -760,6 +875,9 @@ const make = Effect.gen(function* () {
               : sql`run_id IN ${sql.in(request.runId.map(uuidFromString))}`,
           );
         }
+        if (request.taskId !== undefined) {
+          clauses.push(sql`task_id = ${uuidFromString(request.taskId)}`);
+        }
         if (request.kind !== undefined) {
           clauses.push(
             typeof request.kind === "string"
@@ -767,8 +885,18 @@ const make = Effect.gen(function* () {
               : sql`kind IN ${sql.in(request.kind)}`,
           );
         }
+        if (request.workspaceId !== undefined) {
+          clauses.push(
+            typeof request.workspaceId === "string"
+              ? sql`workspace_id = ${uuidFromString(request.workspaceId)}`
+              : sql`workspace_id IN ${sql.in(request.workspaceId.map(uuidFromString))}`,
+          );
+        }
         if (request.done !== undefined) {
           clauses.push(request.done ? sql`done_at IS NOT NULL` : sql`done_at IS NULL`);
+        }
+        if (request.archived !== undefined) {
+          clauses.push(request.archived ? sql`archived_at IS NOT NULL` : sql`archived_at IS NULL`);
         }
         if (request.doneSince !== undefined) {
           clauses.push(sql`(done_at IS NULL OR done_at >= ${request.doneSince})`);
@@ -982,7 +1110,7 @@ const make = Effect.gen(function* () {
       Effect.map(
         sql<{ readonly last: number | null; readonly base: number }>`
           SELECT (SELECT MAX(runner_seq) FROM session_stream
-                  WHERE session_id = sessions.id) AS last,
+                  WHERE session_id = sessions.id AND runner_seq > 0) AS last,
                  stream_base AS base
           FROM sessions WHERE id = ${uuidFromString(sessionId)}
         `,
@@ -1023,52 +1151,47 @@ const make = Effect.gen(function* () {
     /**
      * Appends a `runtime.warning` event stamped `at`, which the controller
      * writes itself rather than a runner reporting it, at the next position
-     * of the session's stream, and
-     * moves the session's sequence offset (`stream_base`) past it. Both
-     * writes join the caller's transaction. The event's sequence number is
-     * one past the highest the session has used, and the offset becomes that
-     * same number.
+     * of the session's stream, and joins the caller's transaction.
      *
-     * Moving the offset is what keeps the runner's next event: the runner
-     * numbers a process's events from 1, and each is stored at the offset
-     * plus its number, so the first lands one past this row. Without the
-     * move, the runner's event would take this row's sequence number and be
-     * dropped as a replay by `append`. The session's cached ingest state
-     * still holds the old offset, so the caller must drop it once the
-     * transaction commits.
+     * The event takes a negative `runner_seq`: the first warning gets -1, the
+     * next -2, and so on. A runner numbers its events upward from 1, so the two
+     * number spaces never meet. This is what lets the controller write a
+     * warning at any moment, even while a runner's turn is running: the write
+     * cannot take the sequence number of a runner event that is folded but not
+     * yet written, and it leaves the session's sequence offset and its cached
+     * ingest state (the text held for open items) untouched.
+     *
+     * `mcpServers` is given when the warning is about MCP Servers: it names
+     * each server and why (spec 21 section 3.8).
      */
     appendRuntimeWarning: (
       sessionId: string,
       message: string,
       at: string,
+      mcpServers?: ReadonlyArray<{
+        readonly mcpServerId: string;
+        readonly reason: McpServerWarningReason;
+      }>,
     ): Effect.Effect<void, SqlError> =>
       Effect.gen(function* () {
         const id = uuidFromString(sessionId);
-        const event: ProviderEvent = {
+        const event: HarnessEvent = {
           _tag: "runtime.warning",
           eventId: crypto.randomUUID(),
           sessionId,
           at,
           message,
+          ...(mcpServers === undefined ? {} : { mcpServers }),
         };
-        // Two scalar subqueries rather than one SELECT with both maxima:
-        // SQLite answers a lone MAX from the end of an index, and each
-        // subquery has its own, while a SELECT with two MAX columns scans
-        // every row of the session's stream.
         yield* sql`
           INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
           VALUES (
             ${id},
             COALESCE((SELECT MAX(position) FROM session_stream WHERE session_id = ${id}), 0) + 1,
-            COALESCE((SELECT MAX(runner_seq) FROM session_stream WHERE session_id = ${id}), 0) + 1,
+            COALESCE((SELECT MIN(runner_seq) FROM session_stream
+                      WHERE session_id = ${id} AND runner_seq < 0), 0) - 1,
             ${event.at}, ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
           )
-        `;
-        yield* sql`
-          UPDATE sessions SET
-            stream_base = (SELECT MAX(runner_seq) FROM session_stream
-                           WHERE session_id = sessions.id)
-          WHERE id = ${id}
         `;
       }),
 
@@ -1090,9 +1213,13 @@ const make = Effect.gen(function* () {
      * writers, ingest and a spawn that could not reach its runner, so a status
      * read before the transaction proves nothing inside it. Only `resume`
      * below moves a session out of `exited`.
+     *
+     * A move to the status the session already has changes nothing and
+     * announces nothing, so a caller need not check first.
      */
     moved: (sessionId: string, status: SessionStatus, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
+      Effect.flatMap(
+        sql<{ readonly task_id: Uint8Array | null }>`
         UPDATE sessions SET
           status = ${status},
           last_activity_at = CASE WHEN ${status} = 'exited' THEN last_activity_at ELSE ${at} END,
@@ -1102,7 +1229,11 @@ const make = Effect.gen(function* () {
           token_hash = CASE WHEN ${status} IN ('starting', 'idle', 'busy') THEN token_hash
                             ELSE NULL END
         WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
-      `),
+          AND status <> ${status}
+        RETURNING task_id
+      `,
+        announceCardChanges,
+      ),
 
     /**
      * Moves a `queued` session to `exited`, and returns the row as it was
@@ -1123,17 +1254,23 @@ const make = Effect.gen(function* () {
      * Moves the session to `starting` for dispatch, and stores the hash of the
      * token created for that start. It is one statement rather than a status
      * change plus a write, because the row may hold a token only while it is
-     * starting or running, and the two must never be out of step. Like
-     * `moved`, it never changes an exited session.
+     * starting or running, and the two must never be out of step. It also
+     * stores `at` as the time the process started and got its credentials.
+     * Like `moved`, it never changes an exited session.
      */
     started: (sessionId: string, tokenHash: string, at: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE sessions SET
-          status = 'starting',
-          last_activity_at = ${at},
-          token_hash = ${tokenHash}
-        WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
-      `),
+      Effect.flatMap(
+        sql<{ readonly task_id: Uint8Array | null }>`
+          UPDATE sessions SET
+            status = 'starting',
+            last_activity_at = ${at},
+            process_started_at = ${at},
+            token_hash = ${tokenHash}
+          WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'
+          RETURNING task_id
+        `,
+        announceCardChanges,
+      ),
 
     /**
      * Records the library skills the session got at the start that was just
@@ -1149,6 +1286,40 @@ const make = Effect.gen(function* () {
         UPDATE sessions SET library_skills = ${JSON.stringify(skills)}
         WHERE id = ${uuidFromString(sessionId)}
       `),
+
+    /**
+     * Records whether the start that was just claimed gave the harness the MCP
+     * Gateway's entry: `null` when it did, else the reason it did not. A start
+     * that goes back to the queue and is claimed again overwrites it. Does
+     * nothing for an unknown id.
+     */
+    recordMcpGateway: (
+      sessionId: string,
+      noGatewayReason: NoGatewayReason | null,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET mcp_gateway = ${noGatewayReason ?? "given"}
+        WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Returns what the session's last claimed start decided about the MCP
+     * Gateway's entry: `null` when it gave one, else the reason it gave none.
+     * Returns none when no start recorded it, which holds for a session that
+     * was started before the record existed, and for an unknown id.
+     */
+    readMcpGateway: (
+      sessionId: string,
+    ): Effect.Effect<Option.Option<NoGatewayReason | null>, SqlError> =>
+      Effect.gen(function* () {
+        const rows = yield* sql<{ readonly mcp_gateway: string | null }>`
+          SELECT mcp_gateway FROM sessions WHERE id = ${uuidFromString(sessionId)}
+        `;
+        const column = rows[0]?.mcp_gateway;
+        if (column == null) return Option.none();
+        const decided = yield* decodeMcpGateway(column).pipe(Effect.orDie);
+        return Option.some(decided === "given" ? null : decided);
+      }),
 
     /**
      * Returns the library skills the session got at its last claimed start,
@@ -1190,15 +1361,19 @@ const make = Effect.gen(function* () {
      * transcript is read in `position` order.
      */
     resume: (sessionId: string, spec: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        UPDATE sessions SET
-          status = 'queued',
-          spec = ${spec},
-          open_requests = '[]',
-          stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
-                         WHERE session_id = sessions.id)
-        WHERE id = ${uuidFromString(sessionId)}
-      `),
+      Effect.flatMap(
+        sql<{ readonly task_id: Uint8Array | null }>`
+          UPDATE sessions SET
+            status = 'queued',
+            spec = ${spec},
+            open_requests = '[]',
+            stream_base = (SELECT COALESCE(MAX(runner_seq), 0) FROM session_stream
+                           WHERE session_id = sessions.id AND runner_seq > 0)
+          WHERE id = ${uuidFromString(sessionId)}
+          RETURNING task_id
+        `,
+        announceCardChanges,
+      ),
 
     /**
      * Stores why the session exited. It decides nothing: the service writes
@@ -1230,16 +1405,16 @@ const make = Effect.gen(function* () {
      * input is waiting.
      */
     undoResume: (sessionId: string): Effect.Effect<boolean, SqlError> =>
-      Effect.map(
-        sql<{ readonly id: Uint8Array }>`
+      Effect.flatMap(
+        sql<{ readonly task_id: Uint8Array | null }>`
           UPDATE sessions SET
             status = 'exited',
             crash_guard_armed = 0
           WHERE id = ${uuidFromString(sessionId)} AND status = 'queued'
             AND exited_at IS NOT NULL
-          RETURNING id
+          RETURNING task_id
         `,
-        (rows) => rows.length > 0,
+        (rows) => Effect.as(announceCardChanges(rows), rows.length > 0),
       ),
 
     /**
@@ -1256,6 +1431,43 @@ const make = Effect.gen(function* () {
         `,
         (rows) => rows.length > 0,
       ),
+
+    /**
+     * Marks the session archived, at `at`, by `actor`. Returns whether it
+     * changed the row: `false` when the session was already archived, or does
+     * not exist. It checks nothing else; the service decides which sessions
+     * may be archived.
+     */
+    archive: (sessionId: string, actor: string, at: string): Effect.Effect<boolean, SqlError> =>
+      Effect.map(
+        sql<{ readonly id: Uint8Array }>`
+          UPDATE sessions SET archived_at = ${at}, archived_by = ${actor}
+          WHERE id = ${uuidFromString(sessionId)} AND archived_at IS NULL
+          RETURNING id
+        `,
+        (rows) => rows.length > 0,
+      ),
+
+    /**
+     * Returns every session of kind `thread` or `agent` in these workspaces,
+     * archived or not: the sessions a desktop sidebar row holds. One query
+     * serves all the workspaces, because a caller archiving many Threads asks
+     * about every one of their workspaces at once.
+     */
+    listThreadsAndAgentSessionsInWorkspaces: (
+      workspaceIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
+      workspaceIds.length === 0
+        ? Effect.succeed([])
+        : Effect.map(
+            sql<SessionRow>`
+              SELECT ${sql.literal(COLUMNS)} FROM sessions
+              WHERE workspace_id IN ${sql.in(workspaceIds.map(uuidFromString))}
+                AND kind IN ('thread', 'agent')
+              ORDER BY created_at, id
+            `,
+            (rows) => rows.map(toSession),
+          ),
 
     /**
      * Takes the Done mark off the session and stores `at` as the time it was
@@ -1325,6 +1537,113 @@ const make = Effect.gen(function* () {
       `),
 
     /**
+     * Replaces the session's list of MCP Servers with the servers given, in
+     * that order. A server that was already in the list keeps the `leftOut` it
+     * had, because a start writes that field and an edit does not. A new one
+     * gets `null`. It announces nothing: the caller announces the session once
+     * it has written everything.
+     */
+    replaceMcpServers: (
+      sessionId: string,
+      mcpServerIds: ReadonlyArray<string>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const session = uuidFromString(sessionId);
+        const kept = yield* sql<{
+          readonly mcp_server_id: Uint8Array;
+          readonly left_out: McpServerLeftOutReason | null;
+        }>`SELECT mcp_server_id, left_out FROM session_mcp_servers WHERE session_id = ${session}`;
+        const leftOutById = new Map(
+          kept.map((row) => [uuidToString(row.mcp_server_id), row.left_out]),
+        );
+        yield* sql`DELETE FROM session_mcp_servers WHERE session_id = ${session}`;
+        yield* Effect.forEach(
+          mcpServerIds,
+          (id, position) =>
+            sql`INSERT INTO session_mcp_servers (session_id, position, mcp_server_id, left_out)
+                VALUES (${session}, ${position}, ${uuidFromString(id)}, ${leftOutById.get(id) ?? null})`,
+          { discard: true },
+        );
+      }),
+
+    /** Returns the ids of the servers in the session's list, in list order. */
+    readMcpServerIds: (sessionId: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly mcp_server_id: Uint8Array }>`SELECT mcp_server_id FROM session_mcp_servers
+           WHERE session_id = ${uuidFromString(sessionId)} ORDER BY position`,
+        (rows) => rows.map((row) => uuidToString(row.mcp_server_id)),
+      ),
+
+    /**
+     * Records why each listed server could not be called at the session's
+     * last start. `reasonsById` holds the reason of every server that was left
+     * out. A server in the session's list that it does not name is recorded as
+     * `null`: it could be called. An id that is not in the list is ignored. It
+     * writes one statement to clear the list and one for each reason that
+     * occurs, however long the list is.
+     */
+    recordLeftOut: (
+      sessionId: string,
+      reasonsById: ReadonlyMap<string, McpServerLeftOutReason>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const session = uuidFromString(sessionId);
+        const idsByReason = new Map<McpServerLeftOutReason, Array<Uint8Array>>();
+        for (const [id, reason] of reasonsById) {
+          idsByReason.set(reason, [...(idsByReason.get(reason) ?? []), uuidFromString(id)]);
+        }
+        yield* sql`UPDATE session_mcp_servers SET left_out = NULL WHERE session_id = ${session}`;
+        yield* Effect.forEach(
+          idsByReason,
+          ([reason, ids]) =>
+            sql`UPDATE session_mcp_servers SET left_out = ${reason}
+                WHERE session_id = ${session} AND mcp_server_id IN ${sql.in(ids)}`,
+          { discard: true },
+        );
+      }),
+
+    /**
+     * Removes the MCP Server from every session's list. The session's other
+     * entries keep their order. Returns each session that held the server, with
+     * the conversation it answers, so the caller can announce them.
+     */
+    removeMcpServer: (
+      mcpServerId: string,
+    ): Effect.Effect<ReadonlyArray<Pick<StoredSession, "id" | "conversationId">>, SqlError> =>
+      Effect.gen(function* () {
+        const server = uuidFromString(mcpServerId);
+        const held = yield* sql<{
+          readonly id: Uint8Array;
+          readonly conversation_id: Uint8Array | null;
+        }>`
+          SELECT id, conversation_id FROM sessions
+          WHERE id IN (SELECT session_id FROM session_mcp_servers WHERE mcp_server_id = ${server})
+          ORDER BY id`;
+        yield* sql`DELETE FROM session_mcp_servers WHERE mcp_server_id = ${server}`;
+        return held.map((row) => ({
+          id: uuidToString(row.id),
+          conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
+        }));
+      }),
+
+    /**
+     * Sets the Task the session belongs to, and announces the card of the Task
+     * it left and the card of the one it joined. It checks nothing: the caller
+     * chose a Task that can be joined.
+     */
+    setTaskId: (sessionId: string, taskId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const left = yield* sql<{ readonly task_id: Uint8Array | null }>`
+          SELECT task_id FROM sessions WHERE id = ${uuidFromString(sessionId)}
+        `;
+        yield* sql`
+          UPDATE sessions SET task_id = ${uuidFromString(taskId)}
+          WHERE id = ${uuidFromString(sessionId)}
+        `;
+        yield* announceCardChanges([...left, { task_id: uuidFromString(taskId) }]);
+      }),
+
+    /**
      * Sets the access mode the session asked for, the one it runs under, and
      * the permission profile its token is bound to. Only a resume calls this,
      * before the session starts again, because a running harness keeps the
@@ -1337,6 +1656,16 @@ const make = Effect.gen(function* () {
           access_mode = ${access.accessMode},
           permission_profile_id = ${uuidFromString(access.permissionProfileId)}
         WHERE id = ${uuidFromString(sessionId)}
+      `),
+
+    /**
+     * Points every session of the Task `sourceId` at the Task `targetId`, for
+     * a merge. Announces nothing: the merge announces both Tasks.
+     */
+    moveTaskLinks: (sourceId: string, targetId: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE sessions SET task_id = ${uuidFromString(targetId)}
+        WHERE task_id = ${uuidFromString(sourceId)}
       `),
 
     /** Stores the Requests the session's agents are parked on, oldest first. */
@@ -1372,28 +1701,189 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Stores the provider-native id a runner reported for one of its sessions.
-     * The runner and the instance are both in the WHERE clause, because a
+     * Returns up to `limit` sessions of the Task and how many sessions it has.
+     * The unfinished sessions come first (`buildUnfinishedClause`), then the
+     * finished ones, each group newest first (latest `created_at`, then
+     * greatest id).
+     *
+     * `pinnedId` names a session of the Task that must be among the ones
+     * returned. It takes a place that the last session of the order would
+     * have had, and is listed where the order puts it. An id that is not a
+     * session of the Task pins nothing.
+     *
+     * One statement: the first step ranks all of the Task's sessions, found
+     * on `sessions_task_id`, and keeps `limit` of them. Ranking reads, for
+     * each session, only the columns that decide the order (`created_at`,
+     * `run_id`, `status`, `done_at`) and the status of its Run, so the work
+     * grows with the number of sessions the Task has. Only the kept sessions
+     * are then read whole, with all their columns, such as the open Requests.
+     * `total` is counted in the same pass, so the count costs no second read.
+     */
+    listOfTask: (
+      taskId: string,
+      limit: number,
+      pinnedId: string | undefined,
+    ): Effect.Effect<
+      { readonly sessions: ReadonlyArray<StoredSession>; readonly total: number },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const rows = yield* sql<SessionRow & { readonly total: number }>`
+          SELECT ${sql.literal(COLUMNS)}, picked.total FROM (
+            SELECT session_id, total, place FROM (
+              SELECT session_id, total,
+                     ROW_NUMBER() OVER (ORDER BY finished, created_at DESC, session_id DESC) AS place,
+                     ROW_NUMBER() OVER (ORDER BY pinned, finished, created_at DESC, session_id DESC)
+                       AS kept
+              FROM (
+                SELECT s.id AS session_id, s.created_at,
+                       COUNT(*) OVER () AS total,
+                       CASE WHEN ${sql.literal(buildUnfinishedClause("s"))} THEN 0 ELSE 1 END AS finished,
+                       CASE WHEN s.id = ${pinnedId === undefined ? null : uuidFromString(pinnedId)}
+                            THEN 0 ELSE 1 END AS pinned
+                FROM sessions s
+                WHERE s.task_id = ${uuidFromString(taskId)}))
+            WHERE kept <= ${limit}) picked
+          JOIN sessions ON sessions.id = picked.session_id
+          ORDER BY picked.place`;
+        return { sessions: rows.map(toSession), total: rows[0]?.total ?? 0 };
+      }),
+
+    /**
+     * Returns what the Work board reads of the sessions of the Tasks `taskIds`,
+     * in two statements whatever the number of Tasks and sessions:
+     *
+     * - `totals`: for each Task that has a session, how many of its sessions
+     *   are Threads and when one of them last ended a turn;
+     * - `notable`: the sessions the board looks into, which are the live ones
+     *   (`queued`, `starting` or `busy`), the ones with an open Request, the
+     *   newest Thread of each Task, and the newest session of each Task of any
+     *   kind. Other sessions, such as a long history of finished Threads, are
+     *   not returned.
+     *
+     * `totals` is answered from `sessions_task_turn_ended` alone. It counts
+     * Threads as the sessions with no agent, which is how `kind` is defined,
+     * because an index cannot cover the generated column `kind`. `notable`
+     * reads the Tasks' sessions on `sessions_task_id`. Neither reads a
+     * transcript.
+     *
+     * The ids reach SQLite as one JSON text, so the statements do not grow
+     * with the number of Tasks.
+     */
+    listBoardFacts: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<
+      {
+        readonly totals: ReadonlyArray<BoardSessionTotals>;
+        readonly notable: ReadonlyArray<BoardSession>;
+      },
+      SqlError
+    > =>
+      Effect.gen(function* () {
+        const hexIds = JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")));
+        const totalRows = yield* sql<{
+          readonly task_id: Uint8Array;
+          readonly thread_count: number;
+          readonly last_turn_ended_at: string | null;
+        }>`
+          SELECT task_id, SUM(agent_id IS NULL) AS thread_count,
+                 MAX(last_turn_ended_at) AS last_turn_ended_at
+          FROM sessions
+          WHERE task_id IN (SELECT unhex(value) FROM json_each(${hexIds}))
+          GROUP BY task_id`;
+        const notableRows = yield* sql<{
+          readonly id: Uint8Array;
+          readonly task_id: Uint8Array;
+          readonly kind: SessionKind;
+          readonly status: SessionStatus;
+          readonly created_at: string;
+          readonly open_requests: string;
+        }>`
+          SELECT id, task_id, kind, status, created_at, open_requests FROM (
+            SELECT id, task_id, kind, status, created_at, open_requests,
+                   ROW_NUMBER() OVER (PARTITION BY task_id, kind
+                                      ORDER BY created_at DESC, id DESC) AS recency_of_kind,
+                   ROW_NUMBER() OVER (PARTITION BY task_id
+                                      ORDER BY created_at DESC, id DESC) AS recency
+            FROM sessions
+            WHERE task_id IN (SELECT unhex(value) FROM json_each(${hexIds})))
+          WHERE recency = 1
+             OR (kind = 'thread' AND recency_of_kind = 1)
+             OR status IN ${sql.in(WORKING_SESSION_STATUSES)}
+             OR open_requests <> '[]'
+          ORDER BY task_id, created_at, id`;
+        return {
+          totals: totalRows.map((row) => ({
+            taskId: uuidToString(row.task_id),
+            threadCount: row.thread_count,
+            lastTurnEndedAt: row.last_turn_ended_at ?? undefined,
+          })),
+          notable: notableRows.map((row) => ({
+            id: uuidToString(row.id),
+            taskId: uuidToString(row.task_id),
+            kind: row.kind,
+            status: row.status,
+            createdAt: row.created_at,
+            openRequests: JSON.parse(row.open_requests) as ReadonlyArray<SessionRequest>,
+          })),
+        };
+      }),
+
+    /**
+     * Counts the working Threads of each of `taskIds`: the sessions of kind
+     * `thread` whose status is one of `WORKING_SESSION_STATUSES`, the rule the
+     * Work board uses for an agent at work. Returns a map from Task id to the
+     * count, which leaves out a Task with none. One statement on
+     * `sessions_task_id`; the ids reach SQLite as one JSON text.
+     */
+    countWorkingThreadsOfTasks: (
+      taskIds: ReadonlyArray<string>,
+    ): Effect.Effect<ReadonlyMap<string, number>, SqlError> =>
+      taskIds.length === 0
+        ? Effect.succeed(new Map())
+        : Effect.map(
+            sql<{ readonly task_id: Uint8Array; readonly working: number }>`
+              SELECT task_id, COUNT(*) AS working FROM sessions
+              WHERE task_id IN (SELECT unhex(value)
+                                FROM json_each(${JSON.stringify(taskIds.map((id) => id.replaceAll("-", "")))}))
+                AND kind = 'thread' AND status IN ${sql.in(WORKING_SESSION_STATUSES)}
+              GROUP BY task_id`,
+            (rows) => new Map(rows.map((row) => [uuidToString(row.task_id), row.working])),
+          ),
+
+    /**
+     * Sets the time the session's own agent last ended a turn to `at`. An
+     * exited session is left alone, like `touched`. This is not the last
+     * activity time, which every tool event moves.
+     */
+    turnEnded: (sessionId: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(
+        sql`UPDATE sessions SET last_turn_ended_at = ${at}
+            WHERE id = ${uuidFromString(sessionId)} AND status <> 'exited'`,
+      ),
+
+    /**
+     * Stores the harness-native id a runner reported for one of its sessions.
+     * The runner and the account are both in the WHERE clause, because a
      * runner may report only on the sessions placed on it, and only for the
-     * instance those sessions were opened against.
+     * account those sessions were opened against.
      */
     bind: (
       sessionId: string,
       runnerId: string,
-      instanceId: string,
+      providerAccountId: string,
       nativeSessionId: string,
     ): Effect.Effect<void, SqlError> =>
       Effect.asVoid(sql`
         UPDATE sessions SET native_session_id = ${nativeSessionId}
         WHERE id = ${uuidFromString(sessionId)} AND runner_id = ${uuidFromString(runnerId)}
-          AND instance_id = ${uuidFromString(instanceId)}
+          AND provider_account_id = ${uuidFromString(providerAccountId)}
       `),
 
     /**
      * Returns up to `limit` of this runner's oldest queued sessions, with what
      * the start frame needs: the exact spec each was queued with, and its
-     * provider. The provider is joined rather than read per row, so dispatch
-     * needs one statement. `after` continues an earlier batch from where it
+     * account and harness. `after` continues an earlier batch from where it
      * stopped, in queue order, so a caller that skips rows never reads them
      * again.
      */
@@ -1409,8 +1899,8 @@ const make = Effect.gen(function* () {
           readonly spec: string;
           readonly checkout_branch: string | null;
           readonly github_connection_id: Uint8Array | null;
-          readonly provider_id: string;
-          readonly config: string;
+          readonly provider_account_id: Uint8Array;
+          readonly harness_id: string;
           readonly agent_id: Uint8Array | null;
           readonly conversation_id: Uint8Array | null;
           readonly model_selection: string;
@@ -1424,9 +1914,9 @@ const make = Effect.gen(function* () {
                  -- would change the branch under whatever the user has done in
                  -- that checkout since.
                  CASE WHEN s.started_at IS NULL THEN s.checkout_branch END AS checkout_branch,
-                 s.github_connection_id, pi.provider_id, pi.config, s.agent_id,
+                 s.github_connection_id, s.provider_account_id, s.harness_id, s.agent_id,
                  s.conversation_id, s.model_selection, s.run_id, s.step_id
-          FROM sessions s JOIN provider_instances pi ON pi.id = s.instance_id
+          FROM sessions s
           WHERE s.runner_id = ${uuidFromString(runnerId)} AND s.status = 'queued'
             -- A session waits until its workspace is ready. Starting it
             -- earlier would give the harness a directory that does not exist
@@ -1447,8 +1937,8 @@ const make = Effect.gen(function* () {
             checkoutBranch: row.checkout_branch,
             githubConnectionId:
               row.github_connection_id === null ? null : uuidToString(row.github_connection_id),
-            providerId: row.provider_id,
-            config: JSON.parse(row.config) as unknown,
+            providerAccountId: uuidToString(row.provider_account_id),
+            harnessId: row.harness_id,
             agentId: row.agent_id === null ? null : uuidToString(row.agent_id),
             conversationId: row.conversation_id === null ? null : uuidToString(row.conversation_id),
             modelSelection: JSON.parse(row.model_selection) as ModelSelection,
@@ -1512,7 +2002,7 @@ const make = Effect.gen(function* () {
      * reach, and its token must keep working. One exception: a runner whose
      * machine was suspended does not count the suspended time, so its process
      * can outlive the bound. That runner lists the process in its report when
-     * it returns, and the controller then stops it (`listExitedAmong`).
+     * it returns, and the controller then stops it (`listToStopAmong`).
      *
      * A spec stored before the timeouts were on it has no absolute timeout, so
      * the default the runner applied to it at that time is the bound.
@@ -1530,11 +2020,14 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Returns the sessions in `held` (the runner's report) that the controller
-     * has already marked `exited`. The caller tells the runner to stop each
-     * one.
+     * Returns the sessions in `held` (the runner's report) that must not be
+     * running: the controller has already marked them `exited`, or they are
+     * archived. An archived session is stopped when it is archived, and the
+     * frame can be lost before the runner gets it. The caller tells the runner
+     * to stop each one. Neither the status nor the lease of a session changes
+     * here.
      */
-    listExitedAmong: (
+    listToStopAmong: (
       runnerId: string,
       held: ReadonlyArray<string>,
     ): Effect.Effect<ReadonlyArray<string>, SqlError> =>
@@ -1543,7 +2036,7 @@ const make = Effect.gen(function* () {
         : Effect.map(
             sql<{ readonly id: Uint8Array }>`
               SELECT id FROM sessions
-              WHERE runner_id = ${uuidFromString(runnerId)} AND status = 'exited'
+              WHERE runner_id = ${uuidFromString(runnerId)} AND (status = 'exited' OR archived_at IS NOT NULL)
                 AND id IN ${sql.in(held.map(uuidFromString))}
             `,
             (rows) => rows.map((row) => uuidToString(row.id)),

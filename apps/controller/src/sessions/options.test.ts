@@ -117,7 +117,7 @@ describe("buildContinuingSpec", () => {
   const CONVERSATION_ID = "0199e0e7-0000-7000-8000-0000000000c1";
   const RUN_ID = "0199e0e7-0000-7000-8000-0000000000a1";
   const buildParent = (timeouts: SessionSpec["timeouts"]): SessionSpec => ({
-    instanceId: "0199e0e7-0000-7000-8000-0000000000f1",
+    providerAccountId: "0199e0e7-0000-7000-8000-0000000000f1",
     workspaceId: null,
     modelSelection: { model: "clever", options: {} },
     accessMode: "full-access",

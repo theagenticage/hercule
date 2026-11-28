@@ -13,11 +13,11 @@
    whatever the queued row's 12px text sets). It takes its size from the
    text around it, so the three places need no rules of their own.
 
-   - Fill: `kbd`'s, and `.pick--pill`'s (composer.css): ink at 6%.
+   - Fill: `kbd`'s: ink at 6%.
    - Radius: `--r-xs` (6px), the token nearest `kbd`'s 5px.
    - Padding: `kbd`'s `0 5px`.
-   - Text: ink in `--w-medium`, as `.pick--pill` and the book's `.chip`, so
-     the chip reads as a thing and not as more of the sentence.
+   - Text: ink in `--w-medium`, as the book's `.chip`, so the chip reads as
+     a thing and not as more of the sentence.
    - `nowrap`: a chip is one atom and never breaks across two lines. */
 .skill-chip {
   padding: 0 5px;

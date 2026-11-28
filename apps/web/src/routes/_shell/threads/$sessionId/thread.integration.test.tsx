@@ -16,14 +16,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { defaultScheduler, focusManager, notifyManager } from "@tanstack/react-query";
-import { buildApprovalCard, formatDuration, formatStamp, queryKeys } from "@hercule/client-core";
+import {
+  buildApprovalCard,
+  formatDuration,
+  formatStamp,
+  queryKeys,
+  TYPING_PAUSE_MS,
+} from "@hercule/client-core";
+import { buildMcpServerViews } from "@hercule/client-core/mcp-servers";
+import { describeThreadServers } from "@hercule/client-core/mcp-servers/first-screen";
+import { buildRunner } from "@hercule/client-core/threads/testing";
 import type {
   Assistant,
   Input,
   ModelOption,
   Profile,
   Project,
-  ProviderInstance,
+  ProviderAccount,
+  McpServer,
   Resource,
   Runner,
   Session,
@@ -39,7 +49,9 @@ import {
   buildSubagentTapTopic,
 } from "@hercule/contract";
 import {
+  buildCatalogFields,
   buildErrorBody,
+  buildMainProfile,
   fakeMainScrollGeometry,
   pickRow,
   readPageText,
@@ -51,6 +63,25 @@ import {
   type LiveStub,
 } from "../../../../app/testing";
 import {
+  MCP_SERVERS,
+  S_DATADOG,
+  S_DOCS_URL,
+  S_FIGMA,
+  S_GITHUB,
+  S_GRAFANA,
+  S_LINEAR,
+  S_NOTION,
+  S_SENTRY_HOBBY,
+  S_SENTRY_WORK,
+  S_STRIPE,
+  buildMcpServerRoutes,
+  buildSessionServers,
+  findServerConnection,
+  openPlusMenu,
+  openServersSubmenu,
+  readSubmenuSwitches,
+} from "../../../../app/testing-mcp-servers";
+import {
   SESSION,
   SESSION_ID,
   ZONE,
@@ -59,36 +90,35 @@ import {
   buildSubagent,
 } from "./-fixtures";
 
+// Count the thread's description and the join of its servers without changing what they return:
+// the provider builds each again only when its records change, so the counts show whether a
+// transcript-only update makes the context it shares new.
+vi.mock("@hercule/client-core/mcp-servers/first-screen", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("@hercule/client-core/mcp-servers/first-screen")>();
+  return { ...original, describeThreadServers: vi.fn(original.describeThreadServers) };
+});
+vi.mock("@hercule/client-core/mcp-servers", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@hercule/client-core/mcp-servers")>();
+  return { ...original, buildMcpServerViews: vi.fn(original.buildMcpServerViews) };
+});
+
 /**
  * Fixtures for the composer tests:
- * - A provider instance, a runner and a profile with `SESSION`'s ids,
+ * - A Provider Account, a runner and a profile with `SESSION`'s ids,
  *   which the started thread's read-only fields and model menu read.
- * - A second instance, runner and profile, which exist only to prove that
+ * - A second account, runner and profile, which exist only to prove that
  *   they never show up in a started thread's read-only fields or its
- *   other-instance groups.
+ *   other-account groups.
  */
-const DECLARED: ProviderInstance["declared"] = {
-  steering: "native",
-  fork: "native",
-  modelSwitch: "in-session",
-  accessModes: {
-    "approval-required": "native",
-    "auto-accept-edits": "native",
-    auto: "native",
-    "full-access": "native",
-  },
-  mcpPassthrough: "native",
-  disallowedTools: "native",
-  structuredOutput: "supported",
-};
-
-const buildInstanceSnapshot = (
+const buildProviderAccountSnapshot = (
   runnerId: string,
   identity: string,
   planLabel: string,
-  models: ProviderInstance["snapshots"][number]["models"],
-): ProviderInstance["snapshots"][number] => ({
+  models: ProviderAccount["snapshots"][number]["models"],
+): ProviderAccount["snapshots"][number] => ({
   runnerId,
+  harnessId: "claude-code/claude-code",
   probedAt: "2026-09-08T09:50:00.000Z",
   harnessVersion: "2.1.263",
   versionVerdict: "ok",
@@ -96,35 +126,40 @@ const buildInstanceSnapshot = (
   models,
 });
 
-const INSTANCE_STARTED: ProviderInstance = {
-  id: SESSION.instanceId,
-  providerId: "claude-code",
-  secretFields: [],
-  name: "personal",
-  config: {},
-  displayName: "Claude Code",
-  binaryName: "claude",
-  declared: DECLARED,
-  snapshots: [
-    buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
-      {
-        slug: "claude-sonnet-5",
-        name: "Claude Sonnet 5",
-        imageInput: { maxBytes: null },
-        isDefault: true,
-        options: [],
-      },
-      { slug: "claude-opus-5", name: "Claude Opus 5", imageInput: { maxBytes: null }, options: [] },
-    ]),
-  ],
+const SNAPSHOTS_STARTED = [
+  buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    {
+      slug: "claude-sonnet-5",
+      name: "Claude Sonnet 5",
+      imageInput: { maxBytes: null },
+      isDefault: true,
+      options: [],
+    },
+    { slug: "claude-opus-5", name: "Claude Opus 5", imageInput: { maxBytes: null }, options: [] },
+  ]),
+];
+
+const ACCOUNT_STARTED: ProviderAccount = {
+  id: SESSION.providerAccountId,
+  providerId: "anthropic/anthropic",
+  kind: "subscription-per-machine",
+  label: "personal",
+  identity: "rogier@example.com",
+  planLabel: "Claude Max",
+  defaultHarnessId: "claude-code/claude-code",
+  expiresAt: null,
+  usage: [],
+  failure: null,
+  snapshots: SNAPSHOTS_STARTED,
+  ...buildCatalogFields(SNAPSHOTS_STARTED),
   createdAt: "2026-09-08T09:00:00.000Z",
   updatedAt: "2026-09-08T09:00:00.000Z",
 };
 
 /**
  * The same descriptor `new.integration.test.tsx` uses, for the model option
- * tests. Only `INSTANCE_OPTIONS` offers it, not
- * `INSTANCE_STARTED`, so the tests that are not about options see a pill with
+ * tests. Only `ACCOUNT_OPTIONS` offers it, not
+ * `ACCOUNT_STARTED`, so the tests that are not about options see a pill with
  * no options selector.
  */
 const EFFORT: ModelOption = {
@@ -139,11 +174,11 @@ const EFFORT: ModelOption = {
   default: "medium",
 };
 
-/** The session's instance, with `effort` offered on both of its models. */
-const INSTANCE_OPTIONS: ProviderInstance = {
-  ...INSTANCE_STARTED,
+/** The session's account, with `effort` offered on both of its models. */
+const ACCOUNT_OPTIONS: ProviderAccount = {
+  ...ACCOUNT_STARTED,
   snapshots: [
-    buildInstanceSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
+    buildProviderAccountSnapshot(SESSION.runnerId, "rogier@example.com", "Claude Max", [
       {
         slug: "claude-sonnet-5",
         name: "Claude Sonnet 5",
@@ -161,12 +196,14 @@ const INSTANCE_OPTIONS: ProviderInstance = {
   ],
 };
 
-const INSTANCE_OTHER: ProviderInstance = {
-  ...INSTANCE_STARTED,
+const ACCOUNT_OTHER: ProviderAccount = {
+  ...ACCOUNT_STARTED,
   id: "01a06d02-1000-7000-8000-000000000099",
-  name: "work",
+  label: "work",
+  identity: "work@example.com",
+  planLabel: "Claude Pro",
   snapshots: [
-    buildInstanceSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
+    buildProviderAccountSnapshot(SESSION.runnerId, "work@example.com", "Claude Pro", [
       {
         slug: "claude-haiku-5",
         name: "Claude Haiku 5",
@@ -186,8 +223,10 @@ const RUNNER_STARTED: Runner = {
   reserved: false,
   version: "0.4.2",
   labels: [],
-  facts: null,
-  watermark: null,
+  // Claude Code and Codex installed, so the accounts of the tests are ready here.
+  facts: buildRunner("", "").facts,
+  metrics: null,
+  diskUsage: null,
   maxConcurrentSessions: 4,
   diskWatermarkBytes: 10 * 1024 * 1024 * 1024,
   lastSeenAt: "2026-09-08T09:50:00.000Z",
@@ -217,23 +256,40 @@ const PROFILE_OTHER: Profile = {
 /**
  * Builds the stubbed controller routes for the app and for the thread of
  * `fixture`, with no subagents, the transcript `rows`, and the composer's
- * instances, runners and profiles. `extra` is added over them.
+ * accounts, runners and profiles. `extra` is added over them.
  */
 const buildThreadRoutes = (
   fixture: Session,
   rows: readonly TranscriptRow[],
   extra: Readonly<Record<string, Handler>> = {},
-): Readonly<Record<string, Handler>> =>
-  buildController(
+): Readonly<Record<string, Handler>> => {
+  // The Model Profile holds the models of whichever accounts the test serves.
+  const served = extra["GET /api/v1/provider-accounts"];
+  const accounts =
+    served !== undefined && "body" in served
+      ? (served.body as readonly ProviderAccount[])
+      : [ACCOUNT_STARTED, ACCOUNT_OTHER];
+  return buildController(
     { session: fixture, subagents: [] },
     {
       [`GET /api/v1/sessions/${fixture.id}/transcript`]: { body: { items: rows } },
-      "GET /api/v1/providers": { body: [INSTANCE_STARTED, INSTANCE_OTHER] },
+      "GET /api/v1/provider-accounts": { body: [ACCOUNT_STARTED, ACCOUNT_OTHER] },
+      "GET /api/v1/model-profiles": { body: [buildMainProfile(accounts)] },
       "GET /api/v1/runners": { body: { items: [RUNNER_STARTED, RUNNER_OTHER] } },
       "GET /api/v1/profiles": { body: { items: [PROFILE_STARTED, PROFILE_OTHER] } },
       ...extra,
     },
   );
+};
+
+/**
+ * Returns the click handler a button has now. Called later, it stands for a click that began on the
+ * render this button came from, before the cache changed.
+ */
+const readClickHandler = (button: HTMLElement): (() => void) => {
+  const key = Object.keys(button).find((each) => each.startsWith("__reactProps$"))!;
+  return (button as unknown as Record<string, { onClick: () => void }>)[key]!.onClick;
+};
 
 const openApp = async (
   fixture: Session,
@@ -260,6 +316,16 @@ const settle = () =>
   act(async () => {
     for (let i = 0; i < 10; i++) await Promise.resolve();
   });
+
+/** Pushes that the server `id` changed, once the thread holds the live topic. */
+const pushServerChange = async (live: LiveStub, id: string): Promise<void> => {
+  await waitFor(() => {
+    expect(live.topics()).toContain("mcpServer");
+  });
+  act(() => {
+    live.push("mcpServer", { _tag: "invalidate", ids: [id], kind: "updated" });
+  });
+};
 
 /** Builds a `TranscriptRow` at `position`, with `at` copied from the event. */
 const buildTranscriptRow = (position: number, event: TranscriptRow["event"]): TranscriptRow => ({
@@ -701,7 +767,7 @@ describe("Thread: transcript", () => {
   });
 
   it("shows the error of a thread that failed to start, with the command as inline code", async () => {
-    const command = "hercule runner install-harness r1 --provider claude-code";
+    const command = "hercule runner install-harness r1 --harness claude-code/claude-code";
     await openApp(buildSession({ status: "exited" }), [
       buildTranscriptRow(0, {
         _tag: "runtime.error",
@@ -1431,8 +1497,12 @@ describe("Thread: token tap", () => {
     await waitFor(() => {
       expect(screen.queryByText("half a paragraph")).toBeNull();
     });
-    expect(live.topics()).not.toContain(TAP);
-    expect(live.topics()).not.toContain(STREAM);
+    // Unsubscribing returns at once, but the Interrupt frame that ends the
+    // subscription is sent by a forked fiber a moment later.
+    await waitFor(() => {
+      expect(live.topics()).not.toContain(TAP);
+      expect(live.topics()).not.toContain(STREAM);
+    });
   });
 
   it("refetches the transcript and shows the refetched rows when the live overlay reports reset", async () => {
@@ -1767,10 +1837,13 @@ describe("Thread: live subscriptions", () => {
     expect(lastTurn.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Neither the stream nor the tap is subscribed again: the stream would
     // stop at the same row, and no row will ever match what the tap delivers.
+    // Both are awaited because they close at different times: the stream is
+    // unsubscribed inside the delta handler, but the tap only when the render
+    // that follows the unreadable state change has flushed its effects.
     await waitFor(() => {
       expect(live.topics()).not.toContain(stream);
+      expect(live.topics()).not.toContain(buildSessionTapTopic(SESSION_ID));
     });
-    expect(live.topics()).not.toContain(buildSessionTapTopic(SESSION_ID));
   });
 
   it("replays a just-spawned thread's rows when the transcript read returned none", async () => {
@@ -2316,21 +2389,55 @@ describe("Thread: composer read-only fields and model switch", () => {
     expect(screen.queryByText("Full access")).toBeNull();
   });
 
-  it("dims the model menu's other accounts with the note account fixed", async () => {
+  it("offers a running thread one flat list of its account's models, and says other models start a new thread", async () => {
     const user = userEvent.setup();
     await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    const menu = await screen.findByRole("dialog");
 
-    expect(readPageText()).toContain("account fixed");
-    // The current instance's other model can still be picked, unlike the
-    // other instance's group.
-    expect(screen.getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+    // The account and the harness are fixed once the thread has started, so
+    // the menu has no lanes, no Recent, and none of the other account's models.
+    expect(within(menu).getByRole("button", { name: /claude sonnet 5/i }).textContent).toContain(
+      "✓",
+    );
+    expect(within(menu).getByRole("button", { name: /claude opus 5/i })).toBeDefined();
+    expect(within(menu).queryByText(/claude haiku 5/i)).toBeNull();
+    expect(within(menu).queryByText("Recent")).toBeNull();
+    expect(within(menu).queryByText("Anthropic · work")).toBeNull();
+    expect(readPageText(menu)).toContain("Other models start a new thread.");
+  });
+
+  it("offers a running thread no New row, because only a draft's profile announces models", async () => {
+    const user = userEvent.setup();
+    const main = buildMainProfile([ACCOUNT_STARTED, ACCOUNT_OTHER]);
+    const announcing = {
+      ...main,
+      accounts: main.accounts.map((section) => ({
+        ...section,
+        newModels: [
+          {
+            model: "claude-opus-5-6",
+            name: "Claude Opus 5.6",
+            firstSeenAt: "2026-10-26T10:00:00.000Z",
+          },
+        ],
+      })),
+    };
+    await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
+      "GET /api/v1/model-profiles": { body: [announcing] },
+    });
+
+    await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
+    const menu = await screen.findByRole("dialog");
+
+    expect(within(menu).queryByText("Claude Opus 5.6")).toBeNull();
+    expect(within(menu).queryByRole("button", { name: /^add /i })).toBeNull();
   });
 
   // Picking a model does not patch the session. The pick is draft state that
   // is sent with the next submission.
-  it("shows the picked model in the pill without sending anything when a model of the same instance is chosen", async () => {
+  it("shows the picked model in the pill without sending anything when a model of the same account is chosen", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns());
 
@@ -2691,16 +2798,16 @@ describe("Thread: stop control", () => {
  * picks are draft state that stays in the browser until the next submission.
  * After the server stores them, the pill shows the stored session values.
  *
- * These tests return `INSTANCE_OPTIONS` from `GET /api/v1/providers`, the
+ * These tests return `ACCOUNT_OPTIONS` from `GET /api/v1/providers`, the
  * only fixture whose models have an `effort` descriptor.
  */
 describe("Thread: model options are sent with the submission", () => {
-  const providers = { body: [INSTANCE_OPTIONS, INSTANCE_OTHER] };
+  const providers = { body: [ACCOUNT_OPTIONS, ACCOUNT_OTHER] };
 
   it("sends nothing when an option is picked, and carries the pick on the next input", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
       },
@@ -2737,7 +2844,7 @@ describe("Thread: model options are sent with the submission", () => {
   it("keeps the picked option when another model that offers it is picked, and never patches the session", async () => {
     const user = userEvent.setup();
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
       },
@@ -2774,10 +2881,10 @@ describe("Thread: model options are sent with the submission", () => {
 
   it("brings a picked option back when the model that offers it is picked again", async () => {
     const user = userEvent.setup();
-    const [snapshot] = INSTANCE_OPTIONS.snapshots;
+    const [snapshot] = ACCOUNT_OPTIONS.snapshots;
     // A third model that offers no options.
-    const withPlainModel: ProviderInstance = {
-      ...INSTANCE_OPTIONS,
+    const withPlainModel: ProviderAccount = {
+      ...ACCOUNT_OPTIONS,
       snapshots: [
         {
           ...snapshot!,
@@ -2794,7 +2901,7 @@ describe("Thread: model options are sent with the submission", () => {
       ],
     };
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": { body: [withPlainModel] },
+      "GET /api/v1/provider-accounts": { body: [withPlainModel] },
       [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
         body: { inputId: INPUT_ID, result: "opened" },
       },
@@ -2833,7 +2940,7 @@ describe("Thread: model options are sent with the submission", () => {
         modelSelection: { model: "claude-sonnet-5", options: { effort: "high" } },
       }),
       buildTwoCompletedTurns(),
-      { "GET /api/v1/providers": providers },
+      { "GET /api/v1/provider-accounts": providers },
     );
 
     await user.click(screen.getByRole("button", { name: /claude sonnet 5/i }));
@@ -2857,7 +2964,7 @@ describe("Thread: model options are sent with the submission", () => {
     // from that stored value.
     let stored: Record<string, string> = {};
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({
         body: buildSession({
           status: "idle",
@@ -2905,7 +3012,7 @@ describe("Thread: model options are sent with the submission", () => {
     });
     let holding = false;
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       // The session read that follows the input is held back, so the user
       // can pick again while the send has not finished.
       [`GET /api/v1/sessions/${SESSION_ID}`]: async () => {
@@ -2968,7 +3075,7 @@ describe("Thread: model options are sent with the submission", () => {
     let holding = false;
 
     const { api } = await openApp(buildSession({ status: "idle" }), buildTwoCompletedTurns(), {
-      "GET /api/v1/providers": providers,
+      "GET /api/v1/provider-accounts": providers,
       [`GET /api/v1/sessions/${SESSION_ID}`]: async () => {
         if (holding) await held;
         return { body: buildSession({ status: "idle", modelSelection: stored }) };
@@ -3037,7 +3144,7 @@ describe("Thread: model options are sent with the submission", () => {
         modelSelection: { model: "claude-sonnet-5", options: { effort: "high" } },
       }),
       buildTwoCompletedTurns(),
-      { "GET /api/v1/providers": providers },
+      { "GET /api/v1/provider-accounts": providers },
     );
 
     await waitFor(() => {
@@ -3070,7 +3177,7 @@ describe("Thread: an exited thread that can be resumed", () => {
     await openApp(EXITED_RESUMABLE, buildTwoCompletedTurns());
 
     const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
-    expect(textarea.disabled).toBe(false);
+    expect(textarea.readOnly).toBe(false);
     expect(textarea.placeholder).toBe("Reply…");
 
     const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude sonnet 5/i });
@@ -3137,7 +3244,7 @@ describe("Thread: an exited thread that cannot be resumed", () => {
     );
 
     const textarea = screen.getByRole<HTMLTextAreaElement>("textbox");
-    expect(textarea.disabled).toBe(true);
+    expect(textarea.readOnly).toBe(true);
     expect(textarea.placeholder).toBe(`This thread can't be resumed: ${reason}.`);
 
     const pill = screen.getByRole<HTMLButtonElement>("button", { name: /claude sonnet 5/i });
@@ -3488,9 +3595,11 @@ describe("Thread: the permission card", () => {
 });
 
 /**
- * Tests for answering a `question` request in the permission card: one
- * question at a time, its options as choices, a field for an own answer, and
- * Next and Send. The answers go to `session.respondToQuestion` as
+ * Tests for answering a `question` request. The composer answers a question
+ * the dock shows: it shows and edits the question's own answer, and its step
+ * button takes the place of Send. The dock draws the question and its
+ * options, and keeps its own field only where the composer cannot answer (a
+ * secret question). The answers go to `session.respondToQuestion` as
  * `{ requestId, answers }`.
  */
 describe("Thread: answering the agent's questions", () => {
@@ -3548,6 +3657,55 @@ describe("Thread: answering the agent's questions", () => {
   };
 
   /**
+   * Opens a busy thread with `initial` open Requests and returns the app, its
+   * stubbed API, and `setOpenRequests`, which changes the session's open
+   * Requests the way the controller does: the read answers with the new
+   * session, and the live `session` topic nudges the app to read it. `extra`
+   * adds or replaces stubbed routes.
+   */
+  const openLive = async (
+    initial: readonly SessionRequest[],
+    extra: Readonly<Record<string, Handler>> = {},
+  ) => {
+    let current = buildSession({ status: "busy", openRequests: initial });
+    const app = await openApp(current, [], {
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: current }),
+      [RESPOND_TO_QUESTION]: () => ({ body: current }),
+      [`POST /api/v1/sessions/${SESSION_ID}/input`]: {
+        body: { inputId: "01a06d02-5000-7000-8000-000000000001", result: "queued" },
+      },
+      ...extra,
+    });
+    await waitFor(() => {
+      expect(app.live.topics()).toContain("session");
+    });
+    const setOpenRequests = (openRequests: readonly SessionRequest[]): void => {
+      current = buildSession({ status: "busy", openRequests });
+      act(() => {
+        app.live.push("session", { _tag: "invalidate", ids: [SESSION_ID], kind: "updated" });
+      });
+    };
+    return { ...app, setOpenRequests };
+  };
+
+  /**
+   * Opens the thread parked on `request`, with a controller that refuses the
+   * first answer with a 409 and accepts every later one, and returns the app
+   * and its stubbed API.
+   */
+  const openRefusingFirstAnswer = (request: SessionRequest) => {
+    const session = buildSession({ status: "busy", openRequests: [request] });
+    const replies = [
+      {
+        status: 409,
+        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
+      },
+      { body: session },
+    ];
+    return openApp(session, [], { [RESPOND_TO_QUESTION]: () => replies.shift()! });
+  };
+
+  /**
    * Returns the bodies the app sent with `session.respondToQuestion` and
    * `session.respondToApprovalRequest`, oldest first, so a decision sent by
    * mistake would show up too.
@@ -3569,235 +3727,650 @@ describe("Thread: answering the agent's questions", () => {
   const findChoice = (role: "radio" | "checkbox", label: string): HTMLElement =>
     screen.getByRole(role, { name: (name) => name.startsWith(label) });
 
-  /** Returns the field the user types their own answer in. */
-  const readOwnAnswer = (): HTMLElement => screen.getByRole("textbox", { name: "Your own answer" });
+  /** Returns the composer's text field, which holds the message or, while a question is answered, the answer. */
+  const readComposerField = (): HTMLTextAreaElement =>
+    screen.getByRole<HTMLTextAreaElement>("textbox");
 
-  /** Returns the button that sends the answers, which the composer's Send is not. */
-  const readSend = (): HTMLElement => screen.getByRole("button", { name: "Send answers" });
+  /** Returns the button that steps to the next question, or sends the answers on the last one. */
+  const readStep = (label: "Next" | "Send answers"): HTMLElement =>
+    screen.getByRole("button", { name: label });
 
   /** Checks whether `element` takes no input, through `disabled` or `aria-disabled`. */
   const isLocked = (element: HTMLElement): boolean =>
     (element as HTMLInputElement | HTMLButtonElement).disabled === true ||
     element.getAttribute("aria-disabled") === "true";
 
-  it("shows one question at a time with its place among them, its options as choices, and a field for an own answer", async () => {
-    const user = userEvent.setup();
-    await openParked(QUESTIONS);
+  /** Returns the question form in the dock that shows `question`'s text. */
+  const findQuestionForm = async (question: string): Promise<HTMLElement> =>
+    (await screen.findByText(question)).closest<HTMLElement>('[role="group"]')!;
 
-    await screen.findByText("Which storage should drafts use?");
-    expect(screen.queryByText("Which features should ship?")).toBeNull();
-    expect(screen.getByText("Question 1 of 2")).toBeDefined();
-    expect(findChoice("radio", "localStorage")).toBeDefined();
-    expect(findChoice("radio", "IndexedDB")).toBeDefined();
-    expect(screen.queryAllByRole("checkbox")).toEqual([]);
-    expect(readOwnAnswer()).toBeDefined();
+  describe("in the composer", () => {
+    it("takes the composer over: the dock shows the question and its options, and the composer holds the answer, with Next in the place of Send", async () => {
+      const user = userEvent.setup();
+      await openParked(QUESTIONS);
 
-    await user.click(findChoice("radio", "localStorage"));
-    await user.click(screen.getByRole("button", { name: "Next" }));
+      const form = await findQuestionForm("Which storage should drafts use?");
+      expect(screen.queryByText("Which features should ship?")).toBeNull();
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      expect(findChoice("radio", "localStorage")).toBeDefined();
+      expect(findChoice("radio", "IndexedDB")).toBeDefined();
+      expect(screen.queryAllByRole("checkbox")).toEqual([]);
+      // The dock has no field and no step button of its own.
+      expect(within(form).queryAllByRole("textbox")).toEqual([]);
+      expect(within(form).queryAllByRole("button")).toEqual([]);
+      // The composer holds the answer, with the placeholder of a question that has options.
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+      // The `+` menu keeps the MCP servers row, and turns Attach off with its reason.
+      await user.click(screen.getByRole("button", { name: "Add to thread" }));
+      const plusMenu = await screen.findByRole("dialog", { name: "Add to thread" });
+      expect(within(plusMenu).getByText("An answer takes text only")).toBeDefined();
+      expect(within(plusMenu).queryByRole("button", { name: "Attach an image" })).toBeNull();
+      expect(within(plusMenu).getByRole("button", { name: /MCP servers/ })).toBeDefined();
+      await user.keyboard("{Escape}");
 
-    expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
-    expect(screen.getByText("Which features should ship?")).toBeDefined();
-    expect(screen.getByText("Question 2 of 2")).toBeDefined();
-    expect(findChoice("checkbox", "Sync")).toBeDefined();
-    expect(findChoice("checkbox", "Search")).toBeDefined();
-    // The shell's own segmented control is a radio group too, so only the
-    // question form is checked for radios.
-    const questionForm = screen.getByText("Which features should ship?").closest("form")!;
-    expect(within(questionForm).queryAllByRole("radio")).toEqual([]);
-    expect(readOwnAnswer()).toBeDefined();
-    expect(readSend()).toBeDefined();
-  });
+      await user.click(findChoice("radio", "localStorage"));
+      await user.click(readStep("Next"));
 
-  it("shows a lone question without its place, and with Send rather than Next", async () => {
-    await openParked(ONE_QUESTION);
-
-    await screen.findByText("Which storage should drafts use?");
-    expect(screen.queryByText(/\b1 of 1\b/)).toBeNull();
-    expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
-    expect(readSend()).toBeDefined();
-  });
-
-  it("warns that an answer the agent asked to keep secret is stored like any other", async () => {
-    await openParked({ ...QUESTIONS, detail: { questions: [{ ...STORAGE, secret: true }] } });
-
-    await screen.findByText("Which storage should drafts use?");
-    expect(
-      screen.getByText(
-        "The agent asked to keep this answer secret. It is stored in the thread like any other answer.",
-      ),
-    ).toBeDefined();
-  });
-
-  it("enables Send only once the question is answered with a pick or non-blank text", async () => {
-    const user = userEvent.setup();
-    await openParked(ONE_QUESTION);
-
-    await screen.findByText("Which storage should drafts use?");
-    expect(isLocked(readSend())).toBe(true);
-    await user.type(readOwnAnswer(), "   ");
-    expect(isLocked(readSend())).toBe(true);
-    await user.click(findChoice("radio", "IndexedDB"));
-    expect(isLocked(readSend())).toBe(false);
-  });
-
-  it("keeps Send disabled on the last question until that question is answered", async () => {
-    const user = userEvent.setup();
-    await openParked(QUESTIONS);
-
-    await user.click(
-      await screen.findByRole("radio", { name: (name) => name.startsWith("localStorage") }),
-    );
-    await user.click(screen.getByRole("button", { name: "Next" }));
-
-    expect(isLocked(readSend())).toBe(true);
-    await user.click(findChoice("checkbox", "Search"));
-    expect(isLocked(readSend())).toBe(false);
-  });
-
-  it("sends the answers of every question with session.respondToQuestion", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(QUESTIONS);
-
-    await user.click(
-      await screen.findByRole("radio", { name: (name) => name.startsWith("localStorage") }),
-    );
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(findChoice("checkbox", "Sync"));
-    await user.click(findChoice("checkbox", "Search"));
-    await user.type(readOwnAnswer(), " Offline mode ");
-    await user.click(readSend());
-
-    await waitFor(() => {
-      expect(readBodies(api.calls)).toEqual([
-        {
-          requestId: "req-2",
-          answers: { Storage: "localStorage", Features: ["Sync", "Search", "Offline mode"] },
-        },
-      ]);
+      expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      expect(screen.getByText("Which features should ship?")).toBeDefined();
+      expect(screen.getByText("Question 2 of 2")).toBeDefined();
+      expect(findChoice("checkbox", "Sync")).toBeDefined();
+      expect(findChoice("checkbox", "Search")).toBeDefined();
+      expect(readStep("Send answers")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Previous" })).toBeDefined();
     });
-  });
 
-  it("locks the choices, the field and Send once the answers are sent", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(ONE_QUESTION);
+    it("leaves the Stop beside the step button while the session is busy, and Stop sends no answer", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(QUESTIONS);
 
-    await user.click(
-      await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
-    );
-    await user.click(readSend());
-    await waitFor(() => {
+      await screen.findByText("Which storage should drafts use?");
+      await user.click(screen.getByRole("button", { name: /^stop$/i }));
+
+      await waitFor(() => {
+        expect(
+          api.calls.filter((call) => call.path === `/api/v1/sessions/${SESSION_ID}/interrupt`),
+        ).toHaveLength(1);
+      });
+      expect(readBodies(api.calls)).toEqual([]);
+    });
+
+    it("shows no Stop while the session is idle, as with a message", async () => {
+      const session = buildSession({
+        status: "idle",
+        openRequests: [{ ...ONE_QUESTION, async: true }],
+      });
+      const user = userEvent.setup();
+      await openApp(session, []);
+
+      await user.click(await screen.findByRole("button", { name: "Answer" }));
+
+      await screen.findByText("Which storage should drafts use?");
+      expect(screen.queryByRole("button", { name: /^stop$/i })).toBeNull();
+      expect(readStep("Send answers")).toBeDefined();
+    });
+
+    it("sends the answers of every question, and a multi-line own answer keeps its line breaks", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(QUESTIONS);
+
+      // Each step stays off until its question is answered.
+      const pick = await screen.findByRole("radio", {
+        name: (name) => name.startsWith("localStorage"),
+      });
+      expect(isLocked(readStep("Next"))).toBe(true);
+      await user.click(pick);
+      expect(isLocked(readStep("Next"))).toBe(false);
+      await user.click(readStep("Next"));
+      expect(isLocked(readStep("Send answers"))).toBe(true);
+      await user.click(findChoice("checkbox", "Sync"));
+      expect(isLocked(readStep("Send answers"))).toBe(false);
+      await user.click(findChoice("checkbox", "Search"));
+      await user.type(readComposerField(), " Offline mode{Shift>}{Enter}{/Shift}Dark mode ");
+      await user.click(readStep("Send answers"));
+
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          {
+            requestId: "req-2",
+            answers: {
+              Storage: "localStorage",
+              Features: ["Sync", "Search", "Offline mode\nDark mode"],
+            },
+          },
+        ]);
+      });
+    });
+
+    it("answers a question with no options with the user's own text", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked({
+        ...QUESTIONS,
+        detail: { questions: [{ ...STORAGE, options: [] }] },
+      });
+
+      const form = await findQuestionForm("Which storage should drafts use?");
+      expect(within(form).queryAllByRole("radio")).toEqual([]);
+      // A lone question has no place ("1 of 1"), no Next and no Previous.
+      expect(screen.queryByText(/\b1 of 1\b/)).toBeNull();
+      expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+      await user.type(readComposerField(), "a sqlite file");
+      await user.click(readStep("Send answers"));
+
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          { requestId: "req-2", answers: { Storage: "a sqlite file" } },
+        ]);
+      });
+    });
+
+    it("shows a notice and keeps the step button off while the answer is over 4,096 characters", async () => {
+      await openParked({
+        ...QUESTIONS,
+        detail: { questions: [{ ...STORAGE, options: [] }] },
+      });
+
+      await findQuestionForm("Which storage should drafts use?");
+      fireEvent.change(readComposerField(), { target: { value: "x".repeat(4097) } });
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "This answer is longer than 4,096 characters.",
+      );
+      expect(isLocked(readStep("Send answers"))).toBe(true);
+
+      fireEvent.change(readComposerField(), { target: { value: "x".repeat(4096) } });
+      await waitFor(() => {
+        expect(screen.queryByRole("status")).toBeNull();
+      });
+      expect(isLocked(readStep("Send answers"))).toBe(false);
+    });
+
+    it("locks the choices, the composer and the step button once the answers are sent", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(ONE_QUESTION);
+
+      await user.click(
+        await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
+      );
+      await user.click(readStep("Send answers"));
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(1);
+      });
+
+      await waitFor(() => {
+        expect(isLocked(readStep("Send answers"))).toBe(true);
+      });
+      expect(isLocked(findChoice("radio", "localStorage"))).toBe(true);
+      expect(isLocked(findChoice("radio", "IndexedDB"))).toBe(true);
+      expect(isLocked(readComposerField())).toBe(true);
+    });
+
+    it("sends once when Enter is pressed twice before the controller answers", async () => {
+      const user = userEvent.setup();
+      const session = buildSession({ status: "busy", openRequests: [ONE_QUESTION] });
+      let release: (() => void) | undefined;
+      const { api } = await openApp(session, [], {
+        [RESPOND_TO_QUESTION]: () =>
+          new Promise<{ readonly body: unknown }>((resolve) => {
+            release = () => {
+              resolve({ body: session });
+            };
+          }),
+      });
+
+      await user.type(await screen.findByRole("textbox"), "a sqlite file");
+      // Both presses arrive before the app has drawn the first one's effect.
+      act(() => {
+        fireEvent.keyDown(readComposerField(), { key: "Enter", keyCode: 13 });
+        fireEvent.keyDown(readComposerField(), { key: "Enter", keyCode: 13 });
+      });
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(1);
+      });
+      await act(async () => {
+        release?.();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
       expect(readBodies(api.calls)).toHaveLength(1);
     });
 
-    await waitFor(() => {
-      expect(isLocked(readSend())).toBe(true);
-    });
-    expect(isLocked(findChoice("radio", "localStorage"))).toBe(true);
-    expect(isLocked(findChoice("radio", "IndexedDB"))).toBe(true);
-    expect(isLocked(readOwnAnswer())).toBe(true);
-    await user.click(readSend());
-    expect(readBodies(api.calls)).toEqual([
-      { requestId: "req-2", answers: { Storage: "IndexedDB" } },
-    ]);
-  });
+    it("shows the controller's error as it is and keeps every answer when sending fails", async () => {
+      const user = userEvent.setup();
+      const { api } = await openRefusingFirstAnswer(QUESTIONS);
 
-  it("shows the controller's error as it is and keeps every answer when sending fails", async () => {
-    const user = userEvent.setup();
-    const replies = [
-      {
-        status: 409,
-        body: buildErrorBody("invalid_state", "The harness did not take the answer."),
-      },
-      { body: buildSession({ status: "busy", openRequests: [QUESTIONS] }) },
-    ];
-    const session = buildSession({ status: "busy", openRequests: [QUESTIONS] });
-    const { api } = await openApp(session, [], {
-      [RESPOND_TO_QUESTION]: () => replies.shift()!,
-    });
+      await user.click(
+        await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
+      );
+      await user.click(readStep("Next"));
+      await user.click(findChoice("checkbox", "Sync"));
+      await user.type(readComposerField(), "Offline mode");
+      // Enter sends from the field, which must keep the focus while the
+      // answers are on their way and after a failure.
+      await user.type(readComposerField(), "{Enter}");
 
-    await user.click(
-      await screen.findByRole("radio", { name: (name) => name.startsWith("IndexedDB") }),
-    );
-    await user.click(screen.getByRole("button", { name: "Next" }));
-    await user.click(findChoice("checkbox", "Sync"));
-    await user.type(readOwnAnswer(), "Offline mode");
-    await user.click(readSend());
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "The harness did not take the answer.",
+      );
+      expect(document.activeElement).toBe(readComposerField());
+      expect(isLocked(readStep("Send answers"))).toBe(false);
+      expect(isLocked(readComposerField())).toBe(false);
+      expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
+      expect(readComposerField().value).toBe("Offline mode");
 
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "The harness did not take the answer.",
-    );
-    expect(isLocked(readSend())).toBe(false);
-    expect(isLocked(readOwnAnswer())).toBe(false);
-    expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
-    expect((readOwnAnswer() as HTMLInputElement).value).toBe("Offline mode");
-
-    // The first question's pick is kept too: sending again sends all of it.
-    await user.click(readSend());
-    await waitFor(() => {
-      expect(readBodies(api.calls)).toHaveLength(2);
-    });
-    expect(readBodies(api.calls)[1]).toEqual({
-      requestId: "req-2",
-      answers: { Storage: "IndexedDB", Features: ["Sync", "Offline mode"] },
+      // The first question's pick is kept too: sending again sends all of it.
+      await user.click(readStep("Send answers"));
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(2);
+      });
+      expect(readBodies(api.calls)[1]).toEqual({
+        requestId: "req-2",
+        answers: { Storage: "IndexedDB", Features: ["Sync", "Offline mode"] },
+      });
     });
   });
 
-  it("goes to the next question on ↩ in the own-answer field", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(QUESTIONS);
+  describe("keys and steps", () => {
+    it("keeps every question's answer when the user steps back and forward", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(QUESTIONS);
 
-    await screen.findByText("Which storage should drafts use?");
-    await user.type(readOwnAnswer(), "a sqlite file{Enter}");
+      await screen.findByText("Which storage should drafts use?");
+      // Enter on an unanswered question steps nowhere and adds no new line.
+      await user.type(readComposerField(), "{Enter}");
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      expect(readComposerField().value).toBe("");
+      expect(readBodies(api.calls)).toEqual([]);
 
-    expect(screen.getByText("Question 2 of 2")).toBeDefined();
-    expect(readBodies(api.calls)).toEqual([]);
+      await user.type(readComposerField(), "a sqlite file{Enter}");
+      // Enter on a filled answer steps on, so Previous goes back to the first question.
+      await user.click(screen.getByRole("button", { name: "Previous" }));
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      await user.click(readStep("Next"));
+
+      await user.click(findChoice("checkbox", "Sync"));
+      await user.type(readComposerField(), "Offline mode");
+
+      await user.click(screen.getByRole("button", { name: "Previous" }));
+      expect(screen.getByText("Question 1 of 2")).toBeDefined();
+      expect(readComposerField().value).toBe("a sqlite file");
+
+      await user.click(readStep("Next"));
+      expect(screen.getByText("Question 2 of 2")).toBeDefined();
+      expect((findChoice("checkbox", "Sync") as HTMLInputElement).checked).toBe(true);
+      expect(readComposerField().value).toBe("Offline mode");
+      await user.click(readStep("Send answers"));
+
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          {
+            requestId: "req-2",
+            answers: { Storage: "a sqlite file", Features: ["Sync", "Offline mode"] },
+          },
+        ]);
+      });
+    });
   });
 
-  it("stays on the question on ↩ while it is unanswered", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(QUESTIONS);
+  describe("beside the message", () => {
+    it("leaves a half-typed message as it was once the answers are sent and the question closes", async () => {
+      const user = userEvent.setup();
+      const { api, setOpenRequests } = await openLive([]);
 
-    await screen.findByText("Which storage should drafts use?");
-    await user.type(readOwnAnswer(), "{Enter}");
+      await user.type(await screen.findByRole("textbox"), "Also check the logs");
+      // Leaving the field ends the typing guard, so the question takes over at once.
+      act(() => {
+        readComposerField().blur();
+      });
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      expect(readComposerField().value).toBe("");
 
-    expect(screen.getByText("Question 1 of 2")).toBeDefined();
-    expect(readBodies(api.calls)).toEqual([]);
-  });
+      await user.type(readComposerField(), "a sqlite file{Enter}");
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(1);
+      });
+      setOpenRequests([]);
 
-  it("answers a question with no options with the user's own text", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked({
-      ...QUESTIONS,
-      detail: { questions: [{ ...STORAGE, options: [] }] },
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(readComposerField().value).toBe("Also check the logs");
+      expect(api.calls.filter((call) => call.path.endsWith("/input"))).toEqual([]);
     });
 
-    const questionForm = (await screen.findByText("Which storage should drafts use?")).closest(
-      "form",
-    )!;
-    expect(within(questionForm).queryAllByRole("radio")).toEqual([]);
-    await user.type(readOwnAnswer(), "a sqlite file");
-    await user.click(readSend());
+    it("moves the text typed for a single-select question to the end of the message when the user picks an option", async () => {
+      const user = userEvent.setup();
+      const { api, setOpenRequests } = await openLive([]);
 
-    await waitFor(() => {
-      expect(readBodies(api.calls)).toEqual([
-        { requestId: "req-2", answers: { Storage: "a sqlite file" } },
-      ]);
+      await user.type(await screen.findByRole("textbox"), "Also check the logs");
+      act(() => {
+        readComposerField().blur();
+      });
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      await user.type(readComposerField(), "maybe a file");
+      await user.click(findChoice("radio", "IndexedDB"));
+
+      // The pick replaced the typed text, which is not erased.
+      expect(readComposerField().value).toBe("");
+      await user.click(readStep("Send answers"));
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          { requestId: "req-2", answers: { Storage: "IndexedDB" } },
+        ]);
+      });
+      setOpenRequests([]);
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(readComposerField().value).toBe("Also check the logs\n\nmaybe a file");
+    });
+
+    it("keeps the typed text beside the picks on a multiSelect question", async () => {
+      const user = userEvent.setup();
+      await openParked({ ...ONE_QUESTION, detail: { questions: [FEATURES] } });
+
+      await screen.findByText("Which features should ship?");
+      await user.type(readComposerField(), "Offline mode");
+      await user.click(findChoice("checkbox", "Sync"));
+
+      expect(readComposerField().value).toBe("Offline mode");
+    });
+
+    it("refuses a pasted image with a notice, and the image does not land on the message's shelf", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([ONE_QUESTION]);
+
+      await screen.findByText("Which storage should drafts use?");
+      fireEvent.paste(readComposerField(), {
+        clipboardData: { files: [new File(["png"], "shot.png", { type: "image/png" })] },
+      });
+
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "An answer takes text only. Images can be sent in a message.",
+      );
+      expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+      // Typing goes on, and the notice goes with the next edit.
+      await user.type(readComposerField(), "a sqlite file");
+      expect(screen.queryByRole("status")).toBeNull();
+      setOpenRequests([]);
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
     });
   });
 
-  it("turns the question down with the composer's Stop, which sends no answer", async () => {
-    const user = userEvent.setup();
-    const { api } = await openParked(QUESTIONS);
+  describe("the typing guard", () => {
+    it("waits while the user types a message, and takes over when the field loses focus", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([]);
 
-    await screen.findByText("Which storage should drafts use?");
-    await user.click(screen.getByRole("button", { name: /^stop$/i }));
+      await user.type(await screen.findByRole("textbox"), "Also check");
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
 
-    await waitFor(() => {
+      // The question is docked with its options, but the composer is still the user's.
+      expect(readComposerField().value).toBe("Also check");
+      expect(screen.queryByRole("button", { name: "Send answers" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
+      expect(screen.queryByLabelText("Your own answer")).toBeNull();
+
+      act(() => {
+        readComposerField().blur();
+      });
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      expect(readComposerField().value).toBe("");
+    });
+
+    // The mouse press on Send must not take the focus from the field. If it did,
+    // the typing guard would end, the question would take the composer over and
+    // replace Send with Next before the click arrived, and the message would
+    // never be sent.
+    it("sends the message when the user clicks Send while the guard still holds", async () => {
+      const user = userEvent.setup();
+      const { api, setOpenRequests } = await openLive([]);
+
+      await user.type(await screen.findByRole("textbox"), "Also check the logs");
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      expect(readComposerField().value).toBe("Also check the logs");
+
+      await user.click(screen.getByRole("button", { name: "Send" }));
+
+      await waitFor(() => {
+        expect(
+          api.calls.filter((call) => call.path.endsWith("/input")).map((call) => call.body),
+        ).toEqual([{ text: "Also check the logs" }]);
+      });
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+    });
+  });
+
+  describe("an IME composition", () => {
+    it("keeps the answer in the field while a composition starts and ends in it", async () => {
+      const user = userEvent.setup();
+      await openLive([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+
+      await user.type(readComposerField(), "IndexedDB");
+      // A composition in the answer must not hold off the question, or the
+      // field would show the saved message instead of the answer.
+      fireEvent.compositionStart(readComposerField());
+      expect(readComposerField().value).toBe("IndexedDB");
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      fireEvent.compositionEnd(readComposerField());
+      expect(readComposerField().value).toBe("IndexedDB");
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+    });
+
+    it("keeps a question off the message for as long as a composition is open in it", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([]);
+
+      await user.type(await screen.findByRole("textbox"), "Also check");
+      fireEvent.compositionStart(readComposerField());
+      setOpenRequests([ONE_QUESTION]);
+      await screen.findByText("Which storage should drafts use?");
+      // Longer than the pause that ends the hold after typing.
+      await new Promise((resolve) => setTimeout(resolve, TYPING_PAUSE_MS + 300));
+
+      expect(readComposerField().value).toBe("Also check");
+      expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
+
+      fireEvent.compositionEnd(readComposerField());
+      await waitFor(
+        () => {
+          expect(readComposerField().placeholder).toBe("Or type your own answer");
+        },
+        { timeout: 3000 },
+      );
+    });
+  });
+
+  describe("the files of an answer", () => {
+    it("refuses a file the picker returns after a question took the composer over", async () => {
+      const { setOpenRequests } = await openLive([]);
+
+      await screen.findByRole("textbox");
+      // The picker was opened on the message and returns after the question arrived.
+      setOpenRequests([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      const picker = document.querySelector<HTMLInputElement>('input[type="file"]')!;
+      fireEvent.change(picker, {
+        target: { files: [new File(["png"], "shot.png", { type: "image/png" })] },
+      });
+
+      expect((await screen.findByRole("status")).textContent).toBe(
+        "An answer takes text only. Images can be sent in a message.",
+      );
+      setOpenRequests([]);
+      await waitFor(() => {
+        expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      });
+      expect(screen.queryByRole("list", { name: "Attached images" })).toBeNull();
+    });
+  });
+
+  describe("errors", () => {
+    it("shows a failed message send in message mode only, not beside an answer", async () => {
+      const user = userEvent.setup();
+      const { setOpenRequests } = await openLive([], {
+        [`POST /api/v1/sessions/${SESSION_ID}/input`]: () => ({
+          status: 409,
+          body: buildErrorBody("invalid_state", "The message was refused."),
+        }),
+      });
+
+      await user.type(await screen.findByRole("textbox"), "Also check the logs{Enter}");
+      expect((await screen.findByRole("alert")).textContent).toBe("The message was refused.");
+
+      setOpenRequests([ONE_QUESTION]);
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      expect(screen.queryByRole("alert")).toBeNull();
+
+      setOpenRequests([]);
+      expect((await screen.findByRole("alert")).textContent).toBe("The message was refused.");
+    });
+
+    it("keeps Next focusable while the question is unanswered", async () => {
+      await openParked(QUESTIONS);
+
+      await screen.findByText("Which storage should drafts use?");
+      const next = readStep("Next");
+      expect(next).toHaveProperty("disabled", false);
+      expect(next.getAttribute("aria-disabled")).toBe("true");
+    });
+  });
+
+  describe("a secret question", () => {
+    const SECRET: SessionRequest = {
+      ...ONE_QUESTION,
+      detail: { questions: [{ ...STORAGE, header: "Token", secret: true, options: [] }] },
+    };
+
+    it("is answered in a masked field, with a warning, apart from the message composer", async () => {
+      const user = userEvent.setup();
+      const { api } = await openParked(SECRET);
+
+      await screen.findByText("Which storage should drafts use?");
+      const field = screen.getByLabelText("Your own answer");
+      expect(field).toHaveProperty("type", "password");
+      // A password manager must not take it for a login: it is not a saved
+      // password, and it is not in a form that submits.
+      expect(field.getAttribute("autocomplete")).toBe("new-password");
+      expect(field.closest("form")).toBeNull();
       expect(
-        api.calls.filter((call) => call.path === `/api/v1/sessions/${SESSION_ID}/interrupt`),
-      ).toHaveLength(1);
+        screen.getByText(
+          "The agent asked to keep this answer secret. It is stored in the thread like any other answer.",
+        ),
+      ).toBeDefined();
+      // The composer is still for the message: it keeps Send, and takes no answer.
+      expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
+      expect(screen.getByRole("button", { name: "Send" })).toBeDefined();
+      await user.type(readComposerField(), "a message");
+
+      await user.type(field, "s3cret{Enter}");
+
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toEqual([
+          { requestId: "req-2", answers: { Token: "s3cret" } },
+        ]);
+      });
+      expect(readComposerField().value).toBe("a message");
     });
-    expect(readBodies(api.calls)).toEqual([]);
+
+    it("shows a failed send in the dock, which has the field, and keeps the typed secret", async () => {
+      const user = userEvent.setup();
+      const { api } = await openRefusingFirstAnswer(SECRET);
+
+      await user.type(await screen.findByLabelText("Your own answer"), "s3cret");
+      await user.click(readStep("Send answers"));
+
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "The harness did not take the answer.",
+      );
+      expect(screen.getByLabelText("Your own answer")).toHaveProperty("value", "s3cret");
+      await user.click(readStep("Send answers"));
+      await waitFor(() => {
+        expect(readBodies(api.calls)).toHaveLength(2);
+      });
+    });
+
+    it("lets the composer answer the other questions of the same Request", async () => {
+      const user = userEvent.setup();
+      await openParked({
+        ...QUESTIONS,
+        detail: { questions: [STORAGE, { ...FEATURES, header: "Token", secret: true }] },
+      });
+
+      await screen.findByText("Which storage should drafts use?");
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      await user.type(readComposerField(), "a sqlite file{Enter}");
+
+      await screen.findByText("Which features should ship?");
+      expect(screen.getByLabelText("Your own answer")).toHaveProperty("type", "password");
+      expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
+      // The dock steps back through the same draft.
+      await user.click(screen.getByRole("button", { name: "Previous" }));
+      expect(readComposerField().placeholder).toBe("Or type your own answer");
+      expect(readComposerField().value).toBe("a sqlite file");
+    });
+  });
+
+  describe("an async question", () => {
+    const ASYNC: SessionRequest = { ...QUESTIONS, async: true };
+
+    it("docks folded as one row, which Answer opens, and Later folds back with the answers kept", async () => {
+      const user = userEvent.setup();
+      await openParked(ASYNC);
+
+      await screen.findByText("The agent asked 2 questions. It keeps working.");
+      expect(screen.queryByText("Which storage should drafts use?")).toBeNull();
+      // Folded, the composer is the user's.
+      expect(readComposerField().placeholder).toBe("Queued until the turn finishes…");
+      await user.type(readComposerField(), "a message");
+
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await screen.findByText("Which storage should drafts use?");
+      act(() => {
+        readComposerField().blur();
+      });
+      await waitFor(() => {
+        expect(readComposerField().placeholder).toBe("Or type your own answer");
+      });
+      await user.type(readComposerField(), "a sqlite file");
+
+      // Later is in the title row, so it adds no row to the card.
+      expect(screen.getByRole("button", { name: "Later" }).parentElement).toBe(
+        screen.getByText("The agent needs answers.").parentElement,
+      );
+      await user.click(screen.getByRole("button", { name: "Later" }));
+      await screen.findByText("The agent asked 2 questions. It keeps working.");
+      expect(readComposerField().value).toBe("a message");
+
+      await user.click(screen.getByRole("button", { name: "Answer" }));
+      await screen.findByText("Which storage should drafts use?");
+      act(() => {
+        readComposerField().blur();
+      });
+      await waitFor(() => {
+        expect(readComposerField().value).toBe("a sqlite file");
+      });
+    });
   });
 });
 
@@ -3820,6 +4393,7 @@ const AT = "2026-09-10T09:00:00.000Z";
 const WEBSHOP: Project = {
   id: "01a06d02-7000-7000-8000-000000000001",
   name: "webshop",
+  mcpServerIds: [],
   createdAt: AT,
   updatedAt: AT,
 };
@@ -3870,6 +4444,8 @@ const buildEphemeralWorkspace = (sessionIds: readonly string[]): Workspace => ({
   message: null,
   sessionIds,
   keptUntil: null,
+  diskUsage: null,
+  diskUsageError: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,
@@ -3911,6 +4487,7 @@ const buildThreadWorldRoutes = (
   sessions: readonly Session[],
 ): Readonly<Record<string, Handler>> => ({
   "GET /api/v1/projects": { body: { items: [WEBSHOP] } },
+  [`GET /api/v1/projects/${WEBSHOP.id}`]: { body: WEBSHOP },
   "GET /api/v1/resources": { body: { items: [R_WEBSHOP] } },
   "GET /api/v1/workspaces": { body: { items: workspaces } },
   "GET /api/v1/sessions": { body: { items: sessions } },
@@ -4063,7 +4640,8 @@ const ADA: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Ada",
   systemPrompt: "You are a helpful assistant.",
-  instanceId: SESSION.instanceId,
+  providerAccountId: SESSION.providerAccountId,
+  harnessId: null,
   permissionProfileId: SESSION.permissionProfileId,
   accessMode: "approval-required",
   model: null,
@@ -4158,6 +4736,51 @@ describe("Thread: the session view of an assistant's session", () => {
     await screen.findByText("Book Friday");
     expect(screen.queryByRole("button", { name: /steer/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
+  });
+
+  it("answers a question in the dock's own field, with Previous, because the session has no composer; a pick erases the typed text", async () => {
+    const user = userEvent.setup();
+    const questions: SessionRequest = {
+      requestId: "req-ask",
+      itemId: "tool-ask",
+      kind: "question",
+      detail: {
+        questions: [
+          {
+            question: "Which day?",
+            header: "Day",
+            options: [{ label: "Monday", description: "" }],
+            multiSelect: false,
+          },
+          { question: "Which hour?", header: "Hour", options: [], multiSelect: false },
+        ],
+      },
+    };
+    const fixture = buildAssistantSession({ status: "busy", openRequests: [questions] });
+    const api = stubApi({
+      ...buildThreadRoutes(fixture, buildTwoCompletedTurns(), ASSISTANT_ROUTES),
+      [`POST /api/v1/sessions/${fixture.id}/respond-to-question`]: { body: fixture },
+    });
+    await renderApp({ path: `/threads/${fixture.id}`, api: api.fetch, token: "held" });
+
+    const field = await screen.findByLabelText("Your own answer");
+    expect(screen.queryByRole("button", { name: "Previous" })).toBeNull();
+    await user.type(field, "some day");
+    await user.click(screen.getByRole("radio", { name: (name) => name.startsWith("Monday") }));
+    expect(field).toHaveProperty("value", "");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.type(screen.getByLabelText("Your own answer"), "noon");
+    await user.click(screen.getByRole("button", { name: "Previous" }));
+    expect(screen.getByText("Question 1 of 2")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Send answers" }));
+
+    await waitFor(() => {
+      expect(api.calls.find((call) => call.path.endsWith("/respond-to-question"))?.body).toEqual({
+        requestId: "req-ask",
+        answers: { Day: "Monday", Hour: "noon" },
+      });
+    });
   });
 
   it("still shows the permission card for an open request, and sends its answer to session.respondToApprovalRequest", async () => {
@@ -4783,5 +5406,1305 @@ describe("Thread: a queued message another agent sent", () => {
     await waitFor(() => {
       expect(screen.queryByText("The 3DS fix is merged")).toBeNull();
     });
+  });
+});
+
+describe("Thread: the MCP servers of the + menu", () => {
+  const SERVER_NAMES = (servers: readonly { readonly name: string }[]) =>
+    servers.map((server) => server.name);
+
+  /**
+   * Opens a thread that has `servers`, on a stub controller that holds the
+   * session: a `session.update` replaces its list, as the controller does.
+   */
+  const openServersThread = async (
+    servers: readonly (typeof MCP_SERVERS)[number][],
+    extra: Readonly<Record<string, Handler>> = {},
+    rows: readonly TranscriptRow[] = [],
+  ) => {
+    const state = {
+      session: buildSession({ status: "idle", mcpServers: buildSessionServers(servers) }),
+    };
+    const app = await openApp(state.session, rows, {
+      ...buildMcpServerRoutes(),
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: state.session }),
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: (call) => {
+        const { mcpServerIds } = call.body as { mcpServerIds: string[] };
+        state.session = {
+          ...state.session,
+          mcpServers: buildSessionServers(
+            mcpServerIds.map((id) => MCP_SERVERS.find((server) => server.id === id)!),
+          ),
+        };
+        return { body: state.session };
+      },
+      ...extra,
+    });
+    return { ...app, state };
+  };
+
+  const readUpdates = (api: { readonly calls: readonly Call[] }) =>
+    api.calls.filter(
+      (call) => call.method === "PATCH" && call.path === `/api/v1/sessions/${SESSION_ID}`,
+    );
+
+  const readServerReads = (api: { readonly calls: readonly Call[] }) =>
+    api.calls.filter((call) => call.path === "/api/v1/mcp-servers").length;
+
+  it("reads no servers and holds no topic for a thread with none, until the MCP row opens", async () => {
+    const user = userEvent.setup();
+    const { api, live } = await openServersThread([]);
+    await screen.findByRole("button", { name: "Add to thread" });
+
+    expect(readServerReads(api)).toBe(0);
+    expect(live.topics()).not.toContain("mcpServer");
+
+    // The `+` menu is also how an image is attached: opening it reads nothing.
+    const menu = await openPlusMenu(user);
+    const row = within(menu).getByRole("button", { name: /MCP servers/ });
+    // With no server the row says so without reading them.
+    expect(row.textContent).toContain("none");
+    expect(readServerReads(api)).toBe(0);
+    expect(live.topics()).not.toContain("mcpServer");
+
+    await user.click(row);
+    await screen.findByRole("dialog", { name: "Servers of this thread" });
+    // The read, and the one more on the topic's first push.
+    await waitFor(() => {
+      expect(readServerReads(api)).toBe(2);
+    });
+    expect(live.topics()).toContain("mcpServer");
+
+    await user.keyboard("{Escape}{Escape}");
+    await waitFor(() => {
+      expect(live.topics()).not.toContain("mcpServer");
+    });
+  });
+
+  it("reads the servers when a thread that has some opens, shows their number, and holds the topic", async () => {
+    const user = userEvent.setup();
+    const { api, live } = await openServersThread([S_SENTRY_WORK, S_NOTION]);
+
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+    await waitFor(() => {
+      expect(readServerReads(api)).toBeGreaterThanOrEqual(1);
+    });
+
+    const menu = await openPlusMenu(user);
+    expect(within(menu).getByRole("button", { name: /MCP servers/ }).textContent).toContain("2");
+    // No red dot: nothing needs sign-in.
+    expect(screen.getByRole("button", { name: "Add to thread" })).toBeDefined();
+  });
+
+  it("shows '1 needs sign-in' in the failure colour and a red dot on the + while a server of the thread needs it", async () => {
+    const user = userEvent.setup();
+    await openServersThread([S_LINEAR, S_NOTION]);
+
+    // The button's name says so with the menu closed, which is where the red dot shows.
+    await screen.findByRole("button", { name: "Add to thread, a server needs sign-in" });
+    const menu = await openPlusMenu(user);
+    const note = within(within(menu).getByRole("button", { name: /MCP servers/ })).getByText(
+      "1 needs sign-in",
+    );
+    expect(note.className).toContain("text-fail");
+  });
+
+  it("lists the thread's own servers first and keeps the order while the user switches", async () => {
+    const user = userEvent.setup();
+    await openServersThread([S_GITHUB]);
+
+    const submenu = await openServersSubmenu(user);
+
+    // Eight names are offered; Figma is switched off in Settings, so it waits in the picker.
+    expect(readSubmenuSwitches(submenu)).toEqual([
+      { name: "github", on: true },
+      { name: "sentry", on: false },
+      { name: "linear", on: false },
+      { name: "notion", on: false },
+      { name: "grafana", on: false },
+      { name: "context7", on: false },
+      { name: "datadog", on: false },
+      { name: "stripe", on: false },
+    ]);
+    expect(within(submenu).getByRole("button", { name: "1 more server…" })).toBeDefined();
+
+    // Switching Stripe on and GitHub off moves no row.
+    await user.click(within(submenu).getByRole("switch", { name: "stripe in this thread" }));
+    await waitFor(() => {
+      expect(
+        within(submenu)
+          .getByRole("switch", { name: "stripe in this thread" })
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+    });
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+    await waitFor(() => {
+      expect(
+        within(submenu)
+          .getByRole("switch", { name: "github in this thread" })
+          .getAttribute("aria-checked"),
+      ).toBe("false");
+    });
+    expect(SERVER_NAMES(readSubmenuSwitches(submenu))).toEqual([
+      "github",
+      "sentry",
+      "linear",
+      "notion",
+      "grafana",
+      "context7",
+      "datadog",
+      "stripe",
+    ]);
+  });
+
+  it("shows all nine servers of a thread that has nine, with no 'more' row", async () => {
+    const user = userEvent.setup();
+    await openServersThread([
+      S_SENTRY_WORK,
+      S_LINEAR,
+      S_NOTION,
+      S_GITHUB,
+      S_GRAFANA,
+      MCP_SERVERS.find((server) => server.name === "context7")!,
+      S_DATADOG,
+      S_STRIPE,
+      // Switched off in Settings, but the thread has it, so it stays on the list.
+      S_FIGMA,
+    ]);
+
+    const submenu = await openServersSubmenu(user);
+
+    expect(readSubmenuSwitches(submenu)).toHaveLength(9);
+    expect(within(submenu).queryByRole("button", { name: /more server/ })).toBeNull();
+  });
+
+  it("writes one session.update with the current list for a switch, and the list it started from for the reset", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersThread([S_SENTRY_WORK, S_NOTION]);
+
+    const submenu = await openServersSubmenu(user);
+    expect(readPageText(submenu)).toContain(
+      "A thread in no project starts with no servers. Switch on what this one needs.",
+    );
+    // The thread started with none, and now has two, so the list can go back.
+    expect(within(submenu).getByRole("button", { name: "Switch all off" })).toBeDefined();
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    expect(readUpdates(api)[0]!.body).toEqual({
+      mcpServerIds: [S_SENTRY_WORK.id, S_NOTION.id, S_GITHUB.id],
+    });
+    // The session is read again, so the switch shows the stored list.
+    await waitFor(() => {
+      expect(
+        within(submenu)
+          .getByRole("switch", { name: "github in this thread" })
+          .getAttribute("aria-checked"),
+      ).toBe("true");
+    });
+
+    await user.click(await within(submenu).findByRole("button", { name: "Switch all off" }));
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(2);
+    });
+    expect(readUpdates(api)[1]!.body).toEqual({ mcpServerIds: [] });
+  });
+
+  it("swaps the account of a name in one write, in the old account's place", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersThread([S_SENTRY_WORK, S_NOTION]);
+
+    const submenu = await openServersSubmenu(user);
+    // Two accounts are one row, and its select names them by their Connection's label.
+    expect(readSubmenuSwitches(submenu).filter((row) => row.name === "sentry")).toHaveLength(1);
+    const account = within(submenu).getByRole<HTMLSelectElement>("combobox", {
+      name: "Account of sentry",
+    });
+    expect([...account.options].map((option) => option.textContent)).toEqual(["hobby", "work"]);
+    expect(account.value).toBe(S_SENTRY_WORK.id);
+
+    await user.selectOptions(account, S_SENTRY_HOBBY.id);
+
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    expect(readUpdates(api)[0]!.body).toEqual({
+      mcpServerIds: [S_SENTRY_HOBBY.id, S_NOTION.id],
+    });
+  });
+
+  it("ignores the controls while a write runs, then works again", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let current = [S_NOTION.id];
+    const { api } = await openServersThread([S_NOTION], {
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: async (call) => {
+        await held;
+        current = (call.body as { mcpServerIds: string[] }).mcpServerIds;
+        return {
+          body: buildSession({
+            status: "idle",
+            mcpServers: buildSessionServers(
+              current.map((id) => MCP_SERVERS.find((server) => server.id === id)!),
+            ),
+          }),
+        };
+      },
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({
+        body: buildSession({
+          status: "idle",
+          mcpServers: buildSessionServers(
+            current.map((id) => MCP_SERVERS.find((server) => server.id === id)!),
+          ),
+        }),
+      }),
+    });
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+    await waitFor(() => {
+      expect(
+        within(submenu)
+          .getByRole("switch", { name: "github in this thread" })
+          .getAttribute("aria-disabled"),
+      ).toBe("true");
+    });
+    await user.click(within(submenu).getByRole("switch", { name: "stripe in this thread" }));
+    expect(readUpdates(api)).toHaveLength(1);
+
+    release();
+    await waitFor(() => {
+      expect(
+        within(submenu)
+          .getByRole("switch", { name: "github in this thread" })
+          .getAttribute("aria-disabled"),
+      ).not.toBe("true");
+    });
+    await user.click(within(submenu).getByRole("switch", { name: "stripe in this thread" }));
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(2);
+    });
+    // The second write starts from the list the first one stored.
+    expect(readUpdates(api)[1]!.body).toEqual({
+      mcpServerIds: [S_NOTION.id, S_GITHUB.id, S_STRIPE.id],
+    });
+  });
+
+  it("shows a refusal under the menu and leaves the list as the controller holds it", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersThread([S_NOTION], {
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: {
+        status: 403,
+        body: {
+          error: {
+            code: "forbidden",
+            message: "Changing a thread's servers needs mcp.manage.",
+            details: { grant: "mcp.manage" },
+          },
+        },
+      },
+    });
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+
+    expect((await within(submenu).findByRole("alert")).textContent).toBe(
+      "Changing a thread's servers needs mcp.manage.",
+    );
+    expect(readUpdates(api)).toHaveLength(1);
+    await waitFor(() => {
+      expect(
+        within(submenu)
+          .getByRole("switch", { name: "github in this thread" })
+          .getAttribute("aria-checked"),
+      ).toBe("false");
+    });
+  });
+
+  /** Returns the answers of a controller whose `session.update` waits on `gate`, then answers with `refusal` or applies the list. */
+  const holdUpdate = (
+    state: { session: Session },
+    gate: Promise<void>,
+    refusal?: { readonly status: number; readonly body: unknown },
+  ): Record<string, Handler> => ({
+    [`PATCH /api/v1/sessions/${SESSION_ID}`]: async (call) => {
+      await gate;
+      if (refusal !== undefined) return refusal;
+      const { mcpServerIds } = call.body as { mcpServerIds: string[] };
+      state.session = {
+        ...state.session,
+        mcpServers: buildSessionServers(
+          mcpServerIds.map((id) => MCP_SERVERS.find((server) => server.id === id)!),
+        ),
+      };
+      return { body: state.session };
+    },
+  });
+
+  it("shows a refusal that arrives after the menu was closed when the menu opens again", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const state = { session: buildSession({ status: "idle", mcpServers: [] }) };
+    const { api } = await openServersThread(
+      [S_NOTION],
+      holdUpdate(state, gate, {
+        status: 403,
+        body: {
+          error: {
+            code: "forbidden",
+            message: "Changing a thread's servers needs mcp.manage.",
+            details: { grant: "mcp.manage" },
+          },
+        },
+      }),
+    );
+
+    const first = await openServersSubmenu(user);
+    await user.click(within(first).getByRole("switch", { name: "github in this thread" }));
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    await user.keyboard("{Escape}{Escape}");
+    release();
+    await waitFor(() => {
+      expect(
+        api.calls.filter(
+          (call) => call.method === "GET" && call.path === `/api/v1/sessions/${SESSION_ID}`,
+        ).length,
+      ).toBeGreaterThan(1);
+    });
+
+    const reopened = await openServersSubmenu(user);
+
+    expect((await within(reopened).findByRole("alert")).textContent).toBe(
+      "Changing a thread's servers needs mcp.manage.",
+    );
+  });
+
+  it("keeps a refusal through closing the menu, the handoff to the picker, and opening them again, until the next write", async () => {
+    const user = userEvent.setup();
+    const MESSAGE = "Changing a thread's servers needs mcp.manage.";
+    const { api } = await openServersThread([S_NOTION, S_GITHUB], {
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: {
+        status: 403,
+        body: { error: { code: "forbidden", message: MESSAGE, details: { grant: "mcp.manage" } } },
+      },
+    });
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+    await within(submenu).findByRole("alert");
+
+    // The handoff closes the menu and opens the picker, which shows the same refusal.
+    await user.click(within(submenu).getByRole("button", { name: /more servers?…$/ }));
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    expect((await within(picker).findByRole("alert")).textContent).toBe(MESSAGE);
+
+    // Closing the picker keeps it for the next time the menu opens.
+    await user.click(within(picker).getByRole("button", { name: "Done" }));
+    const reopened = await openServersSubmenu(user);
+    expect((await within(reopened).findByRole("alert")).textContent).toBe(MESSAGE);
+    expect(readUpdates(api)).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      "invalid",
+      { status: 400, body: buildErrorBody("validation", "A server in the list does not exist.") },
+      true,
+    ],
+    [
+      "forbidden",
+      {
+        status: 403,
+        body: buildErrorBody("forbidden", "Changing a thread's servers needs mcp.manage."),
+      },
+      false,
+    ],
+  ] as const)(
+    "reads the thread again after a refusal as %s, and the servers too only when it is invalid",
+    async (_kind, refusal, readsServers) => {
+      const user = userEvent.setup();
+      const { api, live } = await openServersThread([S_NOTION], {
+        [`PATCH /api/v1/sessions/${SESSION_ID}`]: refusal,
+      });
+      const submenu = await openServersSubmenu(user);
+      await waitFor(() => {
+        expect(live.topics()).toContain("mcpServer");
+      });
+      // The topic's first push reads the servers once more; the count is taken after it.
+      await waitFor(() => {
+        expect(readServerReads(api)).toBe(2);
+      });
+      const sessionReads = () =>
+        api.calls.filter(
+          (call) => call.method === "GET" && call.path === `/api/v1/sessions/${SESSION_ID}`,
+        ).length;
+      const before = sessionReads();
+
+      await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+
+      await waitFor(() => {
+        expect(sessionReads()).toBeGreaterThan(before);
+      });
+      if (readsServers) {
+        await waitFor(() => {
+          expect(readServerReads(api)).toBeGreaterThan(2);
+        });
+      } else {
+        expect(readServerReads(api)).toBe(2);
+      }
+    },
+  );
+
+  it("keeps the switches disabled after a saved write whose list could not be read again, until a read succeeds", async () => {
+    const user = userEvent.setup();
+    const reads = { fail: false };
+    const state = {
+      session: buildSession({ status: "idle", mcpServers: buildSessionServers([S_NOTION]) }),
+    };
+    const { api } = await openApp(state.session, [], {
+      ...buildMcpServerRoutes(),
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () =>
+        reads.fail
+          ? { status: 500, body: buildErrorBody("internal", "The session could not be read.") }
+          : { body: state.session },
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: (call) => {
+        const { mcpServerIds } = call.body as { mcpServerIds: string[] };
+        state.session = {
+          ...state.session,
+          mcpServers: buildSessionServers(
+            mcpServerIds.map((id) => MCP_SERVERS.find((server) => server.id === id)!),
+          ),
+        };
+        return { body: state.session };
+      },
+    });
+    const submenu = await openServersSubmenu(user);
+    reads.fail = true;
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+
+    expect((await within(submenu).findByRole("alert")).textContent).toBe(
+      "Saved, but the list could not be read again.",
+    );
+    // The cache still holds the list from before the write, so a second change would undo the first.
+    const stripe = within(submenu).getByRole("switch", { name: "stripe in this thread" });
+    expect(stripe.getAttribute("aria-disabled")).toBe("true");
+    await user.click(stripe);
+    expect(readUpdates(api)).toHaveLength(1);
+
+    reads.fail = false;
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    await waitFor(() => {
+      expect(stripe.getAttribute("aria-disabled")).not.toBe("true");
+    });
+    expect(within(submenu).queryByRole("alert")).toBeNull();
+    await user.click(stripe);
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(2);
+    });
+    expect(readUpdates(api)[1]!.body).toEqual({
+      mcpServerIds: [S_NOTION.id, S_GITHUB.id, S_STRIPE.id],
+    });
+  });
+
+  it("lets the thread's own switches work when its project cannot be read, and offers no reset", async () => {
+    const user = userEvent.setup();
+    const session = buildSession({
+      status: "idle",
+      projectId: WEBSHOP.id,
+      mcpServers: buildSessionServers([S_NOTION]),
+    });
+    const { api } = await openApp(session, [], {
+      ...buildMcpServerRoutes(),
+      "GET /api/v1/projects": { body: { items: [] } },
+      [`GET /api/v1/projects/${WEBSHOP.id}`]: {
+        status: 404,
+        body: buildErrorBody("not_found", "The project does not exist."),
+      },
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: { body: session },
+    });
+
+    const submenu = await openServersSubmenu(user);
+
+    await within(submenu).findByText(
+      "Where this list started could not be read (The project does not exist.). Changes are for this thread only.",
+    );
+    expect(within(submenu).queryByRole("button", { name: /^Back to / })).toBeNull();
+    await user.click(within(submenu).getByRole("switch", { name: "github in this thread" }));
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    expect(readUpdates(api)[0]!.body).toEqual({ mcpServerIds: [S_NOTION.id, S_GITHUB.id] });
+  });
+
+  it("keeps the account choice, the switches and the way back aria-disabled while a write runs, and ignores presses on them", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const state = {
+      session: buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_SENTRY_WORK]),
+      }),
+    };
+    const { api } = await openApp(state.session, [], {
+      ...buildMcpServerRoutes(),
+      "GET /api/v1/projects": {
+        body: { items: [{ ...WEBSHOP, mcpServerIds: [S_NOTION.id] }] },
+      },
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: state.session }),
+      [`PATCH /api/v1/sessions/${SESSION_ID}`]: async () => {
+        await held;
+        return { body: state.session };
+      },
+    });
+    const submenu = await openServersSubmenu(user);
+    const account = () =>
+      within(submenu).getByRole<HTMLSelectElement>("combobox", { name: "Account of sentry" });
+    const wayBack = () => within(submenu).getByRole("button", { name: "Back to webshop's list" });
+    const notion = () => within(submenu).getByRole("switch", { name: "notion in this thread" });
+
+    await user.selectOptions(account(), S_SENTRY_HOBBY.id);
+
+    await waitFor(() => {
+      expect(account().getAttribute("aria-disabled")).toBe("true");
+    });
+    expect(notion().getAttribute("aria-disabled")).toBe("true");
+    expect(wayBack().getAttribute("aria-disabled")).toBe("true");
+    await user.click(wayBack());
+    await user.click(notion());
+    expect(readUpdates(api)).toHaveLength(1);
+    // The picker, which opens from the menu, holds the same list and is held too.
+    await user.click(within(submenu).getByRole("button", { name: /more servers?…$/ }));
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    expect(
+      within(picker)
+        .getByRole("button", { name: "Back to webshop's list" })
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(
+      within(picker).getByRole("checkbox", { name: "notion" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+
+    release();
+    await waitFor(() => {
+      expect(
+        within(picker)
+          .getByRole("button", { name: "Back to webshop's list" })
+          .getAttribute("aria-disabled"),
+      ).not.toBe("true");
+    });
+    expect(readUpdates(api)).toHaveLength(1);
+  });
+
+  it("reads a project that is not on the first page by its id, and starts from its list", async () => {
+    const user = userEvent.setup();
+    const beyondFirstPage: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
+    const state = {
+      session: buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+    };
+    const { api } = await openApp(state.session, [], {
+      ...buildMcpServerRoutes(),
+      "GET /api/v1/projects": { body: { items: [] } },
+      [`GET /api/v1/projects/${WEBSHOP.id}`]: { body: beyondFirstPage },
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: state.session }),
+    });
+
+    const submenu = await openServersSubmenu(user);
+
+    // The foot and the reset name the thread's project, not the default list.
+    await within(submenu).findByText(
+      "Starts from webshop's list. Changes are for this thread only.",
+    );
+    expect(within(submenu).getByRole("button", { name: "Back to webshop's list" })).toBeDefined();
+    expect(api.calls.filter((call) => call.path === `/api/v1/projects/${WEBSHOP.id}`)).toHaveLength(
+      1,
+    );
+  });
+
+  it("offers no reset once a refresh of the project beyond the first page failed, though an earlier read succeeded", async () => {
+    const user = userEvent.setup();
+    const beyondFirstPage: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
+    let failing = false;
+    const { queryClient } = await openApp(
+      buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+      [],
+      {
+        ...buildMcpServerRoutes(),
+        "GET /api/v1/projects": { body: { items: [] } },
+        [`GET /api/v1/projects/${WEBSHOP.id}`]: () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", "The project could not be read.") }
+            : { body: beyondFirstPage },
+      },
+    );
+    const submenu = await openServersSubmenu(user);
+    await within(submenu).findByRole("button", { name: "Back to webshop's list" });
+
+    failing = true;
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.project(WEBSHOP.id) }));
+
+    await within(submenu).findByText(
+      "Where this list started could not be read (The project could not be read.). Changes are for this thread only.",
+    );
+    expect(within(submenu).queryByRole("button", { name: /^Back to/ })).toBeNull();
+    expect(
+      within(submenu)
+        .getByRole("switch", { name: "notion in this thread" })
+        .getAttribute("aria-disabled"),
+    ).not.toBe("true");
+  });
+
+  it("offers no reset once a refresh of the projects failed, though an earlier read listed the project", async () => {
+    const user = userEvent.setup();
+    const listed: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
+    let failing = false;
+    const { queryClient } = await openApp(
+      buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+      [],
+      {
+        ...buildMcpServerRoutes(),
+        "GET /api/v1/projects": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", "The projects could not be read.") }
+            : { body: { items: [listed] } },
+      },
+    );
+    const submenu = await openServersSubmenu(user);
+    await within(submenu).findByRole("button", { name: "Back to webshop's list" });
+
+    failing = true;
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.projects() }));
+
+    await within(submenu).findByText(
+      "Where this list started could not be read (The projects could not be read.). Changes are for this thread only.",
+    );
+    expect(within(submenu).queryByRole("button", { name: /^Back to/ })).toBeNull();
+    expect(
+      within(submenu)
+        .getByRole("switch", { name: "notion in this thread" })
+        .getAttribute("aria-disabled"),
+    ).not.toBe("true");
+  });
+
+  it("writes nothing when a reset pressed on an earlier render arrives after the refresh of the projects failed", async () => {
+    const user = userEvent.setup();
+    const listed: Project = { ...WEBSHOP, mcpServerIds: [S_SENTRY_WORK.id] };
+    let failing = false;
+    const { api, queryClient } = await openApp(
+      buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+      [],
+      {
+        ...buildMcpServerRoutes(),
+        "GET /api/v1/projects": () =>
+          failing
+            ? { status: 500, body: buildErrorBody("internal", "The projects could not be read.") }
+            : { body: { items: [listed] } },
+      },
+    );
+    const submenu = await openServersSubmenu(user);
+    const earlierReset = readClickHandler(
+      await within(submenu).findByRole("button", { name: "Back to webshop's list" }),
+    );
+
+    failing = true;
+    await act(() => queryClient.invalidateQueries({ queryKey: queryKeys.projects() }));
+    await within(submenu).findByText(/Where this list started could not be read/);
+    await act(async () => {
+      earlierReset();
+      await Promise.resolve();
+    });
+
+    expect(
+      api.calls.filter(
+        (call) => call.method === "PATCH" && call.path === `/api/v1/sessions/${SESSION_ID}`,
+      ),
+    ).toEqual([]);
+  });
+
+  it("keeps the subscription and reads nothing more from the submenu to the picker, and drops it when the picker closes", async () => {
+    // The list is empty, so only the open menu or picker holds the topic: a flag that dropped
+    // during the handoff would drop the subscription and make it again.
+    const user = userEvent.setup();
+    const { api, live, queryClient } = await openServersThread([]);
+    const submenu = await openServersSubmenu(user);
+    await waitFor(() => {
+      expect(readServerReads(api)).toBe(2);
+    });
+    expect(live.countSubscriptions("mcpServer")).toBe(1);
+
+    await user.click(within(submenu).getByRole("button", { name: /more servers?…$/ }));
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    // A read made by the handoff would be under way now, and a second subscription would be made.
+    await waitFor(() => {
+      expect(queryClient.isFetching()).toBe(0);
+    });
+
+    expect(live.topics()).toContain("mcpServer");
+    expect(live.countSubscriptions("mcpServer")).toBe(1);
+    expect(readServerReads(api)).toBe(2);
+    await user.click(within(picker).getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(live.topics()).not.toContain("mcpServer");
+    });
+  });
+
+  it("leaves the switches usable when the project the thread started from cannot be read", async () => {
+    const user = userEvent.setup();
+    const state = {
+      session: buildSession({
+        status: "idle",
+        projectId: WEBSHOP.id,
+        mcpServers: buildSessionServers([S_NOTION]),
+      }),
+    };
+    await openApp(state.session, [], {
+      ...buildMcpServerRoutes(),
+      "GET /api/v1/projects": { body: { items: [] } },
+      [`GET /api/v1/projects/${WEBSHOP.id}`]: {
+        status: 500,
+        body: buildErrorBody("internal", "The project could not be read."),
+      },
+      [`GET /api/v1/sessions/${SESSION_ID}`]: () => ({ body: state.session }),
+    });
+
+    const submenu = await openServersSubmenu(user);
+
+    await within(submenu).findByText(/Where this list started could not be read/);
+    expect(
+      within(submenu)
+        .getByRole("switch", { name: "notion in this thread" })
+        .getAttribute("aria-disabled"),
+    ).not.toBe("true");
+    expect(within(submenu).queryByRole("button", { name: /^Back to/ })).toBeNull();
+  });
+
+  it("opens the picker from 'more servers', which lists every server, and writes its choice at once", async () => {
+    const user = userEvent.setup();
+    const { api } = await openServersThread([S_GITHUB]);
+
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("button", { name: "1 more server…" }));
+
+    const picker = await screen.findByRole("dialog", { name: "MCP servers of this thread" });
+    // The menu closed. Figma is in the picker, which offers servers switched off in Settings too.
+    expect(screen.queryByRole("dialog", { name: "Add to thread" })).toBeNull();
+    await user.click(within(picker).getByRole("checkbox", { name: "figma" }));
+
+    await waitFor(() => {
+      expect(readUpdates(api)).toHaveLength(1);
+    });
+    expect(readUpdates(api)[0]!.body).toEqual({ mcpServerIds: [S_GITHUB.id, S_FIGMA.id] });
+    await user.click(within(picker).getByRole("button", { name: "Done" }));
+    expect(screen.queryByRole("dialog", { name: "MCP servers of this thread" })).toBeNull();
+  });
+
+  it("offers the Connection's Reconnect and the settings link, and says the server stays on", async () => {
+    const user = userEvent.setup();
+    await openServersThread([S_LINEAR]);
+
+    const submenu = await openServersSubmenu(user);
+
+    expect(readPageText(submenu)).toContain("on, joins once you sign in");
+    const reconnect = within(submenu).getByRole("link", { name: "Reconnect Linear · acme" });
+    expect(reconnect.getAttribute("href")).toBe(
+      `/connections?reconnect=${findServerConnection(S_LINEAR).id}`,
+    );
+    expect(
+      within(submenu).getByRole("link", { name: "Open MCP settings" }).getAttribute("href"),
+    ).toBe("/settings/mcp-servers");
+    // The server needing sign-in still counts as the thread's.
+    expect(
+      within(submenu)
+        .getByRole("switch", { name: "linear in this thread" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("offers 'Sign in…' for a server added by URL that needs sign-in, which opens its token dialog, and names it by its name alone", async () => {
+    const user = userEvent.setup();
+    await openServersThread(
+      [S_DOCS_URL],
+      buildMcpServerRoutes(() => [S_DOCS_URL]),
+    );
+
+    const submenu = await openServersSubmenu(user);
+
+    // No Reconnect: a server added by URL has no Connection. Its address is its account, so it is not printed beside the name.
+    expect(within(submenu).queryByRole("link", { name: /Reconnect/ })).toBeNull();
+    expect(readPageText(submenu)).not.toContain("https://docs.acme.example/mcp");
+    await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+
+    expect(await screen.findByRole("dialog", { name: "Sign in to docs" })).toBeTruthy();
+    // The menu closed to make room for the dialog.
+    expect(screen.queryByRole("dialog", { name: "Servers of this thread" })).toBeNull();
+  });
+
+  it("keeps the sign-in dialog of the submenu when its server is deleted, says so, and lets go of the topic once it is closed", async () => {
+    const user = userEvent.setup();
+    let servers: readonly McpServer[] = [S_DOCS_URL];
+    // The thread's own list is empty: only the open dialog needs the servers.
+    const { live } = await openServersThread(
+      [],
+      buildMcpServerRoutes(() => servers),
+    );
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+
+    servers = [];
+    await pushServerChange(live, S_DOCS_URL.id);
+
+    await within(dialog).findByText("docs was removed.");
+    expect(screen.getByRole("dialog", { name: "Sign in to docs" })).toBe(dialog);
+    expect(live.topics()).toContain("mcpServer");
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Sign in to docs" })).toBeNull();
+    await waitFor(() => {
+      expect(live.topics()).not.toContain("mcpServer");
+    });
+  });
+
+  it.each([
+    ["deleted", (): readonly McpServer[] => [], /docs was removed\./],
+    [
+      "moved onto a Connection",
+      (server: McpServer): readonly McpServer[] => [
+        {
+          ...server,
+          source: {
+            kind: "plugin",
+            contributionId: "sentry/sentry",
+            connectionId: findServerConnection(S_SENTRY_WORK).id,
+          },
+          status: "ready",
+          statusDetail: null,
+        },
+      ],
+      /docs is reached with a Connection now/,
+    ],
+  ])(
+    "ends a browser sign-in that waits for the pasted address when its server is %s meanwhile",
+    async (_name, change, words) => {
+      const user = userEvent.setup();
+      const server: McpServer = {
+        ...S_DOCS_URL,
+        source: {
+          ...S_DOCS_URL.source,
+          signIn: "none",
+          signInOffered: "oauth",
+        } as McpServer["source"],
+      };
+      let servers: readonly McpServer[] = [server];
+      const { live, api } = await openServersThread([], {
+        ...buildMcpServerRoutes(() => servers),
+        [`GET /api/v1/mcp-servers/${server.id}`]: () => ({
+          body: servers.find((each) => each.id === server.id) ?? server,
+        }),
+        [`POST /api/v1/mcp-servers/${server.id}/sign-in`]: () => ({
+          body: {
+            authorizationUrl: "https://auth.acme.example/authorize?state=abc123",
+            expiresAt: "2026-11-23T10:10:00.000Z",
+          },
+        }),
+        [`POST /api/v1/mcp-servers/${server.id}/sign-in/finish`]: () => ({ body: server }),
+      });
+      const submenu = await openServersSubmenu(user);
+      await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+      const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+      await user.click(within(dialog).getByRole("button", { name: "Sign in with your browser" }));
+      await within(dialog).findByText("Sign in through your browser");
+
+      servers = change(server);
+      await pushServerChange(live, server.id);
+
+      await within(dialog).findByText(words);
+      expect(within(dialog).queryByText("Sign in through your browser")).toBeNull();
+      expect(api.calls.filter((call) => call.path.endsWith("/sign-in/finish"))).toEqual([]);
+    },
+  );
+
+  it("leads from a token dialog opened on a thread to the server when its check fails", async () => {
+    const user = userEvent.setup();
+    let server: McpServer = S_DOCS_URL;
+    const { live } = await openServersThread([], {
+      ...buildMcpServerRoutes(() => [server]),
+      [`GET /api/v1/mcp-servers/${S_DOCS_URL.id}`]: () => ({ body: server }),
+      [`POST /api/v1/mcp-servers/${S_DOCS_URL.id}/token`]: () => {
+        server = { ...server, status: "checking", statusDetail: null };
+        return { body: server };
+      },
+    });
+    const submenu = await openServersSubmenu(user);
+    await user.click(within(submenu).getByRole("button", { name: "Sign in…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    await user.type(within(dialog).getByLabelText("Token"), "abc12345-xyz");
+    await user.click(within(dialog).getByRole("button", { name: "Save token" }));
+    await within(dialog).findByText("Asking docs.acme.example for its tools…");
+
+    server = { ...server, status: "unreachable", statusDetail: "connection refused" };
+    await pushServerChange(live, S_DOCS_URL.id);
+
+    await within(dialog).findByText(/docs.acme.example could not be reached\./);
+    expect(within(dialog).getByRole("link", { name: "Open docs" }).getAttribute("href")).toBe(
+      `/settings/mcp-servers/${S_DOCS_URL.id}`,
+    );
+  });
+});
+
+describe("Thread: the lines about MCP servers", () => {
+  const AT = "2026-09-08T10:00:01.000Z";
+
+  /** Builds a transcript of one turn holding a warning with `mcpServers`, and one warning about nothing else. */
+  const buildWarningRows = (
+    mcpServers: readonly { mcpServerId: string; reason: string }[],
+  ): TranscriptRow[] =>
+    buildTranscript(buildTurnStart("t1", "2026-09-08T10:00:00.000Z"), [
+      {
+        _tag: "runtime.warning",
+        eventId: "",
+        sessionId: SESSION_ID,
+        at: AT,
+        turnId: "t1",
+        message: "MCP servers were left out.",
+        mcpServers,
+      } as TurnEvent,
+      {
+        _tag: "runtime.warning",
+        eventId: "",
+        sessionId: SESSION_ID,
+        at: AT,
+        turnId: "t1",
+        message: "Retrying the request.",
+      },
+    ]);
+
+  const openWarning = (
+    mcpServers: readonly { mcpServerId: string; reason: string }[],
+    servers: readonly (typeof MCP_SERVERS)[number][] = MCP_SERVERS,
+  ) =>
+    openApp(buildSession({ status: "idle" }), buildWarningRows(mcpServers), {
+      ...buildMcpServerRoutes(() => servers),
+    });
+
+  /** Returns the line that holds `text`: the flex row with the mark, the words and the buttons. */
+  const findLine = async (text: string): Promise<HTMLElement> =>
+    (await screen.findByText(text)).closest<HTMLElement>("div.items-start")!;
+
+  it("ends a line about a server that needs sign-in with the Connection's Reconnect, and draws it in the failure colours", async () => {
+    await openWarning([{ mcpServerId: S_LINEAR.id, reason: "needs-sign-in" }]);
+
+    // The button comes with the servers, and the line is drawn again around it.
+    const reconnect = await screen.findByRole("link", { name: "Reconnect Linear · acme" });
+    expect(reconnect.getAttribute("href")).toBe(
+      `/connections?reconnect=${findServerConnection(S_LINEAR).id}`,
+    );
+    // A line the user must act on is drawn in the failure colours, and a screen
+    // reader still hears a warning, as for a line with nothing to do.
+    const line = await findLine("MCP servers were left out.");
+    expect(line.className).toContain("text-fail");
+    expect(within(line).getByText("Warning:")).toBeDefined();
+    expect(within(line).queryByText("Error:")).toBeNull();
+    const quiet = await findLine("Retrying the request.");
+    expect(quiet.className).toContain("text-muted");
+    expect(within(quiet).getByText("Warning:")).toBeDefined();
+  });
+
+  it("opens the token dialog from the 'Sign in…' of a server added by URL, and saves the token", async () => {
+    const user = userEvent.setup();
+    let server = S_DOCS_URL;
+    const { api } = await openApp(
+      buildSession({ status: "idle" }),
+      buildWarningRows([{ mcpServerId: S_DOCS_URL.id, reason: "needs-sign-in" }]),
+      {
+        ...buildMcpServerRoutes(() => [server]),
+        [`GET /api/v1/mcp-servers/${S_DOCS_URL.id}`]: () => ({ body: server }),
+        [`POST /api/v1/mcp-servers/${S_DOCS_URL.id}/token`]: () => {
+          server = { ...server, status: "checking", statusDetail: null };
+          return { body: server };
+        },
+      },
+    );
+
+    // A server with no Connection has no Reconnect: its button opens the dialog.
+    const signIn = await screen.findByRole("button", { name: "Sign in…: docs" });
+    const line = await findLine("MCP servers were left out.");
+    expect(within(line).queryByRole("link")).toBeNull();
+    expect(line.className).toContain("text-fail");
+    await user.click(signIn);
+
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+    expect(readPageText(dialog)).toContain("The server refused its token. Paste a new one.");
+    await user.type(within(dialog).getByLabelText("Token"), "abc12345-xyz");
+    await user.click(within(dialog).getByRole("button", { name: "Save token" }));
+
+    await waitFor(() => {
+      expect(
+        api.calls.filter((call) => call.method === "POST" && call.path.endsWith("/token")),
+      ).toHaveLength(1);
+    });
+    expect(api.calls.find((call) => call.path.endsWith("/token"))!.body).toEqual({
+      token: "abc12345-xyz",
+    });
+    await within(dialog).findByText("Asking docs.acme.example for its tools…");
+    // Closing leaves the thread as it was.
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Sign in to docs" })).toBeNull();
+    expect(readPageText()).not.toContain("abc12345-xyz");
+  });
+
+  it("keeps the token dialog of a warning line when a live change takes its button away, and says where the server went", async () => {
+    const user = userEvent.setup();
+    let server: McpServer = S_DOCS_URL;
+    const { live } = await openApp(
+      buildSession({ status: "idle" }),
+      buildWarningRows([{ mcpServerId: S_DOCS_URL.id, reason: "needs-sign-in" }]),
+      {
+        ...buildMcpServerRoutes(() => [server]),
+        [`GET /api/v1/mcp-servers/${S_DOCS_URL.id}`]: () => ({ body: server }),
+      },
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign in…: docs" }));
+    const dialog = await screen.findByRole("dialog", { name: "Sign in to docs" });
+
+    // Another client moves the server onto Sentry's Connection: a Connection signs it in now, so the line has no button for it.
+    server = {
+      ...server,
+      source: {
+        kind: "plugin",
+        contributionId: "sentry/sentry",
+        connectionId: findServerConnection(S_SENTRY_WORK).id,
+      },
+      status: "ready",
+      statusDetail: null,
+    };
+    await pushServerChange(live, S_DOCS_URL.id);
+
+    await within(dialog).findByText(/docs is reached with a Connection now/);
+    // The button went, and the dialog it opened is still the one on the page.
+    expect(await screen.findByRole("link", { name: "Reconnect Sentry · work" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Sign in…: docs" })).toBeNull();
+    expect(dialog.isConnected).toBe(true);
+    expect(within(dialog).getByRole("link", { name: "Open docs" }).getAttribute("href")).toBe(
+      `/settings/mcp-servers/${S_DOCS_URL.id}`,
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(dialog.isConnected).toBe(false);
+  });
+
+  it("gives each server it names its own button, 'Open server' for an unreachable one, and none for a reason without a fix", async () => {
+    await openWarning([
+      { mcpServerId: S_NOTION.id, reason: "unreachable" },
+      { mcpServerId: S_GITHUB.id, reason: "error" },
+      { mcpServerId: S_GRAFANA.id, reason: "runner-too-old" },
+    ]);
+
+    await screen.findAllByRole("link", { name: /^Open server/ });
+    const line = await findLine("MCP servers were left out.");
+    const open = within(line).getAllByRole("link");
+    expect(open.map((link) => link.getAttribute("href"))).toEqual([
+      `/settings/mcp-servers/${S_NOTION.id}`,
+      `/settings/mcp-servers/${S_GITHUB.id}`,
+    ]);
+    expect(open.map((link) => link.textContent)).toEqual(["Open server", "Open server"]);
+    // Two buttons with one label say which server each opens.
+    expect(open.map((link) => link.getAttribute("aria-label"))).toEqual([
+      "Open server: notion",
+      "Open server: github",
+    ]);
+  });
+
+  it("draws a line with no fix as the quiet warning, with no button", async () => {
+    const withServersRead = await openWarning([
+      { mcpServerId: S_GRAFANA.id, reason: "harness-unsupported" },
+    ]);
+
+    const line = await findLine("MCP servers were left out.");
+    // Let the servers load: a fix would show up as a button.
+    await waitFor(() => {
+      expect(withServersRead.api.calls.some((call) => call.path === "/api/v1/mcp-servers")).toBe(
+        true,
+      );
+    });
+    expect(within(line).getByText("Warning:")).toBeDefined();
+    expect(within(line).queryByRole("link")).toBeNull();
+    expect(line.className).toContain("text-muted");
+  });
+
+  it("draws no button for a server that was deleted since the line was written", async () => {
+    // Linear is not on the controller's list any more.
+    const deleted = await openWarning(
+      [{ mcpServerId: S_LINEAR.id, reason: "needs-sign-in" }],
+      MCP_SERVERS.filter((server) => server.id !== S_LINEAR.id),
+    );
+
+    const line = await findLine("MCP servers were left out.");
+    await waitFor(() => {
+      expect(deleted.api.calls.some((call) => call.path === "/api/v1/mcp-servers")).toBe(true);
+    });
+    expect(screen.queryAllByRole("link", { name: /Reconnect/ })).toEqual([]);
+    expect(within(line).queryByRole("link")).toBeNull();
+    expect(line.className).toContain("text-muted");
+  });
+
+  it("reads the servers and holds the topic for a thread with such a line, and for none without", async () => {
+    const withLine = await openWarning([{ mcpServerId: S_LINEAR.id, reason: "needs-sign-in" }]);
+    await waitFor(() => {
+      expect(withLine.live.topics()).toContain("mcpServer");
+    });
+    expect(
+      withLine.api.calls.filter((call) => call.path === "/api/v1/mcp-servers").length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("reads the servers once for a page with several such lines, and not again when the window gains focus", async () => {
+    const warn = (message: string, mcpServerId: string): TurnEvent => ({
+      _tag: "runtime.warning",
+      eventId: "",
+      sessionId: SESSION_ID,
+      at: AT,
+      turnId: "t1",
+      message,
+      mcpServers: [{ mcpServerId, reason: "needs-sign-in" }],
+    });
+    const { api, live } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(buildTurnStart("t1", "2026-09-08T10:00:00.000Z"), [
+        warn("Linear was left out.", S_LINEAR.id),
+        warn("Notion was left out.", S_NOTION.id),
+      ]),
+      buildMcpServerRoutes(),
+    );
+
+    await waitFor(() => {
+      expect(live.topics()).toContain("mcpServer");
+    });
+    // The read, and the one more on the topic's first push: one for the page, not one for each line.
+    await waitFor(() => {
+      expect(api.calls.filter((call) => call.path === "/api/v1/mcp-servers")).toHaveLength(2);
+    });
+
+    // The topic keeps the servers fresh, so coming back to the window reads nothing.
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    await settle();
+    expect(api.calls.filter((call) => call.path === "/api/v1/mcp-servers")).toHaveLength(2);
+  });
+
+  describe("while the transcript grows", () => {
+    /** Pushes a warning about nothing else as a new row of the thread, and waits for it to show. */
+    const pushWarning = async (
+      live: LiveStub,
+      position: number,
+      message: string,
+    ): Promise<void> => {
+      await waitFor(() => {
+        expect(live.topics()).toContain(buildSessionStreamTopic(SESSION_ID));
+      });
+      act(() => {
+        live.push(buildSessionStreamTopic(SESSION_ID), {
+          _tag: "delta",
+          items: [
+            buildTranscriptRow(position, {
+              _tag: "runtime.warning",
+              eventId: `e${position}`,
+              sessionId: SESSION_ID,
+              at: AT,
+              turnId: "t1",
+              message,
+            }),
+          ],
+          cursor: String(position),
+        });
+      });
+      await screen.findByText(message);
+    };
+
+    const countBuilds = () => ({
+      described: vi.mocked(describeThreadServers).mock.calls.length,
+      joined: vi.mocked(buildMcpServerViews).mock.calls.length,
+    });
+
+    it("describes the thread and joins the servers once for a line about them, not again for each row", async () => {
+      const { live } = await openWarning([{ mcpServerId: S_LINEAR.id, reason: "needs-sign-in" }]);
+      await screen.findByRole("link", { name: "Reconnect Linear · acme" });
+      const before = countBuilds();
+
+      await pushWarning(live, 100, "First.");
+      await pushWarning(live, 101, "Second.");
+
+      expect(countBuilds()).toEqual(before);
+    });
+
+    it("describes the thread and joins the servers once for the open submenu, not again for each row", async () => {
+      const user = userEvent.setup();
+      const { live } = await openApp(
+        buildSession({ status: "idle", mcpServers: buildSessionServers([S_NOTION]) }),
+        buildTranscript(buildTurnStart("t1", "2026-09-08T10:00:00.000Z"), []),
+        buildMcpServerRoutes(),
+      );
+      await openServersSubmenu(user);
+      const before = countBuilds();
+
+      await pushWarning(live, 100, "First.");
+      await pushWarning(live, 101, "Second.");
+
+      expect(countBuilds()).toEqual(before);
+    });
+  });
+
+  it("reads no servers for a thread whose only warning is about something else", async () => {
+    const { api, live } = await openApp(
+      buildSession({ status: "idle" }),
+      buildTranscript(buildTurnStart("t1", "2026-09-08T10:00:00.000Z"), [
+        {
+          _tag: "runtime.warning",
+          eventId: "",
+          sessionId: SESSION_ID,
+          at: AT,
+          turnId: "t1",
+          message: "Retrying the request.",
+        },
+      ]),
+      buildMcpServerRoutes(),
+    );
+
+    await screen.findByText("Retrying the request.");
+    expect(api.calls.filter((call) => call.path === "/api/v1/mcp-servers")).toHaveLength(0);
+    expect(live.topics()).not.toContain("mcpServer");
   });
 });

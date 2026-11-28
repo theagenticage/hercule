@@ -8,6 +8,16 @@
 /* The book's `.tx` is a flex column with a 22px gap. Here each block is an
    item of the virtualizer, which measures it, so the gap is the item's own
    top padding, and each item is the flex column its block sits in. */
+/* A transcript in a box of its own, such as a dialog (`layout="embedded"`):
+   no header above the first block, no composer below the last, and the
+   column takes the box's width. The selector is as specific as the page's
+   `.column` and `.tx` rules in ../session/transcript.css, and comes later. */
+.column.tx.tx-embedded {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
 .tx-item {
   display: flex;
   flex-direction: column;
@@ -44,16 +54,6 @@
 }
 button.worked:hover b {
   color: var(--ink);
-}
-/* The words only a screen reader gets: a status line's label may count up
-   every second, so the live region holds a text that changes with the state. */
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
 }
 
 /* The agent's message the agent has started and not yet written a word of.
@@ -385,6 +385,16 @@ button.work-row:hover > .ic {
 .runtime-notice-note .code-word,
 .error-note .code-word {
   white-space: nowrap;
+}
+/* The buttons after a note's sentence, such as "Reconnect Sentry · work". They
+   sit on the sentence's baseline. The negative margins keep the note's line as
+   tall as its text, so the note's dot stays level with its words. */
+.note-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -6px 0 -6px 8px;
+  vertical-align: baseline;
 }
 .warning-note .time,
 .runtime-notice-note .time,

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   ApiError,
   ConnectionError,
+  isBlockerCycle,
+  isInvalidState,
   isNotFound,
+  isRequestClosed,
   readErrorMessage,
   readValidationIssues,
   RequestError,
@@ -58,6 +61,69 @@ describe("isNotFound", () => {
       ),
     ).toBe(false);
     expect(isNotFound(null)).toBe(false);
+  });
+});
+
+describe("isInvalidState", () => {
+  it("is true only for an invalid_state response", () => {
+    expect(isInvalidState(new ApiError("invalid_state", "An Agent uses it."))).toBe(true);
+    expect(isInvalidState(new ApiError("conflict", "Changed."))).toBe(false);
+    expect(
+      isInvalidState(
+        new ConnectionError(
+          "mcpServer.update",
+          "http://controller.test",
+          "cannot connect to http://controller.test",
+          new Error("refused"),
+        ),
+      ),
+    ).toBe(false);
+    expect(isInvalidState(null)).toBe(false);
+  });
+});
+
+describe("isRequestClosed", () => {
+  it("is true for a gone session and for an invalid_state that names the closed Request, and for nothing else", () => {
+    expect(isRequestClosed(new ApiError("not_found", "No such session."))).toBe(true);
+    expect(
+      isRequestClosed(
+        new ApiError("invalid_state", "Not one it waits on.", { reason: "request-closed" }),
+      ),
+    ).toBe(true);
+    expect(isRequestClosed(new ApiError("invalid_state", "The runner is away."))).toBe(false);
+    expect(
+      isRequestClosed(new ApiError("invalid_state", "Other.", { reason: "something-else" })),
+    ).toBe(false);
+    expect(isRequestClosed(new ApiError("conflict", "Changed."))).toBe(false);
+    expect(isRequestClosed(new Error("cannot reach"))).toBe(false);
+  });
+
+  it("is false for the refusal of a blocker loop, which is not a closed Request", () => {
+    expect(
+      isRequestClosed(
+        new ApiError("invalid_state", "Print depot pick lists already waits on this Task.", {
+          reason: "blocker-cycle",
+        }),
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("isBlockerCycle", () => {
+  it("is true only for an invalid_state that names a blocker loop", () => {
+    expect(
+      isBlockerCycle(
+        new ApiError("invalid_state", "Pack the crates already waits on this Task.", {
+          reason: "blocker-cycle",
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      isBlockerCycle(new ApiError("invalid_state", "Not open.", { reason: "request-closed" })),
+    ).toBe(false);
+    expect(isBlockerCycle(new ApiError("invalid_state", "The runner is away."))).toBe(false);
+    expect(isBlockerCycle(new ApiError("not_found", "No such Task."))).toBe(false);
+    expect(isBlockerCycle(new Error("cannot reach"))).toBe(false);
   });
 });
 

@@ -19,7 +19,7 @@ import {
   spawnThreadUnder,
   spawnThreadWithGrants,
   listSessions,
-  findInstanceId,
+  findProviderAccountId,
   spawnSessionOrFail,
   at,
   readProfileNamed,
@@ -89,7 +89,7 @@ const spawnFromAgent = async (
     {
       name,
       systemPrompt: "You carry work on.",
-      instanceId: findInstanceId(arranged, "full-provider"),
+      providerAccountId: findProviderAccountId(arranged, "harnesses/full"),
       permissionProfileId: profile.id,
     },
     arranged.token,
@@ -103,7 +103,7 @@ const spawnFromAgent = async (
     sessionId: opened.id,
     at,
     _tag: "session.started",
-    providerRefs: { nativeSessionId: "native-1" },
+    harnessRefs: { nativeSessionId: "native-1" },
   });
   return waitForSession(arranged, opened.id, (one) => one.status === "busy");
 };
@@ -188,7 +188,7 @@ describe("the token the controller mints for a session", () => {
         sessionId: session.id,
         at,
         _tag: "session.started",
-        providerRefs: { nativeSessionId: "native-1" },
+        harnessRefs: { nativeSessionId: "native-1" },
       });
       await waitForSession(arranged, session.id, (one) => one.status === "busy");
 
@@ -453,7 +453,7 @@ describe("a session starting a Thread", () => {
     });
   });
 
-  it("copies the calling session's profile, access mode, instance and project when the call has only a prompt", async () => {
+  it("copies the calling session's profile, access mode, account and project when the call has only a prompt", async () => {
     await withFleet(async (arranged) => {
       // A profile that is not the user's default Thread profile, an access mode
       // that is not the default one, and a project, so that a copy cannot be
@@ -472,7 +472,7 @@ describe("a session starting a Thread", () => {
         agentId: null,
         permissionProfileId: profile.id,
         requestedAccessMode: "auto-accept-edits",
-        instanceId: caller.session.instanceId,
+        providerAccountId: caller.session.providerAccountId,
         projectId,
       });
     });

@@ -1,6 +1,20 @@
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { beforeEach, vi } from "vitest";
+import { configure } from "@testing-library/dom";
 import rowHeights from "./styles/row-heights.css?raw";
+
+/**
+ * Lets `waitFor`, `findBy*` and `waitForElementToBeRemoved` wait up to 30
+ * seconds, in place of Testing Library's 1 second. The wait ends as soon as
+ * its condition holds, so a passing test is not slower. The limit catches a
+ * hang, not a slow machine: with every core busy, an app that renders in 100
+ * ms alone takes more than a second, and a test that is correct fails.
+ *
+ * `configure` comes from `@testing-library/dom`, not `@testing-library/react`:
+ * importing the React one here loads React before the test files stub
+ * globals, which breaks the Office and workflow motion tests.
+ */
+configure({ asyncUtilTimeout: 30_000 });
 
 /**
  * Creates an empty `localStorage` held in memory.
@@ -64,15 +78,36 @@ window.scrollTo = () => {};
 Element.prototype.scrollIntoView = () => {};
 
 /**
+ * jsdom has no `Element.getAnimations`, and runs no CSS transitions. The
+ * model menu waits for the transitions of a switch of profiles to settle, so
+ * each test that switches would fail without it. The stub returns no
+ * animation, as a page whose styles start no transition does.
+ */
+Element.prototype.getAnimations = () => [];
+
+/**
+ * jsdom has no `Element.animate`. The Work board fades the copy of a folding
+ * card with it and does not look at the result, so the stub starts nothing.
+ */
+Element.prototype.animate = () => ({ cancel: () => {} }) as unknown as Animation;
+
+/**
  * jsdom has no `document.fonts`. A screen waits for `document.fonts.ready`
  * before it reports itself to main (see `app/presented-frame.ts`), so without
  * this stub each test that shows the "connecting" screen logs an error. The
- * stub has no fonts to load, so its `ready` has resolved. It is a getter, so
- * a test can replace it with `vi.spyOn(document, "fonts", "get")`.
+ * stub has no fonts to load, so its `ready` has resolved, and it takes event
+ * listeners (the Inbox search refits when `loadingdone` fires) and fires none.
+ * It is a getter, so a test can replace it with
+ * `vi.spyOn(document, "fonts", "get")`.
  */
+const fontsStub = {
+  ready: Promise.resolve(),
+  addEventListener: () => {},
+  removeEventListener: () => {},
+};
 Object.defineProperty(document, "fonts", {
   configurable: true,
-  get: () => ({ ready: Promise.resolve() }),
+  get: () => fontsStub,
 });
 
 /**

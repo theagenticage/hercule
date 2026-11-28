@@ -26,7 +26,8 @@ const ADA: Assistant = {
   id: "01a06d02-a000-7000-8000-000000000001",
   name: "Ada",
   systemPrompt: "You are Ada.",
-  instanceId: "01a06d02-1000-7000-8000-000000000001",
+  providerAccountId: "01a06d02-1000-7000-8000-000000000001",
+  harnessId: null,
   permissionProfileId: "01a06d02-3000-7000-8000-000000000001",
   accessMode: "auto-accept-edits",
   model: null,
@@ -45,7 +46,8 @@ describe("buildAssistantDraft", () => {
     expect(buildAssistantDraft(ADA)).toEqual({
       name: "Ada",
       systemPrompt: "You are Ada.",
-      instanceId: ADA.instanceId,
+      providerAccountId: ADA.providerAccountId,
+      harnessId: null,
       permissionProfileId: ADA.permissionProfileId,
       accessMode: "auto-accept-edits",
       reply: "turn-end",
@@ -100,7 +102,8 @@ describe("buildAssistantUpdate", () => {
     const draft = {
       name: "Bob",
       systemPrompt: "You are Bob.",
-      instanceId: "01a06d02-1000-7000-8000-000000000002",
+      providerAccountId: "01a06d02-1000-7000-8000-000000000002",
+      harnessId: "pi/pi",
       permissionProfileId: "01a06d02-3000-7000-8000-000000000002",
       accessMode: "full-access" as const,
       reply: "segments" as const,
@@ -123,7 +126,7 @@ describe("buildAssistantUpdate", () => {
     expect(buildAssistantUpdate(assistant, draft)).toEqual({ name: "Ada L" });
   });
 
-  it("sends a changed model, and null to go back to the instance's default", () => {
+  it("sends a changed model, and null to go back to the account's default", () => {
     const assistant = { ...ADA, model: { model: "claude-sonnet-5", options: {} } };
 
     expect(
@@ -135,6 +138,13 @@ describe("buildAssistantUpdate", () => {
     expect(
       buildAssistantUpdate(assistant, { ...buildAssistantDraft(assistant), model: null }),
     ).toEqual({ model: null });
+  });
+
+  it("sends harnessId null to put the assistant back on its account's default harness", () => {
+    const assistant = { ...ADA, harnessId: "pi/pi" };
+    const draft = { ...buildAssistantDraft(assistant), harnessId: null };
+
+    expect(buildAssistantUpdate(assistant, draft)).toEqual({ harnessId: null });
   });
 
   it("leaves out a field changed and then changed back", () => {

@@ -8,7 +8,9 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { routeTree } from "../routeTree.gen";
+import { decideMachineTransitionTypes } from "../screens/fleet/machine-transition";
 import { RenderFailure } from "../screens/render-failure";
+import { isMotionReduced } from "../screens/workflows/change-motion";
 import type { RouterContext } from "./context";
 import { openLaunchScreen, trackLastScreen } from "./last-screen";
 
@@ -19,6 +21,10 @@ import { openLaunchScreen, trackLastScreen } from "./last-screen";
  * it starts at `/`.
  * It renders the query cache's provider around every route, so the app and a
  * test render the router alone. A route that fails shows `RenderFailure`.
+ *
+ * A navigation between the Fleet page and a machine's page runs as a view
+ * transition, whatever starts it: a card, the header's Fleet crumb, or Back.
+ * No other navigation does.
  *
  * The router also empties the query cache and its own cache of past screens
  * when the user is signed out. It does so when a navigation ends with no
@@ -44,8 +50,9 @@ import { openLaunchScreen, trackLastScreen } from "./last-screen";
  * token repairs both, and costs almost nothing when the store is empty.
  *
  * Switching to another controller needs no rule here: main reloads the window
- * then, and the thread copies delete themselves when the reloaded page opens
- * them for another controller URL (see `createThreadCopies`).
+ * then, which builds a new undo stack, and the thread copies delete themselves
+ * when the reloaded page opens them for another controller URL (see
+ * `createThreadCopies`). Signing out empties the undo stack with the caches.
  *
  * The caches are emptied only once the navigation has ended, on the sign-in
  * screen or the connect screen. Emptied earlier, a screen still on display
@@ -59,6 +66,11 @@ export const createAppRouter = (context: RouterContext) => {
     context,
     history: createMemoryHistory(),
     defaultErrorComponent: RenderFailure,
+    // Only the move between Fleet and a machine's page is a view transition;
+    // see `decideMachineTransitionTypes`.
+    defaultViewTransition: {
+      types: (places) => decideMachineTransitionTypes(places, isMotionReduced()),
+    },
     Wrap: ({ children }) => (
       <QueryClientProvider client={context.queryClient}>{children}</QueryClientProvider>
     ),
@@ -77,6 +89,10 @@ export const createAppRouter = (context: RouterContext) => {
     if (signedIn && !hasToken) {
       context.queryClient.clear();
       router.clearCache();
+      // Closes what was the signed-out user's: Undo must not reach the next
+      // one, and nothing held for them is sent. What they had not sent yet
+      // stays in storage as unsent and is never sent by itself.
+      context.controller?.accountScopes.close();
     }
     // A page that closes while signing out must not save its copy: the thread
     // copy hook saves nothing while the token is gone, and this delete also

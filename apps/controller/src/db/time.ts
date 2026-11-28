@@ -27,3 +27,7 @@ import * as Effect from "effect/Effect";
 export const nowIso: Effect.Effect<string> = Effect.map(Clock.currentTimeMillis, (millis) =>
   new Date(millis).toISOString(),
 );
+
+/** Returns the time `seconds` after `at` (before it when negative), as an ISO 8601 string. */
+export const addSeconds = (at: string, seconds: number): string =>
+  new Date(Date.parse(at) + seconds * 1000).toISOString();

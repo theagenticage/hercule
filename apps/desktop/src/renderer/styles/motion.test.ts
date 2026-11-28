@@ -1,24 +1,30 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  LAYOUT_TRANSITIONS,
+  listTransitionedProperties,
+  MOTION_FOLDERS,
+  parseTransition,
+  splitOutsideParentheses,
+} from "./motion-policy.ts";
 
 /**
  * Tests every stylesheet of the renderer against spec 17's motion rule
  * (§Performance, rule 2):
  *
  * - Keyframe animations change only `transform` and `opacity`.
- * - Transitions answer a user action, last at most `--dur-3`, and change only
- *   paint properties: color, background, border-color, box-shadow, opacity,
- *   transform, content-visibility. A layout property may transition only
- *   once a measurement shows it is cheap; so far that is the width of a
- *   split's sized column, as its side pane opens or closes, and the width of
- *   the shell's sidebar, as it is shown or hidden.
+ * - Transitions answer a user action and last at most `--dur-3`. Which
+ *   properties a transition may change is not checked here: the ESLint rule
+ *   `desktop/transition-properties` owns that, from `motion-policy.ts`. This
+ *   test only checks that each entry of the policy's layout allowlist still
+ *   matches a transition in a stylesheet.
  *
  * It also checks that:
  *
  * - Reduce motion can stop every animation;
- * - only two animations may run forever: the working pose's paws and the
- *   spinner;
+ * - only three animations may run forever: the working pose's paws, the
+ *   spinner, and the paws on a card of the desk;
  * - no rule for every element (`*`) sets a transition, because an element
  *   transitions every property by default, layout included.
  *
@@ -32,22 +38,6 @@ import { describe, expect, it } from "vitest";
 
 /** The renderer's source folder, which holds every stylesheet the test reads. */
 const RENDERER = join(import.meta.dirname, "..");
-
-/**
- * The properties a transition may change: each costs a repaint, never a
- * layout pass. A `content-visibility` transition switches once, at its end
- * when it hides, so an element can stay shown while something else about it
- * slides.
- */
-const PAINT_PROPERTIES = [
-  "color",
-  "background",
-  "border-color",
-  "box-shadow",
-  "opacity",
-  "transform",
-  "content-visibility",
-];
 
 /** The properties a keyframe may set. The compositor can animate both without a repaint. */
 const KEYFRAME_PROPERTIES = ["transform", "opacity"];
@@ -67,31 +57,24 @@ const REDUCE = "@media (prefers-reduced-motion: reduce)";
  * - the working pose's paws, which tap only beside the open thread's running
  *   turn;
  * - the spinner, which turns only while Hercule starts or a provider login
- *   waits for the browser. Both waits end.
+ *   waits for the browser. Both waits end;
+ * - the paws of a colleague on a card of the desk, which tap in short bursts
+ *   with long pauses for as long as a Thread works on the card. The Still
+ *   colleagues setting stops them.
  */
 const ENDLESS_ANIMATIONS = [
   { file: "faces/face.css", rule: ".cr--working.cr--animated .cr-tap" },
   { file: "styles/controls.css", rule: ".spin" },
+  {
+    file: "screens/desk/card.css",
+    rule: '.card-paws[data-pose="working"]:not([data-still]) i',
+  },
 ];
 
-/**
- * The rules allowed to transition `width`, each because spec 17 records a
- * measurement showing it drops no frame:
- *
- * - Intake's list, the sized column of a split, as its side pane opens or
- *   closes. The column's rows are lines of a fixed count, each cut with an
- *   ellipsis, so a frame of the transition lays the column out without
- *   measuring text again.
- * - The box that holds the shell's sidebar, as the sidebar is shown or
- *   hidden. The sidebar inside keeps its width, so a frame never lays out
- *   its rows again; it lays out the box and the main pane beside it, which
- *   was measured with a long transcript open.
- */
-const SPLIT_WIDTH_TRANSITIONS = [
-  { file: "screens/intake/intake.css", rule: ".asks-list" },
-  { file: "shell/shell.css", rule: ".side-slot" },
-];
-
+/** The `--m-*` durations the motion folders (see `MOTION_FOLDERS`) may transition for. */
+const DESK_DURATIONS = ["--m-press", "--m-quick", "--m-base", "--m-slow", "--m-long"].map(
+  (token) => `var(${token})`,
+);
 /** One declaration of a stylesheet, with the blocks it sits in. */
 interface Declaration {
   /** The stylesheet's path, relative to the renderer's source folder. */
@@ -168,38 +151,12 @@ function parseDeclarations(file: string, css: string): Declaration[] {
   return declarations;
 }
 
-/**
- * Splits `value` at every match of `separator` that is outside parentheses,
- * so `cubic-bezier(0.2, 0, 0, 1)` stays one part. Returns the trimmed parts,
- * leaving out empty ones.
- */
-function splitOutsideParentheses(value: string, separator: RegExp): string[] {
-  const parts: string[] = [];
-  let part = "";
-  let depth = 0;
-  for (const char of value) {
-    if (char === "(") depth++;
-    if (char === ")") depth--;
-    if (depth === 0 && separator.test(char)) {
-      parts.push(part);
-      part = "";
-    } else {
-      part += char;
-    }
-  }
-  parts.push(part);
-  return parts.map((each) => each.trim()).filter((each) => each !== "");
-}
-
 /** Checks whether a word of a `transition` value is a time: a duration or a delay. */
 const isTime = (word: string): boolean =>
-  DURATIONS.includes(word) || /^var\(--dur-/.test(word) || /^[\d.]+m?s$/.test(word);
-
-/** Checks whether a word of a `transition` value is anything but the property it transitions. */
-const isTimingOrBehaviour = (word: string): boolean =>
-  /^(ease|ease-in|ease-out|ease-in-out|linear|step-start|step-end|normal|allow-discrete)$/.test(
-    word,
-  ) || /^(cubic-bezier|steps|linear|var)\(/.test(word);
+  DURATIONS.includes(word) ||
+  DESK_DURATIONS.includes(word) ||
+  /^var\(--dur-/.test(word) ||
+  /^[\d.]+m?s$/.test(word);
 
 /** Returns where a declaration sits, for a message: its file and its innermost selector. */
 const describeLocation = (declaration: Declaration): string => {
@@ -215,31 +172,22 @@ const describeLocation = (declaration: Declaration): string => {
 const appliesToEveryElement = (declaration: Declaration): boolean =>
   /\*(?!\s*=)/.test(declaration.blocks.findLast((block) => !block.startsWith("@")) ?? "");
 
-/** Returns the messages for one `transition` shorthand; see `findMotionViolations`. */
+/**
+ * Returns the messages for one `transition` shorthand: each of its transitions
+ * must last one allowed duration, with no delay. Its properties are checked by
+ * the ESLint rule `desktop/transition-properties`.
+ */
 function checkTransition(declaration: Declaration): string[] {
   if (declaration.value === "none") return [];
   const where = describeLocation(declaration);
-  const isSplitColumn = SPLIT_WIDTH_TRANSITIONS.some(
-    (entry) => entry.file === declaration.file && declaration.blocks.at(-1) === entry.rule,
-  );
-  const allowed = isSplitColumn ? [...PAINT_PROPERTIES, "width"] : PAINT_PROPERTIES;
-  return splitOutsideParentheses(declaration.value, /,/).flatMap((item) => {
-    const words = splitOutsideParentheses(item, /\s/);
+  const isDesk = MOTION_FOLDERS.some((folder) => declaration.file.startsWith(folder));
+  const allowedDurations = isDesk ? [...DURATIONS, ...DESK_DURATIONS] : DURATIONS;
+  return parseTransition(declaration.value).flatMap(({ text, words }) => {
     const times = words.filter(isTime);
-    const properties = words.filter((word) => !isTime(word) && !isTimingOrBehaviour(word));
-    const messages: string[] = [];
-    if (properties.length === 0) {
-      messages.push(`${where}: "${item}" transitions every property; name a paint property.`);
-    }
-    for (const property of properties.filter((each) => !allowed.includes(each))) {
-      messages.push(`${where}: "${item}" transitions ${property}, which is not a paint property.`);
-    }
-    if (times.length !== 1 || !DURATIONS.includes(times[0]!)) {
-      messages.push(
-        `${where}: "${item}" must last var(--dur-1), var(--dur-2) or var(--dur-3), with no delay.`,
-      );
-    }
-    return messages;
+    if (times.length === 1 && allowedDurations.includes(times[0]!)) return [];
+    return [
+      `${where}: "${text}" must last var(--dur-1), var(--dur-2) or var(--dur-3)${isDesk ? ", or a --m-* token" : ""}, with no delay.`,
+    ];
   });
 }
 
@@ -279,15 +227,6 @@ function checkDeclaration(declaration: Declaration): string[] {
   }
   if (property === "transition") {
     messages.push(...checkTransition(declaration));
-  }
-  if (property === "transition-property" && value !== "none") {
-    for (const each of splitOutsideParentheses(value, /,/)) {
-      if (!PAINT_PROPERTIES.includes(each)) {
-        messages.push(
-          `${where}: transition-property names ${each}, which is not a paint property.`,
-        );
-      }
-    }
   }
   if (property === "transition-duration") {
     if (splitOutsideParentheses(value, /,/).some((each) => !DURATIONS.includes(each))) {
@@ -346,6 +285,19 @@ describe("the renderer's motion", () => {
     expect(declarations).toContainEqual(
       expect.objectContaining({ file: "styles/controls.css", property: "transition" }),
     );
+  });
+
+  it("keeps an entry of the layout allowlist only while a transition in its rule needs it", () => {
+    // An entry for a rule that no longer transitions its property would let a
+    // later transition of that property through unchecked.
+    for (const { file, rule, property } of LAYOUT_TRANSITIONS) {
+      const transitioned = declarations
+        .filter((declaration) => declaration.file === file && declaration.blocks.at(-1) === rule)
+        .flatMap((declaration) =>
+          listTransitionedProperties(declaration.property, declaration.value),
+        );
+      expect(transitioned, `${file} ${rule} no longer transitions ${property}`).toContain(property);
+    }
   });
 
   it("keeps the motion rule in every stylesheet", () => {
@@ -526,6 +478,31 @@ describe("the renderer's motion", () => {
     ).toEqual([]);
   });
 
+  it("lets only the desk's and the Work board's stylesheets transition for a --m-* duration, and holds them to the rest of the rule", () => {
+    const css = `
+      .card-stock { transition: box-shadow var(--m-base) var(--m-ease), filter var(--m-quick); }
+      .slow { transition: opacity 260ms; }
+      .late { transition-delay: 50ms; }
+    `;
+    expect(
+      findMotionViolations(
+        parseDeclarations("screens/work/sample.css", ".turn { transition: rotate var(--m-base); }"),
+      ),
+    ).toEqual([]);
+    expect(findMotionViolations(parseDeclarations("screens/desk/sample.css", css))).toEqual([
+      'screens/desk/sample.css .slow: "opacity 260ms" must last var(--dur-1), var(--dur-2) or var(--dur-3), or a --m-* token, with no delay.',
+      "screens/desk/sample.css .late: a transition answers a user action at once, so it has no delay.",
+    ]);
+    // Outside the desk and the Work board the same durations are refused.
+    expect(
+      findMotionViolations(
+        parseDeclarations("screens/other.css", ".card-stock { transition: filter var(--m-base); }"),
+      ),
+    ).toEqual([
+      'screens/other.css .card-stock: "filter var(--m-base)" must last var(--dur-1), var(--dur-2) or var(--dur-3), with no delay.',
+    ]);
+  });
+
   it("reports each way a stylesheet can break the rule", () => {
     // Proves the checks can fail: a check that never fails guards nothing.
     const css = `
@@ -536,36 +513,28 @@ describe("the renderer's motion", () => {
       .pulse { animation: pulse var(--dur-2); }
       .card {
         transition:
-          height var(--dur-1),
           color 150ms,
-          opacity var(--dur-2) var(--dur-1),
-          var(--dur-1);
+          opacity var(--dur-2) var(--dur-1);
       }
-      .link { transition-property: all; transition-duration: 1s; transition-delay: 50ms; }
+      .link { transition-duration: 1s; transition-delay: 50ms; }
       @media (prefers-reduced-motion: reduce) {
         *, *::before { transition-duration: 0.01ms !important; }
       }
       .calm { transition: box-shadow var(--dur-3) var(--ease-out); animation: none; }
       [title*="x"] { transition: color var(--dur-1); }
       .snap * { transition: none; }
-      .asks-list { transition: width var(--dur-3); }
     `;
     expect(findMotionViolations(parseDeclarations("sample.css", css))).toEqual([
       "sample.css from: a keyframe sets width; keyframes may set only transform and opacity.",
       "sample.css to: a keyframe sets width; keyframes may set only transform and opacity.",
       "sample.css .spinner: an animation runs forever. The only one allowed is the working pose's paws.",
       `sample.css .pulse: animation is declared outside ${NO_PREFERENCE}, so Reduce motion cannot stop it.`,
-      'sample.css .card: "height var(--dur-1)" transitions height, which is not a paint property.',
       'sample.css .card: "color 150ms" must last var(--dur-1), var(--dur-2) or var(--dur-3), with no delay.',
       'sample.css .card: "opacity var(--dur-2) var(--dur-1)" must last var(--dur-1), var(--dur-2) or var(--dur-3), with no delay.',
-      'sample.css .card: "var(--dur-1)" transitions every property; name a paint property.',
-      "sample.css .link: transition-property names all, which is not a paint property.",
       "sample.css .link: transition-duration must be var(--dur-1), var(--dur-2) or var(--dur-3), not 1s.",
       "sample.css .link: a transition answers a user action at once, so it has no delay.",
       "sample.css *, *::before: sets transition-duration on every element, so a change to any element can start a transition. Set a transition only on the element that needs one; a rule for every element may only switch transitions off, with transition: none.",
       "sample.css *, *::before: transition-duration must be var(--dur-1), var(--dur-2) or var(--dur-3), not 0.01ms.",
-      // The width exception holds only for the allowed rule in its own file.
-      'sample.css .asks-list: "width var(--dur-3)" transitions width, which is not a paint property.',
     ]);
   });
 });

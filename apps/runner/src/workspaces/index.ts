@@ -9,6 +9,7 @@
 import { realpathSync } from "node:fs";
 import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
+import * as Queue from "effect/Queue";
 import * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import {
@@ -20,6 +21,7 @@ import {
   type WorkspaceProvision,
   type WorkspaceReport,
 } from "@hercule/protocol";
+import type { WorkspaceLifecycleObserver } from "../disk-usage";
 import { attachWorkspace, reserveManagedRepositories } from "./attachment";
 import { hasExpectedCheckoutIdentity } from "./identity";
 import { disposeWorkspace, detachWorkspace, hasSameRemovalIntent } from "./dispose";
@@ -30,7 +32,12 @@ import {
   type RegisteredCheckout,
   type RegisteredWorkspace,
 } from "./registry";
-import { SETUP_DEADLINE_MS, buildSubstrateEnv, type Substrate } from "./substrate";
+import {
+  SETUP_DEADLINE_MS,
+  buildSubstrateEnv,
+  type DeleteArchivedSessionFiles,
+  type Substrate,
+} from "./substrate";
 
 export { buildStepResultsDir, buildStepResultsRoot } from "./dispose";
 export { switchBranch, type GitOutcome, type GitEnv } from "./git";
@@ -105,6 +112,26 @@ export const makeWorkspaces = (options: {
   readonly gitEnv?: Record<string, string>;
   /** How long a setup command may run. Defaults to `SETUP_DEADLINE_MS`; tests set a shorter one. */
   readonly setupDeadlineMs?: number;
+  /**
+   * Deletes the harness files of the archived sessions a dispose lists, and
+   * returns the warnings for the files that stayed. The harness adapters live
+   * outside this module, so the runner passes the function in.
+   */
+  readonly deleteArchivedSessionFiles: DeleteArchivedSessionFiles;
+  /**
+   * Told when a workspace becomes ready, when its removal begins, and when the
+   * removal ends, completed or not.
+   * Tests that do not measure disk usage leave it out.
+   */
+  readonly observer?: WorkspaceLifecycleObserver;
+  /**
+   * Receives a signal each time a dispose ends, completed or not, because a
+   * dispose that failed can have deleted files before it failed. A detach
+   * deletes nothing, so it sends none. The runner's metrics report listens, so
+   * the controller learns of the freed disk space at once. Tests that do not
+   * report metrics leave it out.
+   */
+  readonly workspaceRemovals?: Queue.Enqueue<void>;
 }): Effect.Effect<Workspaces, never, Scope.Scope> =>
   Effect.gen(function* () {
     const scope = yield* Effect.scope;
@@ -135,6 +162,7 @@ export const makeWorkspaces = (options: {
       coordinateRepository,
       gitEnv: buildSubstrateEnv(process.env, options.gitEnv),
       setupDeadlineMs: options.setupDeadlineMs ?? SETUP_DEADLINE_MS,
+      deleteArchivedSessionFiles: options.deleteArchivedSessionFiles,
     };
 
     /**
@@ -303,12 +331,25 @@ export const makeWorkspaces = (options: {
           removalsInFlight.set(instruction.workspaceId, { instruction, result });
           const work = Effect.gen(function* () {
             if (preparation !== undefined) yield* Deferred.await(preparation.result);
+            // A removal that fails can leave the workspace half emptied, so
+            // the observer hears of the change before anything is deleted.
+            yield* options.observer?.beginChange(instruction.workspaceId) ?? Effect.void;
             return yield* instruction._tag === "workspaceDispose"
               ? disposeWorkspace(substrate, instruction)
               : detachWorkspace(substrate, instruction);
           }).pipe(
             Effect.catch((error) =>
               Effect.succeed(failureReport(instruction.workspaceId, error, instruction.requestId)),
+            ),
+            Effect.tap((report) =>
+              report.status === "deleted"
+                ? (options.observer?.forget(report.workspaceId) ?? Effect.void)
+                : (options.observer?.endChange(report.workspaceId) ?? Effect.void),
+            ),
+            Effect.tap(() =>
+              instruction._tag === "workspaceDispose" && options.workspaceRemovals !== undefined
+                ? Effect.sync(() => void Queue.offerUnsafe(options.workspaceRemovals!, undefined))
+                : Effect.void,
             ),
           );
           yield* startWorkspaceOperation(result, restore(work), () =>
@@ -398,6 +439,11 @@ export const makeWorkspaces = (options: {
                 }),
               ),
               Effect.catch((error) => Effect.succeed(failureReport(frame.workspaceId, error))),
+              Effect.tap((report) =>
+                report.status === "ready"
+                  ? (options.observer?.workspaceReady(frame.workspaceId) ?? Effect.void)
+                  : Effect.void,
+              ),
             );
             yield* startWorkspaceOperation(result, restore(work), () =>
               inFlight.delete(frame.workspaceId),

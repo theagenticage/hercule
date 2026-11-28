@@ -31,6 +31,7 @@ const buildPlugin = (
     definition: { type, displayName: type },
   })),
   intake,
+  entityKinds: [],
 });
 
 const buildConnection = (id: string, type: string, label: string): Connection => ({

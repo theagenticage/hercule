@@ -3,8 +3,10 @@
  *
  * - the sessions a runner holds, and what happens in them;
  * - the result of provisioning a workspace, and of each workspace step;
+ * - the disk usage of a runner and of its workspaces;
  * - the git credentials and the GitHub tokens a runner asks for;
- * - the end of a device login, which calls for a fresh probe;
+ * - the end of a device login, and a change in a runner's harnesses, which
+ *   each call for a fresh probe;
  * - every change that may have given a runner room for more work.
  *
  * There are two queues, each read by its own fiber. Session traffic has its
@@ -18,22 +20,34 @@ import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import type * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import { withTransaction } from "../../db";
 import { ConnectionTypes } from "../../connections";
+import { AuditLog } from "../../events";
 import { SessionTokens } from "../../permissions";
 import { PromotionState } from "../../promotion";
-import { ProviderProbes } from "../../providers";
-import { RunnerConnections, type FleetTraffic, type SessionTraffic } from "../../runners";
+import {
+  JoinTokens,
+  RunnerConnections,
+  RunnerService,
+  RunnerServiceLayer,
+  type FleetTraffic,
+  type SessionTraffic,
+} from "../../runners";
 import { RunService, WorkspaceSteps } from "../../runs";
+import { Settings } from "../../settings";
 import { Secrets } from "../../secrets";
 import { SessionService } from "../../sessions";
+import type { TaskService } from "../../tasks";
 import { WorkspaceService } from "../../workspaces";
-import { absorbFailures, forkAndAbsorbFailures } from "../absorbing";
+import { absorbFailures, forkAndAbsorbFailures } from "../../absorbing";
 import { DiscussionInputs } from "../discussions";
+import { ProviderAccountProbing } from "../provider-accounts";
 import { Dispatch, Live, makeGithubTokenAnswers } from "../sessions";
+import { BranchLinks, BranchLinksLayer } from "../tasks";
 import { TextGenerationTargetChanges } from "../text-generation";
 
 const make = Effect.gen(function* () {
@@ -41,15 +55,17 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const sessions = yield* SessionService;
   const workspaces = yield* WorkspaceService;
+  const runners = yield* RunnerService;
   const runs = yield* RunService;
   const promotion = yield* PromotionState;
   const workspaceSteps = yield* WorkspaceSteps;
-  const probes = yield* ProviderProbes;
+  const probing = yield* ProviderAccountProbing;
   const targetChanges = yield* TextGenerationTargetChanges;
   const { dispatch } = yield* Dispatch;
   const { sendClaimed, deliverQueuedInput } = yield* Live;
   const { tellSession } = yield* DiscussionInputs;
   const { answerGithubTokenRequest } = yield* makeGithubTokenAnswers;
+  const branchLinks = yield* BranchLinks;
 
   const applyFleetTraffic = (traffic: FleetTraffic): Effect.Effect<void, SqlError> => {
     switch (traffic._tag) {
@@ -65,11 +81,12 @@ const make = Effect.gen(function* () {
           // writes, and never applied once it is sealed. A report applied
           // after the copy would be missing on the new machine, which sends
           // the runner what it still waits on when the runner connects.
-          const settled = yield* promotion.whenServing(
+          const { settled, branchChanged } = yield* promotion.whenServing(
             withTransaction(
               sql,
               Effect.gen(function* () {
-                const settled = yield* workspaces.reported(traffic.runnerId, traffic.report);
+                const outcome = yield* workspaces.reported(traffic.runnerId, traffic.report);
+                const { settled } = outcome;
                 // A workspace that failed to provision ends the sessions waiting
                 // on it, with the runner's error message as the reason, and
                 // fails the runs working in it.
@@ -81,10 +98,19 @@ const make = Effect.gen(function* () {
                     message ?? "The runner could not provision the workspace, and gave no reason.",
                   );
                 }
-                return settled;
+                return outcome;
               }),
             ),
           );
+          // A checkout on a new branch may now be the branch of a pull request
+          // that Hercule already holds. The link is a database write of its
+          // own, after the report is committed.
+          if (branchChanged) {
+            yield* absorbFailures(
+              "Linking the pull requests on a Task's branch failed",
+              promotion.whenServing(Effect.asVoid(branchLinks.linkEntitiesByBranch())),
+            );
+          }
           // A workspace that became ready lets its waiting sessions start. The
           // dispatch sends frames to the runner, so it runs after the commit,
           // on its own fiber.
@@ -95,6 +121,23 @@ const make = Effect.gen(function* () {
             );
           }
         });
+      case "diskUsageReported":
+        // One transaction for the workspaces' entries and the runner's totals,
+        // so a screen never reads totals from one report beside entries from
+        // another. Held while a promotion freezes the controller, and never
+        // applied once it is sealed, like a workspace report. The runner sends
+        // its disk usage again after it connects to the new machine.
+        return promotion.whenServing(
+          withTransaction(
+            sql,
+            Effect.asVoid(
+              Effect.all([
+                workspaces.recordDiskUsage(traffic.runnerId, traffic.diskUsage.workspaces),
+                runners.recordDiskUsage(traffic.runnerId, traffic.diskUsage.runner),
+              ]),
+            ),
+          ),
+        );
       case "credentialRequested":
         // The credential is valid for this one request only, so it is sent
         // straight back on the connection that asked, and never stored.
@@ -137,13 +180,22 @@ const make = Effect.gen(function* () {
         );
       case "loginEnded":
         // A device login reads nothing back, so its end carries no outcome.
-        // A fresh probe of the instance on that runner tells whether the user
-        // finished it, and announces the new snapshot to everyone watching.
+        // A fresh probe of the account in that harness on that runner tells
+        // whether the user finished it, and announces the new snapshot to
+        // everyone watching.
         // Forked, because the probe waits on the runner. The probe runs only
         // for a login this controller started.
         return forkAndAbsorbFailures(
-          "Probing an instance after its login ended failed",
-          probes.probeAfterLoginEnd(traffic.runnerId, traffic.ended.requestId),
+          "Probing a provider account after its sign-in ended failed",
+          probing.probeAfterLoginEnd(traffic.runnerId, traffic.ended.requestId),
+        );
+      case "harnessesChanged":
+        // A harness appeared, went away or moved on this runner, so the pairs
+        // the runner could be probed for are not the ones it was last probed
+        // for. Forked, because the probes wait on the runner.
+        return forkAndAbsorbFailures(
+          "Probing a runner's provider accounts after its harnesses changed failed",
+          probing.sweepRunner(traffic.runnerId),
         );
       case "placementsChanged":
         // Forked, like the dispatch for a ready workspace: filling a runner's
@@ -176,10 +228,12 @@ const make = Effect.gen(function* () {
    * The work each write leads to is forked after the gate, not inside it,
    * so it passes the gate on its own once the write is done.
    */
-  const ingestSessionTraffic = (traffic: SessionTraffic): Effect.Effect<void, SqlError> =>
+  const ingestSessionTraffic = (
+    traffic: SessionTraffic,
+  ): Effect.Effect<void, SqlError | Schema.SchemaError> =>
     Effect.gen(function* () {
       if (traffic.frame._tag === "sessionsReport") {
-        const ended = yield* promotion.whenServing(
+        const toStop = yield* promotion.whenServing(
           sessions.bound(traffic.runnerId, traffic.frame.sessions),
         );
         // Mark the runner only after the write is committed. The mark lives in
@@ -189,7 +243,9 @@ const make = Effect.gen(function* () {
         // A process for a session the controller has already ended keeps
         // running without a token, and it blocks a resume of that session on
         // the runner. Nothing else would stop it, so the runner is told to.
-        for (const id of ended) {
+        // An archived session still running is stopped here too: the stop sent
+        // when it was archived may have been lost.
+        for (const id of toStop) {
           yield* connections.tell(traffic.runnerId, sessions.stopping(id));
         }
         yield* forkAndAbsorbFailures(
@@ -201,6 +257,11 @@ const make = Effect.gen(function* () {
       if (traffic.frame._tag === "filesEdited") {
         return yield* promotion.whenServing(
           sessions.applyFilesEdited(traffic.runnerId, traffic.frame),
+        );
+      }
+      if (traffic.frame._tag === "accountUsageReported") {
+        return yield* promotion.whenServing(
+          sessions.applyAccountUsageReported(traffic.runnerId, traffic.frame),
         );
       }
       if (traffic.frame._tag === "sessionInputResult") {
@@ -291,9 +352,12 @@ export const InboundLayer: Layer.Layer<
   | RunnerConnections
   | SessionService
   | WorkspaceService
+  | JoinTokens
+  | Settings
+  | AuditLog
   | RunService
   | WorkspaceSteps
-  | ProviderProbes
+  | ProviderAccountProbing
   | PromotionState
   | Dispatch
   | Live
@@ -302,4 +366,11 @@ export const InboundLayer: Layer.Layer<
   | Secrets
   | TextGenerationTargetChanges
   | DiscussionInputs
-> = Layer.effect(Inbound)(make);
+  | TaskService
+> = Layer.effect(Inbound)(make).pipe(
+  Layer.provide(BranchLinksLayer),
+  // The runner service is built here from the same layer the HTTP routes use, so
+  // the controller keeps one runner service and the boot offers it to nobody
+  // else.
+  Layer.provide(RunnerServiceLayer),
+);

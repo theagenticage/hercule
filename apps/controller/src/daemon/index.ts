@@ -4,8 +4,7 @@
  *
  * - the wire to runners: it is the only module that sends frames to runners
  *   and the only one that handles what they report, passing each result to
- *   the domain that owns it. The providers domain is the last exception: it
- *   still sends its own frames, and issue #209 moves it under the same rule;
+ *   the domain that owns it;
  * - the fibers behind the ports domains declare, such as the runs domain's
  *   Run Executor and the plugins domain's Ingest Executor;
  * - the loops that run for the life of the controller, and boot;
@@ -24,7 +23,11 @@
  * - `workspaces/`: provisioning and disposing workspaces, and the sweep that
  *   removes the ones nothing needs any more;
  * - `runners/`: sending a runner that connects the work owed to it, handling
- *   what runners report, and retiring a runner;
+ *   what runners report, asking a runner for its facts or to install a
+ *   harness, and retiring a runner;
+ * - `provider-accounts/`: probing the accounts on the runners and keeping their
+ *   snapshots fresh, reading the usage of the accounts that need an active
+ *   read, and the operations that sign an account in on a runner or probe it;
  * - `discussions/`: sending a session the Discussion Input that tells it
  *   what it has not been told about its Discussions yet, and recording
  *   the files sessions edit so that sessions that edited one file meet in a
@@ -51,8 +54,7 @@
  *   audit entry.
  *
  * The top level holds what belongs to no single folder: the steps run once at
- * boot (`boot.ts`), the helpers every long-running loop uses (`absorbing.ts`),
- * and the test helpers several folders share (`testing.ts`).
+ * boot (`boot.ts`) and the test helpers several folders share (`testing.ts`).
  *
  * A check shared by two use cases lives where its data lives:
  *
@@ -76,7 +78,13 @@ export {
 } from "./events";
 export { AttachmentSweepInterval, runAttachmentSweepLoop } from "./attachments";
 export { runSkillUpdateCheckLoop, SkillUpdateCheckInterval } from "./skills";
+export { runHarnessReleaseCheckLoop } from "./harnesses";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
+export {
+  McpServerCheckInterval,
+  McpServerListHoldersLayer,
+  runMcpServerChecksScheduler,
+} from "./mcp-servers";
 export {
   DiscussionInputs,
   DiscussionInputsLayer,
@@ -86,9 +94,15 @@ export {
   SessionEditObserverLayer,
 } from "./discussions";
 export {
+  EntityObservationsLayer,
   IngestExecutorLayer,
+  ClaimResolverInterval,
+  EntityPruneInterval,
   IngestReconcileInterval,
   OpenSignalsLayer,
+  SignalEntitiesLayer,
+  runClaimResolverLoop,
+  runEntityPruneLoop,
   runIngestReconciler,
 } from "./ingest";
 export { BoundOperationsLayer } from "./bound-actions";
@@ -100,8 +114,23 @@ export {
 } from "./permissions";
 export { thawExpiredFreezes } from "./promotion";
 export {
+  AccountUsageReadingInterval,
+  ProviderAccountProbeDeadline,
+  ProviderAccountProbeInterval,
+  ProviderAccountProbing,
+  ProviderAccountProbingLayer,
+  ProviderAccountRunnerOperations,
+  ProviderAccountRunnerOperationsLayer,
+  ProviderAccountSignInDeadline,
+  runAccountUsageReadingLoop,
+} from "./provider-accounts";
+export {
   Arrival,
   ArrivalLayer,
+  FactsRefresh,
+  FactsRefreshLayer,
+  HarnessInstall,
+  HarnessInstallLayer,
   Inbound,
   InboundLayer,
   PromotionFleet,
@@ -110,13 +139,15 @@ export {
   recordDeparturesAfterThaws,
   Retirement,
   RetirementLayer,
+  RunnerMetricsPruneInterval,
+  runRunnerMetricsPruneLoop,
   sweepUnreachableRunners,
 } from "./runners";
 export {
   RunExecutorLayer,
   RunFibers,
   RunTargetsLayer,
-  TaskTrackingRunsLayer,
+  TaskRunsLayer,
   WorkspaceStepsLayer,
 } from "./runs";
 export {
@@ -138,14 +169,26 @@ export {
 } from "./sessions";
 export {
   checkSchedulerInterval,
+  installCardWorkflowsOrLog,
   revalidateStoredWorkflowsOrLog,
   runScheduler,
   SchedulerInterval,
   TriggeredRunsLayer,
+  WorkflowEntitiesLayer,
   WorkflowRunsLayer,
+  WorkflowServiceWithPortsLayer,
   WorkflowSignalsLayer,
   WorkflowValidityObserversLayer,
 } from "./workflows";
+export {
+  runTaskSummaryLoop,
+  TaskBoardFactsLayer,
+  TaskDetailFactsLayer,
+  LinkedEntitiesLayer,
+  TaskLinkOwnersLayer,
+  TaskServicePortsLayer,
+  TaskServiceWithPortsLayer,
+} from "./tasks";
 export { Provisioning, ProvisioningLayer, WorkspaceSweepInterval } from "./workspaces";
 export {
   forwardTargetChanges,

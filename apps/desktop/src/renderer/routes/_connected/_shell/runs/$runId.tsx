@@ -22,7 +22,7 @@ import {
   controllerQuery,
   pluginsQuery,
   prefetchRunWorkflow,
-  providersQuery,
+  providerAccountsQuery,
   readOnOpen,
   rerunsQuery,
   runQuery,
@@ -64,7 +64,7 @@ interface RunSearch {
  *
  * - the run; when no run has the id, the route shows `RunNotFound`;
  * - the run's sessions and its re-runs;
- * - the triggers, the provider instances, the plugins and the settings,
+ * - the triggers, the Provider Accounts, the plugins and the settings,
  *   which the step cards and the times need;
  * - the Agents and the workflow actions, which name the graph's steps, read
  *   each time the page opens because no topic covers them;
@@ -105,7 +105,7 @@ export const Route = createFileRoute("/_connected/_shell/runs/$runId")({
       queryClient.ensureQueryData(runSessionsQuery(client, runId)),
       queryClient.ensureQueryData(rerunsQuery(client, runId)),
       queryClient.ensureQueryData(triggersQuery(client)),
-      queryClient.ensureQueryData(providersQuery(client)),
+      queryClient.ensureQueryData(providerAccountsQuery(client)),
       queryClient.ensureQueryData(pluginsQuery(client)),
       queryClient.ensureQueryData(settingsQuery(client)),
       readOnOpen(queryClient, agentsQuery(client)),

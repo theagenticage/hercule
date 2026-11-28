@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { Effect, Schema } from "effect";
-import type { ProviderDefinition } from "./contributions";
-import { PluginError, registerProvider } from "./plugin";
+import { Effect } from "effect";
+import type { HarnessDefinition } from "./contributions";
+import type { ProviderDefinition } from "./providers";
+import { PluginError, registerHarness, registerProvider } from "./plugin";
 
-const definition: ProviderDefinition = {
+const definition: HarnessDefinition = {
   id: "fixture",
   displayName: "Fixture",
   binaryName: "harness",
-  supportsMultipleInstances: true,
-  configSchema: Schema.Struct({}),
-  defaultConfig: {},
+  releaseSource: { kind: "npm", package: "harness" },
   declared: {
     steering: "native",
     fork: "native",
@@ -23,17 +22,37 @@ const definition: ProviderDefinition = {
     mcpPassthrough: "native",
     disallowedTools: "native",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
+  runs: [],
 };
 
-describe("registerProvider", () => {
+const providerDefinition: ProviderDefinition = {
+  id: "fixture",
+  displayName: "Fixture",
+  kinds: [
+    {
+      id: "api-key",
+      title: "API key",
+      description: "A key from the provider.",
+      setup: [{ kind: "credentials", fields: [{ name: "apiKey", label: "API key" }] }],
+      keyCheck: { url: "https://api.example.com/v1/models", headers: {} },
+      harnesses: ["fixture/fixture"],
+    },
+  ],
+  defaultHarnessId: "fixture/fixture",
+  catalogSource: { kind: "harness-probe", harnessId: "fixture/fixture" },
+  defaultSelection: "current-models",
+};
+
+describe("registerHarness", () => {
   it("passes the definition to the service the host granted", async () => {
-    const registered: Array<ProviderDefinition> = [];
+    const registered: Array<HarnessDefinition> = [];
 
     await Effect.runPromise(
-      registerProvider(
+      registerHarness(
         {
-          providers: {
+          harnesses: {
             register: (one) =>
               Effect.sync(() => {
                 registered.push(one);
@@ -51,7 +70,36 @@ describe("registerProvider", () => {
     // A typed failure rather than a defect or a silent skip, so the user sees
     // the reason, instead of a plugin that starts fine and contributes
     // nothing.
-    const failure = await Effect.runPromise(Effect.flip(registerProvider({}, definition)));
+    const failure = await Effect.runPromise(Effect.flip(registerHarness({}, definition)));
+
+    expect(failure).toBeInstanceOf(PluginError);
+    expect(failure.message).toContain("harnesses");
+  });
+});
+
+describe("registerProvider", () => {
+  it("passes the definition to the service the host granted", async () => {
+    const registered: Array<ProviderDefinition> = [];
+
+    await Effect.runPromise(
+      registerProvider(
+        {
+          providers: {
+            register: (one) =>
+              Effect.sync(() => {
+                registered.push(one);
+              }),
+          },
+        },
+        providerDefinition,
+      ),
+    );
+
+    expect(registered).toEqual([providerDefinition]);
+  });
+
+  it("fails the plugin's registration, with the capability in the message, when the service is absent", async () => {
+    const failure = await Effect.runPromise(Effect.flip(registerProvider({}, providerDefinition)));
 
     expect(failure).toBeInstanceOf(PluginError);
     expect(failure.message).toContain("providers");

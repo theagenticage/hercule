@@ -76,6 +76,9 @@ inputs:
   - name: account
     connection: { type: github/github }
     required: true
+  - name: item
+    entity: { kinds: [github/pull-request, github/issue] }
+    required: false
 ${STEPS}`;
 
 /** Reads the form of `SOURCE`, which parses, so the reading has fields. */
@@ -98,6 +101,7 @@ describe("buildRunForm", () => {
         ["notify", "boolean", false],
         ["labels", "json", false],
         ["account", "connection", true],
+        ["item", "text", false],
       ],
     );
     assert.strictEqual(fields[0]?.description, "The task's title.");
@@ -113,6 +117,13 @@ describe("buildRunForm", () => {
       { id: "c4", label: "octocat", disabled: false },
       { id: "c5", label: "GitHub", disabled: false },
     ]);
+  });
+
+  it("shows an entity input as a text field that names the kinds it takes", () => {
+    assert.strictEqual(
+      readFields()[7]?.description,
+      "The External Ref of an entity of kind github/pull-request or github/issue.",
+    );
   });
 
   it("has no fields for a workflow with no inputs", () => {
@@ -135,6 +146,7 @@ describe("buildRunInputDraft", () => {
       notify: true,
       labels: '["ci"]',
       account: "",
+      item: "",
     });
   });
 });

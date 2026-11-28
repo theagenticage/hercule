@@ -30,14 +30,14 @@ import { api } from "@hercule/contract";
  * request queues for one of Chromium's 6 connections to the controller. The
  * fetch API does not say when a request gets its connection.
  */
-const HEADER_WAIT_MS = 5000;
+export const HEADER_WAIT_MS = 5000;
 
 /**
  * How long the body of an answer may stop arriving before the request gives
  * up. The limit applies to silence, not to the whole body, so a large answer
  * on a slow link is never cut off while its bytes keep arriving.
  */
-const BODY_SILENCE_MS = 5000;
+export const BODY_SILENCE_MS = 5000;
 
 /**
  * How long a request to an operation in RUNNER_WAITING_OPERATIONS waits for

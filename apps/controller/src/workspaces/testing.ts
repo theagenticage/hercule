@@ -8,7 +8,7 @@
  * tests and the controller to drift apart.
  *
  * What differs between callers is passed in: extra plugins besides the
- * provider fixture, and the sweep interval for a test that watches the sweep.
+ * harness fixture, and the sweep interval for a test that watches the sweep.
  */
 import { expect } from "vitest";
 import { Effect, Schema } from "effect";
@@ -22,8 +22,8 @@ import {
   type Plugin,
 } from "@hercule/plugin-host";
 import { withTransaction } from "../db";
-import { get, post } from "../http/testing";
-import { createPluginFixture, buildProviderDefinition } from "../plugins/testing";
+import { get, post, TEST_HARNESS_ID } from "../http/testing";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import {
   reportEvent,
   spawnSessionOrFail,
@@ -42,8 +42,10 @@ export const FACTS: RunnerFacts = {
   totalMemoryBytes: 68719476736,
   docker: false,
   toolchains: [{ name: "git", version: "2.50.1", path: "/usr/bin/git" }],
-  providers: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
-  adapters: ["test-provider"],
+  harnesses: [{ name: "harness", present: true, path: "/usr/local/bin/harness" }],
+  // The test controller also registers the `test` harness and an account that
+  // runs in it, and an account is probed only on a runner with its harness.
+  adapters: ["harnesses/test", TEST_HARNESS_ID],
   identityPort: 4939,
 };
 
@@ -53,18 +55,20 @@ export const MODELS: ReadonlyArray<ModelDescriptor> = [
 ];
 
 export interface WorkspaceFleetOptions {
-  /** Plugins to load in addition to the provider fixture that every one of these fleets needs. */
+  /** Plugins to load in addition to the harness fixture that every one of these fleets needs. */
   readonly plugins?: ReadonlyArray<Plugin>;
   /**
    * Overrides the shipped ten minutes, which is longer than a test that
    * watches the sweep can wait.
    */
   readonly workspaceSweepInterval?: Duration.Duration;
+  /** The capabilities the fleet's runner lists at hello, instead of those of a runner of this build. */
+  readonly capabilities?: ReadonlyArray<string>;
 }
 
 /**
- * Runs `body` against a controller with one enrolled, connected, logged-in
- * runner and a provider on it.
+ * Runs `body` against a controller with one enrolled, connected, signed-in
+ * runner and a harness on it.
  */
 export const withFleet = (
   body: (arranged: Arranged) => Promise<void>,
@@ -72,14 +76,12 @@ export const withFleet = (
 ): Promise<void> =>
   withRunnerFleet(body, {
     plugins: [
-      createPluginFixture({
-        id: "providers",
-        definitions: [buildProviderDefinition("test-provider")],
-      }).plugin,
+      buildPluginWithProviderPerHarness("harnesses", [buildHarnessDefinition("test")]),
       ...(options.plugins ?? []),
     ],
     facts: FACTS,
     models: MODELS,
+    ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
     ...(options.workspaceSweepInterval === undefined
       ? {}
       : { workspaceSweepInterval: options.workspaceSweepInterval }),
@@ -306,7 +308,7 @@ export const spawnThread = async (
 };
 
 /**
- * Has the runner report that the thread's provider transcript is known, which
+ * Has the runner report that the thread's harness transcript is known, which
  * a session needs before it can be resumed.
  */
 export const bindTranscript = async (arranged: Arranged, session: Session): Promise<void> => {
@@ -316,7 +318,7 @@ export const bindTranscript = async (arranged: Arranged, session: Session): Prom
       {
         sessionId: session.id,
         nativeSessionId: "native-1",
-        instanceId: arranged.instances[0]!.id,
+        providerAccountId: arranged.accounts[0]!.id,
       },
     ],
   });

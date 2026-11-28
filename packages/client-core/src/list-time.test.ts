@@ -65,16 +65,16 @@ describe("computeDayStart", () => {
   });
 
   it("returns the first midnight of a date whose clock reads midnight twice", () => {
-    // In Havana on 1 November 2026, 01:00 CDT becomes 00:00 CST: the date
-    // starts at 00:00 CDT, 04:00 UTC, and the clock reads 00:00 again at
-    // 05:00 UTC.
+    // In the Azores on 25 October 2026, 01:00 summer time becomes 00:00
+    // winter time: the date starts at 00:00 summer time, 00:00 UTC, and the
+    // clock reads 00:00 again at 01:00 UTC.
     assert.strictEqual(
-      readStart("2026-11-01T16:00:00Z", "America/Havana"),
-      "2026-11-01T04:00:00.000Z",
+      readStart("2026-10-25T16:00:00Z", "Atlantic/Azores"),
+      "2026-10-25T00:00:00.000Z",
     );
     assert.strictEqual(
-      readStart("2026-11-01T05:30:00Z", "America/Havana"),
-      "2026-11-01T04:00:00.000Z",
+      readStart("2026-10-25T01:30:00Z", "Atlantic/Azores"),
+      "2026-10-25T00:00:00.000Z",
     );
   });
 
@@ -178,11 +178,11 @@ describe("findNextListTimeChange", () => {
   });
 
   it("finds the first midnight of a date whose clock reads midnight twice", () => {
-    // Havana's clock reads 00:00 on 1 November 2026 at 04:00 UTC and again at
-    // 05:00 UTC; the date, and so the text, changes at the first.
+    // The Azores' clock reads 00:00 on 25 October 2026 at 00:00 UTC and again
+    // at 01:00 UTC; the date, and so the text, changes at the first.
     assert.strictEqual(
-      findChange("2026-10-31T12:00:00Z", "2026-10-31T22:00:00Z", "past", "America/Havana"),
-      "2026-11-01T04:00:00.000Z",
+      findChange("2026-10-24T12:00:00Z", "2026-10-24T22:00:00Z", "past", "Atlantic/Azores"),
+      "2026-10-25T00:00:00.000Z",
     );
   });
 

@@ -277,6 +277,7 @@ describe("Side pane: the Subagents surface", () => {
 const PROJECT: Project = {
   id: "01a06d02-7000-7000-8000-000000000001",
   name: "webshop",
+  mcpServerIds: [],
   createdAt: AT,
   updatedAt: AT,
 };
@@ -325,6 +326,8 @@ const WORKSPACE: Workspace = {
   message: null,
   sessionIds: [SESSION_ID],
   keptUntil: null,
+  diskUsage: null,
+  diskUsageError: null,
   createdAt: AT,
   provisionedAt: AT,
   lastUsedAt: AT,
