@@ -1,7 +1,8 @@
 /**
  * Tests `readAssistantTexts`, which reads the assistant text of a turn, or of
- * one item of a turn, from a session's stored stream, and `readOpenTurnId`,
- * which finds the turn a subagent has open.
+ * one item of a turn, from a session's stored stream, and `readTurnStanding`
+ * and `readOpenTurnId`, which tell where a turn stands and find the turn an
+ * agent has open.
  *
  * It reads no further back than the start of what it was asked for: the
  * turn's `turn.started` row, or the item's `item.started` row. When that row
@@ -16,7 +17,12 @@ import type { HarnessEvent } from "@hercule/protocol";
 import { mintUuid, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
 import { sessionRepository } from "./repository";
-import { readAssistantTexts, readOpenTurnId, readRecentAssistantText } from "./transcript-log";
+import {
+  readAssistantTexts,
+  readOpenTurnId,
+  readRecentAssistantText,
+  readTurnStanding,
+} from "./transcript-log";
 
 const at = "2026-09-07T10:00:00.000Z";
 
@@ -56,11 +62,14 @@ const buildEvent = (sessionId: string, row: Row): HarnessEvent => {
 
 /**
  * Writes a session with `rows` as its stream, in order, then runs `read` on
- * the new session and returns what it returns.
+ * the new session and returns what it returns. With `resumedAfter`, the
+ * session is resumed after that many rows, so those rows belong to an earlier
+ * process and the rest to the current one.
  */
 const readStoredRows = <A>(
   rows: ReadonlyArray<Row>,
   read: (sql: SqlClient.SqlClient, sessionId: string) => Effect.Effect<A, SqlError>,
+  resumedAfter?: number,
 ): Promise<A> =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -97,6 +106,7 @@ const readStoredRows = <A>(
           at,
           event: buildEvent(sessionId, row),
         });
+        if (index + 1 === resumedAfter) yield* sessions.resume(sessionId, "{}");
       }
       return yield* read(sql, sessionId);
     }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
@@ -144,6 +154,22 @@ describe("reading a turn's assistant text", () => {
       { itemId: "a", text: "hello" },
       { itemId: "b", text: "again" },
     ]);
+  });
+
+  it("reads the turn's text past a late turn.completed of an earlier turn", async () => {
+    const texts = await readTexts(
+      [
+        { _tag: "turn.started", turnId: "t1" },
+        { _tag: "turn.started", turnId: "t2" },
+        { _tag: "item.started", turnId: "t2", itemId: "a" },
+        { _tag: "content.delta", turnId: "t2", itemId: "a", delta: "before " },
+        { _tag: "turn.completed", turnId: "t1" },
+        { _tag: "content.delta", turnId: "t2", itemId: "a", delta: "after" },
+      ],
+      "t2",
+    );
+
+    expect(texts).toEqual([{ itemId: "a", text: "before after" }]);
   });
 
   it("reads nothing for a turn whose turn.started row is missing, not the rows before it", async () => {
@@ -225,17 +251,32 @@ describe("reading one agent's assistant text", () => {
   });
 });
 
-describe("reading a subagent's open turn", () => {
+describe("reading where a turn stands, and an agent's open turn", () => {
+  /** Writes `rows`, then reads where the turn `turnId` of the subagent `sub` stands. */
+  const readStanding = (rows: ReadonlyArray<Row>, turnId: string, resumedAfter?: number) =>
+    readStoredRows(
+      rows,
+      (sql, sessionId) => readTurnStanding(sql, sessionId, "sub", turnId),
+      resumedAfter,
+    );
+
   /** Writes `rows`, then reads the open turn of the subagent `sub`. */
-  const readOpenTurn = (rows: ReadonlyArray<Row>) =>
-    readStoredRows(rows, (sql, sessionId) => readOpenTurnId(sql, sessionId, "sub"));
+  const readOpenTurn = (rows: ReadonlyArray<Row>, resumedAfter?: number) =>
+    readStoredRows(rows, (sql, sessionId) => readOpenTurnId(sql, sessionId, "sub"), resumedAfter);
+
+  const started = (turnId: string): Row => ({ _tag: "turn.started", turnId, subagentId: "sub" });
+  const completed = (turnId: string): Row => ({
+    _tag: "turn.completed",
+    turnId,
+    subagentId: "sub",
+  });
 
   it("reads the turn the subagent started last while it is open", async () => {
     expect(
       await readOpenTurn([
-        { _tag: "turn.started", turnId: "s1", subagentId: "sub" },
-        { _tag: "turn.completed", turnId: "s1", subagentId: "sub" },
-        { _tag: "turn.started", turnId: "s2", subagentId: "sub" },
+        started("s1"),
+        completed("s1"),
+        started("s2"),
         // Another agent's turn ending does not close the subagent's.
         { _tag: "turn.started", turnId: "t1" },
         { _tag: "turn.completed", turnId: "t1" },
@@ -243,14 +284,60 @@ describe("reading a subagent's open turn", () => {
     ).toBe("s2");
   });
 
-  it("reads nothing when its last turn ended or it has no turn", async () => {
-    expect(
-      await readOpenTurn([
-        { _tag: "turn.started", turnId: "s1", subagentId: "sub" },
-        { _tag: "turn.completed", turnId: "s1", subagentId: "sub" },
-      ]),
-    ).toBeUndefined();
+  it("reads no open turn when the subagent has none, or its turn ended", async () => {
+    expect(await readOpenTurn([])).toBeUndefined();
+    expect(await readOpenTurn([started("s1"), completed("s1")])).toBeUndefined();
     expect(await readOpenTurn([{ _tag: "turn.started", turnId: "t1" }])).toBeUndefined();
+  });
+
+  it("keeps the newest turn open when the end of an earlier turn is stored after its start", async () => {
+    const lateCompletion = [started("s1"), started("s2"), completed("s1")];
+
+    expect(await readOpenTurn(lateCompletion)).toBe("s2");
+    expect(await readOpenTurn([...lateCompletion, completed("s2")])).toBeUndefined();
+  });
+
+  it("reads the newest turn as current while it has not ended", async () => {
+    expect(await readStanding([started("s1")], "s1")).toBe("current");
+    expect(await readStanding([started("s1"), completed("s1"), started("s2")], "s2")).toBe(
+      "current",
+    );
+  });
+
+  it("reads a turn as past once it ended", async () => {
+    expect(await readStanding([started("s1"), completed("s1")], "s1")).toBe("past");
+  });
+
+  it("reads a turn as past once a newer turn of the agent started", async () => {
+    expect(await readStanding([started("s1"), started("s2")], "s1")).toBe("past");
+  });
+
+  it("reads a turn as unknown when the agent never started it", async () => {
+    expect(await readStanding([started("s1"), completed("s1")], "s2")).toBe("unknown");
+    expect(await readStanding([], "s1")).toBe("unknown");
+  });
+
+  it("ignores the turns of an earlier process of the session", async () => {
+    const rows = [started("s1"), started("s2"), started("s3")];
+
+    expect(await readStanding(rows, "s3", 3)).toBe("unknown");
+    expect(await readOpenTurn(rows, 3)).toBeUndefined();
+    expect(await readStanding(rows, "s3", 2)).toBe("current");
+    expect(await readStanding(rows, "s2", 2)).toBe("unknown");
+    expect(await readStanding(rows, "s2", 1)).toBe("past");
+  });
+
+  it("reads only the rows of the agent asked about", async () => {
+    // The session's own agent started a turn after the subagent's turn, and
+    // ended a turn with the same id: neither moves the subagent's turn.
+    const rows: ReadonlyArray<Row> = [
+      started("s1"),
+      { _tag: "turn.started", turnId: "t2" },
+      { _tag: "turn.completed", turnId: "s1" },
+    ];
+
+    expect(await readStanding(rows, "s1")).toBe("current");
+    expect(await readOpenTurn(rows)).toBe("s1");
   });
 });
 

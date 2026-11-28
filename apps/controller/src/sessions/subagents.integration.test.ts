@@ -557,6 +557,39 @@ describe("the open Requests of several agents", () => {
       expect((await readNotificationStatuses(arranged, session.id))["sub-req"]).toBe("open");
     });
   });
+
+  it("keeps a subagent running and its Request open when a late completion of its earlier turn arrives", async () => {
+    await withAgentFleet(async (arranged) => {
+      const session = await startSession(arranged);
+      const id = session.id;
+      const next = reportEvents(arranged, 2, [
+        { ...buildBase(id), _tag: "turn.started", turnId: "t1" },
+        { ...buildBase(id), _tag: "subagent.started", subagentId: "a1" },
+        { ...buildBase(id, "a1"), _tag: "turn.started", turnId: "s1" },
+        { ...buildBase(id, "a1"), _tag: "turn.started", turnId: "s2" },
+        buildApprovalRequest(id, "sub-req", "a1"),
+      ]);
+      await waitForOpenRequests(arranged, id, ["sub-req"]);
+
+      // Codex can report the end of s1 after s2 has started. The Request the
+      // main agent opens after it shows the late completion was applied
+      // before the reads below.
+      reportEvents(arranged, next, [
+        { ...buildBase(id, "a1"), _tag: "turn.completed", turnId: "s1", state: "completed" },
+        buildApprovalRequest(id, "main-req"),
+      ]);
+      const after = await waitForSession(arranged, id, (one) =>
+        one.openRequests.some((request) => request.requestId === "main-req"),
+      );
+      expect(after.openRequests.map((request) => request.requestId)).toEqual([
+        "sub-req",
+        "main-req",
+      ]);
+      expect((await listSubagents(arranged, id)).items.map((one) => one.status)).toEqual([
+        "running",
+      ]);
+    });
+  });
 });
 
 describe("session.interrupt of a subagent", () => {
