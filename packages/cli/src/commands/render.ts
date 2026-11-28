@@ -45,6 +45,7 @@ import {
   removeTerminalControls,
   truncateText,
   chooseMemoryCap,
+  describeAccessModeFallback,
   formatIssue,
   isSchedule,
   toIdTail,
@@ -990,9 +991,10 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
 };
 
 /**
- * Returns the lines printed after `session spawn`: the session, and a hint
- * with the command that reads its transcript. This is the only hint this
- * build prints after a command. A caller who has just spawned a session wants
+ * Returns the lines printed after `session spawn`: the session, the access
+ * mode fallback when the session runs in another mode than it asked for, and a
+ * hint with the command that reads its transcript. The hint is the only one
+ * this build prints after a command. A caller who has just spawned a session wants
  * to watch it. The hint does not suggest a subscription on the session: no
  * platform event about a session is emitted yet, so the controller would
  * reject it. It points at the transcript, which the caller can already read.
@@ -1001,6 +1003,9 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
  */
 const renderSpawnedSession = (session: Session): ReadonlyArray<string> => [
   ...renderSession(session),
+  ...(session.requestedAccessMode === session.accessMode
+    ? []
+    : ["", describeAccessModeFallback(session.requestedAccessMode, session.accessMode)]),
   "",
   `read what it has done so far with \`hercule transcript read ${formatCell(session.id)}\``,
 ];

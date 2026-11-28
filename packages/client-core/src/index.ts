@@ -624,7 +624,8 @@ export {
 } from "./text-generation";
 export { findTimeOfDayError, formatTimeOfDay } from "./time-of-day";
 export { countUsedTokens, describeTokenUsage } from "./token-usage";
-export { formatAccessMode, type AccessModeMenuItem } from "./threads/access-modes";
+export { formatAccessMode } from "@hercule/contract";
+export type { AccessModeMenuItem } from "./threads/access-modes";
 export { describeAge, findNextAgeChange, formatAge } from "./threads/age";
 export {
   buildSessionAgentState,

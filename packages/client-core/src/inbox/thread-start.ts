@@ -4,15 +4,15 @@
  * sent as the thread's first prompt, and the key under which unsent words are
  * kept. Pure: nothing here reads or writes anything.
  */
-import type {
-  EvidenceEntity,
-  InboxThing,
-  ProjectMatch,
-  Resource,
-  ThreadWorkspace,
+import {
+  formatAccessMode,
+  type EvidenceEntity,
+  type InboxThing,
+  type ProjectMatch,
+  type Resource,
+  type ThreadWorkspace,
 } from "@hercule/contract";
 import { ApiError, readErrorMessage } from "../errors";
-import { formatAccessMode } from "../threads/access-modes";
 import type { ShelfItem } from "../attachments/shelf";
 import { holdsMessageContent, type ThreadPicks } from "../threads/config";
 import { buildDraftView, type DraftReads, type DraftView } from "../threads/draft-view";
