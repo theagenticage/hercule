@@ -1361,7 +1361,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           emit(event);
         }
         yield* Effect.catch(
-          subagent.rpc.send({ type: "prompt", message: dialog.prompt }),
+          subagent.rpc.send({ type: "prompt", message: dialog.prompt }, STARTUP_DEADLINE),
           (error) =>
             Effect.sync(() => {
               // A pi that exited is reported by `watchChild`, with its stderr as
@@ -2035,10 +2035,12 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
               failure.exited ? Effect.void : Effect.fail(failure.message),
             ),
           );
-          yield* Effect.catch(agent.rpc.send({ type: "prompt", message: spec.input }), (error) =>
-            // A pi that already exited is reported below, by the watch on its
-            // exit.
-            error._tag === "PiExited" ? Effect.void : Effect.fail(error.message),
+          yield* Effect.catch(
+            agent.rpc.send({ type: "prompt", message: spec.input }, STARTUP_DEADLINE),
+            (error) =>
+              // A pi that already exited is reported below, by the watch on its
+              // exit.
+              error._tag === "PiExited" ? Effect.void : Effect.fail(error.message),
           );
           return yield* Deferred.await(settled);
         }),

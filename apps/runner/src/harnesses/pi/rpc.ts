@@ -93,8 +93,15 @@ export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 
 /**
  * How long a pi that was just spawned gets to load and answer its first
- * command. Loading takes seconds on a slow machine, much longer than
- * `RPC_DEADLINE`, which is meant for a pi that is already running.
+ * command, and to take its first prompt when the runner sends that prompt
+ * itself: the task of a subagent, or the input of a text generation. Loading
+ * takes seconds on a slow machine, and on a busy one pi's preflight for its
+ * first prompt can take longer than `RPC_DEADLINE`, which is meant for a pi
+ * that is already running.
+ *
+ * A session's own first input is not one of these. The controller sent it and
+ * stops waiting for it after `SESSION_INPUT_DEADLINE`, so it keeps
+ * `RPC_DEADLINE`.
  */
 export const STARTUP_DEADLINE: Duration.Duration = Duration.seconds(30);
 
