@@ -2,6 +2,7 @@
  * Tests installing the Claude Code harness with a stubbed process seam:
  * nothing is downloaded or run.
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import { CLAUDE_CODE_VERSION } from "@hercule/home/version";
@@ -26,6 +27,7 @@ const CONTEXT: HarnessRunnerContext = {
     skill: "",
     claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
   },
+  recordedFolders: unrecordedFolders,
 };
 
 const buildStubSeam = (answer: {

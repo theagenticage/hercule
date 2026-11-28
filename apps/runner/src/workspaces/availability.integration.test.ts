@@ -1,4 +1,5 @@
 import { makeTestWorkspaces } from "./testing";
+import { unrecordedFolders } from "../recorded-folders.testing";
 import {
   existsSync,
   readFileSync,
@@ -61,6 +62,7 @@ const refuseSessionPlacement = async (
       skill: "# fixture",
       claudePluginDir: join(storageDir, "claude-plugin"),
     },
+    recordedFolders: unrecordedFolders,
     controllerUrl: "http://controller.invalid",
     baseEnv: {},
     findBinary: () => undefined,

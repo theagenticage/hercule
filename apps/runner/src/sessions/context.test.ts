@@ -10,6 +10,7 @@ import { makeTestWorkspaces } from "../workspaces/testing";
  * - a credential that reaches the environment before the adapter puts it
  *   there.
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import {
   existsSync,
   lstatSync,
@@ -129,6 +130,7 @@ const buildMachine = (overrides: Partial<Machine> = {}): Machine => {
       skill: "# hercule",
       claudePluginDir: join(under, "claude-plugin"),
     },
+    recordedFolders: unrecordedFolders,
     controllerUrl: "https://controller.example:4938",
     baseEnv: { PATH: "/usr/bin", HOME: "/home/somebody" },
     findBinary: (name) => `/usr/local/bin/${name}`,
@@ -793,6 +795,7 @@ describe("where the session's token is written", () => {
         skill: "# hercule",
         claudePluginDir: join(under, "claude-plugin"),
       },
+      recordedFolders: unrecordedFolders,
     });
     const token = `hercule-token-${crypto.randomUUID()}`;
 

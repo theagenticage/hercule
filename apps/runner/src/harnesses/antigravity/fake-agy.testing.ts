@@ -6,6 +6,7 @@
  * conversation when `session/new` is answered. The real `agy` is never
  * started.
  */
+import { unrecordedFolders } from "../../recorded-folders.testing";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
@@ -80,6 +81,7 @@ export const buildContext = (
   modelArgument: "{model}",
   credentialVariables: [],
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
+  recordedFolders: unrecordedFolders,
   attachmentsDir: null,
   editMarks: null,
   attachmentUploader: NO_CONTROLLER_UPLOADER,

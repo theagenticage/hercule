@@ -3,6 +3,7 @@
  * vendor's `claude auth login` prints a URL, then waits on stdin for the code
  * the user pastes back from the browser.
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +46,7 @@ const CONTEXT: HarnessRunnerContext = {
     skill: "",
     claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
   },
+  recordedFolders: unrecordedFolders,
 };
 
 const URL_ONE = "https://claude.ai/oauth/authorize?code=challenge-one";
@@ -655,6 +657,7 @@ describe("a device login", () => {
       skill: "",
       claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
     },
+    recordedFolders: unrecordedFolders,
   };
 
   afterAll(() => {

@@ -14,7 +14,10 @@
  * - the folders a crashed run left behind are wiped at start, including the
  *   scratch folders of token logins in the temp directory;
  * - a leftover the runner cannot delete is logged with its path and reason,
- *   and the runner starts anyway.
+ *   and the runner starts anyway;
+ * - the folders harness processes of a crashed run left in the temp directory
+ *   are removed through the runner's record, and a folder with a matching name
+ *   that the runner never recorded stays.
  */
 import {
   existsSync,
@@ -33,6 +36,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { Effect, Logger } from "effect";
 import { locateRunnerDir } from "@hercule/home";
 import { runDaemon } from "./daemon";
+import { makeRecordedFolders } from "./recorded-folders";
 import { SETUP_TOKEN_FOLDER_PREFIX } from "./harnesses/setup-token-folder";
 
 const homes: Array<string> = [];
@@ -247,6 +251,57 @@ describe("runDaemon", () => {
         ),
       ).toBe(true);
       expect(existsSync(join(storageDir, "attachments"))).toBe(false);
+    } finally {
+      await server.stop(true);
+    }
+  });
+  it("removes the folders a crashed run's harness processes left, found through the record, and no other", async () => {
+    const seen: Array<string> = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request) {
+        seen.push(new URL(request.url).pathname);
+        return new Response("no", { status: 401 });
+      },
+    });
+    const lines: Array<string> = [];
+    const logger = Logger.make<unknown, void>((options) => {
+      lines.push(`${options.logLevel}: ${String(options.message)}`);
+    });
+
+    try {
+      const home = createEnrolledHome(`http://127.0.0.1:${String(server.port)}`);
+      const storageDir = join(locateRunnerDir(home), "deadbeefdeadbeef");
+      // What a crashed run leaves: folders its adapters made and never removed,
+      // in the temp directory and in a Harness Home.
+      const folders = makeRecordedFolders(join(storageDir, "recorded-folders"));
+      const harnessHome = join(storageDir, "providers", "0199e0e7-0000-7000-8000-0000000000cc");
+      mkdirSync(harnessHome, { recursive: true });
+      const tempFolder = folders.make(tmpdir(), "hercule-agy-");
+      const logFolder = folders.make(harnessHome, "hercule-log-");
+      writeFileSync(join(logFolder, "agy.log"), "the account's email");
+      // A process of another runner on this machine: same name pattern, no record.
+      const stranger = mkdtempSync(join(tmpdir(), "hercule-agy-"));
+      homes.push(stranger);
+
+      await Effect.runPromise(
+        Effect.raceFirst(
+          Effect.ignore(runDaemon(home)),
+          Effect.promise(async () => {
+            for (let attempt = 0; attempt < 1000 && seen.length === 0; attempt++) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          }),
+        ).pipe(Effect.provide(Logger.layer([logger]))),
+      );
+
+      expect(seen[0]).toBe("/api/v1/runners/socket");
+      expect(existsSync(tempFolder)).toBe(false);
+      expect(existsSync(logFolder)).toBe(false);
+      expect(existsSync(stranger)).toBe(true);
+      expect(lines).toContain(`Info: removed the leftover folder ${tempFolder} of an earlier run`);
+      expect(lines).toContain(`Info: removed the leftover folder ${logFolder} of an earlier run`);
     } finally {
       await server.stop(true);
     }

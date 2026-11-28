@@ -27,6 +27,7 @@ import type {
   UsageReading,
 } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
+import type { RecordedFolders } from "../recorded-folders";
 import type { ResolvedSkillReference } from "../skills";
 import { ANTIGRAVITY, antigravity } from "./antigravity";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
@@ -101,6 +102,12 @@ export interface HarnessRunnerContext {
     readonly skill: string;
     readonly claudePluginDir: string;
   };
+  /**
+   * How an adapter makes and removes the private folders it keeps for one
+   * harness process. The runner records each folder, so that after a crash it
+   * removes exactly the ones it made (`sweepRecordedFolders`).
+   */
+  readonly recordedFolders: RecordedFolders;
   /**
    * The user's own material this session's harness is given.
    * The field being present is what marks the session as one that sees User

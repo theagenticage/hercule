@@ -112,6 +112,12 @@ export interface LoginCommand {
    */
   readonly scratchFolder?: string;
   /**
+   * Removes `scratchFolder`, when plain removal is not enough: the folder has a
+   * record that has to go with it. Throws when the folder cannot be removed.
+   * Defaults to removing the folder and what is in it.
+   */
+  readonly removeScratchFolder?: () => void;
+  /**
    * For a terminal login: matches a screen line where the vendor says it
    * refused the pasted code. Such a line ends the login with a failed result.
    * Only a line that appeared or changed after the code was written is
@@ -409,7 +415,8 @@ export const makeLogins = (spawn: LoginSpawn): Logins => {
       const removeScratchFolder = (): void => {
         if (command.scratchFolder === undefined) return;
         try {
-          rmSync(command.scratchFolder, { recursive: true, force: true });
+          if (command.removeScratchFolder !== undefined) command.removeScratchFolder();
+          else rmSync(command.scratchFolder, { recursive: true, force: true });
         } catch {
           // Nothing else can be done about a folder that will not go away, and
           // the login's own result matters more than its leftovers.

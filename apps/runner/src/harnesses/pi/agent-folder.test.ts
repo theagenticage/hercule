@@ -1,7 +1,19 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
+import { makeRecordedFolders, sweepRecordedFolders } from "../../recorded-folders";
+import { unrecordedFolders } from "../../recorded-folders.testing";
 import { createAgentFolder, makeModelFilesBuilder, removeAgentFolder } from "./agent-folder";
 import { cleanupHomes, createPiHome } from "./testing";
 
@@ -9,28 +21,42 @@ describe("a private agent folder", () => {
   const NO_FILES = { store: undefined, modelsText: undefined, toolsFolder: undefined };
 
   it("is readable by this user only", () => {
-    const folder = createAgentFolder(NO_FILES);
+    const folder = createAgentFolder(unrecordedFolders, NO_FILES);
     try {
       expect(statSync(folder).mode & 0o777).toBe(0o700);
     } finally {
-      removeAgentFolder(folder);
+      removeAgentFolder(unrecordedFolders, folder);
     }
   });
 
   it("is a new folder each time", () => {
-    const first = createAgentFolder(NO_FILES);
-    const second = createAgentFolder(NO_FILES);
+    const first = createAgentFolder(unrecordedFolders, NO_FILES);
+    const second = createAgentFolder(unrecordedFolders, NO_FILES);
 
     expect(second).not.toBe(first);
-    removeAgentFolder(first);
+    removeAgentFolder(unrecordedFolders, first);
     expect(existsSync(second)).toBe(true);
-    removeAgentFolder(second);
+    removeAgentFolder(unrecordedFolders, second);
+  });
+
+  it("is recorded, so the next start of a runner that crashed removes it", async () => {
+    const recordsDir = mkdtempSync(join(tmpdir(), "hercule-pi-records-"));
+    try {
+      const folder = createAgentFolder(makeRecordedFolders(recordsDir), NO_FILES);
+      expect(readdirSync(recordsDir)).toHaveLength(1);
+
+      await Effect.runPromise(sweepRecordedFolders(recordsDir));
+
+      expect(existsSync(folder)).toBe(false);
+    } finally {
+      rmSync(recordsDir, { recursive: true, force: true });
+    }
   });
 
   it("is removed with what is in it", () => {
-    const folder = createAgentFolder({ ...NO_FILES, modelsText: "{}" });
+    const folder = createAgentFolder(unrecordedFolders, { ...NO_FILES, modelsText: "{}" });
 
-    removeAgentFolder(folder);
+    removeAgentFolder(unrecordedFolders, folder);
 
     expect(existsSync(folder)).toBe(false);
   });
@@ -43,7 +69,10 @@ describe("the model files", () => {
   });
 
   const createFolderFor = (home: string): string =>
-    createAgentFolder(Effect.runSync(build("pi", { home, modelArgument: "openrouter/x" }, {})));
+    createAgentFolder(
+      unrecordedFolders,
+      Effect.runSync(build("pi", { home, modelArgument: "openrouter/x" }, {})),
+    );
 
   it("makes the tools the home holds visible in the folder", () => {
     const home = createPiHome();
@@ -53,7 +82,7 @@ describe("the model files", () => {
     try {
       expect(existsSync(join(folder, "bin", "fd"))).toBe(true);
     } finally {
-      removeAgentFolder(folder);
+      removeAgentFolder(unrecordedFolders, folder);
       cleanupHomes();
     }
   });
@@ -64,7 +93,7 @@ describe("the model files", () => {
     try {
       expect(existsSync(join(folder, "bin"))).toBe(false);
     } finally {
-      removeAgentFolder(folder);
+      removeAgentFolder(unrecordedFolders, folder);
       cleanupHomes();
     }
   });
@@ -73,7 +102,7 @@ describe("the model files", () => {
     const home = createPiHome();
     mkdirSync(join(home, "bin"));
     writeFileSync(join(home, "bin", "fd"), "#!/bin/sh\n");
-    removeAgentFolder(createFolderFor(home));
+    removeAgentFolder(unrecordedFolders, createFolderFor(home));
     try {
       expect(existsSync(join(home, "bin", "fd"))).toBe(true);
     } finally {
@@ -85,15 +114,15 @@ describe("the model files", () => {
     const home = createPiHome();
     writeFileSync(join(home, "models.json"), '{"providers":{}}');
     const files = Effect.runSync(build("pi", { home, modelArgument: "openrouter/x" }, {}));
-    const first = createAgentFolder(files);
+    const first = createAgentFolder(unrecordedFolders, files);
     writeFileSync(join(home, "models.json"), "CHANGED");
-    const second = createAgentFolder(files);
+    const second = createAgentFolder(unrecordedFolders, files);
     try {
       expect(readFileSync(join(first, "models.json"), "utf8")).toBe('{"providers":{}}');
       expect(readFileSync(join(second, "models.json"), "utf8")).toBe('{"providers":{}}');
     } finally {
-      removeAgentFolder(first);
-      removeAgentFolder(second);
+      removeAgentFolder(unrecordedFolders, first);
+      removeAgentFolder(unrecordedFolders, second);
       cleanupHomes();
     }
   });

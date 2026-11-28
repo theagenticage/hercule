@@ -10,6 +10,7 @@
  * This package must not import controller code, so the stub is `Bun.serve`
  * with an Ed25519 key pair generated here.
  */
+import { unrecordedFolders } from "./recorded-folders.testing";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as joinPath } from "node:path";
@@ -382,6 +383,7 @@ const runConnection = (pin: ControllerPin, overrides: Partial<Omit<ConnectOption
         sessions: makeSupervising([]),
         binDir: BIN_DIR,
         herculeTool: HERCULE_TOOL,
+        recordedFolders: unrecordedFolders,
         proofDeadline: PATIENT,
         followForwardingPointer: () => Effect.succeed("ignored" as const),
         ...overrides,

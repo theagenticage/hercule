@@ -1759,7 +1759,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     const { spec, ctx, agent } = request;
     let folder: string;
     try {
-      folder = createAgentFolder(request.modelFiles);
+      folder = createAgentFolder(ctx.recordedFolders, request.modelFiles);
     } catch (error) {
       throw new PrepareFailed(error);
     }
@@ -1795,12 +1795,12 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         ctx.cwd,
         extensionFile,
         () => {
-          removeAgentFolder(folder);
+          removeAgentFolder(ctx.recordedFolders, folder);
           request.onReleased();
         },
       );
     } catch (error) {
-      removeAgentFolder(folder);
+      removeAgentFolder(ctx.recordedFolders, folder);
       throw error;
     }
   };
