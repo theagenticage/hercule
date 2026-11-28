@@ -463,7 +463,7 @@ describe("initiative.query", () => {
           ids.push((yield* initiatives.create({ name })).id);
           yield* TestClock.adjust(A_MINUTE);
         }
-        const [a, b, c, d] = ids;
+        const [, b, , d] = ids;
         yield* initiatives.close(b!);
         yield* initiatives.close(d!);
         // A deleted Initiative is in no list, `include` included.
@@ -474,7 +474,6 @@ describe("initiative.query", () => {
             .query(closed === undefined ? {} : { closed })
             .pipe(Effect.map((page) => page.items.map((item) => item.name)));
         return {
-          ids: { a, b, c, d },
           byDefault: yield* names(undefined),
           closed: yield* names("only"),
           every: yield* names("include"),
@@ -484,6 +483,31 @@ describe("initiative.query", () => {
     expect(lists.byDefault).toEqual(["A", "C"]);
     expect(lists.closed).toEqual(["B", "D"]);
     expect(lists.every).toEqual(["A", "B", "C", "D"]);
+  });
+
+  it("pages through every Initiative in creation order, whatever an unread one's state becomes between pages", async () => {
+    const names = await run(
+      Effect.gen(function* () {
+        const initiatives = yield* InitiativeService;
+        const ids: Array<string> = [];
+        for (const name of ["A", "B", "C", "D"]) {
+          ids.push((yield* initiatives.create({ name })).id);
+          yield* TestClock.adjust(A_MINUTE);
+        }
+        const first = yield* initiatives.query({ closed: "include", limit: 2 });
+        // B was read on the first page and C and D are not read yet.
+        yield* initiatives.close(ids[1]!);
+        yield* initiatives.close(ids[2]!);
+        yield* initiatives.reopen(ids[3]!);
+        const second = yield* initiatives.query({
+          closed: "include",
+          limit: 2,
+          ...(first.nextCursor === undefined ? {} : { cursor: first.nextCursor }),
+        });
+        return [...first.items, ...second.items].map((item) => item.name);
+      }),
+    );
+    expect(names).toEqual(["A", "B", "C", "D"]);
   });
 
   it("lists only the Initiatives of one project's lane, and pages with a cursor", async () => {

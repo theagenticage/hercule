@@ -7,8 +7,7 @@
  * list each write the exact `WHERE` condition of their partial index
  * (`initiatives_open`, `initiatives_closed`); SQLite only uses a partial index
  * when the query repeats its condition. The list of every Initiative has no
- * partial index of its own: it reads the whole table, which holds a few dozen
- * rows, and only the command line asks for it.
+ * partial index of its own.
  */
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";

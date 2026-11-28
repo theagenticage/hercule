@@ -152,7 +152,10 @@ const readListedIds = async (
     ? { sort: [{ field: "createdAt", direction: "asc" }] }
     : {};
   const items = await readAll(client, listing, { ...field.resolvesQuery, ...stable }, params);
-  return items.map((item) => item["id"]).filter((id): id is string => typeof id === "string");
+  const ids = items.map((item) => item["id"]).filter((id): id is string => typeof id === "string");
+  // A list paged by a value that can change (a runner's name) may return one
+  // row on two pages; one id must not read as two matches.
+  return [...new Set(ids)];
 };
 
 /**

@@ -66,8 +66,9 @@ export type FieldRow =
        * default listing does not hold the ids this field takes. A value is
        * written as the operation's query schema types it: `{ archived:
        * "include" }` lists every Wiki Page, archived or not. It is one query,
-       * because the tail is matched within one listing, which cannot change
-       * between two reads.
+       * so closing, reopening or archiving a record changes neither which
+       * records the listing holds nor their order, and a tail never falls
+       * between two listings.
        */
       readonly resolvesQuery?: ResolvingQuery;
       /**
