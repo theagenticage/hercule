@@ -41,6 +41,7 @@ import {
   readValidationIssues,
 } from "@hercule/client-core";
 import {
+  describeLostAccess,
   escapeMarkerLines,
   removeTerminalControls,
   truncateText,
@@ -1139,13 +1140,20 @@ const renderTaskEntityLinked = (
 
 /**
  * Returns the lines of `entity group`: the label, one line per member (the
- * ref, then its title or "restricted"), then one line per link with who
- * claims it. A cut group says so on the last line.
+ * ref, then its title or "restricted", then the words "Last known state - ..."
+ * for a member that lost access), then one line per link with who claims it. A cut group says so on the last line.
  */
 const renderInboxGroup = (group: InboxGroupDetail): ReadonlyArray<string> => [
   `group  ${group.label} (${String(group.members.length)} ${group.members.length === 1 ? "thing" : "things"})`,
   ...group.members.map((member) =>
-    `  ${member.ref}  ${member.restricted ? "restricted" : (member.title ?? "")}`.trimEnd(),
+    [
+      `  ${member.ref}`,
+      member.restricted ? "restricted" : (member.title ?? ""),
+      describeLostAccess(member.access),
+    ]
+      .filter((part) => part !== undefined)
+      .join("  ")
+      .trimEnd(),
   ),
   ...(group.links.length === 0 ? [] : ["links"]),
   ...group.links.map((link) => {

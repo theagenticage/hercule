@@ -829,7 +829,8 @@ export const externalEntityInbox = Effect.gen(function* () {
    * `queryInbox` decides it, inside one read snapshot.
    *
    * - A thing linked to nothing on the Inbox is a group of one, titled by its
-   *   peer (its ref when the peer is restricted and shows no title).
+   *   peer. A thing on the Inbox is a full work record, so its peer is never
+   *   restricted: a thing that lost access keeps its last known title.
    * - Members are the label thing, then the others sorted by ref, cut at
    *   `MAX_INBOX_MOVED_THINGS`; `links` are cut at `MAX_GRAPH_EDGES`.
    *   `complete` is false when either was cut.

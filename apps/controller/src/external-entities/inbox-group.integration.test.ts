@@ -111,6 +111,49 @@ describe("readInboxGroup", () => {
     });
   });
 
+  it("keeps a member that lost access in the group, with its last known title and its access", async () => {
+    await withNorthwind(async (controller) => {
+      const { base, token } = controller;
+      const account = await createAccount(controller, "bot");
+      const readable = await arrangeThing(controller, {
+        kind: TICKET_KIND,
+        key: "WEB-1",
+        title: "Fine",
+        accounts: [account],
+      });
+      const lost = await arrangeThing(controller, {
+        kind: TICKET_KIND,
+        key: "WEB-2",
+        title: "Lost",
+        accounts: [account],
+        lostAccess: "deleted",
+      });
+      await post(base, `/api/v1/external-entities/${readable.id}/take-on`, {}, token);
+      const linked = await post(
+        base,
+        "/api/v1/external-entities/links",
+        { fromRef: readable.ref, toRefs: [lost.ref] },
+        token,
+      );
+      expect(linked.status, await linked.clone().text()).toBe(200);
+
+      const response = await post(base, GROUP, { ref: lost.ref }, token);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const group = (await response.json()) as InboxGroupDetail;
+      // Whichever member is elected, the label is a title and never the locked words.
+      expect(["Fine", "Lost"]).toContain(group.label);
+      expect(group.members).toHaveLength(2);
+      expect(group.members.find((member) => member.ref === lost.ref)).toMatchObject({
+        title: "Lost",
+        access: "deleted",
+        restricted: false,
+      });
+      expect(group.members.find((member) => member.ref === readable.ref)).not.toHaveProperty(
+        "access",
+      );
+    });
+  });
+
   it("refuses a thing that is not on the Inbox", async () => {
     await withNorthwind(async (controller) => {
       const { base, token } = controller;
