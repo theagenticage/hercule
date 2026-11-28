@@ -7,7 +7,8 @@ import type { JSX } from "react";
 import { IconFrame, type IconProps } from "../../icons/icon-frame";
 
 /** Renders a chevron that points down, for a button that opens a menu. */
-export function ChevronDownIcon({ size = 16 }: IconProps): JSX.Element {
+export function ChevronDownIcon({ size: sizeProp }: IconProps): JSX.Element {
+  const size = sizeProp ?? 16;
   return (
     <IconFrame size={size}>
       <path d="M3.8 6.2L8 10.4l4.2-4.2" />

@@ -28,18 +28,18 @@ import { ChevronRightIcon } from "../../icons/chevron-right";
  *   faded. Only an inert row has one.
  */
 export function MenuLine({
-  glyph = null,
+  glyph: glyphProp,
   name,
-  detail = null,
-  sub = null,
-  warning = null,
-  note = null,
+  detail: detailProp,
+  sub: subProp,
+  warning: warningProp,
+  note: noteProp,
   current,
-  chevron = false,
-  multiple = false,
-  inert = false,
+  chevron: chevronProp,
+  multiple: multipleProp,
+  inert: inertProp,
   entry,
-  action = null,
+  action: actionProp,
   onPick,
 }: {
   readonly glyph?: ReactNode;
@@ -56,6 +56,15 @@ export function MenuLine({
   readonly action?: { readonly label: string; readonly onAct: () => void } | null;
   readonly onPick: () => void;
 }): JSX.Element {
+  const glyph = glyphProp ?? null;
+  const detail = detailProp ?? null;
+  const sub = subProp ?? null;
+  const warning = warningProp ?? null;
+  const note = noteProp ?? null;
+  const chevron = chevronProp ?? false;
+  const multiple = multipleProp ?? false;
+  const inert = inertProp ?? false;
+  const action = actionProp ?? null;
   const body = (
     <>
       {glyph}

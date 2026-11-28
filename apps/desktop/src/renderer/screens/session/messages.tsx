@@ -287,10 +287,10 @@ export const UserMessage = memo(function UserMessage({
   at,
   timezone,
   today,
-  steered = false,
-  sending = false,
+  steered: steeredProp,
+  sending: sendingProp,
   sender,
-  skills = NO_SKILLS,
+  skills: skillsProp,
   sessionId,
 }: {
   readonly text: string;
@@ -305,6 +305,9 @@ export const UserMessage = memo(function UserMessage({
   readonly skills?: readonly string[];
   readonly sessionId?: string;
 }): JSX.Element {
+  const steered = steeredProp ?? false;
+  const sending = sendingProp ?? false;
+  const skills = skillsProp ?? NO_SKILLS;
   const time = formatBlockTime(at, timezone, today);
   const agent = sender === undefined || sender === "loading" ? undefined : sender;
   return (

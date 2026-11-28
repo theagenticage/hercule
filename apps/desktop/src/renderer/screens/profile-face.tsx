@@ -11,11 +11,12 @@ import "./profile-face.css";
  */
 export function ProfileFace({
   name,
-  size = "md",
+  size: sizeProp,
 }: {
   readonly name: string;
   readonly size?: "md" | "sm" | "xs";
 }): JSX.Element {
+  const size = sizeProp ?? "md";
   const [initial = ""] = Array.from(name.trim());
   return (
     <span className={`profile-face profile-face--${size}`} aria-hidden="true">

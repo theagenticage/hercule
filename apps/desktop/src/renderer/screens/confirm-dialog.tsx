@@ -40,13 +40,13 @@ export function ConfirmDialog({
   title,
   actionLabel,
   actionClass,
-  closeLabel = "Cancel",
-  className = "",
+  closeLabel: closeLabelProp,
+  className: classNameProp,
   initialFocus,
-  pending = false,
-  unready = false,
-  error = null,
-  refusal = null,
+  pending: pendingProp,
+  unready: unreadyProp,
+  error: errorProp,
+  refusal: refusalProp,
   onConfirm,
   onClose,
   children,
@@ -66,6 +66,12 @@ export function ConfirmDialog({
   readonly onClose: () => void;
   readonly children: ReactNode;
 }): JSX.Element {
+  const closeLabel = closeLabelProp ?? "Cancel";
+  const className = classNameProp ?? "";
+  const pending = pendingProp ?? false;
+  const unready = unreadyProp ?? false;
+  const error = errorProp ?? null;
+  const refusal = refusalProp ?? null;
   const closeRef = useRef<HTMLButtonElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
   // This effect runs after the one in GlassDialog that opens the dialog,

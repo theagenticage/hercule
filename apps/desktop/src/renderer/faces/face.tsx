@@ -37,13 +37,14 @@ export function Face({
   look,
   pose,
   size,
-  animated = false,
+  animated: animatedProp,
 }: {
   readonly look: Look;
   readonly pose: Pose;
   readonly size: number;
   readonly animated?: boolean;
 }): JSX.Element {
+  const animated = animatedProp ?? false;
   // Small faces get thicker strokes and larger eyes, so they still read.
   const bold = size < 30;
   const { topY } = SHAPE_METRICS[look.shape];

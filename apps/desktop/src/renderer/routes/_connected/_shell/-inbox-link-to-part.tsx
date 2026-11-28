@@ -47,10 +47,11 @@ export function InboxLinkToPart({
   const [query, setQuery] = useState("");
   const [highlighted, setHighlighted] = useState(0);
   const text = useQuietValue(query.trim(), QUIET_MS);
-  const { data: things = [] } = useQuery({
+  const candidates = useQuery({
     ...linkCandidatesQuery(client, fromRef, text, excludedRefs),
     placeholderData: keepPreviousData,
   });
+  const things = candidates.data ?? [];
 
   const results: InboxLinkToResult[] = things.map(({ ref, identifier, title, source }) => ({
     ref,

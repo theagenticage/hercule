@@ -56,12 +56,13 @@ export function SkillBand({
  * lighter, as the second line of a proposal is.
  */
 export function SkillBandLine({
-  note = false,
+  note: noteProp,
   children,
 }: {
   readonly note?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
+  const note = noteProp ?? false;
   return (
     <span className={note ? "skill-band-line skill-band-note" : "skill-band-line"}>{children}</span>
   );

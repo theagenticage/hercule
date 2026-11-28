@@ -415,10 +415,10 @@ function MarkdownTree({
  */
 export const Markdown = memo(function Markdown({
   text,
-  breaks = false,
-  inlineImages = false,
-  relativeLinksAsText = false,
-  embeddedHtml = true,
+  breaks: breaksProp,
+  inlineImages: inlineImagesProp,
+  relativeLinksAsText: relativeLinksAsTextProp,
+  embeddedHtml: embeddedHtmlProp,
   skillNames,
   skillsByName,
 }: {
@@ -452,6 +452,10 @@ export const Markdown = memo(function Markdown({
   /** The session's skills by name, for the hover card of each chip. Needs `skillNames`. */
   readonly skillsByName?: ReadonlyMap<string, SessionSkill>;
 }): JSX.Element {
+  const breaks = breaksProp ?? false;
+  const inlineImages = inlineImagesProp ?? false;
+  const relativeLinksAsText = relativeLinksAsTextProp ?? false;
+  const embeddedHtml = embeddedHtmlProp ?? true;
   return (
     <PlainTextOnError text={text}>
       <MarkdownTree
