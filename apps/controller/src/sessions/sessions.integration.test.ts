@@ -6625,6 +6625,53 @@ describe("session.spawn into a workspace", () => {
     });
   });
 
+  it("leaves a running session alone when its ready workspace is observed unavailable", async () => {
+    await withFleet(async (arranged) => {
+      const web = await makeRepo(arranged, "https://github.com/acme/web");
+      const session = await spawnSessionOrFail(arranged, {
+        prompt: "hello",
+        workspace: { kind: "ephemeral", checkouts: [{ resourceId: web }] },
+      });
+      const workspaceId = String(session.workspaceId);
+      reportWorkspaceReady(arranged, await readWorkspace(arranged, workspaceId));
+      // The start frame has really reached the runner.
+      await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
+      reportEvent(arranged.wire, 1, {
+        eventId: crypto.randomUUID(),
+        sessionId: session.id,
+        at,
+        _tag: "session.started",
+      });
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+
+      // The runner's own observation finds the checkout gone. The harness is
+      // still running on the runner, so only its exit report may end the session.
+      arranged.wire.send({
+        _tag: "workspaceReport",
+        workspaceId,
+        status: "failed",
+        observedAt: new Date().toISOString(),
+        message: "The selected checkout is missing.",
+      } as never);
+      await waitUntil("workspace reads failed", async () => {
+        const workspace = await readWorkspace(arranged, workspaceId);
+        return workspace.status === "failed" ? workspace : undefined;
+      });
+
+      expect((await readSession(arranged, session.id)).status).toBe("busy");
+      const stream = await readStreamRows(arranged.harness, session.id);
+      expect(stream.map((row) => row.tag)).not.toContain("session.exited");
+
+      // The user can still stop it: the runner gets the stop and reports the exit.
+      const response = await stopSession(arranged, session.id);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await waitForFrames<SessionStopFrame>(arranged.wire, "sessionStop", 1);
+      expect(sent[0]!.sessionId).toBe(session.id);
+      reportExited(arranged.wire, session.id, 2);
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
+    });
+  });
+
   it("creates a new primary workspace when the runner failed to create the last one, rather than joining it", async () => {
     await withFleet(async (arranged) => {
       const web = await makeRepo(arranged, "https://github.com/acme/web");

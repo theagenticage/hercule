@@ -1818,6 +1818,58 @@ const runEndOnLostRunners = (connected: ReadonlyArray<string>) =>
     yield* withTransaction(sql, sessions.endOnLostRunners(connected));
   });
 
+describe("SessionService.requeue", () => {
+  it("ends a session instead of queueing it when its workspace failed while the start was in flight", async () => {
+    const result = await run(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const sessions = yield* SessionService;
+        const runnerId = mintId();
+        const workspaceId = mintId();
+        const providerAccountId = mintId();
+        yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* sql`
+              INSERT INTO runners (id, name, connectivity, lifecycle, reserved, labels,
+                                   credential_hash, created_at, updated_at)
+              VALUES (${uuidFromString(runnerId)}, ${runnerId}, 'online', 'active', 0, '[]',
+                      'a hash', ${at}, ${at})`;
+            yield* sql`
+              INSERT INTO workspaces (id, runner_id, kind, status, created_at)
+              VALUES (${uuidFromString(workspaceId)}, ${uuidFromString(runnerId)}, 'ephemeral',
+                      'ready', ${at})`;
+          }),
+        );
+        const sessionId = yield* insertQueuedSession(runnerId, {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+        });
+        yield* withTransaction(
+          sql,
+          sql`UPDATE sessions SET workspace_id = ${uuidFromString(workspaceId)}
+              WHERE id = ${uuidFromString(sessionId)}`,
+        );
+        const [start] = yield* claimStarting(runnerId, 1);
+        // The runner's failed report commits after the claim and before the
+        // start frame fails to send. It skips the session, which is `starting`.
+        yield* withTransaction(
+          sql,
+          sql`UPDATE workspaces SET status = 'failed', message = 'The checkout is missing.'
+              WHERE id = ${uuidFromString(workspaceId)}`,
+        );
+        yield* withTransaction(sql, sessions.endQueuedForWorkspace(workspaceId, "unused"));
+        const whileStarting = yield* readStatus(sessionId);
+
+        yield* sessions.requeue(start!);
+        return { whileStarting, afterRequeue: yield* readStatus(sessionId) };
+      }),
+    );
+
+    expect(result).toEqual({ whileStarting: "starting", afterRequeue: "exited" });
+  });
+});
+
 describe("SessionService.endOnLostRunners", () => {
   it("ends every session on a lost runner once it has not been heard from for its absolute timeout", async () => {
     const result = await run(

@@ -1795,13 +1795,16 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Ends every session waiting on a workspace that could not be created. The
-   * sessions never started, so there is no harness to stop and nothing to send
-   * to the runner. The user needs the reason, so the runner's error message is
-   * stored as a `session.exited` row on each session's stream, where the exit
-   * is shown.
+   * Ends every `queued` session waiting on a workspace that failed. Dispatch
+   * starts a session only in a ready workspace, so these can never start, and
+   * the runner holds no process for them: nothing needs stopping or sending.
+   * A session the runner already holds (`starting`, `idle` or `busy`) is left
+   * alone, because the runner owns its process and ends the session by
+   * reporting its exit. The user needs the reason, so the runner's error
+   * message is stored as a `session.exited` row on each ended session's
+   * stream, where the exit is shown.
    */
-  const endForWorkspace = (
+  const endQueuedForWorkspace = (
     workspaceId: string,
     message: string | null,
   ): Effect.Effect<void, SqlError> =>
@@ -1809,7 +1812,7 @@ const make = Effect.gen(function* () {
       sql,
       Effect.gen(function* () {
         const at = yield* nowIso;
-        const ended = yield* sessions.endInWorkspace(workspaceId, at);
+        const ended = yield* sessions.endQueuedInWorkspace(workspaceId, at);
         for (const { id, runnerId } of ended) {
           yield* sessions.append(id, {
             seq: 0,
@@ -3236,6 +3239,14 @@ const make = Effect.gen(function* () {
             tokens.forgetSessions([sessionId]);
           });
           yield* announceSessionChangeById(sessionId);
+          // A failed workspace report may have committed while this start was
+          // in flight. It skipped the session then, because it was `starting`.
+          // Dispatch claims only sessions in a ready workspace, so the session
+          // would wait for ever, with no reason shown.
+          const failed = yield* sessions.readFailedWorkspaceOfQueued(sessionId);
+          if (Option.isSome(failed)) {
+            yield* endQueuedForWorkspace(failed.value.workspaceId, failed.value.message);
+          }
         }),
       ),
 
@@ -3284,7 +3295,7 @@ const make = Effect.gen(function* () {
         }),
       ),
 
-    endForWorkspace,
+    endQueuedForWorkspace,
 
     /**
      * Cancels the step prompts still waiting on the sessions of a run that

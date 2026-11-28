@@ -87,12 +87,12 @@ const make = Effect.gen(function* () {
               Effect.gen(function* () {
                 const outcome = yield* workspaces.reported(traffic.runnerId, traffic.report);
                 const { settled } = outcome;
-                // A workspace that failed to provision ends the sessions waiting
-                // on it, with the runner's error message as the reason, and
-                // fails the runs working in it.
+                // A workspace that failed ends the queued sessions waiting on
+                // it, with the runner's error message as the reason, and fails
+                // the runs working in it.
                 if (settled?.moved === "failed") {
                   const { message } = traffic.report;
-                  yield* sessions.endForWorkspace(settled.workspaceId, message ?? null);
+                  yield* sessions.endQueuedForWorkspace(settled.workspaceId, message ?? null);
                   yield* runs.failRunsInWorkspace(
                     settled.workspaceId,
                     message ?? "The runner could not provision the workspace, and gave no reason.",
