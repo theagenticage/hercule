@@ -11,6 +11,7 @@
  *   own close returns before the CLI has exited, so only the real SDK can
  *   show that the adapter waits for the process.
  */
+import { unrecordedFolders } from "./recorded-folders.testing";
 import {
   existsSync,
   mkdirSync,
@@ -133,6 +134,7 @@ const generateWith = async (behaviour: HarnessBehaviour) => {
       modelArgument: "fake/{model}",
       credentialVariables: [],
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
+      recordedFolders: unrecordedFolders,
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
   });
@@ -242,6 +244,7 @@ const generateWithClaude = async (behaviour: ClaudeBehaviour, count = 1) => {
       modelArgument: "{model}",
       credentialVariables: [],
       herculeTool: { orientation: "", skill: "", claudePluginDir: join(root, "claude-plugin") },
+      recordedFolders: unrecordedFolders,
     }),
     deadline: Duration.millis(behaviour.deadlineMillis),
   });

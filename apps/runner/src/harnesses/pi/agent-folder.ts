@@ -44,10 +44,11 @@
  * Sessions and their transcripts stay in the Harness Home: pi gets
  * `--session-dir` and the transcript paths explicitly.
  */
-import { mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as Effect from "effect/Effect";
+import type { RecordedFolders } from "../../recorded-folders";
 import type { HarnessRunnerContext } from "../index";
 import { readModelStore, writeModelStore } from "./model-store";
 import { setProviderModels } from "./models-file";
@@ -109,15 +110,15 @@ export const writeModelFiles = (directory: string, files: ModelFiles): void => {
 /**
  * Removes an agent folder and what is in it. Never throws. A folder left
  * behind holds the model files and, once pi has run, the copy of Hercule's
- * extension, the session's instructions and the files pi wrote there.
+ * extension, the session's instructions and the files pi wrote there. When it
+ * cannot be removed, its record stays and the next start of the runner tries
+ * again (`sweepRecordedFolders`).
  */
-export const removeAgentFolder = (path: string): void => {
+export const removeAgentFolder = (recordedFolders: RecordedFolders, path: string): void => {
   try {
-    // A few retries cover a pi that has just been killed and is still
-    // closing a file in the folder.
-    rmSync(path, { recursive: true, force: true, maxRetries: 3 });
+    recordedFolders.remove(path);
   } catch {
-    // The operating system's cleanup of the temporary directory gets it later.
+    // The record of the folder stays, and the runner's next start removes it.
   }
 };
 
@@ -125,23 +126,22 @@ export const removeAgentFolder = (path: string): void => {
  * Creates a private agent folder holding `files`, readable by this user only,
  * in the machine's temporary directory, and returns its path. That is where
  * the probe keeps its scratch folders too, and it keeps the folder away from
- * the Harness Home. The folder is created with mode 0700 (`mkdtempSync`) and
+ * the Harness Home. The folder is created with mode 0700 (`RecordedFolders.make`) and
  * every file Hercule writes in it has mode 0600. When created, the folder
  * holds the model files and nothing else. Those can hold a key: the home's
  * `models.json` may carry a literal `apiKey` (pi's `docs/models.md`), and this
  * is a copy of it, one per pi process, for as long as the process runs. The
  * account's own key never goes into a file: it is in the process's
  * environment. Throws when the folder cannot be created or the files cannot be
- * written, after removing the folder. A runner that crashes leaves its folders
- * behind, and the operating system's cleanup of the temporary directory
- * removes them.
+ * written, after removing the folder. The folder is recorded
+ * (`RecordedFolders`), so a runner that crashes removes it at its next start.
  */
-export const createAgentFolder = (files: ModelFiles): string => {
-  const path = mkdtempSync(join(tmpdir(), "hercule-pi-agent-"));
+export const createAgentFolder = (recordedFolders: RecordedFolders, files: ModelFiles): string => {
+  const path = recordedFolders.make(tmpdir(), "hercule-pi-agent-");
   try {
     writeModelFiles(path, files);
   } catch (error) {
-    removeAgentFolder(path);
+    removeAgentFolder(recordedFolders, path);
     throw error;
   }
   return path;

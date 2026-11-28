@@ -34,6 +34,7 @@
  *
  * `HERCULE_CODEX_TEST_BINARY` can select a pinned binary without changing PATH.
  */
+import { unrecordedFolders } from "../../recorded-folders.testing";
 import {
   copyFileSync,
   existsSync,
@@ -123,6 +124,7 @@ const buildContext = (home: string): SessionStartContext => ({
   modelArgument: "{model}",
   credentialVariables: [],
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
+  recordedFolders: unrecordedFolders,
 });
 
 /**

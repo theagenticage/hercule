@@ -21,6 +21,7 @@ import {
 import { makeAttachmentCache, makeAttachmentUploader } from "./attachments";
 import { makeDiskMeasurements, makeFolderMeasurer } from "./disk-usage";
 import { openFileClock } from "./edit-marks";
+import { makeRecordedFolders, sweepRecordedFolders } from "./recorded-folders";
 import { serveIdentity } from "./identity";
 import { buildThisMachine, probeFacts } from "./probe";
 import { harnessLogins, removeStaleSetupTokenFolders } from "./harnesses";
@@ -195,6 +196,12 @@ export const runDaemon = (
       // The skills of each session start, one folder per start, removed when
       // the session exits.
       const sessionSkillsDir = joinPath(storageDir, "session-skills");
+      // The record of the private folders harness adapters make for their
+      // processes (`makeRecordedFolders`). It sits beside the storage
+      // directories, not in one, so a runner that joined again still removes
+      // the folders its earlier identity left in the temp directory.
+      const recordedFoldersDir = joinPath(locateRunnerDir(home), "recorded-folders");
+      const recordedFolders = makeRecordedFolders(recordedFoldersDir);
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git
       // does: through this socket, with nothing written to disk.
@@ -263,6 +270,10 @@ export const runDaemon = (
           ),
         );
       }
+      // The folders harness processes had when the last run ended. They are in
+      // the machine's temp directory and the Harness Homes, so they are found
+      // through the record the adapters keep, never by name.
+      yield* sweepRecordedFolders(recordedFoldersDir);
       // A token login keeps its scratch folder in the machine's temp directory,
       // where a runner killed in the middle of one leaves it.
       removeStaleSetupTokenFolders(tmpdir(), Date.now());
@@ -330,6 +341,7 @@ export const runDaemon = (
             sessions,
             binDir,
             herculeTool,
+            recordedFolders,
             followForwardingPointer: applyControllerMove,
           });
         }),

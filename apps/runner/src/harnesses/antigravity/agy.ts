@@ -4,8 +4,8 @@
  * is built here, so that all of them get the same environment and none of
  * them can run as another account.
  */
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import * as Duration from "effect/Duration";
@@ -35,6 +35,7 @@ import {
   buildHarnessNotInstalled,
   buildStartFailure,
 } from "../adapter-error-builders";
+import type { RecordedFolders } from "../../recorded-folders";
 import type { HarnessRunnerContext } from "../index";
 import type { LoginCommand } from "../login";
 import { isExecutableNotFound, stopChild } from "../process";
@@ -339,41 +340,33 @@ const buildAccountFlags = (home: string, logFolder: string): ReadonlyArray<strin
 ];
 
 /**
- * Makes an empty folder for the log of the sign-in, readable by the runner's
- * user only (mode 0700), directly in the Harness Home, and returns its path.
- * The login removes it when it ends. Throws when the folder cannot be made.
- *
- * The folder is in the Harness Home, not in the system's temporary folder,
- * because the `agy` processes of an account keep nothing outside its Harness
- * Home.
- */
-const createLoginLogFolder = (home: string): string => mkdtempSync(join(home, LOG_FOLDER_PREFIX));
-
-/**
- * Makes an empty folder with `mkdtemp` at `prefix`, readable by the runner's
- * user only (mode 0700), and removes it with everything in it when the scope
- * closes. A failed removal is logged as a warning with the reason the
- * operating system gave and nothing of the folder's contents. Fails with an
- * `AdapterFailed` that names `what` when the folder cannot be made. A runner
- * that crashes leaves the folder behind, and nothing removes it later.
+ * Makes an empty folder named `prefix` plus random characters in `parent`,
+ * readable by the runner's user only (mode 0700), and removes it with
+ * everything in it when the scope closes. A failed removal is logged as a
+ * warning with the reason the operating system gave and nothing of the
+ * folder's contents. Fails with an `AdapterFailed` that names `what` when the
+ * folder cannot be made. The runner records the folder, so a runner that
+ * crashes removes it at its next start.
  */
 const makeScopedFolder = (
+  recordedFolders: RecordedFolders,
+  parent: string,
   prefix: string,
   what: string,
 ): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
   Effect.acquireRelease(
     Effect.try({
-      try: () => mkdtempSync(prefix),
+      try: () => recordedFolders.make(parent, prefix),
       catch: (error) =>
         buildAdapterFailed(
           `Could not make ${what} for ${ANTIGRAVITY_NAME} on this runner: ${describeFileFailure(error)}`,
         ),
     }),
     (folder) =>
-      Effect.tryPromise(() => rm(folder, { recursive: true, force: true })).pipe(
+      Effect.try(() => recordedFolders.remove(folder)).pipe(
         Effect.catch((error) =>
           Effect.logWarning(
-            `Could not remove ${what} of ${ANTIGRAVITY_NAME}: ${describeFileFailure(error.cause)}`,
+            `Could not remove ${what} of ${ANTIGRAVITY_NAME}: ${describeFileFailure(error.cause)}. The runner tries again when it starts.`,
           ),
         ),
       ),
@@ -381,11 +374,13 @@ const makeScopedFolder = (
 
 /**
  * Makes an empty folder for the log of a session or probe process, like
- * `createLoginLogFolder`, and removes it when the scope closes (see
+ * the login command's, and removes it when the scope closes (see
  * `makeScopedFolder`).
  */
-const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
-  makeScopedFolder(join(home, LOG_FOLDER_PREFIX), "a log folder");
+const makeSessionLogFolder = (
+  ctx: HarnessRunnerContext,
+): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+  makeScopedFolder(ctx.recordedFolders, ctx.home, LOG_FOLDER_PREFIX, "a log folder");
 
 /**
  * Makes the temporary folder of one `agy` process and removes it with
@@ -397,8 +392,10 @@ const makeSessionLogFolder = (home: string): Effect.Effect<string, AdapterFailed
  * below `TMPDIR`, and a socket path of more than about 104 bytes fails on
  * macOS, where the system's temporary folder is already long.
  */
-const makeAgyTempFolder = (): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
-  makeScopedFolder(join(tmpdir(), "hercule-agy-"), "a temporary folder");
+const makeAgyTempFolder = (
+  ctx: HarnessRunnerContext,
+): Effect.Effect<string, AdapterFailed, Scope.Scope> =>
+  makeScopedFolder(ctx.recordedFolders, tmpdir(), "hercule-agy-", "a temporary folder");
 
 /**
  * Builds the command that signs the account in. `agy` prints a link, reads one
@@ -406,16 +403,21 @@ const makeAgyTempFolder = (): Effect.Effect<string, AdapterFailed, Scope.Scope> 
  * when the code was refused. The exit alone decides (`endsAtExit`).
  *
  * The command logs to a folder of its own in the Harness Home, which is the
- * command's `scratchFolder`. The caller must start the command, which removes
- * the folder when the login ends. Throws when the folder cannot be made.
+ * command's `scratchFolder`. The folder is in the Harness Home, not in the
+ * system's temporary folder, because the `agy` processes of an account keep
+ * nothing outside its Harness Home. The runner records the folder, so a runner
+ * that crashes during the sign-in removes it at its next start. The caller
+ * must start the command, which removes the folder when the login ends.
+ * Throws when the folder cannot be made.
  */
 export const buildLoginCommand = (ctx: HarnessRunnerContext, binary: string): LoginCommand => {
-  const logFolder = createLoginLogFolder(ctx.home);
+  const logFolder = ctx.recordedFolders.make(ctx.home, LOG_FOLDER_PREFIX);
   return {
     command: [binary, "acp", "--login", ...buildAccountFlags(ctx.home, logFolder)],
     env: buildAgyEnv(ctx),
     endsAtExit: true,
     scratchFolder: logFolder,
+    removeScratchFolder: () => ctx.recordedFolders.remove(logFolder),
   };
 };
 
@@ -731,7 +733,7 @@ export const openSignedInAgy = (
     // holds a file that would loosen it.
     yield* resetOwnedHomePaths(ctx.home, buildHooksFile(buildHookLauncher(options.hookLauncher)));
 
-    const folder = yield* makeSessionLogFolder(ctx.home);
+    const folder = yield* makeSessionLogFolder(ctx);
     const command = [
       binary,
       "acp",
@@ -745,7 +747,7 @@ export const openSignedInAgy = (
     // own TMPDIR is writable by the agent, and the marks folder is read by the
     // edit watch, which takes every file in it for a mark.
     const conversationIdFile = join(folder, CONVERSATION_ID_FILE);
-    const tempFolder = yield* makeAgyTempFolder();
+    const tempFolder = yield* makeAgyTempFolder(ctx);
     const env = buildAgyEnv(
       ctx,
       tempFolder,

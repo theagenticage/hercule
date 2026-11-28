@@ -1,4 +1,5 @@
 /** Verifies pre-change workspace and native-session associations through migration and public resume. */
+import { unrecordedFolders } from "../../../../runner/src/recorded-folders.testing";
 import {
   existsSync,
   lstatSync,
@@ -454,6 +455,7 @@ describe("pre-change controller and provider-state upgrade", () => {
                 skill: "# fixture",
                 claudePluginDir: join(fixture.storageDir, "claude-plugin"),
               },
+              recordedFolders: unrecordedFolders,
               controllerUrl: controller.base,
               baseEnv: { PATH: process.env["PATH"] ?? "" },
               findBinary: () => "/fixture/claude",
