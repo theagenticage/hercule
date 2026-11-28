@@ -209,6 +209,23 @@ export const deriveAccess = (
 };
 
 /**
+ * Builds the SQL condition that some Connection reads the thing of the row
+ * `entityAlias` now: an observation of its ref has `access = 'ok'`. It is the
+ * SQL form of `deriveAccess(observations) === "ok"`. The subquery names its
+ * observation `readable_observation`, so `entityAlias` must not be that name.
+ *
+ * Other conditions on observations look similar and stay separate on purpose,
+ * because they mean something else:
+ * - `OBSERVING_SQL` also counts a Connection that only reports a concern.
+ * - `presenter_usable` (repository) asks about one Connection, the presenter,
+ *   and also needs its status and its active plugin.
+ * - The acting filter of the workflow offers asks about the Connections that
+ *   can run something, so it also excludes disabled ones.
+ */
+export const buildReadableCondition = (entityAlias: string): string =>
+  `EXISTS (SELECT 1 FROM external_entity_observations readable_observation WHERE readable_observation.ref = ${entityAlias}.ref AND readable_observation.access = 'ok')`;
+
+/**
  * Checks that a record is a restricted place (spec 20 section 1.3): not a
  * full work record, and no Connection can read it now. Such a record shows no
  * title, identifier or URL anywhere, only its kind and noun. A full work
@@ -393,23 +410,6 @@ export const isWorkRecord = (row: EntityRow): boolean =>
  */
 export const buildWorkRecordCondition = (entityAlias: string): string =>
   `${entityAlias}.completeness = 'full' AND ${entityAlias}.pace IN (${WORK_PACES.map((pace) => `'${pace}'`).join(", ")})`;
-
-/**
- * Builds the SQL condition that some Connection reads the thing of the row
- * `entityAlias` now: an observation of its ref has `access = 'ok'`. It is the
- * SQL form of `deriveAccess(observations) === "ok"`, so the two cannot
- * disagree. The condition uses the alias `o` inside its own subquery.
- *
- * Other conditions on observations look similar and stay separate on purpose,
- * because they mean something else:
- * - `OBSERVING_SQL` also counts a Connection that only reports a concern.
- * - `presenter_usable` (repository) asks about one Connection, the presenter,
- *   and also needs its status and its active plugin.
- * - The acting filter of the workflow offers asks about the Connections that
- *   can run something, so it also excludes disabled ones.
- */
-export const buildReadableCondition = (entityAlias: string): string =>
-  `EXISTS (SELECT 1 FROM external_entity_observations o WHERE o.ref = ${entityAlias}.ref AND o.access = 'ok')`;
 
 /** What a card or a detail adds to the row it draws. */
 export interface EntityReadInputs {
