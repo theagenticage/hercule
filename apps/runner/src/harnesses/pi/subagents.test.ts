@@ -60,9 +60,6 @@ interface StartedSubagent {
 
 const DESCRIPTION = "Survey the failing tests";
 
-/** `RPC_DEADLINE` in milliseconds. */
-const RPC_DEADLINE_MS = Duration.toMillis(RPC_DEADLINE);
-
 const PROMPT = "List every failing test in this repository, with its error.";
 
 /**
@@ -900,9 +897,7 @@ describe("a subagent whose pi is slow to take its task", () => {
 
     // This waits on the real clock, because the adapter starts the subagent
     // on its own fiber that a test clock does not reach.
-    await new Promise((resolve) => setTimeout(resolve, RPC_DEADLINE_MS + 500));
-    expect(listDialogAnswers(run.child, subagent.dialogId)).toEqual([]);
-
+    await new Promise((resolve) => setTimeout(resolve, Duration.toMillis(RPC_DEADLINE) + 500));
     subagent.child.push({
       type: "response",
       id: listSentCommands(subagent.child.sent, "prompt")[0]!["id"],

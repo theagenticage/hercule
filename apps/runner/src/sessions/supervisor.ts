@@ -1885,7 +1885,10 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
       //   makes two (the handshake and opening the thread). Its input makes
       //   one or two more (a steer, then a new turn), and each of those is
       //   retried up to three times while Codex reports it is overloaded.
-      // - pi: `RPC_DEADLINE`, 5 seconds per command.
+      // - pi: `STARTUP_DEADLINE`, 30 seconds, for the check of the model it
+      //   started on, and `RPC_DEADLINE`, 5 seconds, for each command of an
+      //   input. A subagent's task and a text generation's prompt get
+      //   `STARTUP_DEADLINE` too, but no input of a session waits on those.
       // - Claude Code: `CONTROL_DEADLINE`, 5 seconds, for a change of model
       //   before the input. Its start and the input itself do not wait on
       //   the harness.
