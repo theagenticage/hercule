@@ -299,7 +299,7 @@ describe("task.move", () => {
           const tasks = yield* TaskService;
           yield* fillCell(["a", "b"], "planned");
           const finished = yield* createInCell("finished", "planned");
-          yield* tasks.update({ id: finished.id, stage: "done" });
+          yield* tasks.update({ taskId: finished.id, stage: "done" });
           const refused = yield* Effect.flip(tasks.move({ id: finished.id, afterTaskId: null }));
           const restored = yield* tasks.move({ id: finished.id, stage: "planned" });
           return { refused, restored, titles: yield* readCellTitles(null, "planned") };

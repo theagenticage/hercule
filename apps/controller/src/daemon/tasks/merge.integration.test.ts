@@ -420,7 +420,7 @@ describe("an id of a merged Task", () => {
         yield* merge(source.id, survivor.id);
 
         const read = yield* tasks.read(source.id);
-        const updated = yield* tasks.update({ id: source.id, title: "Refund flow, renamed" });
+        const updated = yield* tasks.update({ taskId: source.id, title: "Refund flow, renamed" });
         const afterOther = yield* tasks.move({ id: other.id, afterTaskId: source.id });
         const moved = yield* tasks.move({ id: source.id, afterTaskId: other.id });
         const listed = yield* tasks.query({});
@@ -879,7 +879,7 @@ describe("a merge is refused", () => {
           const tasks = yield* TaskService;
           const live = yield* createTask("Refund bug");
           const finished = yield* createTask("Refund flow");
-          yield* tasks.update({ id: finished.id, stage });
+          yield* tasks.update({ taskId: finished.id, stage });
           return [
             yield* Effect.flip(merge(live.id, finished.id)),
             yield* Effect.flip(merge(finished.id, live.id)),
@@ -900,11 +900,11 @@ describe("a merge is refused", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         yield* tasks.update({
-          id: source.id,
+          taskId: source.id,
           addLabels: Array.from({ length: 40 }, (_, n) => label("a", n)),
         });
         yield* tasks.update({
-          id: survivor.id,
+          taskId: survivor.id,
           addLabels: Array.from({ length: 40 }, (_, n) => label("b", n)),
         });
         return { sourceId: source.id, intoTaskId: survivor.id };
@@ -924,8 +924,8 @@ describe("a merge is refused", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const long = "x".repeat(MAX_TASK_DESCRIPTION_LENGTH - 100);
-        yield* tasks.update({ id: source.id, description: long });
-        yield* tasks.update({ id: survivor.id, description: long });
+        yield* tasks.update({ taskId: source.id, description: long });
+        yield* tasks.update({ taskId: survivor.id, description: long });
         return { sourceId: source.id, intoTaskId: survivor.id };
       }),
     );

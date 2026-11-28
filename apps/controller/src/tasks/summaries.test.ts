@@ -179,7 +179,9 @@ const settle = Effect.forEach(Array.from({ length: 20 }), () => Effect.yieldNow,
 const at = (seconds: number) => new Date(seconds * 1000).toISOString();
 
 const finishTask = (id: string) =>
-  Effect.asVoid(Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "dropped" })));
+  Effect.asVoid(
+    Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: id, stage: "dropped" })),
+  );
 const deleteTask = (id: string) =>
   Effect.asVoid(Effect.flatMap(TaskService, (tasks) => tasks.delete(id)));
 
