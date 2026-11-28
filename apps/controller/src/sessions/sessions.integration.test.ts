@@ -4064,7 +4064,7 @@ describe("an input the runner refused with a typed failure", () => {
 
       // The turn ends, and the flush sends the waiting input as the next turn.
       arranged.wire.answering(() => "opened");
-      reportEvent(arranged.wire, ...buildTranscript(session.id)[1]!);
+      reportTurnStarted(arranged, session.id, 2);
       reportTurnCompleted(arranged, session.id, 3);
       await waitUntil("delivered the waiting input", async () => {
         const row = (await listInputs(arranged, session.id)).find((one) => one.id === inputId);
@@ -4603,13 +4603,7 @@ const reportHeldSessions = (
 /** Starts a session and then a turn, so the controller reads the session as busy. */
 const startBusySession = async (arranged: Arranged, prompt: string): Promise<Session> => {
   const session = await startSession(arranged, prompt);
-  reportEvent(arranged.wire, 2, {
-    eventId: crypto.randomUUID(),
-    sessionId: session.id,
-    at,
-    _tag: "turn.started",
-    turnId: `turn-${session.id}`,
-  });
+  reportTurnStarted(arranged, session.id, 2);
   return await waitForSession(arranged, session.id, (one) => one.status === "busy");
 };
 
@@ -4631,7 +4625,7 @@ const startBusySessionOn = async (
     ...base,
     eventId: crypto.randomUUID(),
     _tag: "turn.started",
-    turnId: `turn-${session.id}`,
+    turnId: "t2",
   });
   return await waitForSession(arranged, session.id, (one) => one.status === "busy");
 };
@@ -5660,6 +5654,84 @@ describe("session.respondToQuestion", () => {
         state: "interrupted",
       });
       await waitForSession(arranged, session.id, (one) => one.openRequests.length === 0);
+    });
+  });
+
+  it("ignores a late completion of an earlier turn, and ends the newer turn only when it completes", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startSession(arranged, "hello");
+      const queued = await sendInput(arranged, session.id, { text: "two" });
+      expect(await queued.json()).toMatchObject({ result: "queued" });
+      const base = { sessionId: session.id, at };
+      reportEvent(arranged.wire, 2, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "turn.started",
+        turnId: "t1",
+      });
+      reportEvent(arranged.wire, 3, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "turn.started",
+        turnId: "t2",
+      });
+      reportEvent(arranged.wire, 4, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "request.opened",
+        request: {
+          requestId: REQUEST_ID,
+          itemId: "i1",
+          kind: "command_approval",
+          decisions: DECISIONS,
+          detail: { command: "ls -la" },
+        },
+      });
+      await waitForSession(arranged, session.id, (one) => one.openRequests.length === 1);
+
+      // Codex can report the end of t1 after t2 has started.
+      reportEvent(arranged.wire, 5, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "turn.completed",
+        turnId: "t1",
+        state: "completed",
+      });
+      await waitUntil("stored the late turn.completed", async () => {
+        const rows = await readStreamRows(arranged.harness, session.id);
+        return rows.some((row) => row.tag === "turn.completed") ? true : undefined;
+      });
+      const stillRunning = await readSession(arranged, session.id);
+      expect(stillRunning.status).toBe("busy");
+      expect(stillRunning.openRequests.map((request) => request.requestId)).toEqual([REQUEST_ID]);
+      expect(listInputFrames(arranged.wire)).toEqual([]);
+
+      reportEvent(arranged.wire, 6, {
+        ...base,
+        eventId: crypto.randomUUID(),
+        _tag: "turn.completed",
+        turnId: "t2",
+        state: "completed",
+      });
+      // The turn's end closes the Request and sends the queued input.
+      await waitForSession(arranged, session.id, (one) => one.openRequests.length === 0);
+      const sent = await waitForFrames<SessionInput>(arranged.wire, "sessionInput", 1);
+      expect(sent.map((frame) => frame.input.text)).toEqual(["two"]);
+    });
+  });
+
+  it("ends the session's turn when the turn.started of its next turn was never reported", async () => {
+    await withFleet(async (arranged) => {
+      const session = await startIdleSession(arranged, "hello");
+
+      // The runner answers the input with `opened`, which makes the session
+      // busy. Its `turn.started` is lost, so only the turn's end arrives.
+      const sent = await sendInput(arranged, session.id, { text: "two" });
+      expect(sent.status, await sent.clone().text()).toBe(200);
+      await waitForSession(arranged, session.id, (one) => one.status === "busy");
+      reportTurnCompleted(arranged, session.id, 5);
+
+      await waitForSession(arranged, session.id, (one) => one.status === "idle");
     });
   });
 

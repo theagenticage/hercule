@@ -86,7 +86,7 @@ const applyEvents = (
   let state = from;
   const folds: Array<Folded> = [];
   for (const [seq, event] of events) {
-    const folded = fold(state, seq, event);
+    const folded = fold(state, seq, event, undefined);
     expect(folded, `seq ${String(seq)} was skipped`).toBeDefined();
     folds.push(folded!);
     state = folded!.next;
@@ -137,7 +137,9 @@ describe("merging deltas", () => {
     expect(listTexts(folds[1]!)).toEqual([`${long}yz`]);
     // Nothing is held after the flush, so the next boundary writes no empty row.
     expect(state.buffers.size).toBe(0);
-    expect(listTags(fold(state, 3, buildCompletedItem("i1"))!)).toEqual(["item.completed"]);
+    expect(listTags(fold(state, 3, buildCompletedItem("i1"), undefined)!)).toEqual([
+      "item.completed",
+    ]);
   });
 
   it("ends a row written at the flush size on a word break, and keeps the rest held", () => {
@@ -187,6 +189,32 @@ describe("every other event", () => {
   });
 });
 
+describe("a turn.completed, by where its turn stands", () => {
+  const completedT1: RequestEvent = { ...turnCompleted, turnId: "T1" };
+  const fresh = startTracking({ lastSeq: 0, base: 0 });
+
+  it("is only stored, and leaves the session's status alone, when its turn is past", () => {
+    const folded = fold(fresh, 1, completedT1, "past")!;
+
+    expect(folded.recordOnly).toBe(true);
+    expect(folded.status).toBeUndefined();
+    expect(folded.rows).toEqual([{ seq: 1, at: base.at, event: completedT1 }]);
+  });
+
+  it("is only stored for a subagent too", () => {
+    const folded = fold(fresh, 1, { ...completedT1, subagentId: "a1" }, "past")!;
+
+    expect(folded.recordOnly).toBe(true);
+  });
+
+  it.each(["current", "unknown"] as const)("ends the turn when its turn is %s", (standing) => {
+    const folded = fold(fresh, 1, completedT1, standing)!;
+
+    expect(folded.recordOnly).toBe(false);
+    expect(folded.status).toBe("idle");
+  });
+});
+
 describe("attributeEvent", () => {
   it("stores a subagent's introduction under the agent that started it", () => {
     const introduced = { ...base, _tag: "subagent.started", subagentId: "a2" } as const;
@@ -221,7 +249,7 @@ describe("a subagent's events", () => {
     // turn is still running and keeps its held text.
     expect(listTexts(folds[4]!)).toEqual(["main"]);
     expect(state.buffers.size).toBe(1);
-    expect(listTexts(fold(state, 6, exited)!)).toEqual(["more"]);
+    expect(listTexts(fold(state, 6, exited, undefined)!)).toEqual(["more"]);
   });
 });
 

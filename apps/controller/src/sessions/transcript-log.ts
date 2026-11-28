@@ -28,6 +28,7 @@ import type { TranscriptRow } from "@hercule/contract";
 import { UUID_PATTERN, uuidFromString } from "../db";
 import { takeTail } from "../text";
 import { buildAgentClause } from "./repository";
+import type { TurnStanding } from "./stream";
 
 /**
  * Checks whether an agent's transcript can exist: the session has ever been
@@ -168,31 +169,112 @@ export const hasOtherTurn = (
   );
 
 /**
- * Returns the id of an agent's open turn: the turn of its newest
- * `turn.started` row, when no `turn.completed` row comes after it. Returns
- * `undefined` when the agent has no turn, or its last turn ended. Without
- * `subagentId` it is the session's own agent.
+ * Returns where a turn stands for the agent that ran it (see `TurnStanding`).
+ * Without `subagentId` the agent is the session's own agent.
+ *
+ * - The turn is found by its newest `turn.started` row of that agent with that
+ *   turn id. No such row means `unknown`.
+ * - The turn is `past` when a later row of the same agent is a `turn.started`
+ *   of any turn, or a `turn.completed` of this turn. Otherwise it is `current`.
+ * - Only rows of the session's current process count. Rows with a sequence
+ *   number up to `stream_base` belong to an earlier process, and none of its
+ *   turns is the agent's turn any more.
+ *
+ * It is one statement, so the answer is a consistent snapshot even outside a
+ * transaction. Only rows already written are read, like `readAssistantTexts`.
+ */
+export const readTurnStanding = (
+  sql: SqlClient.SqlClient,
+  sessionId: string,
+  subagentId: SubagentId | undefined,
+  turnId: string,
+): Effect.Effect<TurnStanding, SqlError> => {
+  const session = uuidFromString(sessionId);
+  // `INDEXED BY` makes SQLite walk the agent's rows from the newest and stop at
+  // the first match. Left to itself it scans every row of the current process,
+  // of all agents, and sorts them.
+  return Effect.map(
+    sql<{ readonly past: number }>`
+      SELECT EXISTS (
+        SELECT 1 FROM session_stream AS later
+        WHERE later.session_id = started.session_id
+          AND later.subagent_id IS started.subagent_id
+          AND later.position > started.position
+          AND (json_extract(later.event, '$._tag') = 'turn.started'
+               OR (json_extract(later.event, '$._tag') = 'turn.completed'
+                   AND json_extract(later.event, '$.turnId') = ${turnId}))
+      ) AS past
+      FROM session_stream AS started INDEXED BY session_stream_agent
+      WHERE started.session_id = ${session} AND ${buildAgentClause(sql, subagentId)}
+        AND started.runner_seq > (SELECT stream_base FROM sessions WHERE id = ${session})
+        AND json_extract(started.event, '$._tag') = 'turn.started'
+        AND json_extract(started.event, '$.turnId') = ${turnId}
+      ORDER BY started.position DESC LIMIT 1
+    `,
+    (rows) => (rows[0] === undefined ? "unknown" : rows[0].past === 1 ? "past" : "current"),
+  );
+};
+
+/**
+ * Returns the id of an agent's open turn, or `undefined` when it has none.
+ * Without `subagentId` the agent is the session's own agent.
+ *
+ * The newest `turn.started` row of the agent in the session's current process
+ * is the candidate. It is open unless a later `turn.completed` row of the same
+ * agent ends it. A later `turn.completed` ends it when it names:
+ *
+ * - the candidate itself, or
+ * - a turn with no `turn.started` row in this process, because a start or an
+ *   end lost on a disconnect leaves no trace of that turn.
+ *
+ * A later `turn.completed` of a turn that started before the candidate is the
+ * late end of an earlier turn and does not close the candidate. Rows up to the
+ * session's `stream_base` belong to an earlier process and are not read.
  *
  * Used when the session ends while the subagent is still running, to find
  * the turn whose last message becomes its result, and to tell whether the
- * session is inside a turn. Only rows already written are read, like
- * `readAssistantTexts`.
+ * session is inside a turn. It is one statement, and only rows already written
+ * are read, like `readAssistantTexts`.
  */
 export const readOpenTurnId = (
   sql: SqlClient.SqlClient,
   sessionId: string,
   subagentId: SubagentId | undefined,
-): Effect.Effect<string | undefined, SqlError> =>
-  Effect.map(
-    sql<{ readonly tag: string; readonly turnId: string }>`
-      SELECT json_extract(event, '$._tag') AS tag, json_extract(event, '$.turnId') AS turnId
-      FROM session_stream
-      WHERE session_id = ${uuidFromString(sessionId)} AND ${buildAgentClause(sql, subagentId)}
-        AND json_extract(event, '$._tag') IN ('turn.started', 'turn.completed')
-      ORDER BY position DESC LIMIT 1
+): Effect.Effect<string | undefined, SqlError> => {
+  const session = uuidFromString(sessionId);
+  // `INDEXED BY`: see `readTurnStanding`.
+  return Effect.map(
+    sql<{ readonly turnId: string; readonly ended: number }>`
+      SELECT json_extract(started.event, '$.turnId') AS turnId, EXISTS (
+        SELECT 1 FROM session_stream AS later
+        WHERE later.session_id = started.session_id
+          AND later.subagent_id IS started.subagent_id
+          AND later.position > started.position
+          AND json_extract(later.event, '$._tag') = 'turn.completed'
+          AND (
+            -- Checked first, so the end of the candidate itself never walks back
+            -- through the agent's earlier rows.
+            json_extract(later.event, '$.turnId') = json_extract(started.event, '$.turnId')
+            OR NOT EXISTS (
+              SELECT 1 FROM session_stream AS earlier
+              WHERE earlier.session_id = started.session_id
+                AND earlier.subagent_id IS started.subagent_id
+                AND earlier.position < started.position
+                AND earlier.runner_seq > (SELECT stream_base FROM sessions WHERE id = ${session})
+                AND json_extract(earlier.event, '$._tag') = 'turn.started'
+                AND json_extract(earlier.event, '$.turnId') = json_extract(later.event, '$.turnId')
+            )
+          )
+      ) AS ended
+      FROM session_stream AS started INDEXED BY session_stream_agent
+      WHERE started.session_id = ${session} AND ${buildAgentClause(sql, subagentId)}
+        AND started.runner_seq > (SELECT stream_base FROM sessions WHERE id = ${session})
+        AND json_extract(started.event, '$._tag') = 'turn.started'
+      ORDER BY started.position DESC LIMIT 1
     `,
-    (rows) => (rows[0]?.tag === "turn.started" ? rows[0].turnId : undefined),
+    (rows) => (rows[0] === undefined || rows[0].ended === 1 ? undefined : rows[0].turnId),
   );
+};
 
 /**
  * Returns the assistant text one agent streamed so far, one entry per item, in
@@ -208,11 +290,17 @@ export const readOpenTurnId = (
  *   `item.started` row on.
  *
  * The start row is found by walking the agent's rows back from the newest.
- * The walk stops at the first row that is the start row, any `turn.started`,
- * or another turn's `turn.completed`. So neither the walk nor the read ever
- * covers more than the current turn, and a caller that reads each item as it
- * completes reads each item once. When the walk stops anywhere other than the
- * start row, the start row is missing, and it returns no entries.
+ * The walk stops at the first row that is the start row or any `turn.started`.
+ * So neither the walk nor the read ever covers more than the current turn,
+ * and a caller that reads each item as it completes reads each item once.
+ * When the walk stops at another turn's `turn.started`, the start row is
+ * missing, and it returns no entries.
+ *
+ * The walk does not stop at a `turn.completed`. The harness can report the end
+ * of an earlier turn after this turn has started, so that row can be stored
+ * between this turn's start and its end. Stopping there would lose the text
+ * after it, such as an assistant's reply or a subagent's result. The deltas
+ * are still filtered by `turnId`, so the earlier turn's text is not read.
  *
  * Only rows already written are read, so a caller that reads inside the
  * transaction applying a turn's end also sees the rows that end flushed.
@@ -235,8 +323,6 @@ export const readAssistantTexts = (
       FROM session_stream
       WHERE session_id = ${session} AND ${agent}
         AND (json_extract(event, '$._tag') = 'turn.started'
-             OR (json_extract(event, '$._tag') = 'turn.completed'
-                 AND json_extract(event, '$.turnId') <> ${turnId})
              ${
                itemId === undefined
                  ? sql``
