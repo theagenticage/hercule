@@ -35,6 +35,7 @@ import {
 import {
   createInvalidStateError,
   createNotFoundError,
+  type AccessMode,
   type InvalidState,
   type Passage,
 } from "@hercule/contract";
@@ -82,6 +83,7 @@ import { SessionObserver } from "./observer";
 import {
   SessionService,
   SessionServiceLayer,
+  type CreateRequest,
   type PassageQueryInput,
   type StartNeeds,
   type StartRequest,
@@ -1160,19 +1162,27 @@ const insertQueuedSessionWithServers = (
     return sessionId;
   });
 
-/** Returns the `runtime.warning` events of the session's stream, in order. */
-const readRuntimeWarnings = (sessionId: string) =>
+/** Returns the events of the session's stream that have the given tag, in order, as stored. */
+const readStreamEvents = (sessionId: string, tag: string) =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     const rows = yield* sql<{ readonly event: string }>`
       SELECT event FROM session_stream
       WHERE session_id = ${uuidFromString(sessionId)}
-        AND json_extract(event, '$._tag') = 'runtime.warning'
+        AND json_extract(event, '$._tag') = ${tag}
       ORDER BY position`;
     return rows.map(
-      (row) => JSON.parse(row.event) as { readonly message: string; readonly mcpServers?: unknown },
+      (row) =>
+        JSON.parse(row.event) as {
+          readonly message: string;
+          readonly turnId?: string;
+          readonly mcpServers?: unknown;
+        },
     );
   });
+
+/** Returns the `runtime.warning` events of the session's stream, in order. */
+const readRuntimeWarnings = (sessionId: string) => readStreamEvents(sessionId, "runtime.warning");
 
 /** Returns the reason of each entry of the session's list, in list order, by the server's name. */
 const readLeftOut = (sessionId: string) =>
@@ -2842,6 +2852,124 @@ describe("a warning the controller writes while a turn runs", () => {
     );
 
     expect(rows.map((row) => row.tag).toSorted()).toEqual(["runtime.warning", "turn.started"]);
+  });
+});
+
+describe("the notice that a session runs in another access mode than it asked for", () => {
+  const fallbackSentence = "Runs in Auto-accept edits, because this harness does not support Auto.";
+
+  const readNotices = (sessionId: string) => readStreamEvents(sessionId, "runtime.notice");
+
+  const buildCreateRequest = (
+    requestedAccessMode: AccessMode,
+    effectiveAccessMode: AccessMode,
+  ): CreateRequest => ({
+    id: mintId(),
+    permissionProfileId: mintId(),
+    agentId: undefined,
+    conversationId: undefined,
+    step: undefined,
+    runnerId: mintId(),
+    harnessId: HARNESS_ID,
+    requestedAccessMode,
+    parentSessionId: undefined,
+    spec: { ...buildSpec(mintId(), "clever"), accessMode: effectiveAccessMode },
+    prompt: "begin",
+    attachments: [],
+    title: undefined,
+    role: undefined,
+    kind: "session.spawned",
+    payload: {},
+    projectId: undefined,
+    taskSource: { _tag: "fixed", taskId: undefined },
+    checkoutBranch: undefined,
+    githubConnectionId: undefined,
+    at,
+  });
+
+  /** Creates a session with the two modes and returns the notices of its stream. */
+  const createWithModes = (requested: AccessMode, effective: AccessMode) =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const sessions = yield* SessionService;
+      const request = buildCreateRequest(requested, effective);
+      yield* withTransaction(
+        sql,
+        Effect.provideService(sessions.create(request), CurrentActor, USER),
+      );
+      return yield* readNotices(request.id);
+    });
+
+  it("is written once when a session is created with a fallback mode", async () => {
+    const notices = await run(createWithModes("auto", "auto-accept-edits"));
+
+    expect(notices).toEqual([expect.objectContaining({ message: fallbackSentence })]);
+    expect(notices[0]).not.toHaveProperty("turnId");
+  });
+
+  it("is not written when a session gets the mode it asked for", async () => {
+    expect(await run(createWithModes("auto", "auto"))).toEqual([]);
+  });
+
+  describe("when an assistant's session resumes", () => {
+    /** Stores a session under the stored pair of modes, then resumes it under the new pair. */
+    const resumeWithModes = (
+      stored: readonly [AccessMode, AccessMode],
+      resumed: readonly [AccessMode, AccessMode],
+    ) =>
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const rows = yield* sessionRepository;
+        const sessions = yield* SessionService;
+        const providerAccountId = mintId();
+        const sessionId = yield* insertQueuedSession(mintId(), {
+          providerAccountId,
+          spec: buildSpec(providerAccountId, "clever"),
+        });
+        const permissionProfileId = mintId();
+        yield* withTransaction(
+          sql,
+          rows.setAccess(sessionId, {
+            requestedAccessMode: stored[0],
+            accessMode: stored[1],
+            permissionProfileId,
+          }),
+        );
+        const row = (yield* rows.one(sessionId)).pipe(Option.getOrThrow);
+        yield* withTransaction(
+          sql,
+          sessions.setAccess(row, {
+            requestedAccessMode: resumed[0],
+            accessMode: resumed[1],
+            permissionProfileId,
+          }),
+        );
+        return yield* readNotices(sessionId);
+      });
+
+    it("writes nothing when the pair of modes is the one already stored", async () => {
+      const notices = await run(
+        resumeWithModes(["auto", "auto-accept-edits"], ["auto", "auto-accept-edits"]),
+      );
+
+      expect(notices).toEqual([]);
+    });
+
+    it("writes a notice when the pair changes and the new mode is a fallback", async () => {
+      const notices = await run(
+        resumeWithModes(["auto-accept-edits", "auto-accept-edits"], ["auto", "auto-accept-edits"]),
+      );
+
+      expect(notices).toEqual([expect.objectContaining({ message: fallbackSentence })]);
+    });
+
+    it("writes nothing when the pair changes to modes that match", async () => {
+      const notices = await run(
+        resumeWithModes(["auto", "auto-accept-edits"], ["auto-accept-edits", "auto-accept-edits"]),
+      );
+
+      expect(notices).toEqual([]);
+    });
   });
 });
 

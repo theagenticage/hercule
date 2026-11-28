@@ -144,6 +144,49 @@ describe("hercule session spawn", () => {
     );
   });
 
+  it("prints the access mode fallback between the session and the hint when the modes differ", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: SESSION,
+          status: "starting",
+          openRequests: [],
+          requestedAccessMode: "auto",
+          accessMode: "auto-accept-edits",
+        },
+      },
+      lookUpCommand("session", "spawn"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines.slice(-4)).toEqual([
+      "",
+      "Runs in Auto-accept edits, because this harness does not support Auto.",
+      "",
+      `read what it has done so far with \`hercule transcript read ${SESSION.slice(-8)}\``,
+    ]);
+  });
+
+  it("prints no access mode fallback when the session runs in the mode it asked for", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          id: SESSION,
+          status: "starting",
+          openRequests: [],
+          requestedAccessMode: "auto",
+          accessMode: "auto",
+        },
+      },
+      lookUpCommand("session", "spawn"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines.join("\n")).not.toContain("does not support");
+  });
+
   it("prints no hint after an ordinary read", () => {
     const lines = renderHuman(
       { kind: "value", value: { id: SESSION, status: "idle", openRequests: [] } },

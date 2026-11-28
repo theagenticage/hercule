@@ -250,10 +250,10 @@ _Avoid_: chat message, event, input (bare; a Queued Input is the session-side de
 
 **Notice**:
 A conversation message the system writes in one of three forms: "<name> was interrupted: <reason>" when the session exits while a turn runs, or when a turn fails or is stopped while the session lives; "<name> can't be reached: <why>" when a message cannot be delivered and waits, because no session could take it or the crash-loop guard holds that session; and "There was a problem delivering your message to <name>: <reason>" when a message is given up on for good, because its session cannot be resumed or the runner failed it in a way that sending it again would not mend. No other event writes one. It lives in the conversation it explains and is read there. Not a Notification: it is never recorded centrally, never delivered through other channels, and never carries a decision.
-_Avoid_: notification (Hercule's central message to its user), error message, alert, runtime notice (a harness adapter's neutral report, a **Runtime Notice**)
+_Avoid_: notification (Hercule's central message to its user), error message, alert, runtime notice (a neutral report from a harness adapter or the controller, a **Runtime Notice**)
 
 **Runtime Notice**:
-Neutral information a harness adapter reports about a session that is neither a problem nor a failure, such as "Conversation was cleared" or "Recalled 3 memories". It is the `runtime.notice` event. A client draws it as a plain note in the thread, where it happened, and it never opens a turn or ends one. Not a Notice, which is a conversation message the system writes, and not a warning, which tells the user something went wrong or may.
+Neutral information a harness adapter, or the controller, reports about a session that is neither a problem nor a failure, such as "Conversation was cleared", "Recalled 3 memories", or the controller's "Runs in Auto-accept edits, because this harness does not support Auto." when the access-mode fallback applies. It is the `runtime.notice` event. A client draws it as a plain note in the thread, where it happened, and it never opens a turn or ends one. Not a Notice, which is a conversation message the system writes, and not a warning, which tells the user something went wrong or may.
 _Avoid_: notice (bare; a **Notice** is a conversation message), warning, alert
 
 **Idle Unload**:

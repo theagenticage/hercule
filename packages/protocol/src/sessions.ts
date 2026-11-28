@@ -1004,7 +1004,8 @@ const RuntimeWarning = defineEvent("runtime.warning", {
 
 /**
  * Neutral information about the session, such as "Conversation was cleared".
- * Unlike a warning, nothing went wrong: a client draws it as a plain note, not
+ * A harness adapter reports it, or the controller writes it, for example when
+ * the access mode fallback applies. Unlike a warning, nothing went wrong: a client draws it as a plain note, not
  * as a problem. Like a warning, it may fire inside a turn or between turns, so
  * the turn id is optional, and it never opens a turn of its own.
  */

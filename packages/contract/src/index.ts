@@ -140,7 +140,12 @@ export {
   type SortKey,
 } from "./pagination";
 
-export { ACCESS_MODE_CHAIN, findNearestSupportedAccessMode } from "./access-modes";
+export {
+  ACCESS_MODE_CHAIN,
+  describeAccessModeFallback,
+  findNearestSupportedAccessMode,
+  formatAccessMode,
+} from "./access-modes";
 
 export { findSnapshotModel, isModelMissingFromHarness } from "./harness-models";
 

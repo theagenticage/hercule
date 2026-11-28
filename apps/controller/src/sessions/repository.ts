@@ -642,6 +642,33 @@ const make = Effect.gen(function* () {
         CROSS JOIN sessions ON id = active_id`;
 
   /**
+   * Appends an event the controller writes itself, rather than a runner
+   * reporting it, at the next position of the event's session, and joins the
+   * caller's transaction.
+   *
+   * The row takes a negative `runner_seq`: the first such event gets -1, the
+   * next -2, and so on. A runner numbers its events upward from 1, so the two
+   * number spaces never meet. This is what lets the controller write an event
+   * at any moment, even while a runner's turn is running: the write cannot
+   * take the sequence number of a runner event that is folded but not yet
+   * written, and it leaves the session's sequence offset and its cached
+   * ingest state (the text held for open items) untouched.
+   */
+  const insertControllerEvent = (event: HarnessEvent): Effect.Effect<void, SqlError> => {
+    const id = uuidFromString(event.sessionId);
+    return Effect.asVoid(sql`
+      INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
+      VALUES (
+        ${id},
+        COALESCE((SELECT MAX(position) FROM session_stream WHERE session_id = ${id}), 0) + 1,
+        COALESCE((SELECT MIN(runner_seq) FROM session_stream
+                  WHERE session_id = ${id} AND runner_seq < 0), 0) - 1,
+        ${event.at}, ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
+      )
+    `);
+  };
+
+  /**
    * Announces the card of each Task that the given session rows belong to,
    * once per Task. A row with no Task changes no card.
    */
@@ -1149,17 +1176,9 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Appends a `runtime.warning` event stamped `at`, which the controller
-     * writes itself rather than a runner reporting it, at the next position
-     * of the session's stream, and joins the caller's transaction.
-     *
-     * The event takes a negative `runner_seq`: the first warning gets -1, the
-     * next -2, and so on. A runner numbers its events upward from 1, so the two
-     * number spaces never meet. This is what lets the controller write a
-     * warning at any moment, even while a runner's turn is running: the write
-     * cannot take the sequence number of a runner event that is folded but not
-     * yet written, and it leaves the session's sequence offset and its cached
-     * ingest state (the text held for open items) untouched.
+     * Appends a `runtime.warning` event stamped `at` to the session's stream,
+     * joining the caller's transaction. The controller writes it itself; a
+     * runner does not report it.
      *
      * `mcpServers` is given when the warning is about MCP Servers: it names
      * each server and why (spec 21 section 3.8).
@@ -1173,26 +1192,32 @@ const make = Effect.gen(function* () {
         readonly reason: McpServerWarningReason;
       }>,
     ): Effect.Effect<void, SqlError> =>
-      Effect.gen(function* () {
-        const id = uuidFromString(sessionId);
-        const event: HarnessEvent = {
-          _tag: "runtime.warning",
-          eventId: crypto.randomUUID(),
-          sessionId,
-          at,
-          message,
-          ...(mcpServers === undefined ? {} : { mcpServers }),
-        };
-        yield* sql`
-          INSERT INTO session_stream (session_id, position, runner_seq, at, event, subagent_id)
-          VALUES (
-            ${id},
-            COALESCE((SELECT MAX(position) FROM session_stream WHERE session_id = ${id}), 0) + 1,
-            COALESCE((SELECT MIN(runner_seq) FROM session_stream
-                      WHERE session_id = ${id} AND runner_seq < 0), 0) - 1,
-            ${event.at}, ${JSON.stringify(event)}, ${attributeEvent(event) ?? null}
-          )
-        `;
+      insertControllerEvent({
+        _tag: "runtime.warning",
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        message,
+        ...(mcpServers === undefined ? {} : { mcpServers }),
+      }),
+
+    /**
+     * Appends a `runtime.notice` event stamped `at` to the session's stream,
+     * joining the caller's transaction. The controller writes it itself; a
+     * runner does not report it. The notice has no turn: it is information
+     * about the session, not about one turn.
+     */
+    appendRuntimeNotice: (
+      sessionId: string,
+      message: string,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      insertControllerEvent({
+        _tag: "runtime.notice",
+        eventId: crypto.randomUUID(),
+        sessionId,
+        at,
+        message,
       }),
 
     /**

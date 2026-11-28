@@ -450,7 +450,7 @@ const make = Effect.gen(function* () {
           ),
         );
       }
-      yield* sessions.setAccess(session.id, {
+      yield* sessions.setAccess(session, {
         requestedAccessMode: assistant.accessMode,
         accessMode,
         permissionProfileId: assistant.permissionProfileId,

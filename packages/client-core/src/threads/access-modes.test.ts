@@ -1,6 +1,5 @@
 /**
- * Tests `formatAccessMode(mode)`, which returns a mode's name as the user
- * reads it, and `buildAccessModeMenu(declared, harnessName)`, which lists the
+ * Tests `buildAccessModeMenu(declared, harnessName)`, which lists the
  * four access modes with their fixed meaning. A mode the harness does not
  * support falls back downward, to the nearest less permissive mode it does
  * support (spec 06 §8.4). A dimmed mode's note names the mode it runs as and
@@ -12,8 +11,8 @@
  * on.
  */
 import { describe, expect, it } from "vitest";
-import { ACCESS_MODE_CHAIN, type AccessMode } from "@hercule/contract";
-import { buildAccessModeMenu, formatAccessMode } from "./access-modes";
+import type { AccessMode } from "@hercule/contract";
+import { buildAccessModeMenu } from "./access-modes";
 
 /** The harness's display name, as used in a dimmed row's note. */
 const HARNESS = "Claude Code";
@@ -24,17 +23,6 @@ const ALL_NATIVE: Record<AccessMode, "native" | "unsupported"> = {
   auto: "native",
   "full-access": "native",
 };
-
-describe("formatAccessMode", () => {
-  it("names each mode with the Bureau book's words", () => {
-    expect(ACCESS_MODE_CHAIN.map(formatAccessMode)).toEqual([
-      "Approval required",
-      "Auto-accept edits",
-      "Auto",
-      "Full access",
-    ]);
-  });
-});
 
 describe("buildAccessModeMenu", () => {
   it("lists the four modes in order with their name and fixed meaning, none dimmed when every mode is native", () => {

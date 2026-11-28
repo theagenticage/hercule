@@ -61,6 +61,7 @@ import {
   createNotFoundError,
   createValidationError,
   DEFAULT_PAGE_LIMIT,
+  describeAccessModeFallback,
   Id,
   INPUT_SORT_FIELDS,
   EMPTY_PROMPT_MESSAGE,
@@ -1077,6 +1078,22 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, SqlError> =>
     Effect.gen(function* () {
       yield* sessions.appendRuntimeWarning(sessionId, message, at, mcpServersWarned);
+      yield* announce({ _tag: "transcript", sessionId });
+    });
+
+  /**
+   * Writes a `runtime.notice` event stamped `at` to the session's stream, in
+   * the caller's transaction, and announces the session's transcript. Like a
+   * warning, the row takes a sequence number of its own, so it is safe while
+   * a runner's turn runs.
+   */
+  const appendRuntimeNotice = (
+    sessionId: string,
+    message: string,
+    at: string,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.gen(function* () {
+      yield* sessions.appendRuntimeNotice(sessionId, message, at);
       yield* announce({ _tag: "transcript", sessionId });
     });
 
@@ -2705,6 +2722,15 @@ const make = Effect.gen(function* () {
           createdBy: actor,
           at: open.at,
         });
+        // The stream is new, so this notice is its first event. A fork has a
+        // stream of its own and gets its own notice.
+        const fallbackNotice = describeAccessModeFallback(
+          open.requestedAccessMode,
+          open.spec.accessMode,
+        );
+        if (fallbackNotice !== undefined) {
+          yield* appendRuntimeNotice(open.id, fallbackNotice, open.at);
+        }
         if (open.mcpServerIds !== undefined && open.mcpServerIds.length > 0) {
           yield* sessions.replaceMcpServers(open.id, open.mcpServerIds);
         }
@@ -3503,17 +3529,37 @@ const make = Effect.gen(function* () {
 
     /**
      * Sets the access mode and permission profile an exited session resumes
-     * under, joining the caller's transaction. The caller also puts the same
-     * access mode in the resume spec, so the row shows what the resumed
-     * harness runs under. It is kept on the service, not read straight from
-     * the repository, because it is a write, and every write to a session
-     * goes through this service.
+     * under, joining the caller's transaction. `session` is the stored row
+     * the caller already holds, from before the change. The caller also puts
+     * the same access mode in the resume spec, so the row shows what the
+     * resumed harness runs under. It is kept on the service, not read
+     * straight from the repository, because it is a write, and every write
+     * to a session goes through this service.
+     *
+     * When the resume changes what the session asked for or got, and the
+     * harness runs it under a different mode than it asked for, the call also
+     * writes a Runtime Notice saying so. A resume that changes neither still
+     * saves the access and the profile but appends no Runtime Notice, because
+     * an assistant's session unloads and resumes often and would repeat the
+     * same notice each time.
      *
      * It checks no grant. The caller is the controller daemon, resuming an
      * assistant's session under the assistant's current settings.
      */
-    setAccess: (sessionId: string, access: SessionAccess): Effect.Effect<void, SqlError> =>
-      sessions.setAccess(sessionId, access),
+    setAccess: (session: StoredSession, access: SessionAccess): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        yield* sessions.setAccess(session.id, access);
+        const changed =
+          access.requestedAccessMode !== session.requestedAccessMode ||
+          access.accessMode !== session.accessMode;
+        const fallbackNotice = describeAccessModeFallback(
+          access.requestedAccessMode,
+          access.accessMode,
+        );
+        if (changed && fallbackNotice !== undefined) {
+          yield* appendRuntimeNotice(session.id, fallbackNotice, yield* nowIso);
+        }
+      }),
 
     /**
      * Stores one user input and the model selection the session runs under
