@@ -13,7 +13,7 @@ Three roles ship in one self-contained Bun binary: the **controller** (always-on
 Before writing code:
 
 1. **`GLOSSARY.md`** - the vocabulary. Use its terms exactly, in code identifiers too, and respect the "Avoid" lists.
-2. **`CODING_STANDARDS.md`** - how names and comments are written.
+2. **`CODING_STANDARDS.md`** - how names and comments are written. Read it before you write or review code.
 3. **The spec document that owns your area** - `docs/spec/` (map in `docs/spec/README.md`). Normative text you can build from.
 4. **The ADRs that touch your area** - `docs/adr/`. The "why" behind the spec.
 5. **For UI work**: `docs/design-language.md` for the web app; for the desktop app, `docs/spec/17-desktop-app.md`, which says what to build, and the goldens in `apps/desktop/ui-goldens/` and `tokens.css`, which say how it looks (the Crew Bureau book is the frozen record of how it was first drawn).
@@ -33,8 +33,6 @@ Development cost carries almost no weight here. Optimize, in order, for: correct
 - If you wrote 200 lines and it could be 50, rewrite it before presenting it.
 
 The test: would a senior engineer call this overcomplicated? Then it is.
-
-**Names and comments** follow `CODING_STANDARDS.md`; read it before you write or review code. In short: a name says what a thing is, in GLOSSARY.md words, and never contains the product name; a function name is a verb plus its object; a docstring starts with a verb and says what the function returns and when it fails; an inline comment says why, never what.
 
 **Think before coding.** State your assumptions. If multiple interpretations of the ticket or spec exist, present them - don't pick one silently. If a simpler approach than the ticket implies exists, say so and push back.
 
@@ -158,7 +156,7 @@ And one more, any time:
 pnpm format        # oxfmt, which formats like prettier
 ```
 
-`bun check` needs the Bun in `.bun-version`: Bun 1.4.0 fails with `Script not found "check"`. `bun check` is TypeScript 7; the `typescript` package stays on 6.0 on purpose (`docs/agents/checks.md` says why). When the editor and `bun check` disagree, `bun check` decides, because CI runs it. A rule that needs types goes in `.oxlintrc.json`, any other rule in `eslint.config.js`, and a comment that turns off an oxlint rule is written `// oxlint-disable-next-line typescript/<rule>`. oxlint does not report such a comment once the rule no longer fires, so remove one by hand when the code it covered changes.
+`bun check` needs the Bun in `.bun-version`: Bun 1.4.0 fails with `Script not found "check"`. `bun check` is TypeScript 7; the `typescript` package stays on 6.0 on purpose (`docs/agents/checks.md` says why). When the editor and `bun check` disagree, `bun check` decides, because CI runs it. A rule that needs types goes in `.oxlintrc.json`, any other rule in `eslint.config.js`, and a comment that turns off an oxlint rule is written `// oxlint-disable-next-line typescript/<rule>`. oxlint does not report such a comment once the rule no longer fires, so remove one by hand when the code it covered changes (`docs/agents/checks.md` says why).
 
 Toolchain versions are pinned exactly, in `package.json` (`packageManager`, every dependency), in `.bun-version`, and in `.npmrc` (`save-exact=true`). Upgrading any of them is a deliberate, reviewed change.
 

@@ -4,7 +4,7 @@ Details of the checks in `AGENTS.md` that an agent needs only in some pull reque
 
 ## CI shards
 
-CI splits each half, and the desktop end-to-end suite, into shards by each file's recorded run time (`scripts/test-shards.ts`). The times are kept in the Actions cache and updated after every run on `main`, so nobody refreshes them. A new file weighs the median until then. To run CI's second shard locally, put the run's `test-shard-weights` artifact at the repository root and run `pnpm test:react --shard=2/4`; without that file, `--shard` splits by file count.
+CI splits `pnpm test:node`, `pnpm test:react` and the desktop end-to-end suite into shards by each file's recorded run time (`scripts/test-shards.ts`). The times are kept in the Actions cache and updated after every run on `main`, so nobody refreshes them. A new file weighs the median until then. To run CI's second shard locally, put the run's `test-shard-weights` artifact at the repository root and run `pnpm test:react --shard=<x>/<y>`, with the `x/y` that the CI job shows in its name (for example `2/6`); without that file, `--shard` splits by file count.
 
 ## Android check
 
