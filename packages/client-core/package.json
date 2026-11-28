@@ -28,6 +28,7 @@
     "./node-details": "./src/node-details.ts",
     "./project-groups": "./src/project-groups.ts",
     "./run-marks": "./src/run-marks.ts",
+    "./run-sessions": "./src/run-sessions.ts",
     "./run-page-rows": "./src/run-page-rows.ts",
     "./run-timeline": "./src/run-timeline.ts",
     "./skill-folder": "./src/skill-folder.ts",

@@ -38,6 +38,7 @@ import {
   waitForOptionalReads,
 } from "@hercule/client-core";
 import { WALK_CATCH_UP_SECONDS } from "../office/engine/contracts";
+import { readRunSessions } from "@hercule/client-core/run-sessions";
 import type { TimelineDay } from "@hercule/client-core/run-timeline";
 import {
   DEFAULT_PAGE_LIMIT,
@@ -1248,14 +1249,13 @@ export const prefetchRunWorkflow = (
  * again.
  */
 export const liveRunSessionsQuery = (client: HerculeClient, runIds: readonly string[]) => {
-  const [first, ...rest] = [...runIds].sort();
-  const filter = first === undefined ? null : ({ runId: [first, ...rest] } as const);
+  const sortedRunIds = [...runIds].sort();
   return queryOptions({
-    queryKey: filter === null ? [...queryKeys.sessions(), "of no run"] : queryKeys.sessions(filter),
-    queryFn: () =>
-      filter === null
-        ? Promise.resolve<readonly Session[]>([])
-        : readEveryPage((page) => client.session.query({ query: { ...filter, ...page } })),
+    queryKey:
+      sortedRunIds.length === 0
+        ? [...queryKeys.sessions(), "of no run"]
+        : queryKeys.sessions({ runId: sortedRunIds }),
+    queryFn: () => readRunSessions(client, sortedRunIds),
     ...LIVE_KEPT_READ_OPTIONS,
   });
 };
@@ -1334,13 +1334,10 @@ export const endedWorkQuery = (client: HerculeClient) =>
         ),
       ]);
       const runs = activeRuns.filter((run) => "finishedAt" in run);
-      const [first, ...rest] = runs.map((run) => run.id);
-      const runSessions =
-        first === undefined
-          ? []
-          : await readEveryPage((page) =>
-              client.session.query({ query: { runId: [first, ...rest], ...page } }),
-            );
+      const runSessions = await readRunSessions(
+        client,
+        runs.map((run) => run.id),
+      );
       return { since, runs, sessions: [...sessions, ...runSessions] };
     },
     staleTime: Infinity,

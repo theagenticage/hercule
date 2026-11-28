@@ -3242,10 +3242,10 @@ Settings does not open a live topic the shell does not already need, except whil
 | Cost | Expected | Measured |
 |---|---|---|
 | Processes | none added | none added |
-| Operations | none added. `session.query`'s `runId` filter takes several runs, so the Office reads the sessions of every live run in one read | by reading the contract |
+| Operations | none added. `session.query`'s `runId` filter takes several runs, so the Office reads the sessions of every live run, in one read per 150 runs (`MAX_SESSION_RUN_IDS`) | by reading the contract |
 | The first screen's JavaScript | grows only by `isThreadSeated`, the two new hats in the sidebar's faces, and the Office's query options: about 1 kB | 333.8 kB to 334.5 kB gzipped (+0.7 kB), the bundle check on `main` and on the branch |
 | The Office's chunk | grows by the café's furniture and the two hats, within its budget of 241.5 kB | 223.8 kB to 229.4 kB gzipped (+5.6 kB) |
-| Reads | when the Office opens: the running runs and the pending ones (the workflow list's own two reads), and the sessions of those runs in one read. A `run` push reads the two run lists again; the sessions of the runs are read again only when the set of live runs changes | the Office's integration test counts them |
+| Reads | when the Office opens: the running runs and the pending ones (the workflow list's own two reads), and the sessions of those runs, in one read per 150 runs. A `run` push reads the two run lists again; the sessions of the runs are read again only when the set of live runs changes | the Office's integration test counts them |
 | Live topics | `run`, held by the shell while the window shows (`useScreenTopicsLive` with `RUN_TOPICS`), since [#801](https://github.com/theagenticage/hercule/issues/801) on every screen, not only the Office. The controller pushes on it at every cron fire, which costs the two reads of the live runs | by reading the Office screen |
 | CPU, memory and rebuilds | the same for the same threads as before; growing with the colleagues, not with their kind. The café, which always stands, costs a small building | `perf:office`, below |
 | A failed read | a failed read of the runs' sessions shows the route's error, rather than taking a live run's finished sessions out | the Office's integration test |
