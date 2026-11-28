@@ -9,7 +9,7 @@ The renderer (`src/renderer`) follows the root `AGENTS.md` §Web app layout, wit
 
 ## The React Compiler
 
-The renderer is built with the React Compiler, which skips a component it cannot compile without a word: the component then runs with no memoization and redraws on every change of its parent. `src/renderer/react-compiler.test.ts` runs the compiler over every renderer source file and fails on any skipped function, with the file, the line and the compiler's reason:
+The renderer is built with the React Compiler, which skips a component it cannot compile without a word: the component then runs without the compiler's memoization (a draft composer without it redraws on every keystroke). `src/renderer/react-compiler.test.ts` runs the compiler over every renderer source file and fails on any skipped function, with the file, the line and the compiler's reason:
 
 ```
 pnpm test:react apps/desktop/src/renderer/react-compiler.test.ts
@@ -17,7 +17,7 @@ pnpm test:react apps/desktop/src/renderer/react-compiler.test.ts
 
 - The usual cause is a default value in a destructuring, in the props (`function Chip({ size = 16 })`) or in the body (`const { data = [] } = useQuery()`). The Babel 8 the build uses makes the compiler refuse it. Take the value without the default and apply it in the body: `{ size: sizeProp }`, then `const size = sizeProp ?? 16`.
 - A `"use no memo"` directive must stay the first statement of the function body, so new lines go after it.
-- A skip that cannot be fixed, such as a function that calls `useVirtualizer` or that disables a React lint rule on purpose, goes in `ALLOWED_SKIPS` in that test with its reason. The test also fails when an entry no longer matches a skipped function.
+- A skip that cannot be fixed, such as a function that calls `useVirtualizer` or that disables a React lint rule on purpose, goes in `ALLOWED_SKIPS` in that test with the compiler's message and the reason. The test also fails when an entry matches no skip. A function that opts out with `"use no memo"` is not a skip.
 
 ## Checks
 
