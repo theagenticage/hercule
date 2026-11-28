@@ -181,6 +181,13 @@ export async function run(argv: readonly string[]): Promise<void> {
 
   const args = rest.slice(1);
 
+  // Only `join` and `set-controller` are left. Without this check, any other
+  // verb would be read as `join`.
+  if (verb !== "join" && verb !== "set-controller") {
+    reportMisuse(`unknown runner command \`${verb}\``);
+    return;
+  }
+
   if (verb === "set-controller") {
     if (args.length !== 1) {
       reportMisuse("set-controller takes one controller URL");

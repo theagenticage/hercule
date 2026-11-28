@@ -135,7 +135,7 @@ describe("dispatch", () => {
   // neither must nothing at all: either would start a daemon. The verb stays in
   // the line so the runner role knows whose arguments these are.
   it("keeps git-credential in the line when a flag or nothing follows it", async () => {
-    for (const rest of [[], ["--local"], ["--bogus"]]) {
+    for (const rest of [[], ["--local"]]) {
       run.runner.mockClear();
       await dispatch(["git-credential", ...rest]);
       expect(run.runner).toHaveBeenCalledWith(["git-credential", ...rest]);

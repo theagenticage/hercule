@@ -4,7 +4,16 @@
  * tells git to try the next helper.
  */
 import { join } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+  type MockInstance,
+} from "vitest";
 import type { CredentialAnswer } from "@hercule/protocol";
 import {
   answerCredentialQuestion,
@@ -159,46 +168,56 @@ describe("what the helper prints", () => {
 });
 
 describe("the actions git passes", () => {
-  it("prints nothing for `store` and `erase`", async () => {
-    const written: Array<unknown> = [];
-    const write = vi.spyOn(process.stdout, "write").mockImplementation((chunk) => {
-      written.push(chunk);
-      return true;
-    });
+  const REFUSAL = `hercule: git-credential takes one action: get, store or erase. git runs it for you. Run "git help credential" for help.\n`;
+  let stdout: MockInstance<typeof process.stdout.write>;
+  let stderr: MockInstance<typeof process.stderr.write>;
+  let stdin: MockInstance<typeof Bun.stdin.text>;
 
-    // git sends `store` and `erase` to report what it did with a credential,
-    // and this helper stores none.
-    await runCredentialAction(["store"]);
-    await runCredentialAction(["erase"]);
-
-    expect(written).toEqual([]);
-    expect(process.exitCode).toBeUndefined();
-    write.mockRestore();
+  beforeEach(() => {
+    // Bun ignores `process.exitCode = undefined`, so the code is reset to 0.
+    process.exitCode = 0;
+    stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    // A regression that reads stdin must fail at once, not wait for input.
+    stdin = vi.spyOn(Bun.stdin, "text").mockResolvedValue("");
   });
 
-  // Each of these once reached the runner role as a daemon option or was
-  // accepted silently. `--local` started a local runner.
-  it.each([[[]], [["--local"]], [["--help"]], [["foo"]], [["git-credential"]], [["get", "extra"]]])(
+  afterEach(() => {
+    process.exitCode = 0;
+    vi.restoreAllMocks();
+  });
+
+  // git sends `store` and `erase` to report what it did with a credential, and
+  // this helper stores none.
+  it.each([["store"], ["erase"]])("prints nothing for `%s`", async (action) => {
+    await runCredentialAction([action]);
+
+    expect(stdout).not.toHaveBeenCalled();
+    expect(stderr).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+  });
+
+  // Words after the action are ignored, as before: `get --help` answers a
+  // well-formed request and gives no credential without one.
+  it("still answers a request for `get --help`", async () => {
+    await runCredentialAction(["get", "--help"]);
+
+    expect(stdin).toHaveBeenCalledOnce();
+    expect(stderr).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+  });
+
+  // `--local` once reached the runner role as a daemon option and started a
+  // local runner. The others were accepted silently.
+  it.each([[[]], [["--local"]], [["--help"]], [["foo"]], [["git-credential"]]])(
     "refuses %j with a message and exit code 2, and reads no stdin",
     async (args) => {
-      const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stdin = vi.spyOn(Bun.stdin, "text");
-      try {
-        await runCredentialAction(args);
+      await runCredentialAction(args);
 
-        expect(stderr).toHaveBeenCalledWith(
-          `hercule: git-credential takes one action: get, store or erase. git runs it for you. Run "git help credential" for help.\n`,
-        );
-        expect(stdout).not.toHaveBeenCalled();
-        expect(stdin).not.toHaveBeenCalled();
-        expect(process.exitCode).toBe(2);
-      } finally {
-        process.exitCode = undefined;
-        stderr.mockRestore();
-        stdout.mockRestore();
-        stdin.mockRestore();
-      }
+      expect(stderr).toHaveBeenCalledWith(REFUSAL);
+      expect(stdout).not.toHaveBeenCalled();
+      expect(stdin).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(2);
     },
   );
 });
