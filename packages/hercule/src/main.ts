@@ -2,10 +2,11 @@
 // `hercule github-token` runs on every `gh` call, so it must start fast. The
 // build splits the bundle into chunks, and a chunk is loaded only when it is
 // imported. This verb is chosen here, before `./index` is imported, so it loads
-// only the client's small chunk and never the dispatcher's.
+// only the client's small chunk and never the dispatcher's. The client reads
+// the arguments after the verb: a token is printed only for a bare call.
 if (process.argv[2] === "github-token") {
   const { runGithubToken } = await import("@hercule/runner/github-token");
-  await runGithubToken();
+  await runGithubToken(process.argv.slice(3));
 } else if (process.argv[2] === "measure-disk-usage") {
   // The runner starts this verb in a child process to walk a folder. It reads
   // no Home, so it is chosen here, before the dispatcher is imported.
