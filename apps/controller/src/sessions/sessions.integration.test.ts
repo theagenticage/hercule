@@ -6634,7 +6634,8 @@ describe("session.spawn into a workspace", () => {
       });
       const workspaceId = String(session.workspaceId);
       reportWorkspaceReady(arranged, await readWorkspace(arranged, workspaceId));
-      await waitForSession(arranged, session.id, (one) => one.status !== "queued");
+      // The start frame has really reached the runner.
+      await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);
       reportEvent(arranged.wire, 1, {
         eventId: crypto.randomUUID(),
         sessionId: session.id,
@@ -6660,6 +6661,14 @@ describe("session.spawn into a workspace", () => {
       expect((await readSession(arranged, session.id)).status).toBe("busy");
       const stream = await readStreamRows(arranged.harness, session.id);
       expect(stream.map((row) => row.tag)).not.toContain("session.exited");
+
+      // The user can still stop it: the runner gets the stop and reports the exit.
+      const response = await stopSession(arranged, session.id);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const sent = await waitForFrames<SessionStopFrame>(arranged.wire, "sessionStop", 1);
+      expect(sent[0]!.sessionId).toBe(session.id);
+      reportExited(arranged.wire, session.id, 2);
+      await waitForSession(arranged, session.id, (one) => one.status === "exited");
     });
   });
 

@@ -1948,13 +1948,35 @@ const make = Effect.gen(function* () {
       ),
 
     /**
-     * Ends every `queued` session in a workspace, and returns those rows as
-     * they were before. A queued session never reached the runner, so nothing
-     * needs stopping. A session the runner already holds (`starting`, `idle` or
-     * `busy`) is left alone: it ends only when the runner reports its exit. The
-     * caller runs it in a transaction.
+     * Returns the workspace of a `queued` session when that workspace has
+     * failed, with the message the runner gave, or `none`.
      */
-    endInWorkspace: (
+    readFailedWorkspaceOfQueued: (
+      sessionId: string,
+    ): Effect.Effect<
+      Option.Option<{ readonly workspaceId: string; readonly message: string | null }>,
+      SqlError
+    > =>
+      Effect.map(
+        sql<{ readonly workspace_id: Uint8Array; readonly message: string | null }>`
+          SELECT w.id AS workspace_id, w.message
+          FROM sessions s JOIN workspaces w ON w.id = s.workspace_id
+          WHERE s.id = ${uuidFromString(sessionId)} AND s.status = 'queued' AND w.status = 'failed'
+        `,
+        (rows) =>
+          Option.fromNullishOr(rows[0]).pipe(
+            Option.map((row) => ({
+              workspaceId: uuidToString(row.workspace_id),
+              message: row.message,
+            })),
+          ),
+      ),
+
+    /**
+     * Ends every `queued` session in a workspace, and returns those rows as
+     * they were before. The caller runs it in a transaction.
+     */
+    endQueuedInWorkspace: (
       workspaceId: string,
       at: string,
     ): Effect.Effect<ReadonlyArray<StoredSession>, SqlError> =>
