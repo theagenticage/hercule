@@ -157,7 +157,22 @@ describe("the assistant step", () => {
   });
 
   it("explains where the assistant comes from when there is none, and lets the user continue", async () => {
-    const { api, router } = await openStep([]);
+    // A fresh install: no account, no runner. Continue lands on Sessions,
+    // which reads both, so a missing stub would show up as an error there.
+    const { api, router } = await openStep([], {
+      "GET /api/v1/runners": { body: { items: [] } },
+      "GET /api/v1/provider-accounts": { body: [] },
+      "GET /api/v1/controller": {
+        body: {
+          id: "01a06d02-a000-7000-8000-000000000002",
+          publicKey: "bm90LWEta2V5",
+          version: "0.4.2",
+          defaultRunnerId: null,
+          localRunnerId: null,
+          textGeneration: { model: null, lastFailure: null, unavailableReason: null },
+        },
+      },
+    });
 
     expect(
       await screen.findByRole("heading", {
@@ -171,6 +186,7 @@ describe("the assistant step", () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe("/");
     });
+    expect(await screen.findByText("No runner has been detected on this machine.")).toBeDefined();
     const recorded = api.calls.find(
       (call) => call.method === "PATCH" && call.path === "/api/v1/settings",
     );
