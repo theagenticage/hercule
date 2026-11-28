@@ -9,8 +9,9 @@
  *   session's agent sent names its sender under the bubble;
  * - one line per subagent the turn started;
  * - the assistant's prose at full width;
- * - the turn's runtime errors and warnings, under the prose. A runtime note sits
- *   there whatever its place in the turn, because the prose is one block;
+ * - the turn's runtime errors, warnings and notices, under the prose. A
+ *   runtime note sits there whatever its place in the turn, because the prose
+ *   is one block;
  * - the divider that shows how long the agent worked, or how the turn ended,
  *   when `showsTurnDivider` returns true.
  *
