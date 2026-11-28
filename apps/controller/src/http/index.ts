@@ -6,6 +6,7 @@
  * controller's entrypoint uses.
  */
 export { buildPerimeterWarning } from "./perimeter";
+export { ListenerDrain } from "./drain";
 export { operationLayers } from "./routes";
 export { closeMcpStreams } from "./mcp";
 export { listenerOptions, serve, webBundle } from "./server";

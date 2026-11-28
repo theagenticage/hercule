@@ -87,9 +87,9 @@ afterAll(async () => {
 
 describe("the binary serving live topics", () => {
   it("stops when asked to, even though a socket is still open", async () => {
-    // A controller someone is watching always has an open socket, and the
-    // listener's drain waits for every connection, so without a deadline
-    // `hercule serve` could not be stopped while anybody was watching it.
+    // A controller someone is watching always has an open socket. The
+    // controller closes it itself with the going-away code, so the stop does
+    // not wait for the drain deadline (ten seconds) and prints no warning.
     const home = createTemporaryHome();
     let its: Controller | undefined;
     try {
@@ -107,6 +107,10 @@ describe("the binary serving live topics", () => {
         });
       });
 
+      const closed = new Promise<CloseEvent>((resolve) => {
+        socket.addEventListener("close", resolve, { once: true });
+      });
+
       const stopping = its;
       const began = Date.now();
       const code = await stopping.stop();
@@ -114,8 +118,9 @@ describe("the binary serving live topics", () => {
       its = undefined;
 
       expect(code, stopping.output()).toBe(0);
-      expect(took, "the drain never gave up on the open socket").toBeLessThan(25_000);
-      expect(stopping.output()).toContain("Connections were still open");
+      expect((await closed).code).toBe(1001);
+      expect(took, "the stop waited for the drain deadline").toBeLessThan(5_000);
+      expect(stopping.output()).not.toContain("Connections were still open");
     } finally {
       await its?.stop().catch(() => -1);
       home.remove();

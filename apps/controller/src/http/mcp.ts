@@ -20,12 +20,14 @@
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import type * as Scope from "effect/Scope";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
 import { hashToken } from "../credentials";
 import { buildUnauthorizedResponse, McpGateway } from "../mcp-gateway";
 import { SessionTokens } from "../permissions";
 import { readBearerToken } from "./bearer";
+import { ListenerDrain } from "./drain";
 
 /** The route's path. Only this exact path is the gateway's. */
 export const MCP_PATH = "/mcp";
@@ -76,8 +78,9 @@ const answerMcpRequest = Effect.gen(function* () {
 
 /**
  * Ends the gateway's open streams and refuses new ones. The controller runs
- * it when it is asked to stop, before the listener drains: the listener
- * waits for every open response, and a gateway stream never ends by itself.
+ * it when it is asked to stop, before it waits for the requests in flight: an
+ * open stream counts as a request in flight, and a gateway stream never ends
+ * by itself.
  */
 export const closeMcpStreams: Effect.Effect<void, never, McpGateway> = Effect.flatMap(
   McpGateway,
@@ -86,7 +89,8 @@ export const closeMcpStreams: Effect.Effect<void, never, McpGateway> = Effect.fl
 
 /**
  * Wraps `app` so that a request for `/mcp` goes to the gateway and every other
- * request to `app`.
+ * request to `app`. A gateway request is counted by the listener's drain until
+ * it ends, and refused once the controller is stopping.
  *
  * The server runs a request uninterruptibly, and the router makes only the
  * handlers it owns interruptible. This route sits outside the router, so it
@@ -98,9 +102,13 @@ export const withMcpRoute = <E, R>(
 ): Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   E,
-  R | HttpServerRequest.HttpServerRequest | McpGateway | SessionTokens
+  R | HttpServerRequest.HttpServerRequest | McpGateway | SessionTokens | ListenerDrain | Scope.Scope
 > =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
-    return yield* isMcpRequest(request) ? Effect.interruptible(answerMcpRequest) : app;
+    if (!isMcpRequest(request)) return yield* app;
+    // The gateway sits outside the application's own drain, so it counts and
+    // refuses its requests itself.
+    const drain = yield* ListenerDrain;
+    return yield* drain.admit(Effect.interruptible(answerMcpRequest));
   });

@@ -152,6 +152,7 @@ import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../pr
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
 import { seed } from "../seed";
+import { ListenerDrain } from "./drain";
 import { operationLayers } from "./routes";
 import { listenerOptions, serve } from "./server";
 import type { WebBundle } from "./static";
@@ -512,6 +513,8 @@ export interface ServerHarness {
   readonly reboot: RebootArranger;
   readonly runWithLiveSessions: LiveSessionsRunner;
   readonly runWithShippedWorkflowServices: ShippedWorkflowServicesRunner;
+  /** The listener's drain, which a test uses to start the controller's shutdown. */
+  readonly drain: ListenerDrain["Service"];
   /**
    * The controller's secrets repository. A test uses it to arrange a secret
    * the public API refuses to write, such as a connection's credentials.
@@ -737,6 +740,7 @@ export const withServer = (
         const shippedWorkflowServices = yield* Effect.context<ShippedWorkflowServices>();
         const runWithShippedWorkflowServices: ShippedWorkflowServicesRunner = (effect) =>
           Effect.runPromiseExit(Effect.provideContext(effect, shippedWorkflowServices));
+        const drain = yield* ListenerDrain;
         const secrets = yield* Secrets;
         const promotion = yield* PromotionState;
         const mcpServerCalls = yield* McpServerCalls;
@@ -764,6 +768,7 @@ export const withServer = (
             reboot,
             runWithLiveSessions,
             runWithShippedWorkflowServices,
+            drain,
             secrets,
             promotion,
             mcpServerCalls,

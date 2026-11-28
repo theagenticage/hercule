@@ -671,6 +671,38 @@ describe("what a connection leaves behind", () => {
       { pings: FAST },
     );
   });
+
+  it("marks a runner unreachable, not offline, when the controller closes its sockets to stop", async () => {
+    await withServer(
+      async (harness) => {
+        const token = await completeSetupWithNoProviderAccount(harness);
+        const joined = await enlist(harness);
+        const { wire } = await greet(harness.base, joined.credential);
+        await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "online",
+        );
+
+        await Effect.runPromise(harness.drain.closeSockets);
+
+        // A close the controller sends is not a goodbye, so the runner does
+        // not read as having announced its departure.
+        expect((await wire.closed()).code).toBe(GOING_AWAY);
+        // Read without waiting: `closeSockets` returns after the departure is written.
+        expect(await readStateTransitions(harness)).toEqual(["online", "unreachable"]);
+        const row = await waitForRunner(
+          harness.base,
+          token,
+          joined.runnerId,
+          (one) => one.connectivity === "unreachable",
+        );
+        expect(row.connectivity).toBe("unreachable");
+      },
+      { pings: FAST },
+    );
+  });
 });
 
 describe("the liveness check", () => {

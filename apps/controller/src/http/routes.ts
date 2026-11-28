@@ -146,6 +146,7 @@ import {
   WorkflowService,
 } from "../workflows";
 import { buildAttachmentResponse } from "./attachment-response";
+import { ListenerDrainLayer } from "./drain";
 
 /**
  * Wraps a handler's service call: the contract's errors pass through, and
@@ -1294,6 +1295,8 @@ export const operationLayers = operationServices.pipe(
   // Also offered to the drivers: the summary writer asks it whether a text
   // generation could run now.
   Layer.provideMerge(TextGenerationStatusLayer),
+  // One drain for the listener and for the routes that upgrade a socket.
+  Layer.provideMerge(ListenerDrainLayer),
 );
 
 /** The handlers of every group, which `HttpApiBuilder.layer(api)` needs to build routes. */

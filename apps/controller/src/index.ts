@@ -7,21 +7,26 @@
  *
  * SIGINT and SIGTERM both mean the same thing:
  *
- * - stop accepting connections;
+ * - refuse every new request;
  * - let the requests already in flight finish;
+ * - stop the local runner, which says goodbye over its socket;
+ * - close every open socket, with the going-away code;
  * - close the database;
  * - exit with code 0.
  *
- * A connection that is meant to stay open, such as a client watching a Live
- * Topic, would keep that drain waiting for ever, so the drain has a deadline
- * and prints a message when it reaches it.
+ * A socket meant to stay open, such as a runner's or a client watching a Live
+ * Topic, is closed by the controller, so the stop does not wait for it. The
+ * drain still has a deadline, for a request that never ends or a peer that
+ * never answers the close, and prints a message when it reaches it.
  *
  * The listener forks the work that runs in the background beside it (the
  * controller daemon's drivers and the provider probes), so a future scheduler
  * adds a step there rather than changing this structure.
  */
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Latch from "effect/Latch";
+import * as Option from "effect/Option";
 import type { ServeError } from "effect/http/HttpServerError";
 import type * as Scope from "effect/Scope";
 import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
@@ -31,6 +36,7 @@ import { bootWith, type BootError, type BootOutcome } from "./bootstrap";
 import {
   buildPerimeterWarning,
   closeMcpStreams,
+  ListenerDrain,
   listenerOptions,
   operationLayers,
   serve,
@@ -95,19 +101,34 @@ export function report(outcome: BootOutcome, webApp: boolean): void {
 /** The message a second signal during the drain prints, instead of killing the process. */
 export const STILL_STOPPING = "Still stopping Hercule; the requests in flight are finishing.";
 
-/** The message the drain prints when it stops waiting for the connections still open. */
+/**
+ * The message the drain prints when it stops waiting for the requests still
+ * in flight or the sockets still open.
+ */
 export const STILL_OPEN = "Connections were still open; Hercule stopped anyway.";
 
 /**
  * How long the drain waits before the process stops regardless.
  *
- * A client watching a Live Topic keeps its socket open for as long as its tab
- * is open, and the listener's drain waits for every open connection, so a
- * controller anybody is watching would otherwise never finish stopping.
- * Stopping early loses nothing: every committed write is already durable, and
- * a request in flight has these ten seconds to finish.
+ * The controller closes its sockets itself, so a normal stop takes
+ * milliseconds. This is the fallback for a request that never finishes and a
+ * peer that never answers the close. Stopping early loses nothing: every
+ * committed write is already durable, and a request in flight has these ten
+ * seconds to finish.
  */
 const DRAIN_DEADLINE_MS = 10_000;
+
+/**
+ * How long the stop waits for the requests in flight before it goes on and
+ * stops the local runner. Half of `DRAIN_DEADLINE_MS`: when the full deadline
+ * passes, the process exits and kills the local runner, so a runner that is
+ * stopped only then never gets to say goodbye. The other half is what it needs
+ * to do so.
+ */
+const FINISH_REQUESTS_DEADLINE_MS = DRAIN_DEADLINE_MS / 2;
+
+/** The message printed when a request in flight outlasts `FINISH_REQUESTS_DEADLINE_MS`. */
+const REQUESTS_STILL_IN_FLIGHT = `Requests were still in flight after ${FINISH_REQUESTS_DEADLINE_MS / 1000} s; stopping the local runner anyway.`;
 
 /**
  * Installs the SIGINT and SIGTERM handlers, and returns an effect that
@@ -163,6 +184,7 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
   Effect.gen(function* () {
     const bootstrap = yield* BootstrapConfig;
     const bundle = yield* webBundle;
+    const drain = yield* ListenerDrain;
     yield* serve(bundle);
 
     const warning = buildPerimeterWarning(bootstrap.bindHost, bootstrap.bindPort);
@@ -177,13 +199,30 @@ const listen = (outcome: BootOutcome, stopped: Effect.Effect<void>) =>
     yield* stopped;
     console.log("Stopping Hercule.");
     yield* Effect.logInfo("Stopping Hercule.");
-    // The gateway's streams never end by themselves, and the listener's drain
-    // waits for every open response, so they are closed before it starts.
+    // The gateway's streams never end by themselves, and the requests the
+    // drain waits for include them, so they are closed before it starts.
     yield* closeMcpStreams;
-    // Before the listener stops: the local runner says goodbye over its socket
-    // to this controller, and a controller that had already stopped listening
-    // would treat that as a machine that disappeared.
+    // From here on every new request, a reconnecting runner's included, is
+    // refused. The requests already in flight finish first, for as long as
+    // `FINISH_REQUESTS_DEADLINE_MS`: one of them may be waiting for a runner's
+    // reply.
+    const finished = yield* Effect.timeoutOption(
+      drain.finishRequests,
+      Duration.millis(FINISH_REQUESTS_DEADLINE_MS),
+    );
+    if (Option.isNone(finished)) {
+      console.log(REQUESTS_STILL_IN_FLIGHT);
+      yield* Effect.logWarning(REQUESTS_STILL_IN_FLIGHT);
+    }
+    // After the requests, because one of them may be waiting for the local
+    // runner. Before the sockets close: the local runner says goodbye over
+    // its socket to this controller, and a controller that had already closed
+    // it would treat that as a machine that disappeared.
     if (outcome.localRunner !== undefined) yield* outcome.localRunner.stop;
+    // Last, so that the listener's own stop finds no open connection to wait
+    // for. Returns once each socket's route has ended, which for a runner
+    // means its departure has been recorded.
+    yield* drain.closeSockets;
   }).pipe(Effect.provide(operationLayers));
 
 export async function run(argv: readonly string[]): Promise<void> {
