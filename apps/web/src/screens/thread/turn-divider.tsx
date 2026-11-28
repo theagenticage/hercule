@@ -3,9 +3,13 @@
  * turn ended; `describeTurnDivider` in client-core picks the words. A turn
  * with tool items can open the divider into a quiet mono list with one
  * `verb · target · result` line per item, and under a todo list's line one
- * indented line per step. A turn with none has nothing to
- * list, so its divider is plain text with no chevron. Spec 14 §The thread
- * surface owns the divider.
+ * indented line per step. A compaction line that has a summary opens, with the
+ * same chevron, to the summary the harness wrote, as wrapped prose in the UI
+ * face in a quiet box that scrolls past about ten lines; a compaction with no
+ * summary is a plain line. Every line of the list wraps at any character, so a
+ * long path never overflows a narrow column. A turn with no tool items has
+ * nothing to list, so its divider is plain text with no chevron. Spec 14 §The
+ * thread surface owns the divider.
  *
  * While the turn is live, the time updates every second and shimmers in the
  * live colour. With `prefers-reduced-motion`, the shimmer stops and the colour
@@ -68,6 +72,54 @@ function TodoSteps({ steps }: { readonly steps: readonly TodoStep[] }): JSX.Elem
   );
 }
 
+/** The ring a focused line draws, as every other focusable control in the web app does. */
+const FOCUS_RING =
+  "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live";
+
+/** Draws a compaction's line as a disclosure, closed at first, that opens to the summary the harness wrote. */
+function CompactionLine({
+  line,
+  summary,
+}: {
+  readonly line: string;
+  readonly summary: string;
+}): JSX.Element {
+  return (
+    <details className="group/compaction">
+      <summary
+        className={cn(
+          "w-fit cursor-pointer list-none rounded-control [&::-webkit-details-marker]:hidden",
+          FOCUS_RING,
+        )}
+      >
+        {line}
+        {/* Inline after the last word, so a wrapped line keeps the chevron beside its text. */}
+        <span
+          aria-hidden="true"
+          className="ml-1.5 inline-block transition-transform group-open/compaction:rotate-90"
+        >
+          ›
+        </span>
+      </summary>
+      {/* A stop in the tab order, so a keyboard user can scroll it. The inset is a transparent
+          border outside the scrolling area, so no half line shows at the bottom. */}
+      <div
+        role="region"
+        aria-label="Compaction summary"
+        tabIndex={0}
+        className={cn(
+          "mt-1 mb-1 ml-4 max-h-54 overflow-y-auto rounded-card border-x-12 border-y-8 border-transparent bg-surface",
+          "font-sans text-fine leading-5 whitespace-pre-wrap text-muted",
+          "outline outline-1 -outline-offset-1 outline-line-soft",
+          FOCUS_RING,
+        )}
+      >
+        {summary}
+      </div>
+    </details>
+  );
+}
+
 export function TurnDivider({
   turn,
   live,
@@ -95,7 +147,12 @@ export function TurnDivider({
 
   return (
     <div>
-      <button type="button" onClick={() => setOpen((was) => !was)} className={style}>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((was) => !was)}
+        className={cn(style, "rounded-control", FOCUS_RING)}
+      >
         {reading}
         {/* One glyph, turned when the list is open, so the chevron keeps
             its baseline, as the pulse's chevron does. */}
@@ -104,10 +161,14 @@ export function TurnDivider({
         </span>
       </button>
       {open ? (
-        <ul className="mt-1 flex flex-col gap-0.5 font-mono text-fine text-muted">
+        <ul className="mt-1 flex flex-col gap-0.5 font-mono text-fine wrap-anywhere text-muted">
           {turn.items.map((item) => (
             <li key={item.itemId} className={chooseResultHue(item.result)}>
-              {describeThreadItem(item)}
+              {item.compactionSummary === undefined ? (
+                describeThreadItem(item)
+              ) : (
+                <CompactionLine line={describeThreadItem(item)} summary={item.compactionSummary} />
+              )}
               {item.todoSteps.length > 0 ? <TodoSteps steps={item.todoSteps} /> : null}
             </li>
           ))}

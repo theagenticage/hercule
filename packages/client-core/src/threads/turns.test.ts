@@ -1357,8 +1357,65 @@ describe("buildTurns: compaction and unknown items", () => {
         target: "182k → 31k tokens (auto)",
         result: "completed",
         todoSteps: [],
+        compactionSummary: "The user asked for a login fix.",
       },
     ]);
+  });
+
+  it.each([
+    ["a running compaction", () => buildItemRows("context_compaction", { summary: "At start." })],
+    [
+      "a compaction completed without a summary",
+      () =>
+        buildItemRows("context_compaction", undefined, {
+          status: "completed",
+          detail: { trigger: "auto", tokensBefore: 182_000, tokensAfter: 31_000 },
+        }),
+    ],
+    [
+      "a compaction completed with an empty summary",
+      () =>
+        buildItemRows("context_compaction", undefined, {
+          status: "completed",
+          detail: { summary: "" },
+        }),
+    ],
+    [
+      "a compaction completed with a blank summary",
+      () =>
+        buildItemRows("context_compaction", undefined, {
+          status: "completed",
+          detail: { summary: " \n\t " },
+        }),
+    ],
+  ])("has no summary on %s", (_name, buildRows) => {
+    expect(buildTurns(buildRows(), AGENT_ASKING_NOTHING).turns[0]!.items[0]).not.toHaveProperty(
+      "compactionSummary",
+    );
+  });
+
+  it("keeps the summary a failed compaction started with", () => {
+    const rows = buildItemRows(
+      "context_compaction",
+      { summary: "Written at the start." },
+      { status: "failed" },
+    );
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items[0]).toMatchObject({
+      result: "failed",
+      compactionSummary: "Written at the start.",
+    });
+  });
+
+  it("has no summary on another kind of item, whatever its detail holds", () => {
+    const rows = buildItemRows("unknown", undefined, {
+      status: "completed",
+      detail: { summary: "Not a compaction." },
+    });
+
+    expect(buildTurns(rows, AGENT_ASKING_NOTHING).turns[0]!.items[0]).not.toHaveProperty(
+      "compactionSummary",
+    );
   });
 
   it("shows a running compaction with no words after its verb", () => {
@@ -1612,6 +1669,17 @@ describe("buildTurns: todo lists, page fetches and MCP calls", () => {
     );
 
     expect(readItems(rows)[0]!.target).toBe("182k → 31k tokens (auto)");
+  });
+
+  it("keeps the summary of a compaction's latest update when its completion has none", () => {
+    const rows = buildRowsOfItem(
+      "context_compaction",
+      { trigger: "auto" },
+      { _tag: "item.updated", detail: { summary: "Given while it ran." } },
+      { _tag: "item.completed", status: "completed", detail: { tokensAfter: 31_000 } },
+    );
+
+    expect(readItems(rows)[0]!.compactionSummary).toBe("Given while it ran.");
   });
 
   it("ignores an update for an item that never started", () => {

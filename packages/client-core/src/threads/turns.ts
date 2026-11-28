@@ -69,6 +69,13 @@ export interface ThreadItem {
    * update. Empty for any other item, and for a list that has no steps.
    */
   readonly todoSteps: readonly TodoStep[];
+  /**
+   * The summary the harness wrote of the compacted context, once a
+   * `context_compaction` item has completed with a summary that is not blank,
+   * taken from its completion or an earlier row. Absent on a running
+   * compaction and on any other kind.
+   */
+  readonly compactionSummary?: string;
 }
 
 /** The steps of every item that is not a todo list. One shared array, so a memoized component sees the same value on each projection. */
@@ -531,6 +538,9 @@ export interface CompletedItem<Item extends ThreadItem> {
  *
  * Any other kind keeps its target whatever the completion carries.
  *
+ * A compaction with a summary that is not blank, from the completion or an
+ * earlier row, also gets it as `compactionSummary`, text unchanged.
+ *
  * The desktop's blocks build their items on this too, so both screens end up
  * with the same words.
  */
@@ -553,6 +563,9 @@ export const buildCompletedItem = <Item extends ThreadItem>(
       ...(completion === undefined || compaction === undefined
         ? {}
         : { target: describeCompactionTarget(compaction) }),
+      ...(compaction?.summary === undefined || compaction.summary.trim() === ""
+        ? {}
+        : { compactionSummary: compaction.summary }),
     },
     update,
     compaction,
