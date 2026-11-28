@@ -333,15 +333,44 @@ export const JOINABLE_TASK_SQL = `tasks.deleted_at IS NULL
  * `onlyRefs` is an optional SQL condition on `l.ref` that limits the links to
  * some refs, such as `l.ref IN (SELECT ref FROM page_refs)`. It cannot change a
  * ref's positions, because they are ranked per ref.
+ *
+ * This text reaches the links of each ref by `task_entity_links_ref`, so a read
+ * of one ref, or of a few, costs what those refs have. A read of every ref
+ * should use `ALL_LIVE_TASK_LINKS_SQL`.
  */
-export const buildLiveTaskLinksSql = (onlyRefs = "1"): string => `
+export const buildLiveTaskLinksSql = (onlyRefs = "1"): string =>
+  buildLiveTaskLinksFrom("task_entity_links l JOIN tasks ON tasks.id = l.task_id", onlyRefs);
+
+/** Builds the live links over `from`: the one place the columns, the ranking and the liveness rule are written. */
+const buildLiveTaskLinksFrom = (from: string, onlyRefs: string): string => `
   SELECT l.task_id, l.ref, l.linked_at, l.following, l.taken_at,
          ROW_NUMBER() OVER (PARTITION BY l.ref ORDER BY l.linked_at, l.task_id) AS position
-  FROM task_entity_links l JOIN tasks ON tasks.id = l.task_id
+  FROM ${from}
   WHERE ${JOINABLE_TASK_SQL} AND ${onlyRefs}`;
 
-/** The live links of all refs: see `buildLiveTaskLinksSql`. */
+/**
+ * The live links of the refs that a caller filters afterwards by `WHERE ref =
+ * ...` or `ref IN (...)`: see `buildLiveTaskLinksSql`. SQLite pushes that
+ * filter into the ranking, so the read seeks the refs it names.
+ */
 export const LIVE_TASK_LINKS_SQL = buildLiveTaskLinksSql();
+
+/**
+ * The live links of every ref, for a read that needs them all. Its cost follows
+ * the live Tasks and not the finished ones: without hints SQLite walks every
+ * link ever made and looks up each Task. Two hints fix the plan, because SQLite
+ * has no statistics here: `INDEXED BY tasks_board_rank` reads only the live Tasks
+ * (that partial index has exactly the condition of `JOINABLE_TASK_SQL`, so the
+ * hint fails loudly if the two ever differ), and the `CROSS JOIN` then reaches
+ * each Task's links by their primary key.
+ *
+ * Do not filter it by ref afterwards: that tests every live Task against the
+ * refs. Use `LIVE_TASK_LINKS_SQL` for that.
+ */
+export const ALL_LIVE_TASK_LINKS_SQL = buildLiveTaskLinksFrom(
+  "tasks INDEXED BY tasks_board_rank CROSS JOIN task_entity_links l ON l.task_id = tasks.id",
+  "1",
+);
 
 /**
  * The rank of each priority, lowest first. It matches the `priority_rank`

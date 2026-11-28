@@ -42,6 +42,7 @@ import { INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
 import { OPEN_THREAD_REFS_SQL, signalRepository } from "../signals";
 import {
+  ALL_LIVE_TASK_LINKS_SQL,
   LIVE_TASK_LINKS_SQL,
   makeSummaryDirtyMarker,
   taskRepository,
@@ -1590,7 +1591,7 @@ const make = Effect.gen(function* () {
         sql<{ readonly ref: string }>`
           SELECT DISTINCT o.ref FROM external_entity_observations o
           WHERE o.connection_id = ${uuidFromString(connectionId)}
-            AND o.ref IN (SELECT ref FROM (${sql.literal(LIVE_TASK_LINKS_SQL)}))`,
+            AND o.ref IN (SELECT ref FROM (${sql.literal(ALL_LIVE_TASK_LINKS_SQL)}))`,
         (rows) => rows.map((row) => row.ref),
       ),
 
