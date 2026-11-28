@@ -945,6 +945,7 @@ describe("id tails", () => {
       updatedAt: at,
       statusChangedAt: at,
       stageChangedAt: at,
+      leadSessionId: null,
     });
     const rows = [
       buildTaskRow("aaaaaaa1", "2026-01-01T00:00:00.000Z"),

@@ -25,12 +25,20 @@ A unit of human intent: a described piece of work someone wants done. Work-type-
 _Avoid_: ticket, issue (reserved for external trackers)
 
 **Stage**:
-Where a Task stands: one of `exploring`, `planned`, `building`, `in-review`, `landed`, `done` or `dropped`. The list is fixed and any stage can follow any other. Only an explicit update moves a Task's stage; the core never does, and a Task Summary never does. A shipped workflow may write the stage when a Fact arrives, and the Task's fence makes a person's drag win until a newer Fact arrives. No shipped workflow sets `done`. A Task's status is a coarse reading of its stage. Done on a Task and Done on a Thread are separate acts: a Task at `done` leaves its Threads as they are, and marking a Thread Done leaves its Task where it is.
+Where a Task stands: one of `exploring`, `planned`, `building`, `in-review`, `landed`, `done` or `dropped`. The list is fixed and any stage can follow any other. Only an explicit update moves a Task's stage; the core never does, and a Task Summary never does. A shipped workflow may write the stage when a Fact arrives, and the Task's fence makes a person's drag win until a newer Fact arrives. Landed means finished from the agents' side and waiting for the user to look; Done is the user's sign-off. No shipped workflow sets `done`. A Task's status is a coarse reading of its stage. Done on a Task and Done on a Thread are separate acts: a Task at `done` leaves its Threads as they are, and marking a Thread Done leaves its Task where it is.
 _Avoid_: step (a workflow's, see Step), status (the coarse reading of the stage, not the stage itself), column (how a board draws a stage), reviewing (the stage is `in-review`)
 
 **Fact (Stage)**:
 A record that a thing a live Task links changed its lifecycle (`open`, `completed` or `abandoned`), or was just linked or first observed with a link. It comes from the External Entity kept true by polls, not from a raw event, so a merge that no event reported is still a Fact. A Fact is a row with an integer id, and that id is its order: never a time. The core writes it, in the transaction of the change, with the Platform Event `task.entityChanged`, and decides nothing about the stage. A workflow acts on it by passing its id to `task.update` as `stageFactId`; the Task's fence refuses a Fact at or below the highest one already accounted for, so a late or repeated Fact never undoes a drag. An unlink voids the Facts of that Task and ref. A Fact is not an outside change shown on a timeline, and not a Runner Fact.
 _Avoid_: event (the Platform Event is what carries a Fact, not the Fact), signal (a **Signal** asks the user for a move), update, change (bare), fence (bare: it is the Task's counter, not the Fact)
+
+**Lead**:
+The Thread that speaks for a Task: the only session whose Stage Report is accepted. Only a Thread can lead; an Agent's session or a run is a helper. A new Thread's Task is led by that Thread, a filed Task by the first Thread to join it, and a fork or a move can pass it on. The user does not choose it.
+_Avoid_: owner, primary, assignee (a Task has none)
+
+**Stage Report**:
+A lead's claim of where its Task stands (`task.reportStage`, `hercule task report`). The weakest way to move a card: a Fact beats it, and a repeat of it never undoes the user's drag. It is counted by the audit entry `task.stageReported`.
+_Avoid_: status update, check-in, progress report
 
 **Provenance**:
 A task's record of what created or touched it: entries pointing at events, runs, external refs, the signals handed off onto it, and the Tasks merged into it. Entries are only appended, and an entry is never edited or removed; the one thing that can happen to one is that a Merge moves it, unchanged, to the surviving Task. What lets a later event about the same thing find its existing task.

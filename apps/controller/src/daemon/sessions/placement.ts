@@ -983,24 +983,24 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Writes the workspace and the session in one transaction, joining the
-   * caller's when there is one. Returns the new session's id, the workspace
-   * frame the runner must be told about after the commit, if any, and the id
-   * of the Task made for the session, if any (`SessionService.create` decides
-   * the session's Task).
+   * Writes the workspace and the session `sessionId` in one transaction,
+   * joining the caller's when there is one. The caller mints the id, so a
+   * Task made for the session before this runs can already name it as its
+   * lead. Returns the workspace frame the runner must be told about after the
+   * commit, if any, and the id of the Task made for the session, if any
+   * (`SessionService.create` decides the session's Task).
    */
   const writeSession = (
+    sessionId: string,
     open: Placing,
   ): Effect.Effect<
     {
-      readonly sessionId: string;
       readonly frame: WorkspaceProvision | undefined;
       readonly madeTaskId: string | undefined;
     },
     Validation | NotFound | InvalidState | SqlError
   > =>
     Effect.gen(function* () {
-      const sessionId = uuidToString(mintUuid());
       const { frame, madeTaskId } = yield* withTransaction(
         sql,
         Effect.gen(function* () {
@@ -1059,7 +1059,7 @@ const make = Effect.gen(function* () {
           return { frame: opened.frame, madeTaskId };
         }),
       );
-      return { sessionId, frame, madeTaskId };
+      return { frame, madeTaskId };
     });
 
   /**
@@ -1105,6 +1105,10 @@ const make = Effect.gen(function* () {
    * `NotFound` or `InvalidState` when the call named a Task that is missing,
    * deleted or finished.
    *
+   * `sessionId` is the id the new session gets. The caller mints it, so
+   * `prepare` can name the session in a Task it makes for it first
+   * (`session.spawn` with `newTask`).
+   *
    * `prepare` builds the `Placing` and is the part of the call that can be
    * refused. It runs inside the transaction, so it may wait on nothing but the
    * database and short local checks (spec 04, the transaction rule). The
@@ -1124,6 +1128,7 @@ const make = Effect.gen(function* () {
   const place = <E>(
     operation: DedupOperation,
     dedupKey: string | undefined,
+    sessionId: string,
     prepare: Effect.Effect<Placing, E>,
   ): Effect.Effect<Session, E | Validation | NotFound | InvalidState | SqlError> =>
     promotion.whenServing(
@@ -1132,19 +1137,21 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             if (dedupKey !== undefined) {
-              const sessionId = yield* dedupKeys.findResultId(operation, dedupKey);
-              if (sessionId !== undefined) return { _tag: "existing" as const, sessionId };
+              const existingSessionId = yield* dedupKeys.findResultId(operation, dedupKey);
+              if (existingSessionId !== undefined) {
+                return { _tag: "existing" as const, sessionId: existingSessionId };
+              }
             }
             const open = yield* prepare;
-            const written = yield* writeSession(open);
+            const written = yield* writeSession(sessionId, open);
             if (dedupKey !== undefined) {
-              yield* dedupKeys.recordDedupKey(operation, dedupKey, written.sessionId);
+              yield* dedupKeys.recordDedupKey(operation, dedupKey, sessionId);
             }
             return { _tag: "created" as const, open, ...written };
           }),
         );
         if (saved._tag === "existing") return yield* readSessionRecord(saved.sessionId);
-        const { open, sessionId, frame, madeTaskId } = saved;
+        const { open, frame, madeTaskId } = saved;
         yield* tellRunnerAndDispatch(open.runnerId, frame);
         // Read back instead of using the inserted row, so the caller sees
         // `starting` when dispatch started the session at once, not `queued`.
@@ -1252,7 +1259,7 @@ const make = Effect.gen(function* () {
           timeouts: buildConversationTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
-        const { frame } = yield* writeSession({
+        const { frame } = yield* writeSession(uuidToString(mintUuid()), {
           permissionProfileId: agent.permissionProfileId,
           agentId: agent.id,
           conversationId: request.conversationId,
@@ -1371,7 +1378,8 @@ const make = Effect.gen(function* () {
           timeouts: buildStepSessionTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
-        const { sessionId, frame } = yield* writeSession({
+        const sessionId = uuidToString(mintUuid());
+        const { frame } = yield* writeSession(sessionId, {
           permissionProfileId: agent.permissionProfileId,
           agentId: agent.id,
           conversationId: undefined,
@@ -1538,6 +1546,8 @@ const make = Effect.gen(function* () {
           decoded.newTask === undefined
             ? undefined
             : yield* externalEntities.prepareThingsForTask(decoded.newTask.entityIds);
+        // Minted here so the Task `newTask` makes can name the Thread as its lead.
+        const sessionId = uuidToString(mintUuid());
         const prepareSpawn = Effect.gen(function* () {
           if (decoded.agentId !== undefined) yield* refuseAgentOwnedFields(decoded);
           // The calling session, when a session spawns: its spawn runs next to
@@ -1733,6 +1743,7 @@ const make = Effect.gen(function* () {
               : yield* externalEntities.takeOnAsOneTask(prepared, {
                   title: decoded.newTask.title,
                   projectId: Option.isSome(project) ? projectId : undefined,
+                  leadSessionId: sessionId,
                 });
 
           // The entries are read after the take-on, so a thing that was read
@@ -1802,7 +1813,7 @@ const make = Effect.gen(function* () {
           } satisfies Placing;
         });
 
-        return yield* place("session.spawn", decoded.dedupKey, prepareSpawn);
+        return yield* place("session.spawn", decoded.dedupKey, sessionId, prepareSpawn);
       }),
 
     /**
@@ -1939,7 +1950,7 @@ const make = Effect.gen(function* () {
           } satisfies Placing;
         });
 
-        return yield* place("session.continue", dedupKey, prepareFork);
+        return yield* place("session.continue", dedupKey, uuidToString(mintUuid()), prepareFork);
       }),
   };
 });

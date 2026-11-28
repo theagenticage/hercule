@@ -48,6 +48,7 @@ const CART_TASK: Task = {
   id: "01a06d02-7700-7000-8000-000000000001",
   title: "Cart total rounding on discounts",
   description: "Totals are off by a cent.",
+  leadSessionId: null,
   status: "open",
   stage: "planned",
   priority: "high",

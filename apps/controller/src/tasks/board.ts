@@ -42,6 +42,7 @@ import {
   type SessionKind,
   type SessionRequest,
   type SessionStatus,
+  type TaskStage,
   type Unauthenticated,
   type WorkBoard,
   type WorkCard,
@@ -128,8 +129,17 @@ export interface BoardFacts {
 export interface BoardFactsRequest {
   readonly id: string;
   readonly failedRunId: string | undefined;
+  /** The Task's current stage, which a stage report's cause names. */
+  readonly stage: TaskStage;
   /** The fact that placed the Task's stage, when one did. */
   readonly stageCauseFactId: number | undefined;
+  /** The session whose Stage Report placed the Task's stage, when one did. */
+  readonly stageCauseSessionId: string | undefined;
+  /**
+   * The Task's stage revision. While a report is the stage's cause it is the
+   * report's own revision, because every later stage write clears the cause.
+   */
+  readonly stageRevision: number;
 }
 
 export class TaskBoardFacts extends Context.Service<

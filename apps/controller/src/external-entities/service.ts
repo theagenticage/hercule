@@ -1311,12 +1311,20 @@ const make = Effect.gen(function* () {
      * - `Conflict` naming the first thing already on an active Task, and that
      *   Task.
      *
+     * `leadSessionId` is the Thread the Task is made for. It leads the Task
+     * from the start, so `task.created` carries it. The Thread's own row is
+     * written later in the caller's transaction.
+     *
      * User only, with the grant `task.update`. The caller has checked that
      * `projectId`, if any, is a live Project.
      */
     takeOnAsOneTask: (
       prepared: PreparedThings,
-      task: { readonly title: string; readonly projectId: string | undefined },
+      task: {
+        readonly title: string;
+        readonly projectId: string | undefined;
+        readonly leadSessionId: string;
+      },
     ): Effect.Effect<
       { readonly taskId: string },
       Unauthenticated | Forbidden | NotFound | Conflict | SqlError
@@ -1336,6 +1344,7 @@ const make = Effect.gen(function* () {
           stage: NEW_THREAD_TASK_STAGE,
           ...(task.projectId === undefined ? {} : { projectId: task.projectId }),
           following: false,
+          leadSessionId: task.leadSessionId,
         });
         yield* announceEntityChanges({
           entityIds: records.map(({ id }) => id),

@@ -1,6 +1,7 @@
 /** Tests that the board snapshot read back from `localStorage` is trusted only when every part of it is what it should be. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BoardSnapshot } from "@hercule/client-core/work";
+import { buildBoardSnapshot, type BoardSnapshot } from "@hercule/client-core/work";
+import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import {
   buildBoardSnapshotKey,
   readSavedBoardSnapshot,
@@ -20,7 +21,12 @@ const SNAPSHOT: BoardSnapshot = {
     {
       id: "b",
       stage: "landed",
-      stageCause: { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" },
+      stageCause: {
+        kind: "fact",
+        factId: 4,
+        ref: "github:pull-request:6221",
+        text: "Pull request #6221 merged",
+      },
     },
   ],
   isTruncated: false,
@@ -83,6 +89,61 @@ describe("the saved board snapshot", () => {
     ["a cause that is not an object", { id: "a", stage: "landed", stageCause: "merged" }],
   ])("reads the whole snapshot as none for %s, so no card shows as new by mistake", (_, card) => {
     store({ cards: [SNAPSHOT.cards[0], card], isTruncated: false });
+
+    expect(readSavedBoardSnapshot(KEY)).toBeUndefined();
+  });
+
+  it("reads a cause stored without a kind, written before reports existed, as a fact", () => {
+    store({
+      cards: [
+        {
+          id: "b",
+          stage: "landed",
+          stageCause: { factId: 4, ref: "github:pull-request:6221", text: "merged" },
+        },
+      ],
+      isTruncated: false,
+    });
+
+    expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([
+      {
+        id: "b",
+        stage: "landed",
+        stageCause: { kind: "fact", factId: 4, ref: "github:pull-request:6221", text: "merged" },
+      },
+    ]);
+  });
+
+  it("stores no Thread title for a card placed by a report", () => {
+    const board = buildBoard(
+      buildCard("b", {
+        stage: "planned",
+        stageCause: {
+          kind: "report",
+          sessionId: "s1",
+          stageRevision: 3,
+          text: "\u201cPricing research\u201d says Planned",
+        },
+      }),
+    );
+
+    writeSavedBoardSnapshot(KEY, buildBoardSnapshot(board));
+
+    expect(localStorage.getItem(KEY)).not.toContain("Pricing research");
+    expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([{ id: "b", stage: "planned" }]);
+  });
+
+  it("reads an entry with a report cause as no snapshot, because a snapshot never holds one", () => {
+    store({
+      cards: [
+        {
+          id: "b",
+          stage: "planned",
+          stageCause: { kind: "report", sessionId: "s1", stageRevision: 3, text: "says Planned" },
+        },
+      ],
+      isTruncated: false,
+    });
 
     expect(readSavedBoardSnapshot(KEY)).toBeUndefined();
   });

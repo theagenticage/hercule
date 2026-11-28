@@ -69,6 +69,7 @@ const buildTask = (card: WorkCard): Task => ({
   id: card.id,
   title: card.title,
   description: "",
+  leadSessionId: null,
   status: "open",
   stage: card.stage,
   priority: "normal",

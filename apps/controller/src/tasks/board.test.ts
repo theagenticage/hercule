@@ -68,6 +68,8 @@ const TASK: BoardTask = {
   stageChangedAt: AT,
   failedRunId: undefined,
   stageCauseFactId: undefined,
+  stageCauseSessionId: undefined,
+  stageRevision: 0,
   summary: undefined,
 };
 

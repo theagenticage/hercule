@@ -11,7 +11,12 @@ import { holdBackBoardChanges } from "./hold-back-board";
 import { listCardMoves } from "./list-card-moves";
 
 const NOTHING = new Set<string>();
-const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
+const MERGED = {
+  kind: "fact" as const,
+  factId: 4,
+  ref: "github:pull-request:6221",
+  text: "Pull request #6221 merged",
+};
 
 /** Returns a card that landed at the given time of 2 November 2026. */
 const buildLanded = (id: string, hour: number) =>
@@ -35,6 +40,24 @@ describe("buildBoardSnapshot", () => {
       ],
       isTruncated: false,
     });
+  });
+});
+
+describe("buildBoardSnapshot and a report's cause", () => {
+  it("leaves out the cause of a card a report placed, whose text quotes a Thread's title", () => {
+    const board = buildBoard(
+      buildCard("a", {
+        stage: "planned",
+        stageCause: {
+          kind: "report",
+          sessionId: "s1",
+          stageRevision: 3,
+          text: "\u201cPricing research\u201d says Planned",
+        },
+      }),
+    );
+
+    expect(buildBoardSnapshot(board).cards).toEqual([{ id: "a", stage: "planned" }]);
   });
 });
 

@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { applyCardMove } from "./card-move";
 import { buildBoard, buildCard, buildPlace, FAILURE, listIds } from "./cards.testing";
-import { holdBackBoardChanges, buildArrivalKey } from "./hold-back-board";
+import { holdBackBoardChanges, buildArrivalKey, buildStageMoveKey } from "./hold-back-board";
 
 const NOTHING = new Set<string>();
 
@@ -178,13 +178,70 @@ describe("holdBackBoardChanges", () => {
     expect(result.held).toHaveLength(1);
   });
 
+  describe("the key of a move by a report", () => {
+    const REPORT = {
+      kind: "report" as const,
+      sessionId: "s1",
+      stageRevision: 4,
+      text: "“Pricing research” says Planned",
+    };
+
+    it("names the stage revision, so a second report is a new move even at the same time", () => {
+      const first = buildCard("b", {
+        stage: "planned",
+        stageCause: REPORT,
+        stageChangedAt: "2026-11-02T12:00:00.000Z",
+      });
+      const second = { ...first, stageCause: { ...REPORT, stageRevision: 6 } };
+
+      expect(buildStageMoveKey(first)).toBe("move:b:report-4");
+      expect(buildStageMoveKey(second)).not.toBe(buildStageMoveKey(first));
+    });
+
+    it("holds two consecutive reports by one Thread with the same words and the same time", () => {
+      const AT = "2026-11-02T12:00:00.000Z";
+      const options = { released: NOTHING, hiddenBefore: NOTHING };
+      const building = buildBoard(buildCard("b", { stage: "building", stageChangedAt: AT }));
+      const reported = buildBoard(
+        buildCard("b", { stage: "planned", stageCause: REPORT, stageChangedAt: AT }),
+      );
+      const first = holdBackBoardChanges(building, reported, options);
+      expect(first.held).toHaveLength(1);
+
+      const again = buildBoard(
+        buildCard("b", {
+          stage: "building",
+          stageCause: { ...REPORT, stageRevision: 5, text: "says Building" },
+          stageChangedAt: AT,
+        }),
+      );
+      const reportedAgain = buildBoard(
+        buildCard("b", {
+          stage: "planned",
+          stageCause: { ...REPORT, stageRevision: 6 },
+          stageChangedAt: AT,
+        }),
+      );
+      const released = new Set([buildStageMoveKey(reported.cards[0]!)]);
+      const second = holdBackBoardChanges(again, reportedAgain, {
+        released,
+        hiddenBefore: NOTHING,
+      });
+
+      expect(second.held).toHaveLength(1);
+      expect(second.board.cards[0]!.stage).toBe("building");
+    });
+  });
+
   describe("a card moved by a fact", () => {
     const OPENED = {
+      kind: "fact" as const,
       factId: 1,
       ref: "github:pull-request:6221",
       text: "Pull request #6221 opened",
     };
     const MERGED = {
+      kind: "fact" as const,
       factId: 2,
       ref: "github:pull-request:6221",
       text: "Pull request #6221 merged",

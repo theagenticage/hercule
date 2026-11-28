@@ -38,7 +38,12 @@ afterEach(() => {
 
 const WEBSHOP = SIDEBAR_FIXTURE.projects[0]!;
 const buildTaskId = (n: number): string => `01a06d02-7e00-7000-8000-${String(n).padStart(12, "0")}`;
-const MERGED = { factId: 4, ref: "github:pull-request:6221", text: "Pull request #6221 merged" };
+const MERGED = {
+  kind: "fact" as const,
+  factId: 4,
+  ref: "github:pull-request:6221",
+  text: "Pull request #6221 merged",
+};
 const SNAPSHOT_KEY = buildBoardSnapshotKey(CONTROLLER_URL, SIDEBAR_FIXTURE.username);
 
 const SLOTS = buildCard(buildTaskId(1), {

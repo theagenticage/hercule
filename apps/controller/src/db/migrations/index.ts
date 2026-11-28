@@ -140,6 +140,7 @@ import dropIntakeIndexes from "./0131-drop-intake-indexes";
 import dropSignalSnoozes from "./0132-drop-signal-snoozes";
 import mcpServerSignInGeneration from "./0133-mcp-server-sign-in-generation";
 import wikiPageArchive from "./0134-wiki-page-archive";
+import stageReports from "./0136-stage-reports";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -274,6 +275,7 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [132, "drop-signal-snoozes", Effect.succeed(dropSignalSnoozes)],
   [133, "mcp-server-sign-in-generation", Effect.succeed(mcpServerSignInGeneration)],
   [134, "wiki-page-archive", Effect.succeed(wikiPageArchive)],
+  [136, "stage-reports", Effect.succeed(stageReports)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */
