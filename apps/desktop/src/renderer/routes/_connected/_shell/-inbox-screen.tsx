@@ -27,7 +27,8 @@ import { inboxCountQuery, inboxOutlineQuery, pluginsQuery, userQuery } from "../
 import { describeUndoKey } from "../../../app/primary-modifier";
 import { useOfflineSince } from "../../../app/use-offline-since";
 import type { SavedController } from "../../../app/context";
-import { KeysSheet, UndoLine } from "../../../screens/desk";
+import { KeysSheet } from "../../../screens/desk/keys-sheet";
+import { UndoLine } from "../../../screens/desk/undo-line";
 import { InboxFrame } from "../../../screens/inbox/inbox-frame";
 import type { InboxClickModifiers } from "../../../screens/inbox/inbox-row";
 import { buildInboxKeyRows, type InboxKeyAction } from "../../../screens/inbox/inbox-keys";
