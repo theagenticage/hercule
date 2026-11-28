@@ -1795,12 +1795,13 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Ends every `queued` session waiting on a workspace that failed. Those
-   * sessions never started, so there is no harness to stop and nothing to send
-   * to the runner. A session the runner already holds (`starting`, `idle` or
-   * `busy`) is left alone, because the runner owns its process and ends the
-   * session by reporting its exit. The user needs the reason, so the runner's
-   * error message is stored as a `session.exited` row on each ended session's
+   * Ends every `queued` session waiting on a workspace that failed. Dispatch
+   * starts a session only in a ready workspace, so these can never start, and
+   * the runner holds no process for them: nothing needs stopping or sending.
+   * A session the runner already holds (`starting`, `idle` or `busy`) is left
+   * alone, because the runner owns its process and ends the session by
+   * reporting its exit. The user needs the reason, so the runner's error
+   * message is stored as a `session.exited` row on each ended session's
    * stream, where the exit is shown.
    */
   const endQueuedForWorkspace = (
