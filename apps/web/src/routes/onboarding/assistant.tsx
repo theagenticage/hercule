@@ -18,10 +18,11 @@ export const Route = createFileRoute("/onboarding/assistant")({
 });
 
 /**
- * Names the assistant that setup created. When there is none (it was deleted,
- * or setup ran before assistants existed), the step creates one with the typed
- * name instead. The step is recorded as done only after the assistant write
- * succeeds, so a refused write leaves the user on this step.
+ * Names the assistant that setup created. A fresh install has none, because
+ * the first Provider Account creates it and the web app cannot add an account,
+ * so the step then says where the assistant comes from and lets the user
+ * continue. The step is recorded as done only after the rename succeeds, so a
+ * refused write leaves the user on this step.
  */
 function AssistantStep(): JSX.Element {
   const { client, queryClient } = Route.useRouteContext();
@@ -34,21 +35,14 @@ function AssistantStep(): JSX.Element {
   const save = useMutation({
     mutationKey: SAVE_KEY,
     mutationFn: async (typed: string) => {
-      // The list is read afresh rather than taken from the render: after a
-      // create whose settings write was refused, a retry must rename the
-      // assistant it created, not create a second one.
-      const assistant =
-        (await queryClient.fetchQuery({ ...assistantsQuery(client), staleTime: 0 })).items[0] ??
-        null;
-      if (assistant === null) {
-        await client.assistant.create({ payload: { name: typed } });
-      } else {
-        await client.assistant.update({ params: { id: assistant.id }, payload: { name: typed } });
+      // A fresh install has no assistant to rename: the step is only recorded.
+      if (shown !== null) {
+        await client.assistant.update({ params: { id: shown.id }, payload: { name: typed } });
+        // The write changes the assistants list, which the sidebar shows the
+        // name from. The conversation screen reads the one assistant instead,
+        // and the live `assistant` topic refreshes that read.
+        await queryClient.invalidateQueries({ queryKey: assistantsQuery(client).queryKey });
       }
-      // Both writes change the assistants list, which the sidebar shows the
-      // name from. The conversation screen reads the one assistant instead,
-      // and the live `assistant` topic refreshes that read.
-      await queryClient.invalidateQueries({ queryKey: assistantsQuery(client).queryKey });
       return client.settings.update({
         payload: {
           user: {
@@ -71,6 +65,33 @@ function AssistantStep(): JSX.Element {
     if (isMutationRunning(queryClient, SAVE_KEY)) return;
     save.mutate(name.trim());
   };
+
+  if (shown === null) {
+    return (
+      <CenteredScreen
+        title="Your assistant comes with your first account"
+        lead={
+          "The assistant is created when you add your first Provider Account. The web app cannot add one: use the desktop app, or run hercule provider-account create. You can name the assistant then, in Settings\u00a0>\u00a0Assistants."
+        }
+      >
+        <form onSubmit={submit}>
+          {save.isError ? (
+            <p role="alert" className="mb-4 text-fine text-fail">
+              {readErrorMessage(save.error)}
+            </p>
+          ) : null}
+          <Button
+            type="submit"
+            variant="form"
+            disabled={save.isPending}
+            className="w-full justify-center py-2"
+          >
+            Continue
+          </Button>
+        </form>
+      </CenteredScreen>
+    );
+  }
 
   return (
     <CenteredScreen
