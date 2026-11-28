@@ -28,3 +28,26 @@ describe("decodeStdin", () => {
     }
   });
 });
+
+describe("ignoreClosedOutput", () => {
+  /** Installs the handler in a child process, emits one stream error on stdout, and returns the exit code and stderr. */
+  const emitOutputError = async (code: string) => {
+    const script = `
+      import { ignoreClosedOutput } from ${JSON.stringify(new URL("./io.ts", import.meta.url).pathname)};
+      ignoreClosedOutput();
+      process.stdout.emit("error", Object.assign(new Error("boom"), { code: ${JSON.stringify(code)} }));
+    `;
+    const child = Bun.spawn([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe" });
+    return { stderr: await new Response(child.stderr).text(), code: await child.exited };
+  };
+
+  it("ignores a closed pipe", async () => {
+    expect(await emitOutputError("EPIPE")).toEqual({ stderr: "", code: 0 });
+  });
+
+  it("still fails on any other output error, such as a full disk", async () => {
+    const result = await emitOutputError("ENOSPC");
+    expect(result.code).not.toBe(0);
+    expect(result.stderr).toContain("boom");
+  });
+});
