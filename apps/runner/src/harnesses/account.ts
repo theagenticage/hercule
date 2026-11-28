@@ -5,7 +5,7 @@
  * for every harness, because the controller sends the account's own forms of
  * them (spec 06 section 10.4).
  */
-import { mkdirSync } from "node:fs";
+import { lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { HarnessAccount, HarnessHome } from "@hercule/protocol";
 
@@ -21,12 +21,55 @@ export const buildHarnessHomePath = (storageDir: string, harnessHome: HarnessHom
 
 /**
  * Returns the absolute folder of a Harness Home, which it creates with mode
- * 0700 when it is missing.
+ * 0700 when it is missing. Fails when a folder on the way down is a link or
+ * not a folder, with a message that names its path.
+ *
+ * The check walks the components of `harnessHome` one by one, from the
+ * storage directory down, and requires each to be a real folder, not a link.
+ * A link is refused even when it points back inside the storage directory,
+ * because it would make two Provider Accounts share one Harness Home: one
+ * account's login, sessions and probe results would serve the other.
+ *
+ * What this protects against: a link that already stands in the runner's
+ * storage, made by mistake or left by another tool, which every harness would
+ * otherwise follow without a word.
+ *
+ * What it does not protect against:
+ *
+ * - A process of the runner's own user that writes into the storage directory
+ *   while this runs or afterwards. It can already read every Harness Home. It
+ *   can also replace a folder with a link after it was checked, either during
+ *   this walk or before the harness first uses the Home. The check holds only
+ *   while the storage tree stays as it is.
+ * - The storage directory itself and the folders above it. They are the
+ *   runner's own location and may be links on purpose (`/home` on some systems).
+ * - Links inside a Harness Home. What a harness or an adapter keeps there is
+ *   theirs to check.
  */
 export const createHarnessHome = (storageDir: string, harnessHome: HarnessHome): string => {
-  const home = buildHarnessHomePath(storageDir, harnessHome);
-  mkdirSync(home, { recursive: true, mode: 0o700 });
-  return home;
+  mkdirSync(storageDir, { recursive: true, mode: 0o700 });
+  let folder = storageDir;
+  for (const component of harnessHome.split("/")) {
+    folder = join(folder, component);
+    // One level at a time and without `recursive`, so each folder is looked at
+    // right after it is made or found, before the next one is made below it.
+    try {
+      mkdirSync(folder, { mode: 0o700 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+    const stat = lstatSync(folder);
+    if (stat.isSymbolicLink()) {
+      throw new Error(
+        `The Harness Home folder ${folder} is a link, not a real folder. The runner does not ` +
+          "follow links in its storage directory. Remove the link and try again.",
+      );
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`The Harness Home path ${folder} is not a folder. Remove it and try again.`);
+    }
+  }
+  return folder;
 };
 
 /**
