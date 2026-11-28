@@ -173,7 +173,10 @@ export function InboxPaneThing({
                   {link.title}
                 </button>
                 <span className="ib-pane-link-id">{link.identifier}</span>
-                <span className="ib-pane-link-claim">{link.claim}</span>
+                <span className="ib-pane-link-claim">
+                  {link.claim}
+                  {link.lastKnownNote}
+                </span>
               </li>
             ))}
           </ul>

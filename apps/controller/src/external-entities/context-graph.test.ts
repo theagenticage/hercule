@@ -392,6 +392,35 @@ describe("what a place says of itself", () => {
       restricted: true,
     });
   });
+
+  it.each(["inaccessible", "deleted"] as const)(
+    "keeps the last known facts of a ticket above that is %s, and says so, while a project above that is also lost stays restricted",
+    async (reason) => {
+      const outcome = await run((context) =>
+        Effect.gen(function* () {
+          yield* readTrackerGraph(context);
+          for (const ref of [PARENT_TICKET, HARBOUR]) {
+            yield* context.repository.reportMissing({
+              connectionId: TRACKER_ACCOUNT,
+              ref,
+              reason,
+              environment: environment(11),
+            });
+          }
+          return yield* readAbove(context.repository, TICKET, 12);
+        }),
+      );
+      const placeOf = (placeRef: string) => outcome.places.find((one) => one.ref === placeRef)!;
+      expect(placeOf(PARENT_TICKET)).toMatchObject({
+        title: `Title of ${PARENT_TICKET}`,
+        access: reason,
+        restricted: false,
+      });
+      expect(placeOf(HARBOUR)).toMatchObject({ restricted: true });
+      expect(placeOf(HARBOUR)).not.toHaveProperty("title");
+      expect(placeOf(HARBOUR)).not.toHaveProperty("access");
+    },
+  );
 });
 
 describe("turning a plugin off", () => {

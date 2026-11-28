@@ -127,6 +127,7 @@ export function InboxGroupPane({
                   <span className="ib-pane-member-why">
                     {member.why.who === undefined ? null : <b>{member.why.who} </b>}
                     {member.why.rest}
+                    {member.lastKnownNote === undefined ? null : ` · ${member.lastKnownNote}`}
                     {member.why.more > 0 && (
                       <span
                         className="ib-pane-member-more"

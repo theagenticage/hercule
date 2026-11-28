@@ -82,6 +82,14 @@ describe("a relation row", () => {
     expect(screen.getByText("A Quayside shipment you cannot open")).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
   });
+
+  it("draws a thing that lost access with its title and the note that its facts are the last known ones", () => {
+    const row = buildPlaceRow(place({ access: "inaccessible" }));
+    render(<RelationRows rows={[row]} plugins={PLUGINS} />);
+    expect(screen.getByText("Rotterdam depot")).toBeTruthy();
+    expect(screen.getByText("Last known state - you can no longer open it")).toBeTruthy();
+    expect(screen.queryByText(/you cannot open/)).toBeNull();
+  });
 });
 
 describe("RelationRows", () => {

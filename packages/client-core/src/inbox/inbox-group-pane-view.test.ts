@@ -97,6 +97,20 @@ describe("describeInboxGroupPane members", () => {
     expect(view.members[2]?.title).toBe("Issue");
   });
 
+  it("says the title and status of a member that lost access are the last known ones", () => {
+    const lost = peer("github:pull:9", "github/pull-request", {
+      title: "Gone",
+      access: "deleted",
+    });
+    const view = describeInboxGroupPane(detail({ members: [issue, lost] }), context());
+    expect(view.members[0]?.lastKnownNote).toBeUndefined();
+    expect(view.members[1]).toMatchObject({
+      title: "Gone",
+      lastKnownNote: "Last known state - deleted at the source",
+    });
+    expect(view.members[1]?.label).toContain("Last known state - deleted at the source");
+  });
+
   it("says 'waits' for one member, and that the others are not loaded when they have no row", () => {
     const rows = new Map([[pull.ref, askingRow(pull.ref, "2026-11-07T10:00:00.000Z")]]);
     expect(describeInboxGroupPane(detail(), context(rows)).waiting).toBe(

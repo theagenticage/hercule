@@ -211,23 +211,64 @@ describe("links and peers of a detail", () => {
     expect(inbox.peers[0]!.id).toEqual(expect.any(String));
   });
 
-  it("gives a restricted peer only its ref, kind and noun", async () => {
+  it.each(["inaccessible", "deleted"] as const)(
+    "keeps the last known facts of a peer that is %s, and says so",
+    async (reason) => {
+      const inbox = await run(({ repository, reconcile, sql }) =>
+        Effect.gen(function* () {
+          yield* reconcile(TICKET_KIND, [ticket("t1"), ticket("t2", { concerns: [] })], 1);
+          yield* repository.reportMissing({
+            connectionId: ACCOUNT,
+            ref: ticketRef("t2"),
+            reason,
+            environment: environment(2),
+          });
+          yield* insertClaim(sql, { from: ticketRef("t1"), to: ticketRef("t2"), type: "person" });
+          return yield* readDetail(repository, ticketRef("t1"), 3);
+        }),
+      );
+      expect(inbox.peers).toHaveLength(1);
+      expect(inbox.peers[0]).toMatchObject({
+        ref: ticketRef("t2"),
+        title: "Ticket t2",
+        identifier: "T",
+        url: "https://tracker.example/t2",
+        access: reason,
+        restricted: false,
+      });
+    },
+  );
+
+  it("gives a peer that can be read no access", async () => {
     const inbox = await run(({ repository, reconcile, sql }) =>
       Effect.gen(function* () {
         yield* reconcile(TICKET_KIND, [ticket("t1"), ticket("t2", { concerns: [] })], 1);
-        yield* repository.reportMissing({
-          connectionId: ACCOUNT,
-          ref: ticketRef("t2"),
-          reason: "inaccessible",
-          environment: environment(2),
-        });
         yield* insertClaim(sql, { from: ticketRef("t1"), to: ticketRef("t2"), type: "person" });
+        return yield* readDetail(repository, ticketRef("t1"), 2);
+      }),
+    );
+    expect(inbox.peers[0]).not.toHaveProperty("access");
+  });
+
+  it("gives a restricted peer only its ref, kind and noun", async () => {
+    const inbox = await run(({ repository, reconcile, sql }) =>
+      Effect.gen(function* () {
+        yield* reconcile(TICKET_KIND, [ticket("t1")], 1);
+        // A partial record is a place, not a work record. No Connection can read this one.
+        yield* sql`
+          INSERT INTO external_entities (id, ref, kind, noun, pace, completeness, title, first_observed_at, updated_at)
+          VALUES (${uuidFromString("0190c000-0000-7000-8000-0000000000b1")}, ${ticketRef("p1")}, ${TICKET_KIND},
+                  'Ticket', 'context', 'partial', 'P', ${at(1)}, ${at(1)})`;
+        yield* sql`
+          INSERT INTO external_entity_observations (ref, connection_id, access)
+          VALUES (${ticketRef("p1")}, ${uuidFromString(ACCOUNT)}, 'inaccessible')`;
+        yield* insertClaim(sql, { from: ticketRef("t1"), to: ticketRef("p1"), type: "person" });
         return yield* readDetail(repository, ticketRef("t1"), 3);
       }),
     );
     expect(inbox.peers).toEqual([
       {
-        ref: ticketRef("t2"),
+        ref: ticketRef("p1"),
         kind: TICKET_KIND,
         noun: "Ticket",
         yours: false,
@@ -303,9 +344,13 @@ describe("links and peers of a detail", () => {
         return yield* readDetail(repository, ticketRef("t1"), 3);
       }),
     );
-    const restricted = outcome.peers.filter((peer) => peer.restricted).map((peer) => peer.ref);
+    // A full record that lost access is not restricted: it keeps its facts and carries its `access`.
+    const lost = outcome.peers
+      .filter((peer) => peer.access === "inaccessible")
+      .map((peer) => peer.ref);
     expect(outcome.peers).toHaveLength(30);
-    expect(restricted.sort()).toEqual(
+    expect(outcome.peers.some((peer) => peer.restricted)).toBe(false);
+    expect(lost.sort()).toEqual(
       Array.from({ length: 15 }, (_, index) => ticketRef(`p${index * 2 + 1}`)).sort(),
     );
   });

@@ -158,7 +158,8 @@ export interface Thing {
 /**
  * Writes the record of a thing and, for each account, an observation of it
  * that can read it. A `change` lands in the repository `REMOTE`; a `ticket`
- * has none.
+ * has none. With `lostAccess`, the observations cannot read it but still
+ * concern the user, so the thing is on the Inbox with its last known facts.
  */
 export const arrangeThing = (
   controller: SetUpController,
@@ -167,6 +168,7 @@ export const arrangeThing = (
     readonly key: string;
     readonly title: string;
     readonly accounts: ReadonlyArray<string>;
+    readonly lostAccess?: "inaccessible" | "deleted";
   },
 ): Promise<Thing> => {
   const word = fields.kind.slice(fields.kind.indexOf("/") + 1);
@@ -188,8 +190,9 @@ export const arrangeThing = (
                   ${fields.key}, ${fields.title}, ${repository}, ${now}, ${now})`;
         for (const account of fields.accounts) {
           yield* sql`
-            INSERT INTO external_entity_observations (ref, connection_id)
-            VALUES (${ref}, ${uuidFromString(account)})`;
+            INSERT INTO external_entity_observations (ref, connection_id, access, concerns)
+            VALUES (${ref}, ${uuidFromString(account)}, ${fields.lostAccess ?? "ok"},
+                    ${fields.lostAccess === undefined ? "[]" : '["assigned"]'})`;
         }
       }),
     ),
