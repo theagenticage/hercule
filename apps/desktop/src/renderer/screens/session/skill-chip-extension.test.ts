@@ -175,40 +175,26 @@ describe("the work of one edit among many chips", () => {
 
   /**
    * Types one character at the end of the paragraph and returns how many
-   * children of the document the plugin walked past while it ran. The count
-   * is of ProseMirror's own child walks (`Fragment.forEach` and
-   * `Fragment.nodesBetween`), which is how the extension reads the document.
-   * Counting them instead of timing the keystroke gives the same answer on
-   * a busy machine as on a quiet one.
+   * children of a node the plugin walked past with `Fragment.forEach`, the
+   * walk it reads the document with. A pass over the whole document once per
+   * reference, as the extension once did, shows up as a count that grows with
+   * the square of the chips. It is a count, not a time, so a busy machine
+   * gives the same answer as a quiet one. It cannot see work on plain arrays,
+   * which never touches ProseMirror.
    */
   const countWalkedChildren = (editor: Editor): number => {
     let walked = 0;
-    // Both are called with `.call(this, ...)` below, so `this` stays bound.
+    // Called with `.call(this, ...)` below, so `this` stays bound.
     // oxlint-disable-next-line typescript/unbound-method
-    const { forEach, nodesBetween } = Fragment.prototype;
-    Fragment.prototype.forEach = function (this: Fragment, callback) {
-      return forEach.call(this, (...args: Parameters<typeof callback>) => {
-        walked += 1;
-        return callback(...args);
-      });
-    };
-    Fragment.prototype.nodesBetween = function (this: Fragment, from, to, callback, ...rest) {
-      return nodesBetween.call(
-        this,
-        from,
-        to,
-        (...args: Parameters<typeof callback>) => {
-          walked += 1;
-          return callback(...args);
-        },
-        ...rest,
-      );
-    };
+    const { forEach } = Fragment.prototype;
     try {
+      Fragment.prototype.forEach = function (this: Fragment, callback) {
+        walked += this.childCount;
+        return forEach.call(this, callback);
+      };
       editor.view.dispatch(editor.state.tr.insertText("x", editor.state.doc.content.size - 1));
     } finally {
       Fragment.prototype.forEach = forEach;
-      Fragment.prototype.nodesBetween = nodesBetween;
     }
     return walked;
   };
@@ -218,9 +204,8 @@ describe("the work of one edit among many chips", () => {
     const largeCount = 4 * smallCount;
     const small = countWalkedChildren(buildEditor(buildChips(smallCount)));
     const large = countWalkedChildren(buildEditor(buildChips(largeCount)));
-    // A pass over the whole document once per reference, as the extension
-    // once did, walks 16 times as much when the chips are four times as many.
-    // A linear pass walks 4 times as much, so 5 leaves room for a constant.
+    // With four times the chips, a linear pass walks about 4 times as many
+    // children and a pass per reference about 16 times as many.
     expect(large / small).toBeLessThan(5);
   });
 });
