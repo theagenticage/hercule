@@ -160,6 +160,7 @@ export {
   bounded,
   countCharacters,
   cutKeepingEnd,
+  lowerFirst,
 } from "./strings";
 
 export {
@@ -170,6 +171,8 @@ export {
 } from "./agent-text";
 
 export { appendPromptContext, splitPromptContext } from "./prompt-context";
+
+export { describeLostAccess, describeRestrictedThing } from "./restricted-things";
 
 export {
   parseCallbackQuery,

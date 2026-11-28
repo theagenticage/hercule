@@ -4,7 +4,13 @@
  * linked. Each function returns finished words and values from the read of the
  * group (`externalEntity.readInboxGroup`), so the pane only draws them.
  */
-import type { EntityPeer, EntityStatus, InboxGroupDetail, InboxThing } from "@hercule/contract";
+import {
+  describeLostAccess,
+  type EntityPeer,
+  type EntityStatus,
+  type InboxGroupDetail,
+  type InboxThing,
+} from "@hercule/contract";
 import { readEntityPluginId } from "../desk/entity-words";
 import { describeClaim } from "../desk/link-claim";
 import { namePlugin, type PluginName } from "../plugin-names";
@@ -29,6 +35,8 @@ export interface InboxGroupPaneMember {
     /** True when the member asks nothing of the user: the line is quiet. */
     readonly quiet: boolean;
   };
+  /** Present when the member lost access: the words that say its title and status are the last known ones. */
+  readonly lastKnownNote?: string | undefined;
   /** What a screen reader says for the whole entry. */
   readonly label: string;
 }
@@ -117,6 +125,7 @@ const buildMember = (
   context: InboxGroupPaneContext,
 ): InboxGroupPaneMember => {
   const title = peer.title ?? peer.noun;
+  const lastKnownNote = describeLostAccess(peer.access);
   const why: InboxGroupPaneMember["why"] =
     row === undefined
       ? { rest: peer.status?.label ?? peer.noun, more: 0, quiet: true }
@@ -128,7 +137,8 @@ const buildMember = (
     identifier: peer.identifier,
     status: peer.status,
     why: { who: why.who, rest: why.rest, more: why.more, quiet: why.quiet },
-    label: `${title}. ${why.who === undefined ? "" : `${why.who} `}${why.rest}`,
+    lastKnownNote,
+    label: `${title}. ${why.who === undefined ? "" : `${why.who} `}${why.rest}${lastKnownNote === undefined ? "" : `. ${lastKnownNote}`}`,
   };
 };
 

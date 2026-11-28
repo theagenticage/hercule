@@ -7,8 +7,13 @@
  * The lanes use the same shape as the Project lanes, so the board draws them
  * with the same code. Their `outside` field is what tells them apart.
  */
-import type { EntityGrouping, EntityPlace, WorkBoard, WorkCard } from "@hercule/contract";
-import { describeLockedRow } from "../desk/relation-rows";
+import {
+  describeRestrictedThing,
+  type EntityGrouping,
+  type EntityPlace,
+  type WorkBoard,
+  type WorkCard,
+} from "@hercule/contract";
 import { lowerFirst } from "../text";
 import { parsePluginId } from "../plugin-id";
 import { buildLane, type CardPlaces, type WorkLane } from "./lanes";
@@ -49,7 +54,7 @@ export const readPlaceLaneRef = (laneId: string): string | undefined =>
 
 /** Returns the name of a place: its title, or a plain sentence for a place the user cannot read. */
 export const readPlaceName = (place: EntityPlace): string =>
-  place.title ?? describeLockedRow(place);
+  place.title ?? describeRestrictedThing(place.noun);
 
 /** Returns the plural of a noun of the kind table, such as "Project" or "Repository". */
 export const pluralizeNoun = (noun: string): string => {

@@ -1,12 +1,18 @@
 /**
  * Tests that the SQL condition `buildReadableCondition` selects the same
- * things as the TypeScript rule `deriveAccess`, on a migrated database.
+ * things as the TypeScript rule `deriveAccess`, on a migrated database, and
+ * that the restricted places (`isRestrictedPlace`) are the things it leaves out.
  */
 import { describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import { inTransaction, TestDatabase } from "../db/testing";
-import { buildReadableCondition, deriveAccess, type EntityAccess } from "./entity-records";
+import {
+  buildReadableCondition,
+  deriveAccess,
+  isRestrictedPlace,
+  type EntityAccess,
+} from "./entity-records";
 
 const AT = "2026-03-01T00:00:00.000Z";
 const FIRST_CONNECTION = new Uint8Array(16).fill(1);
@@ -71,8 +77,37 @@ describe("the readable condition", () => {
         : [],
     ).sort();
     expect(readable).toEqual(expected);
+    // The rows above have no pace, so none is a work record: each is a place, and a place is
+    // restricted exactly when the condition leaves it out.
+    const restricted = CASES.flatMap((observations, index) =>
+      isRestrictedPlace({
+        isWorkRecord: false,
+        access: deriveAccess(observations.map((access) => ({ access }))),
+      })
+        ? [`acme:ticket:${index}`]
+        : [],
+    ).sort();
+    expect([...readable, ...restricted].sort()).toEqual(
+      CASES.map((_, index) => `acme:ticket:${index}`).sort(),
+    );
     // Guards against both sides being empty or full by accident.
     expect(readable.length).toBeGreaterThan(0);
     expect(readable.length).toBeLessThan(CASES.length);
   });
+});
+
+describe("isRestrictedPlace", () => {
+  it.each([
+    [false, "ok", false],
+    [false, "inaccessible", true],
+    [false, "deleted", true],
+    [true, "ok", false],
+    [true, "inaccessible", false],
+    [true, "deleted", false],
+  ] as const)(
+    "for a record with isWorkRecord %s and access %s answers %s",
+    (isWorkRecord, access, restricted) => {
+      expect(isRestrictedPlace({ isWorkRecord, access })).toBe(restricted);
+    },
+  );
 });

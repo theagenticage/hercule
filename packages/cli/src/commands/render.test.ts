@@ -106,6 +106,28 @@ describe("hercule entity group", () => {
     ]);
   });
 
+  it("says the title of a member that lost access is the last known one", () => {
+    const lines = renderHuman(
+      {
+        kind: "value",
+        value: {
+          labelRef: "acme:ticket:a",
+          label: "Ticket a",
+          members: [{ ...peer("acme:ticket:a", "Ticket a"), access: "inaccessible" }],
+          links: [],
+          complete: true,
+        },
+      },
+      lookUpCommand("entity", "group"),
+      CONTROLLER_URL,
+    );
+
+    expect(lines).toEqual([
+      "group  Ticket a (1 thing)",
+      "  acme:ticket:a  Ticket a  Last known state - you can no longer open it",
+    ]);
+  });
+
   it("says when the group was cut", () => {
     const lines = renderHuman(
       {
