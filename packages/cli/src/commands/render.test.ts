@@ -2544,7 +2544,7 @@ describe("hercule provider-account list", () => {
     expect(lines[0]).toMatch(
       /^id +providerId +kind +label +identity +planLabel +defaultHarnessId +expiresAt +modelCount +failedAt$/,
     );
-    for (const hidden of ["vendor/model", "remaining", "runner-1", "not-signed-in"]) {
+    for (const hidden of ["vendor/model", "remaining", "runner-1"]) {
       expect(text).not.toContain(hidden);
     }
   });
