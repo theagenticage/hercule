@@ -199,30 +199,31 @@ const isObject = (value: unknown): value is JsonObject =>
  * - `Mcp-Method` must equal the method, and for `tools/call`, `Mcp-Name` must
  *   equal the tool's name.
  *
- * A `notifications/cancelled` is exempt from the `_meta` rules, because the
- * protocol lets it carry no `_meta` of its own.
+ * A notification is exempt from the `_meta` rules, because the `2026-07-28`
+ * specification requires that `_meta` on requests only. A notification that
+ * does carry the revision in its `_meta` must still agree with the header.
  */
 export const checkStatelessMetadata = (
   headers: HeaderMap,
-  method: string,
-  params: JsonObject,
+  message: Extract<IncomingMessage, { readonly method: string }>,
 ): RequestRefusal | undefined => {
+  const { method, params } = message;
   const version = headers["mcp-protocol-version"];
   if (version === undefined) return buildHeaderMismatch("MCP-Protocol-Version header is required");
-  const isCancellation = method === "notifications/cancelled";
+  const isNotification = message._tag === "notification";
   const meta = isObject(params["_meta"]) ? params["_meta"] : undefined;
   const claim = meta?.[REVISION_META_KEY];
-  if (!isCancellation && typeof claim !== "string") {
+  if (!isNotification && typeof claim !== "string") {
     return {
       status: 400,
       code: McpSchema.INVALID_PARAMS_ERROR_CODE,
       message: "Required request metadata is missing",
     };
   }
-  if ((!isCancellation || claim !== undefined) && claim !== version) {
+  if ((!isNotification || claim !== undefined) && claim !== version) {
     return buildHeaderMismatch("MCP-Protocol-Version header does not match request metadata");
   }
-  if (!isCancellation && !isObject(meta?.[CLIENT_CAPABILITIES_META_KEY])) {
+  if (!isNotification && !isObject(meta?.[CLIENT_CAPABILITIES_META_KEY])) {
     return {
       status: 400,
       code: McpSchema.INVALID_PARAMS_ERROR_CODE,

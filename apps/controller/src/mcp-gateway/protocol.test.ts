@@ -1,6 +1,12 @@
 /** Tests how the gateway reads a client's message and chooses the revision of a handshake. */
 import { describe, expect, it } from "vitest";
-import { classifyMessage, negotiateStatefulRevision, readStatelessRevision } from "./protocol";
+import {
+  checkStatelessMetadata,
+  classifyMessage,
+  negotiateStatefulRevision,
+  readStatelessRevision,
+  type IncomingMessage,
+} from "./protocol";
 
 describe("classifyMessage", () => {
   it("tells a request from a notification, a response, a batch and nonsense", () => {
@@ -37,5 +43,65 @@ describe("readStatelessRevision", () => {
     ).toBe("2026-07-28");
     expect(readStatelessRevision({})).toBeUndefined();
     expect(readStatelessRevision({ _meta: "x" })).toBeUndefined();
+  });
+});
+
+describe("checkStatelessMetadata", () => {
+  const headers = { "mcp-protocol-version": "2026-07-28" };
+  const revisionMeta = { "io.modelcontextprotocol/protocolVersion": "2026-07-28" };
+  const notification = (
+    method: string,
+    params: Extract<IncomingMessage, { readonly method: string }>["params"] = {},
+  ): Extract<IncomingMessage, { readonly method: string }> => ({
+    _tag: "notification",
+    method,
+    params,
+  });
+
+  it("accepts a notification that carries no _meta, as agy sends notifications/roots/list_changed", () => {
+    for (const method of ["notifications/roots/list_changed", "notifications/cancelled"]) {
+      expect(
+        checkStatelessMetadata({ ...headers, "mcp-method": method }, notification(method)),
+      ).toBeUndefined();
+    }
+  });
+
+  it("still refuses a request that carries no _meta", () => {
+    const refusal = checkStatelessMetadata(
+      { ...headers, "mcp-method": "tools/list" },
+      { _tag: "request", id: 1, method: "tools/list", params: {} },
+    );
+    expect(refusal).toMatchObject({ status: 400, message: "Required request metadata is missing" });
+  });
+
+  it("holds a notification to the version header and to its own method header", () => {
+    const method = "notifications/roots/list_changed";
+    expect(checkStatelessMetadata({}, notification(method))?.message).toBe(
+      "MCP-Protocol-Version header is required",
+    );
+    expect(checkStatelessMetadata(headers, notification(method))?.message).toBe(
+      "Mcp-Method header does not match request method",
+    );
+    expect(
+      checkStatelessMetadata(
+        { "mcp-protocol-version": "2025-11-25", "mcp-method": method },
+        notification(method),
+      )?.message,
+    ).toBe("Unsupported protocol version: 2025-11-25");
+  });
+
+  it("refuses a notification whose _meta names another revision than the header", () => {
+    const method = "notifications/roots/list_changed";
+    const refusal = checkStatelessMetadata(
+      { ...headers, "mcp-method": method },
+      notification(method, { _meta: { "io.modelcontextprotocol/protocolVersion": "2025-11-25" } }),
+    );
+    expect(refusal?.message).toBe("MCP-Protocol-Version header does not match request metadata");
+    expect(
+      checkStatelessMetadata(
+        { ...headers, "mcp-method": method },
+        notification(method, { _meta: revisionMeta }),
+      ),
+    ).toBeUndefined();
   });
 });

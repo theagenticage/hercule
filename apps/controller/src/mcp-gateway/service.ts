@@ -441,7 +441,7 @@ const make = Effect.gen(function* () {
       headers["mcp-protocol-version"] === undefined;
     if (asksWhichRevisions) return dispatch("stateless", caller, state, undefined, message);
     if (isStatelessMessage(headers, message.params)) {
-      const refusal = checkStatelessMetadata(headers, message.method, message.params);
+      const refusal = checkStatelessMetadata(headers, message);
       return refusal === undefined
         ? dispatch("stateless", caller, state, undefined, message)
         : Effect.succeed(respondRefusal(refusal, idOrNull));
