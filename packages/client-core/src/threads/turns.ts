@@ -695,6 +695,8 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
 
   const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
   let openTurnId: string | null = null;
+  // The turns that started since the session's harness last started.
+  let startedTurnIds = new Set<string>();
   const firstMessageItemId = findFirstMessageItemId(rows, agent);
 
   for (const row of rows) {
@@ -703,16 +705,26 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       case "turn.started": {
         findOrStartTurn(event.turnId, event.at).startedAt = event.at;
         openTurnId = event.turnId;
+        startedTurnIds.add(event.turnId);
         break;
       }
       case "turn.completed": {
         const turn = findOrStartTurn(event.turnId, event.at);
         turn.completedAt = event.at;
         turn.endState = event.state;
+        // The controller's rule (spec 06 §6.2): the late end of an earlier
+        // turn is only recorded, and the open turn stays open. A completion of
+        // a turn that never started ends the open turn, so a lost start row
+        // cannot leave a turn open for good.
+        const endsEarlierTurn = startedTurnIds.has(event.turnId) && openTurnId !== event.turnId;
+        if (!endsEarlierTurn) openTurnId = null;
+        break;
+      }
+      case "session.started": {
+        startedTurnIds = new Set();
         openTurnId = null;
         break;
       }
-      case "session.started":
       case "session.exited": {
         openTurnId = null;
         break;
