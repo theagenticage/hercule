@@ -4195,7 +4195,7 @@ const make = Effect.gen(function* () {
         const opensNothing = event._tag === "request.opened" && session.archived !== null;
         if (folded.recordOnly && event._tag === "turn.completed") {
           yield* Effect.logInfo(
-            "Stored the end of an earlier turn and ignored it, because a newer turn of the agent started or the turn had already ended",
+            "Ignored the end of an earlier turn, because a newer turn of the agent started or the turn had already ended",
           ).pipe(
             Effect.annotateLogs({
               runnerId,

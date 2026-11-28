@@ -297,6 +297,12 @@ describe("reading where a turn stands, and an agent's open turn", () => {
     expect(await readOpenTurn([...lateCompletion, completed("s2")])).toBeUndefined();
   });
 
+  it("reads no open turn when the end of a turn the agent never started follows its newest start", async () => {
+    // The connection dropped: the end of s1 and the start of s2 were lost, and
+    // after the reconnect the end of s2 arrived. It ends the agent's turn.
+    expect(await readOpenTurn([started("s1"), completed("s2")])).toBeUndefined();
+  });
+
   it("reads the newest turn as current while it has not ended", async () => {
     expect(await readStanding([started("s1")], "s1")).toBe("current");
     expect(await readStanding([started("s1"), completed("s1"), started("s2")], "s2")).toBe(
