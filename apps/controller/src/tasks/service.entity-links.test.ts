@@ -7,9 +7,10 @@ import { describe, expect, it } from "vitest";
 import { Effect, Layer } from "effect";
 import { TestClock } from "effect/testing";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as Statement from "effect/sql/Statement";
 import type { ExternalRef } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
-import { mintUuid, uuidFromString, withTransaction } from "../db";
+import { mintUuid, uuidFromString, uuidToString, withTransaction } from "../db";
 import { TestDatabase } from "../db/testing";
 import { AuditLogLayer, PlatformEventsLayer } from "../events";
 import { NotifierLayer } from "../notifications";
@@ -91,6 +92,42 @@ describe("the link a Task's provenance writes", () => {
     expect(after.map((link) => link.ref)).toEqual([REF, OTHER_REF]);
     expect(after[0]).toEqual(first[0]);
     expect(after[1]!.linked_at > first[0]!.linked_at).toBe(true);
+  });
+});
+
+describe("listing the refs of many Tasks", () => {
+  it("reads 1,200 Task ids in one statement, Tasks in the order given and refs in link order", async () => {
+    const { statements, links, older, newer } = await run(
+      Effect.gen(function* () {
+        const tasks = yield* TaskService;
+        const repository = yield* taskRepository;
+        const older = yield* createTaskOnRef("Older", THIRD_REF);
+        // Linked a minute later, and sorting before THIRD_REF by name.
+        yield* TestClock.adjust(A_MINUTE);
+        yield* tasks.linkEntity({ id: older.id, ref: REF });
+        const newer = yield* createTaskOnRef("Newer", OTHER_REF);
+        // Ids of Tasks that do not exist, more than one old chunk of 500 apart.
+        const missing = Array.from({ length: 1197 }, () => uuidToString(mintUuid()));
+        const statements: Array<string> = [];
+        const links = yield* repository
+          .listEntityLinks([newer.id, ...missing.slice(0, 600), older.id, ...missing.slice(600)])
+          .pipe(
+            Effect.provideService(Statement.CurrentTransformer, (statement) =>
+              Effect.sync(() => {
+                statements.push(statement.compile()[0]);
+                return statement;
+              }),
+            ),
+          );
+        return { statements, links, older: older.id, newer: newer.id };
+      }),
+    );
+
+    expect(statements).toHaveLength(1);
+    expect([...links]).toEqual([
+      [newer, [OTHER_REF]],
+      [older, [THIRD_REF, REF]],
+    ]);
   });
 });
 

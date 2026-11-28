@@ -655,6 +655,19 @@ describe("the cost of the board read", () => {
     expect(large.statements).toHaveLength(small.statements.length);
     expect(large.statements.some((text) => text.includes("session_stream"))).toBe(false);
   });
+
+  it.each([400, 600, 1200])(
+    "sends the same number of statements for %i Tasks as for 10, however many cards fit",
+    async (count) => {
+      const small = await countStatements(10);
+      const large = await countStatements(count);
+
+      // 1,200 Tasks are more than the board shows: it cuts at MAX_BOARD_CARDS.
+      expect(large.board.cards).toHaveLength(Math.min(count, MAX_BOARD_CARDS));
+      expect(large.statements).toHaveLength(small.statements.length);
+    },
+    30_000,
+  );
 });
 
 const PLUGIN = "acme-tracker";
@@ -996,7 +1009,7 @@ describe("the context of the board", () => {
     expect(() => Schema.encodeSync(WorkBoard)(read)).not.toThrow();
   });
 
-  it("sends the same number of statements for 10 Tasks and for 300 that link things under places", async () => {
+  it("sends the same number of statements for 10 Tasks and for 600 that link things under places", async () => {
     /** Reads a board of `count` Tasks, each linking its own ticket under one project, and returns the statements sent. */
     const countContextStatements = (count: number) =>
       Effect.runPromise(
@@ -1027,11 +1040,11 @@ describe("the context of the board", () => {
       );
 
     const small = await countContextStatements(10);
-    const large = await countContextStatements(300);
+    const large = await countContextStatements(600);
 
-    expect(large.board.cards).toHaveLength(300);
+    expect(large.board.cards).toHaveLength(600);
     expect(large.board.cards.every((card) => card.contextRefs.includes(PROJECT_A))).toBe(true);
-    expect(large.board.places).toHaveLength(301);
+    expect(large.board.places).toHaveLength(601);
     expect(large.statements).toHaveLength(small.statements.length);
   });
 });
