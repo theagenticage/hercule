@@ -15,6 +15,7 @@
  * one-shot command. The child supports `write`, `stdout`, `stderr`, `exited`,
  * `kill` and `end`. `end` closes stdin, which tells pi to exit.
  */
+import { unrecordedFolders } from "../../recorded-folders.testing";
 import { rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -74,6 +75,7 @@ export const buildContext = (
   credentialVariables: ["ZAI_API_KEY"],
   ...(credential === null ? {} : { credential }),
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(home, "claude-plugin") },
+  recordedFolders: unrecordedFolders,
 });
 
 export const SESSION = "0199e0e7-0000-7000-8000-0000000000ff";

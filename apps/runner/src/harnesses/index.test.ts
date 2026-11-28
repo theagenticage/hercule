@@ -4,6 +4,7 @@
  * adapter, so a harness missing from it shows up everywhere in the product as
  * "no adapter in this build".
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Effect, Exit, Scope } from "effect";
@@ -64,6 +65,7 @@ describe("the adapters in this runner build", () => {
         skill: "",
         claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
       },
+      recordedFolders: unrecordedFolders,
       controllerUrl: "https://controller.example:4938",
       baseEnv: { PATH: "/usr/bin" },
       findBinary: () => undefined,

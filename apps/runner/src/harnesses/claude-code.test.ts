@@ -3,6 +3,7 @@
  * stubbed. The fixtures were captured from the real CLI, version 2.1.263; they
  * are not invented.
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import {
   existsSync,
   mkdirSync,
@@ -90,6 +91,7 @@ const CONTEXT: SessionStartContext = {
   modelArgument: "{model}",
   credentialVariables: [],
   herculeTool: HERCULE_TOOL,
+  recordedFolders: unrecordedFolders,
   attachmentUploader: testing.NO_CONTROLLER_UPLOADER,
 };
 

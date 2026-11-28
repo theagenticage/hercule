@@ -39,6 +39,7 @@ import {
 } from "@hercule/protocol";
 import { ANTIGRAVITY_VERSION } from "@hercule/home/version";
 import type { AdapterError, ModelDescriptor } from "@hercule/protocol";
+import { makeRecordedFolders, sweepRecordedFolders } from "../../recorded-folders";
 import type { Run } from "../process";
 import { cleanupHomes, createScratchHome, settle, waitUntil } from "../testing";
 import {
@@ -330,6 +331,21 @@ describe("the login command", () => {
     ]);
     expect(login.endsAtExit).toBe(true);
     expect(login.terminal).toBeUndefined();
+  });
+});
+
+describe("the login command's folder", () => {
+  it("is recorded, so a sign-in that a crash cut short is swept at the next start", async () => {
+    const home = createScratchHome("agy");
+    const recordsDir = createScratchHome("agy-records");
+    const ctx = { ...buildContext(home), recordedFolders: makeRecordedFolders(recordsDir) };
+
+    const login = buildLoginCommand(ctx, BINARY);
+    expect(readdirSync(recordsDir)).toHaveLength(1);
+    await Effect.runPromise(sweepRecordedFolders(recordsDir));
+
+    expect(existsSync(login.scratchFolder!)).toBe(false);
+    expect(readdirSync(recordsDir)).toEqual([]);
   });
 });
 
@@ -918,6 +934,43 @@ describe("closing the scope", () => {
     expect(spawned.hasExited).toBe(true);
     expect(listLogFolders(home)).toEqual([]);
     expect(await Effect.runPromise(signedIn.connection.awaitClosed)).toBeInstanceOf(AcpError);
+  });
+
+  it("leaves the log folder and the temporary folder of a crashed runner for the next start to remove, and nothing else", async () => {
+    const { home, fake } = setUp();
+    const recordsDir = createScratchHome("agy-records");
+    const ctx = { ...buildContext(home), recordedFolders: makeRecordedFolders(recordsDir) };
+    // The folder of a process this runner never made, with a name that fits the pattern.
+    const strangerLog = join(home, "hercule-log-someoneelse");
+    mkdirSync(strangerLog);
+    const scope = Effect.runSync(Scope.make());
+    await Effect.runPromise(
+      Effect.provideService(
+        openSignedInAgy(fake.spawn, ctx, BINARY, {
+          cwd: createScratchHome("agy-work"),
+          handlers: NO_HANDLERS,
+          purpose: { kind: "probe" },
+        }),
+        Scope.Scope,
+        scope,
+      ),
+    );
+    const tempFolder = fake.spawns[0]!.env["TMPDIR"]!;
+    const logFolder = join(
+      home,
+      listLogFolders(home).find((name) => name !== "hercule-log-someoneelse")!,
+    );
+    expect(existsSync(tempFolder)).toBe(true);
+    expect(readdirSync(recordsDir)).toHaveLength(2);
+
+    // The runner crashes here: its scope never closes. The next start sweeps.
+    await Effect.runPromise(sweepRecordedFolders(recordsDir));
+
+    expect(existsSync(tempFolder)).toBe(false);
+    expect(existsSync(logFolder)).toBe(false);
+    expect(existsSync(strangerLog)).toBe(true);
+    expect(readdirSync(recordsDir)).toEqual([]);
+    await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
   it("does the same when the start fails", async () => {

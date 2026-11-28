@@ -12,6 +12,7 @@
  * temporary one. So those tests use the developer's own login, spend a few
  * tokens, and run only when opted in.
  */
+import { unrecordedFolders } from "../recorded-folders.testing";
 import {
   existsSync,
   mkdirSync,
@@ -159,6 +160,7 @@ describe.skipIf(binary === undefined)("the real Claude adapter on this machine",
         modelArgument: "{model}",
         credentialVariables: [],
         herculeTool: prepareTool(),
+        recordedFolders: unrecordedFolders,
       };
 
       const started = Date.now();
@@ -252,6 +254,7 @@ const authed =
               modelArgument: "{model}",
               credentialVariables: [],
               herculeTool: prepareTool(),
+              recordedFolders: unrecordedFolders,
             },
             { readUsage: false },
           ),
@@ -376,6 +379,7 @@ const buildContext = (
   modelArgument: "{model}",
   credentialVariables: [],
   herculeTool,
+  recordedFolders: unrecordedFolders,
 });
 
 /**
@@ -857,6 +861,7 @@ describe.skipIf(binary === undefined)("User Material in a real Claude Code sessi
       modelArgument: "{model}",
       credentialVariables: [],
       herculeTool: prepareTool(),
+      recordedFolders: unrecordedFolders,
       ...(session.thread ? { userMaterial: NO_USER_MATERIAL, librarySkillsFolder } : {}),
       ...(repository === undefined
         ? {}
@@ -1031,6 +1036,7 @@ describe.skipIf(binary === undefined)(
           modelArgument: "{model}",
           credentialVariables: [],
           herculeTool: prepareTool(),
+          recordedFolders: unrecordedFolders,
         };
 
         try {
@@ -1172,6 +1178,7 @@ describe.skipIf(binary === undefined)("the workspace root in a real Claude Code 
       modelArgument: "{model}",
       credentialVariables: [],
       herculeTool: prepareTool(),
+      recordedFolders: unrecordedFolders,
       repositorySkillsFolders,
     };
     const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };
@@ -1452,6 +1459,7 @@ describe.skipIf(binary === undefined)(
         modelArgument: "{model}",
         credentialVariables: [],
         herculeTool: prepareTool(),
+        recordedFolders: unrecordedFolders,
         sessionSkillsFolder: join(root, "session-skills"),
         ...(listCheckouts ? { checkoutPaths: [web, join(workspaceRoot, "api")] } : {}),
       };
@@ -1613,6 +1621,7 @@ describe.skipIf(binary === undefined)("full-access in a real Claude Code session
       modelArgument: "{model}",
       credentialVariables: [],
       herculeTool: prepareTool(),
+      recordedFolders: unrecordedFolders,
     };
     mkdirSync(context.home);
     // A workspace id makes the adapter load the project's settings.
@@ -1955,6 +1964,7 @@ const replayFixture = async (
           skill: "",
           claudePluginDir: "/var/hercule/runner/storage/claude-plugin",
         },
+        recordedFolders: unrecordedFolders,
       },
     ),
   );
@@ -2520,6 +2530,7 @@ describe.skipIf(binary === undefined)(
           modelArgument: "{model}",
           credentialVariables: [],
           herculeTool: prepareTool(),
+          recordedFolders: unrecordedFolders,
           repositorySkillsFolders: [pluginFolder],
         };
         const spec: SessionSpec = { ...SPEC, workspaceId: "0199e0e7-0000-7000-8000-00000000000b" };

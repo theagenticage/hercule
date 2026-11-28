@@ -3,6 +3,7 @@
  * way the call can end becomes an outcome, that the call's scratch directory is
  * removed on every path, and that no more than the limit run at once.
  */
+import { unrecordedFolders } from "./recorded-folders.testing";
 import {
   chmodSync,
   existsSync,
@@ -88,6 +89,7 @@ const buildContext = (binary: string | undefined): HarnessRunnerContext => ({
   modelArgument: "{model}",
   credentialVariables: [],
   herculeTool: { orientation: "", skill: "", claudePluginDir: join(scratchDir, "claude-plugin") },
+  recordedFolders: unrecordedFolders,
 });
 
 /** Builds the function under test around `adapter`. */

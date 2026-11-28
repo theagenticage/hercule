@@ -29,6 +29,7 @@ import {
   type RepositorySkillListing,
   type SessionSkillsFolders,
 } from "../skills";
+import type { RecordedFolders } from "../recorded-folders";
 import { provisionUserMaterial } from "../user-material";
 import { takeInitialState, type InitialState } from "./checkout-edits";
 import { buildSessionCheckouts, type SessionCheckout } from "./edited-files";
@@ -61,6 +62,8 @@ export interface Machine {
   readonly binDir: string;
   /** The skill and the Claude plugin directory, prepared once at runner start (spec 06 section 9.3). */
   readonly herculeTool: HarnessRunnerContext["herculeTool"];
+  /** The record of the folders harness adapters make for their processes. */
+  readonly recordedFolders: RecordedFolders;
   /** What a session reads as `HERCULE_API_URL`. */
   readonly controllerUrl: string;
   /** The runner's own environment. A session's environment is built on top of it. */
@@ -410,6 +413,7 @@ export const resolveSessionContext = (
             ? {}
             : { credential: frame.harnessAccount.credential }),
           herculeTool: machine.herculeTool,
+          recordedFolders: machine.recordedFolders,
           attachmentsDir,
           mcpServers,
           attachmentUploader: machine.attachmentUploader,
