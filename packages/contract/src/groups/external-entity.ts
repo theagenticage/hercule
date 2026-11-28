@@ -303,6 +303,12 @@ export const EntityPeer = Schema.Struct({
   status: Schema.optionalKey(EntityStatus),
   /** True when any observing Connection reported the thing as owned by the user. Always false when `restricted`. */
   yours: Schema.Boolean,
+  /**
+   * Present only for a full record of a work kind that no Connection can read
+   * now (`inaccessible` or `deleted`). It is not restricted: it keeps its last
+   * known facts, and its row says they are last known.
+   */
+  access: Schema.optionalKey(Schema.Literals(["inaccessible", "deleted"])),
   restricted: Schema.Boolean,
   /** The latest change at the source, when there is one. Absent when `restricted`. */
   latestChange: Schema.optionalKey(EntityChange),

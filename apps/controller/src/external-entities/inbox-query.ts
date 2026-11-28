@@ -25,6 +25,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   createValidationError,
+  describeRestrictedThing,
   MAX_ENTITY_SIGNALS,
   MAX_GRAPH_EDGES,
   MAX_INBOX_ACCOUNTS,
@@ -58,7 +59,6 @@ import { sessionRepository } from "../sessions";
 import { signalRepository } from "../signals";
 import type { RegisteredSavedQuery, RegisteredSignalKind } from "../plugins";
 import {
-  buildLockedLabel,
   buildReadableCondition,
   deriveAccess,
   deriveObservedAt,
@@ -460,7 +460,7 @@ const buildFacets = (
         label:
           row.title ??
           facet.enumLabels?.get(row.value) ??
-          (facet.contextKind === undefined ? row.value : buildLockedLabel(row.noun)),
+          (facet.contextKind === undefined ? row.value : describeRestrictedThing(row.noun)),
         count: row.n,
         ...(health === undefined ? {} : { health }),
       };
@@ -1416,7 +1416,7 @@ export const externalEntityInbox = Effect.gen(function* () {
             );
       const buildPinLabel = (pin: InboxRailSettings["pins"][number]): string => {
         const record = records.get(pin.value);
-        if (record !== undefined) return record.title ?? buildLockedLabel(record.noun);
+        if (record !== undefined) return record.title ?? describeRestrictedThing(record.noun);
         const enumLabel = declared
           .filter((field) => field.key === pin.key && parseSourceOfKind(field.kind) === pin.source)
           .flatMap((field) => field.enumValues ?? [])

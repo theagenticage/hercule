@@ -4,6 +4,7 @@
  *
  * - two linked things on the Inbox are one group, with the link that joins them;
  * - a thing on the Inbox that is linked to nothing is a group of one;
+ * - a thing that lost access keeps its last known title as the label;
  * - a thing that is not on the Inbox is refused with `not_found`.
  */
 import { describe, expect, it } from "vitest";
@@ -84,6 +85,29 @@ describe("readInboxGroup", () => {
         complete: true,
       });
       expect(group.members.map((member) => member.ref)).toEqual([thing.ref]);
+    });
+  });
+
+  it("titles the group of a thing that lost access with its last known title, and says so on its member", async () => {
+    await withNorthwind(async (controller) => {
+      const { base, token } = controller;
+      // A full record that lost access (spec 20 section 1.3) is not a restricted place.
+      const account = await createAccount(controller, "bot");
+      const thing = await arrangeThing(controller, {
+        kind: TICKET_KIND,
+        key: "WEB-1",
+        title: "Lost",
+        accounts: [account],
+        lostAccess: "inaccessible",
+      });
+
+      const response = await post(base, GROUP, { ref: thing.ref }, token);
+      expect(response.status, await response.clone().text()).toBe(200);
+      const group = (await response.json()) as InboxGroupDetail;
+      expect(group).toMatchObject({ labelRef: thing.ref, label: "Lost" });
+      expect(group.members).toMatchObject([
+        { ref: thing.ref, title: "Lost", access: "inaccessible", restricted: false },
+      ]);
     });
   });
 

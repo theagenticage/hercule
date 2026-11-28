@@ -11,7 +11,6 @@ import {
   buildLinkedRows,
   buildPeerRow,
   buildPlaceRow,
-  describeLockedRow,
   indexRelationGraph,
   readAncestorRows,
 } from "./relation-rows";
@@ -153,17 +152,39 @@ describe("the URL of a row", () => {
   });
 });
 
-describe("describeLockedRow", () => {
-  it.each([
-    ["Sentry", "Error", "A Sentry error you cannot open"],
-    ["Asana", "Task", "An Asana task you cannot open"],
-    ["GitHub", "PR", "A GitHub PR you cannot open"],
-    [undefined, "Project", "A project you cannot open"],
-    [undefined, "Issue", "An issue you cannot open"],
-    [undefined, "PR", "A PR you cannot open"],
-  ])("words a %s %s with the right article and no title", (pluginName, noun, words) => {
-    const row = buildPlaceRow(place(SITE, "x", { noun, restricted: true }));
-    expect(row.isLocked && describeLockedRow(row, pluginName)).toBe(words);
+describe("a thing that lost access", () => {
+  const peer: EntityPeer = {
+    ref: ROUND_A,
+    kind: "quayside/round",
+    noun: "Delivery round",
+    title: "Round A",
+    yours: false,
+    restricted: false,
+  };
+
+  it("keeps its title and carries the note that its facts are the last known ones", () => {
+    expect(buildPlaceRow(place(ROUND_A, "Round A", { access: "inaccessible" }))).toMatchObject({
+      isLocked: false,
+      title: "Round A",
+      lastKnownNote: "Last known state - you can no longer open it",
+    });
+    expect(buildPeerRow({ ...peer, access: "deleted" })).toMatchObject({
+      isLocked: false,
+      title: "Round A",
+      lastKnownNote: "Last known state - deleted at the source",
+    });
+  });
+
+  it("carries no note when the thing can be read", () => {
+    expect(buildPlaceRow(place(ROUND_A, "Round A"))).not.toHaveProperty("lastKnownNote");
+    expect(buildPeerRow(peer)).not.toHaveProperty("lastKnownNote");
+  });
+
+  it("is a locked row, with no title, only when it is restricted", () => {
+    expect(buildPlaceRow(place(ROUND_A, "x", { restricted: true }))).toMatchObject({
+      isLocked: true,
+    });
+    expect(buildPeerRow({ ...peer, restricted: true })).toMatchObject({ isLocked: true });
   });
 });
 
