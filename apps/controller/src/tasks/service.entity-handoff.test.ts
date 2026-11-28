@@ -402,7 +402,7 @@ describe("reverseEntityHandoff", () => {
     [
       "it was edited",
       (taskId: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: taskId, title: "Renamed" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId, title: "Renamed" })),
       "edited",
     ],
     [
@@ -414,7 +414,7 @@ describe("reverseEntityHandoff", () => {
     [
       "its stage was set to the one it has",
       (taskId: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: taskId, stage: "building" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId, stage: "building" })),
       "moved",
     ],
     [

@@ -1890,7 +1890,7 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Updates the task `input.taskId` and returns it as stored. The `task.updated` event lists
+     * Updates a task and returns it as stored. The `task.updated` event lists
      * what changed.
      *
      * A patch that sets no field, or sets both `stage` and `status`, fails to

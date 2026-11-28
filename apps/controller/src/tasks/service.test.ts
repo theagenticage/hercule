@@ -649,13 +649,18 @@ describe("provenance", () => {
             tasks.create(castMalformedInput({ title: "t", description: "d", provenance: [{}] })),
           ),
           onUpdate: yield* Effect.flip(
-            tasks.update(castMalformedInput({ id: created.id, provenance: [{}] })),
+            tasks.update(castMalformedInput({ taskId: created.id, provenance: [{}] })),
           ),
         };
       }),
     );
     expect(onCreate).toMatchObject({ error: { code: "validation" } });
-    expect(onUpdate).toMatchObject({ error: { code: "validation" } });
+    expect(onUpdate).toMatchObject({
+      error: {
+        code: "validation",
+        details: { issues: [{ path: ["provenance", "0"] }] },
+      },
+    });
   });
 
   it("records a handoff on a task that exists in one task.updated, and returns the entry on read", async () => {
@@ -779,7 +784,10 @@ describe("provenance", () => {
         );
         const updateError = yield* Effect.flip(
           tasks.update(
-            castMalformedInput({ id: created.id, provenance: [{ signalId: SIGNAL_ID }] }),
+            castMalformedInput({
+              taskId: created.id,
+              provenance: [{ ref: ISSUE_REF, signalId: SIGNAL_ID }],
+            }),
           ),
         );
         return { created, createError, updateError };
@@ -788,7 +796,12 @@ describe("provenance", () => {
     expect(created.id).not.toBe(HANDOFF_TASK_ID);
     expect(created.status).toBe("open");
     expect(createError).toMatchObject({ error: { code: "validation" } });
-    expect(updateError).toMatchObject({ error: { code: "validation" } });
+    expect(updateError).toMatchObject({
+      error: {
+        code: "validation",
+        details: { issues: [{ path: ["provenance", "0", "signalId"] }] },
+      },
+    });
   });
 
   it("sets at and actor itself", async () => {

@@ -408,13 +408,13 @@ describe("the failure a Task shows", () => {
       "Done",
       "task-finished",
       (taskId: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: taskId, stage: "done" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId, stage: "done" })),
     ],
     [
       "Drop",
       "task-finished",
       (taskId: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: taskId, stage: "dropped" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId, stage: "dropped" })),
     ],
     [
       "a delete",

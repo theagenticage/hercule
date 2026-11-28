@@ -55,7 +55,7 @@ const landByFact = (taskId: string, factId: number) =>
   Effect.gen(function* () {
     yield* TestClock.adjust(A_MINUTE);
     const tasks = yield* TaskService;
-    return yield* tasks.update({ taskId: taskId, stage: "landed", stageFactId: factId });
+    return yield* tasks.update({ taskId, stage: "landed", stageFactId: factId });
   });
 
 const MERGED = {

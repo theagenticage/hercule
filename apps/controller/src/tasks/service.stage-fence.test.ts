@@ -190,7 +190,7 @@ const deliverFact = (
     const tasks = yield* TaskService;
     const { by = "run", ...fields } = options;
     return yield* tasks
-      .update({ taskId: taskId, stage, stageFactId: factId, ...fields })
+      .update({ taskId, stage, stageFactId: factId, ...fields })
       .pipe(Effect.provideService(CurrentActor, ACTORS[by]));
   });
 
