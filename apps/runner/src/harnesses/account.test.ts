@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -18,6 +18,69 @@ describe("the Harness Home on this machine", () => {
     expect(statSync(home).mode & 0o777).toBe(0o700);
     // A second call finds the folder and keeps it.
     expect(createHarnessHome(storage, "providers/homes/acct-1/pi/pi")).toBe(home);
+  });
+});
+
+describe("a Harness Home that is a link or sits below one", () => {
+  const HOME = "providers/homes/acct-1/pi/pi";
+  const makeStorage = (): string => {
+    const storage = mkdtempSync(join(tmpdir(), "hercule-home-"));
+    scratch.push(storage);
+    return storage;
+  };
+
+  it("is refused when the Home itself is a link to another account's Home", () => {
+    const storage = makeStorage();
+    mkdirSync(join(storage, "providers/homes/acct-2/pi/pi"), { recursive: true });
+    mkdirSync(join(storage, "providers/homes/acct-1/pi"), { recursive: true });
+    symlinkSync(join(storage, "providers/homes/acct-2/pi/pi"), join(storage, HOME));
+    expect(() => createHarnessHome(storage, HOME)).toThrow(
+      `The Harness Home folder ${join(storage, HOME)} is a link to ${join(storage, "providers/homes/acct-2/pi/pi")}`,
+    );
+  });
+
+  it.each([
+    ["providers", "providers"],
+    ["homes", "providers/homes"],
+    ["the account folder", "providers/homes/acct-1"],
+    ["the harness plugin folder", "providers/homes/acct-1/pi"],
+  ])("is refused when %s is a link, and nothing is created below it", (_name, linkPath) => {
+    const storage = makeStorage();
+    const elsewhere = mkdtempSync(join(tmpdir(), "hercule-elsewhere-"));
+    scratch.push(elsewhere);
+    const parent = join(storage, linkPath, "..");
+    mkdirSync(parent, { recursive: true });
+    symlinkSync(elsewhere, join(storage, linkPath));
+    expect(() => createHarnessHome(storage, HOME)).toThrow(
+      `folder ${join(storage, linkPath)} is a link`,
+    );
+    expect(statSync(elsewhere).isDirectory()).toBe(true);
+    expect(() => statSync(join(elsewhere, "pi"))).toThrow();
+  });
+
+  it("is refused when the link points back inside the storage directory", () => {
+    const storage = makeStorage();
+    mkdirSync(join(storage, "providers/other/pi/pi"), { recursive: true });
+    symlinkSync(join(storage, "providers/other"), join(storage, "providers/homes"));
+    expect(() => createHarnessHome(storage, HOME)).toThrow("is a link");
+  });
+
+  it("is refused when a component is a file", () => {
+    const storage = makeStorage();
+    mkdirSync(join(storage, "providers/homes"), { recursive: true });
+    writeFileSync(join(storage, "providers/homes/acct-1"), "");
+    expect(() => createHarnessHome(storage, HOME)).toThrow(
+      `${join(storage, "providers/homes/acct-1")} is a file, not a folder`,
+    );
+  });
+
+  it("accepts a storage directory that is itself behind a link", () => {
+    const real = makeStorage();
+    const holder = mkdtempSync(join(tmpdir(), "hercule-link-"));
+    scratch.push(holder);
+    const linked = join(holder, "storage");
+    symlinkSync(real, linked);
+    expect(createHarnessHome(linked, HOME)).toBe(join(linked, HOME));
   });
 });
 
