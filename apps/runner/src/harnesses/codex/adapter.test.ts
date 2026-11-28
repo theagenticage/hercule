@@ -4517,6 +4517,22 @@ describe("a session whose app-server exits", () => {
       .map((event) => event._tag);
     expect(order).toEqual([...Array<string>(12).fill("item.completed"), "session.exited"]);
   });
+
+  it("stops an app-server whose output cannot be read, and gives the cause as the exit message", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.failRead("A line is longer than 10 characters, the limit for one line.");
+
+    await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
+    // Without the stop, the app-server would keep running with nobody reading it.
+    expect(run.spawns[0]!.kills()).toBeGreaterThan(0);
+    const exited = filterByTag(run.seen, "session.exited")[0]!;
+    expect(exited.reason).toBe("process_exit");
+    expect(exited.message).toBe(
+      "reading the app-server's output failed: A line is longer than 10 characters, the limit for one line.",
+    );
+  });
 });
 
 /** The reply to `account/rateLimits/read` for a Plus account, shaped like `GetAccountRateLimitsResponse`. */

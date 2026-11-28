@@ -198,6 +198,11 @@ interface RunningAgent {
   readonly state: Normalizing;
   /** How many levels below the session's own agent this agent runs: 0 for the session's own. */
   readonly depth: number;
+  /**
+   * Why pi's output could not be read, once that has happened. It is reported
+   * with pi's last error output when pi's process ends.
+   */
+  readFailure?: string;
 }
 
 /** A subagent: an agent that another agent of the session started with its `subagent` tool. */
@@ -1289,7 +1294,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     const state = buildSubagentState(held.root.state, subagentId);
     const subagent: Subagent = {
       child,
-      rpc: makeRpc(child, (line, frame) => onLine(held, subagent, line, frame)),
+      rpc: makeRpc(
+        child,
+        (line, frame) => onLine(held, subagent, line, frame),
+        (message) => void (subagent.readFailure = message),
+      ),
       state,
       depth,
       subagentId,
@@ -1569,6 +1578,10 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         // already read are still worth reporting.
       }
     })();
+    // The read failure comes first: it is Hercule's own account of why pi was
+    // stopped, and the error output after it is pi's.
+    const describeFailure = (): string =>
+      [...(agent.readFailure === undefined ? [] : [agent.readFailure]), ...complaints].join("\n");
     const onChildGone = async (code: number | undefined): Promise<void> => {
       // `stopSession` waits for this exit and reports its own reason. A pi
       // that exited by itself has nobody else to report it.
@@ -1576,7 +1589,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
       // pi's last stderr lines can still be in the pipe when the exit arrives.
       // Wait for them, so a crash is reported with its reason.
       await drained;
-      const message = code === 0 ? "" : complaints.join("\n");
+      const message = code === 0 ? "" : describeFailure();
       if (!isSubagent(agent)) {
         if (held.startup._tag === "checking") {
           held.startup = { _tag: "exited", message };
@@ -1596,7 +1609,7 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
     void child.exited.then(onChildGone, () => onChildGone(undefined));
     return async () => {
       await drained;
-      return complaints.join("\n");
+      return describeFailure();
     };
   };
 
@@ -1952,29 +1965,39 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
           const reportUnknownMessage = yield* captureUnknownItemReporter("Pi", id);
           const agent: RunningAgent = {
             child,
-            rpc: makeRpc(child, (line, frame) => {
-              const violation = findTextGenerationViolation(frame);
-              if (violation !== undefined) {
-                Deferred.doneUnsafe(
-                  settled,
-                  Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message: violation }),
-                );
-                return;
-              }
-              for (const event of normalize(agent.state, line, frame)) {
-                if (event._tag === "turn.completed") {
-                  Deferred.doneUnsafe(settled, Effect.succeed(decideTextGenerationOutcome(event)));
+            rpc: makeRpc(
+              child,
+              (line, frame) => {
+                const violation = findTextGenerationViolation(frame);
+                if (violation !== undefined) {
+                  Deferred.doneUnsafe(
+                    settled,
+                    Effect.succeed<TextGenerationOutcome>({
+                      outcome: "failed",
+                      message: violation,
+                    }),
+                  );
+                  return;
                 }
-              }
-              // A model that keeps sending answers the schema rejects would
-              // otherwise run until the deadline.
-              if (
-                agent.state.refusedAnswers >= MAX_REFUSED_ANSWERS &&
-                agent.state.endedBySystem === undefined
-              ) {
-                Effect.runFork(abortTurn(agent, "schema"));
-              }
-            }),
+                for (const event of normalize(agent.state, line, frame)) {
+                  if (event._tag === "turn.completed") {
+                    Deferred.doneUnsafe(
+                      settled,
+                      Effect.succeed(decideTextGenerationOutcome(event)),
+                    );
+                  }
+                }
+                // A model that keeps sending answers the schema rejects would
+                // otherwise run until the deadline.
+                if (
+                  agent.state.refusedAnswers >= MAX_REFUSED_ANSWERS &&
+                  agent.state.endedBySystem === undefined
+                ) {
+                  Effect.runFork(abortTurn(agent, "schema"));
+                }
+              },
+              (message) => void (agent.readFailure = message),
+            ),
             state: buildNormalizingState(
               id,
               id,
@@ -1994,7 +2017,9 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
                     settled,
                     Effect.succeed<TextGenerationOutcome>({
                       outcome: "failed",
-                      message: "pi exited before it answered",
+                      // Unlike pi's error output, a read failure is Hercule's own
+                      // text and holds no credential.
+                      message: agent.readFailure ?? "pi exited before it answered",
                     }),
                   ),
                 ),
@@ -2135,7 +2160,11 @@ export const makePiAdapter = (seam: PiSeam): HarnessAdapter => {
         };
         const root: RunningAgent = {
           child,
-          rpc: makeRpc(child, (line, frame) => onLine(held, root, line, frame)),
+          rpc: makeRpc(
+            child,
+            (line, frame) => onLine(held, root, line, frame),
+            (message) => void (root.readFailure = message),
+          ),
           state,
           depth: 0,
         };

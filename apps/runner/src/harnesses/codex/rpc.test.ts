@@ -17,6 +17,11 @@ interface Peer {
   readonly warnings: Array<string>;
   readonly serverRequests: Array<{ readonly id: string | number; readonly method: string }>;
   readonly notifications: Array<{ readonly method: string; readonly params: unknown }>;
+  /** The causes the codec reported when reading the output failed. */
+  readonly readErrors: Array<string>;
+  /** Makes reading the output fail, after the lines already answered. */
+  readonly failRead: (error: Error) => void;
+  readonly end: () => void;
 }
 
 const createPeer = (): Peer => {
@@ -25,6 +30,7 @@ const createPeer = (): Peer => {
   const warnings: Array<string> = [];
   const serverRequests: Array<{ readonly id: string | number; readonly method: string }> = [];
   const notifications: Array<{ readonly method: string; readonly params: unknown }> = [];
+  const readErrors: Array<string> = [];
   const rpc = makeRpc(
     {
       write: (text: string) => void writes.push(text),
@@ -34,9 +40,20 @@ const createPeer = (): Peer => {
       onServerRequest: (frame) => void serverRequests.push(frame),
       onNotification: (frame) => void notifications.push(frame),
       onWarning: (message) => void warnings.push(message),
+      onReadError: (message) => void readErrors.push(message),
     },
   );
-  return { rpc, writes, answer: stdout.push, warnings, serverRequests, notifications };
+  return {
+    rpc,
+    writes,
+    answer: stdout.push,
+    warnings,
+    serverRequests,
+    notifications,
+    readErrors,
+    failRead: stdout.fail,
+    end: stdout.end,
+  };
 };
 
 const WAIT_MS = 5_000;
@@ -67,6 +84,7 @@ const createDeafPeer = (): Peer => {
       onServerRequest: () => undefined,
       onNotification: () => undefined,
       onWarning: (message) => void warnings.push(message),
+      onReadError: () => undefined,
     },
   );
   return {
@@ -76,6 +94,9 @@ const createDeafPeer = (): Peer => {
     warnings,
     serverRequests: [],
     notifications: [],
+    readErrors: [],
+    failRead: stdout.fail,
+    end: stdout.end,
   };
 };
 
@@ -284,5 +305,38 @@ describe("a peer that sends bad lines or never replies", () => {
     );
 
     expect(String(JSON.stringify(failure))).toContain("nope/nothing");
+  });
+});
+
+describe("an output that cannot be read", () => {
+  it("reports the cause once and fails the requests that wait, instead of treating it as a closed pipe", async () => {
+    const peer = createPeer();
+
+    const failure = await Effect.runPromise(
+      Effect.gen(function* () {
+        const pumping = yield* Effect.forkChild(peer.rpc.pump);
+        const asked = yield* Effect.forkChild(Effect.flip(peer.rpc.request("initialize", {})));
+        yield* waitUntil("wrote the request", () => peer.writes.length === 1);
+
+        peer.failRead(new Error("A line is longer than 10 characters, the limit for one line."));
+
+        yield* Fiber.join(pumping);
+        return yield* Fiber.join(asked);
+      }),
+    );
+
+    expect(peer.readErrors).toEqual([
+      "reading the app-server's output failed: A line is longer than 10 characters, the limit for one line.",
+    ]);
+    expect(failure.message).toContain("exited or closed its output");
+  });
+
+  it("reports nothing when the output simply ends", async () => {
+    const peer = createPeer();
+
+    peer.end();
+    await Effect.runPromise(peer.rpc.pump);
+
+    expect(peer.readErrors).toEqual([]);
   });
 });

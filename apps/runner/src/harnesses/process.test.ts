@@ -12,6 +12,7 @@ import { Duration, Effect } from "effect";
 import {
   isExecutableNotFound,
   killProcessesHolding,
+  MAX_LINE_LENGTH,
   spawnCheckedFramed,
   splitLines,
   stopChild,
@@ -226,9 +227,12 @@ const streamOf = (chunks: ReadonlyArray<Uint8Array | string>): ReadableStream<Ui
   });
 };
 
-const readLines = async (stream: ReadableStream<Uint8Array>): Promise<Array<string>> => {
+const readLines = async (
+  stream: ReadableStream<Uint8Array>,
+  maxLength?: number,
+): Promise<Array<string>> => {
   const lines: Array<string> = [];
-  for await (const line of splitLines(stream)) lines.push(line);
+  for await (const line of splitLines(stream, maxLength)) lines.push(line);
   return lines;
 };
 
@@ -252,5 +256,51 @@ describe("splitting a stream into lines", () => {
     const chunks = Array.from({ length: 2000 }, () => "x".repeat(1000));
     const lines = await readLines(streamOf([...chunks, "\nnext\n"]));
     expect(lines.map((line) => line.length)).toEqual([2_000_000, 4]);
+  });
+
+  it("accepts a line of exactly the limit and fails on one longer", async () => {
+    expect(await readLines(streamOf(["x".repeat(10), "\n"]), 10)).toEqual(["x".repeat(10)]);
+    await expect(readLines(streamOf(["x".repeat(10), "x\n"]), 10)).rejects.toThrow(
+      "longer than 10 characters",
+    );
+  });
+
+  it("fails on a line with no newline that grows past the limit over many chunks", async () => {
+    const chunks = Array.from({ length: 20 }, () => "x");
+    // The line never ends, so a reader that waited for the newline would hold all of it.
+    await expect(readLines(streamOf(chunks), 10)).rejects.toThrow("longer than 10 characters");
+  });
+
+  it("counts each line of a chunk alone, so many short lines are not too long together", async () => {
+    expect(await readLines(streamOf(["aaaa\nbbbb\ncccc\n"]), 5)).toEqual(["aaaa", "bbbb", "cccc"]);
+  });
+});
+
+describe("the limit on a line from a spawned harness", () => {
+  /** The number of characters one real harness line may have in these tests: `MAX_LINE_LENGTH` plus one. */
+  const OVER_THE_LIMIT = MAX_LINE_LENGTH + 1;
+  const writeLongLine = (stream: "stdout" | "stderr"): Array<string> => [
+    "bun",
+    "-e",
+    `process.${stream}.write("x".repeat(${OVER_THE_LIMIT}) + "\\n" + "after\\n")`,
+  ];
+
+  it("fails the reader of stdout on a line over the limit", async () => {
+    const child = spawnCheckedFramed(writeLongLine("stdout"), process.env);
+    await expect(
+      (async () => {
+        for await (const line of child.stdout) void line;
+      })(),
+    ).rejects.toThrow("is longer than");
+    child.kill();
+    await child.exited;
+  });
+
+  it("does not limit stderr, which an adapter reads only for its last lines", async () => {
+    const child = spawnCheckedFramed(writeLongLine("stderr"), process.env);
+    const lengths: Array<number> = [];
+    for await (const line of child.stderr) lengths.push(line.length);
+    expect(lengths).toEqual([OVER_THE_LIMIT, "after".length]);
+    await child.exited;
   });
 });

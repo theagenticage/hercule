@@ -11,7 +11,7 @@
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import type { FramedChild } from "../process";
+import { stopChild, type FramedChild } from "../process";
 
 /**
  * pi's stdio, split into lines, because a frame split across two reads cannot
@@ -61,8 +61,9 @@ export interface PiRpc {
     deadline?: Duration.Duration,
   ) => Effect.Effect<Record<string, unknown>, PiRpcFailure>;
   /**
-   * Reads pi's stdout until it closes. No response reaches `send` until this
-   * is running.
+   * Reads pi's stdout until it closes or cannot be read. No response reaches
+   * `send` until this is running. When the output cannot be read, for example
+   * because a line is too long, pi is stopped and `onReadError` gets the cause.
    */
   readonly pump: Effect.Effect<void>;
 }
@@ -119,6 +120,12 @@ export const makeRpc = (
    * that is not JSON, `frame` is undefined.
    */
   onLine: (line: string, frame: unknown) => void,
+  /**
+   * Called once when reading pi's output fails, with the cause in text for the
+   * user. pi is stopped first, because a session that goes on without its
+   * output would hang.
+   */
+  onReadError: (message: string) => void = () => undefined,
 ): PiRpc => {
   const pending = new Map<string, Deferred.Deferred<Record<string, unknown>, PiRpcFailure>>();
   let next = 1;
@@ -210,9 +217,10 @@ export const makeRpc = (
             if (signal.aborted) return;
             if (line.trim() !== "") deliver(line);
           }
-        } catch {
-          // A pipe that throws while reading means pi is gone, just like a pipe
-          // that ends. Either way, the commands still waiting must fail.
+        } catch (error) {
+          if (signal.aborted) return;
+          onReadError(`reading pi's output failed: ${describeError(error)}`);
+          Effect.runFork(stopChild(child));
         }
         if (signal.aborted) return;
         abandon();

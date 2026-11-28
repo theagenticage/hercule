@@ -12,20 +12,23 @@ import { RPC_DEADLINE, makeRpc } from "./rpc";
 const createPeer = (onLine: (line: string, frame: unknown) => void = () => undefined) => {
   const stdout = createLines();
   const writes: Array<Record<string, unknown>> = [];
+  const readErrors: Array<string> = [];
+  const kills: Array<string | undefined> = [];
   const rpc = makeRpc(
     {
       write: (text) => void writes.push(JSON.parse(text) as Record<string, unknown>),
       stdout: stdout.iterable,
       stderr: createLines().iterable,
       end: () => undefined,
-      kill: () => undefined,
+      kill: (signal) => void kills.push(signal),
       exited: new Promise<number>(() => undefined),
     },
     onLine,
+    (message) => void readErrors.push(message),
   );
   const respondToLast = (): void =>
     stdout.push(JSON.stringify({ type: "response", id: writes.at(-1)!["id"], success: true }));
-  return { rpc, respondToLast, stdout };
+  return { rpc, respondToLast, stdout, readErrors, kills };
 };
 
 describe("the time pi gets to respond to a command", () => {
@@ -85,5 +88,39 @@ describe("the lines pi writes that are not responses", () => {
     await Effect.runPromise(rpc.pump);
 
     expect(frames).toEqual([null, 5, { type: "agent_start" }]);
+  });
+});
+
+describe("an output that cannot be read", () => {
+  it("reports the cause once, stops pi and fails the command that waits", async () => {
+    const { rpc, stdout, readErrors, kills } = createPeer();
+
+    const failure = await Effect.runPromise(
+      Effect.gen(function* () {
+        const pumping = yield* Effect.forkChild(rpc.pump);
+        const sent = yield* Effect.forkChild(Effect.flip(rpc.send({ type: "get_state" })));
+        yield* Effect.sleep(1);
+        stdout.fail(new Error("A line is longer than 10 characters, the limit for one line."));
+        yield* Fiber.join(pumping);
+        return yield* Fiber.join(sent);
+      }),
+    );
+
+    expect(readErrors).toEqual([
+      "reading pi's output failed: A line is longer than 10 characters, the limit for one line.",
+    ]);
+    // Stopped, not left running with nobody reading its output.
+    expect(kills).toEqual(["SIGTERM"]);
+    expect(failure._tag).toBe("PiExited");
+  });
+
+  it("reports nothing and stops nothing when the output simply ends", async () => {
+    const { rpc, stdout, readErrors, kills } = createPeer();
+
+    stdout.end();
+    await Effect.runPromise(rpc.pump);
+
+    expect(readErrors).toEqual([]);
+    expect(kills).toEqual([]);
   });
 });

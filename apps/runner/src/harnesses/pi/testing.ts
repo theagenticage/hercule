@@ -204,6 +204,11 @@ export interface Spawn {
    * the given lines to stderr.
    */
   readonly crash: (...complaints: ReadonlyArray<string>) => void;
+  /**
+   * Makes reading pi's stdout fail, as a line over the limit does, while pi
+   * itself keeps running until the adapter stops it.
+   */
+  readonly failRead: (message: string) => void;
 }
 
 /** Returns the private agent folder pi was started in. */
@@ -411,6 +416,7 @@ export const buildFakePiSeam = (
       sent: sentToThisPi,
       stdinClosed: () => closed,
       kills: () => kills,
+      failRead: (message) => out.fail(new Error(message)),
       crash: (...complaints) => {
         for (const line of complaints) err.push(line);
         out.end();

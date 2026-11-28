@@ -154,29 +154,52 @@ const decodeStream = (stream: ReadableStream<Uint8Array>): AsyncIterable<string>
 };
 
 /**
+ * The longest line, in characters, that a harness's stdout may have. The
+ * largest real lines are Codex tool results that carry base64 images, a few
+ * megabytes each. 64 MiB is more than ten times that, and still stops a harness
+ * that never sends a newline from filling the runner's memory.
+ */
+export const MAX_LINE_LENGTH = 64 * 1024 * 1024;
+
+/**
  * Splits a stream into lines and returns them in order, without the newline
  * (a `\r` before it stays). A trailing partial line is held back until its
  * newline arrives, and is returned at the end of the stream. Each chunk is
  * searched for a newline once, and the pieces of a partial line are joined once
  * when it completes, so a long line in many chunks costs time linear in its
  * length.
+ *
+ * The iterator fails with an error that names `maxLength` when a line grows
+ * past it, and the stream is not read any further. With no `maxLength` a line
+ * has no limit.
  */
-export const splitLines = (stream: ReadableStream<Uint8Array>): AsyncIterable<string> =>
+export const splitLines = (
+  stream: ReadableStream<Uint8Array>,
+  maxLength: number = Number.POSITIVE_INFINITY,
+): AsyncIterable<string> =>
   (async function* () {
-    // The pieces of the line being read.
+    // The pieces of the line being read, and their total length.
     let pieces: Array<string> = [];
+    let pendingLength = 0;
+    const failTooLong = (): never => {
+      throw new Error(`A line is longer than ${maxLength} characters, the limit for one line.`);
+    };
     for await (const chunk of decodeStream(stream)) {
       let start = 0;
       for (;;) {
         const newline = chunk.indexOf("\n", start);
         if (newline === -1) break;
         const piece = chunk.slice(start, newline);
+        if (pendingLength + piece.length > maxLength) failTooLong();
         yield pieces.length === 0 ? piece : [...pieces, piece].join("");
         pieces = [];
+        pendingLength = 0;
         start = newline + 1;
       }
       if (start < chunk.length) {
         const rest = start === 0 ? chunk : chunk.slice(start);
+        pendingLength += rest.length;
+        if (pendingLength > maxLength) failTooLong();
         pieces.push(rest);
       }
     }
@@ -395,7 +418,7 @@ const spawnFramed = (
 ): FramedChild => {
   const child = startFramedProcess(command, env, cwd);
   return {
-    stdout: splitLines(child.stdout),
+    stdout: splitLines(child.stdout, MAX_LINE_LENGTH),
     stderr: splitLines(child.stderr),
     write: (text) => {
       // Write and flush without waiting: the response arrives on stdout,
@@ -433,7 +456,7 @@ export const spawnCheckedFramed = (
 ): CheckedFramedChild => {
   const child = startFramedProcess(command, env, cwd);
   return {
-    stdout: splitLines(child.stdout),
+    stdout: splitLines(child.stdout, MAX_LINE_LENGTH),
     stderr: splitLines(child.stderr),
     write: async (text) => {
       const written: unknown = await child.stdin.write(text);

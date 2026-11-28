@@ -305,6 +305,8 @@ const withCodexHome = async (
         }),
       onNotification: (frame) => void notifications.push(frame),
       onWarning: () => undefined,
+      // An output that cannot be read leaves the test with nothing to wait on.
+      onReadError: () => child.kill(),
     });
     Effect.runFork(rpc.pump);
     /** Sends a request and returns its result, or fails the test with Codex's error. */
