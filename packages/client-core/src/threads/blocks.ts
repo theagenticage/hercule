@@ -223,13 +223,15 @@ export interface ErrorBlock {
 }
 
 /**
- * A neutral note the runner or the harness reported, that is not a problem: a
- * conversation that was cleared, or memories that were recalled (spec 06).
+ * A neutral note about the session, that is not a problem: a conversation that
+ * was cleared, or memories that were recalled (spec 06). A harness adapter
+ * reports it, or the controller writes it, for example when the access mode
+ * falls back.
  */
 export interface RuntimeNoticeBlock {
   readonly kind: "runtime-notice";
   readonly key: string;
-  /** The runtime notice's text, as the runner wrote it. */
+  /** The runtime notice's text, as it was stored. */
   readonly message: string;
   readonly at: string;
 }
