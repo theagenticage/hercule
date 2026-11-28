@@ -1166,6 +1166,38 @@ describe("buildTurns runtime notes", () => {
     expect(turns.find((turn) => turn.turnId === "t2")?.endState).toBeNull();
   });
 
+  it("keeps the newer turn open when the earlier turn ends a second time", () => {
+    const { turns, outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        turnCompleted(2, "t1", "2026-09-08T10:00:01.000Z"),
+        turnStarted(3, "t2", "2026-09-08T10:00:02.000Z"),
+        turnCompleted(4, "t1", "2026-09-08T10:00:03.000Z"),
+        errorRow(5, "2026-09-08T10:00:04.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes).toEqual([]);
+    expect(turns.find((turn) => turn.turnId === "t2")?.runtimeNotes).toHaveLength(1);
+  });
+
+  it("ends the open turn at the completion of a turn from before the harness restarted", () => {
+    const { turns, outsideRuntimeNotes } = buildTurns(
+      [
+        turnStarted(1, "t1", "2026-09-08T10:00:00.000Z"),
+        row(2, { _tag: "session.started", ...base(2, "2026-09-08T10:00:01.000Z") }),
+        turnStarted(3, "t2", "2026-09-08T10:00:02.000Z"),
+        turnCompleted(4, "t1", "2026-09-08T10:00:03.000Z"),
+        errorRow(5, "2026-09-08T10:00:04.000Z", { message: "Rate limited." }),
+      ],
+      AGENT_ASKING_NOTHING,
+    );
+
+    expect(outsideRuntimeNotes).toHaveLength(1);
+    expect(turns.find((turn) => turn.turnId === "t2")?.runtimeNotes).toEqual([]);
+  });
+
   it("ends the open turn at the completion of a turn that never started, so a lost start row leaves nothing open", () => {
     const { outsideRuntimeNotes } = buildTurns(
       [
