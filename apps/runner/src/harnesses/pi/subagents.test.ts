@@ -16,7 +16,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Effect } from "effect";
+import { Duration, Effect } from "effect";
+import { RPC_DEADLINE } from "./rpc";
 import { MCP_GATEWAY_ENTRY_NAME } from "@hercule/protocol";
 import type { OutputSchema, HarnessEvent, SessionSpec, SubagentId } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE } from "../../edit-marks";
@@ -877,6 +878,35 @@ describe("the private agent folders of a session's pi processes", () => {
     expect(existsSync(folders[1]!)).toBe(false);
     expect(existsSync(folders[0]!)).toBe(true);
   });
+});
+
+describe("a subagent whose pi is slow to take its task", () => {
+  it("keeps waiting past the deadline of a running pi, and runs the task once pi answers", async () => {
+    // The subagent's pi holds back its answer to the task, as a pi on a
+    // loaded machine does while it prepares the prompt.
+    const run = await startBusySession({
+      answers: {
+        prompt: (command) => (command["message"] === PROMPT ? undefined : { success: true }),
+      },
+    });
+    const subagent = await askForSubagent(run, run.child);
+    await waitUntil(
+      "sent the task",
+      () => listSentCommands(subagent.child.sent, "prompt").length === 1,
+    );
+
+    // This waits on the real clock, because the adapter starts the subagent
+    // on its own fiber that a test clock does not reach.
+    await new Promise((resolve) => setTimeout(resolve, Duration.toMillis(RPC_DEADLINE) + 500));
+    subagent.child.push({
+      type: "response",
+      id: listSentCommands(subagent.child.sent, "prompt")[0]!["id"],
+      success: true,
+    });
+    await openSubagentTurn(run, subagent);
+    pushFinishedTurn(subagent.child, "Two tests fail.", { input: 30, output: 3 });
+    expect(await awaitReply(run.child, subagent)).toEqual({ text: "Two tests fail." });
+  }, 20_000);
 });
 
 describe("a subagent whose pi exits by itself", () => {

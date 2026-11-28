@@ -93,8 +93,18 @@ export const RPC_DEADLINE: Duration.Duration = Duration.seconds(5);
 
 /**
  * How long a pi that was just spawned gets to load and answer its first
- * command. Loading takes seconds on a slow machine, much longer than
- * `RPC_DEADLINE`, which is meant for a pi that is already running.
+ * command, and to take its first prompt when the runner sends that prompt
+ * itself: the task of a subagent, or the input of a text generation. Loading
+ * takes seconds on a slow machine, and on a busy one pi's preflight for its
+ * first prompt can take longer than `RPC_DEADLINE`, which is meant for a pi
+ * that is already running.
+ *
+ * A session's own input is not one of these, because the adapter cannot tell
+ * which frame carried it. The input that starts a session waits on the
+ * controller without a limit, but a separate input frame is dropped by the
+ * controller after `SESSION_INPUT_DEADLINE` (10 seconds), so a longer wait
+ * could report a failure the controller has already dropped. Both keep
+ * `RPC_DEADLINE`. Telling the two apart needs the supervisor to pass the frame kind to the adapter.
  */
 export const STARTUP_DEADLINE: Duration.Duration = Duration.seconds(30);
 

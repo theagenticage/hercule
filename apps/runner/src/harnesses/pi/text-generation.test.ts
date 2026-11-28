@@ -6,7 +6,9 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { Effect, Option } from "effect";
+import { Effect, Fiber, Option } from "effect";
+import { TestClock } from "effect/testing";
+import { RPC_DEADLINE } from "./rpc";
 import type { OutputSchema, TextGenerationOutcome, TextGenerationSpec } from "@hercule/protocol";
 import { buildTextGenerationContext } from "../testing";
 import type { HarnessAdapter } from "../index";
@@ -26,6 +28,7 @@ import {
   cleanupHomes,
   createPiHome,
   listAgentSpawns,
+  listSentCommands,
   settle,
   waitUntil,
   type FakePiBehaviour,
@@ -237,6 +240,36 @@ describe("a text generation on pi", () => {
     const outcome = await Effect.runPromise(generate(makePiAdapter(seam)));
 
     expect(outcome).toEqual({ outcome: "failed", message: "pi exited before it answered" });
+  });
+
+  it("waits past the deadline of a running pi for pi to take the prompt, then returns the answer", async () => {
+    const { seam, spawns } = buildFakePiSeam({ answers: { prompt: () => undefined } });
+
+    const outcome = await Effect.runPromise(
+      Effect.provide(
+        Effect.gen(function* () {
+          const generating = yield* Effect.forkChild(generate(makePiAdapter(seam)));
+          yield* Effect.promise(() =>
+            waitUntil(
+              "sent the prompt",
+              () => listSentCommands(spawns[0]?.sent ?? [], "prompt").length === 1,
+            ),
+          );
+          yield* TestClock.adjust(RPC_DEADLINE);
+          const child = spawns[0]!;
+          child.push({
+            type: "response",
+            id: listSentCommands(child.sent, "prompt")[0]!["id"],
+            success: true,
+          });
+          answerWith(child, ANSWER);
+          return yield* Fiber.join(generating);
+        }),
+        TestClock.layer(),
+      ),
+    );
+
+    expect(outcome).toMatchObject({ outcome: "ok", value: ANSWER });
   });
 
   it("reports a failure when pi refuses the prompt", async () => {
