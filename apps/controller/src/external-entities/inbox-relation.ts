@@ -194,6 +194,10 @@ const TAKEN_SQL = `taken AS MATERIALIZED (
  * to look, so the read follows the things that can be on it and not every
  * record the database keeps (the daily sweep keeps the records that finished
  * Tasks link). It reads the `live_links` and `live_signals` tables.
+ *
+ * Keep it in step with the `WHERE` of `eligible`: a source of membership added
+ * there must be a candidate here too, or the read of every thing leaves such a
+ * thing out while the read of some refs (`onlyRefs`) still returns it.
  */
 const CANDIDATE_ENTITIES_SQL = `(
       ${CONCERNED_REFS_SQL}
