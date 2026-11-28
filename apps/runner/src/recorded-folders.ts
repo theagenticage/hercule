@@ -17,7 +17,7 @@
  */
 import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import * as Effect from "effect/Effect";
 
 /** What an adapter uses to make and remove the folders the runner records. */
@@ -38,24 +38,45 @@ export interface RecordedFolders {
   readonly remove: (path: string) => void;
 }
 
+/**
+ * The name of a folder `make` creates: the caller's prefix, which starts with
+ * `hercule-`, and six hex characters. Six characters, because a folder the
+ * agent's programs make Unix sockets in has to keep its path short.
+ */
+const FOLDER_NAME_PATTERN = /^hercule-[a-z-]+-[0-9a-f]{6}$/;
+
 /** The record file of a folder: a hash of its path, so `remove` finds it without a lookup table. */
 const recordFile = (recordsDir: string, folder: string): string =>
   join(recordsDir, createHash("sha256").update(folder).digest("hex"));
 
+/** Returns true when `error` is a file system error with the given `code`. */
+const hasCode = (error: unknown, code: string): boolean =>
+  (error as NodeJS.ErrnoException).code === code;
+
 /** Returns the `RecordedFolders` that keeps its records in `recordsDir`. */
 export const makeRecordedFolders = (recordsDir: string): RecordedFolders => ({
   make: (parent, prefix) => {
-    const folder = join(parent, prefix + randomBytes(4).toString("hex"));
-    const record = recordFile(recordsDir, folder);
     mkdirSync(recordsDir, { recursive: true, mode: 0o700 });
-    writeFileSync(record, folder, { mode: 0o600 });
-    try {
-      mkdirSync(folder, { mode: 0o700 });
-    } catch (error) {
-      rmSync(record, { force: true });
-      throw error;
+    for (;;) {
+      const folder = join(parent, prefix + randomBytes(3).toString("hex"));
+      const record = recordFile(recordsDir, folder);
+      try {
+        // `wx`: a record of a folder that exists is never overwritten.
+        writeFileSync(record, folder, { flag: "wx", mode: 0o600 });
+      } catch (error) {
+        if (hasCode(error, "EEXIST")) continue;
+        throw error;
+      }
+      try {
+        mkdirSync(folder, { mode: 0o700 });
+        return folder;
+      } catch (error) {
+        rmSync(record, { force: true });
+        // The name is taken by a folder this runner did not make: pick another.
+        if (hasCode(error, "EEXIST")) continue;
+        throw error;
+      }
     }
-    return folder;
   },
   remove: (path) => {
     // A few retries cover a process that has just been killed and is still
@@ -70,16 +91,58 @@ const describeFailure = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
+ * Removes the folder one record names, and then the record, and logs what it
+ * did. Never fails: a folder that cannot be removed is logged with the reason.
+ *
+ * A record is only trusted when it is whole: the file is named by the hash of
+ * the path in it, and the folder has the shape of a folder `make` creates. A
+ * record cut short by a crash, or one an agent wrote into the records
+ * directory, names a different path or a different shape, and is dropped
+ * without touching the path. Without that check such a record could make the
+ * runner remove a Harness Home.
+ */
+const sweepRecord = (recordsDir: string, name: string): Effect.Effect<void> =>
+  Effect.try({
+    try: () => {
+      const record = join(recordsDir, name);
+      const folder = readFileSync(record, "utf8");
+      const trusted =
+        isAbsolute(folder) &&
+        recordFile(recordsDir, folder) === record &&
+        FOLDER_NAME_PATTERN.test(basename(folder));
+      if (!trusted) {
+        rmSync(record, { force: true });
+        return Effect.logWarning(
+          `dropped the record ${record}: it does not name a folder this runner made`,
+        );
+      }
+      rmSync(folder, { recursive: true, force: true });
+      rmSync(record, { force: true });
+      return Effect.logInfo(`removed the leftover folder ${folder} of an earlier run`);
+    },
+    catch: describeFailure,
+  }).pipe(
+    Effect.flatten,
+    Effect.catch((reason) =>
+      Effect.logWarning(
+        `could not delete the leftover folder recorded in ${join(recordsDir, name)}: ${reason}. ` +
+          "Delete the folder by hand, or change the owner of the files in it to the runner's user.",
+      ),
+    ),
+  );
+
+/**
  * Removes every folder recorded in `recordsDir`, and then its record. Meant
- * for the start of a runner: no process of an earlier run is still a session
- * of this runner, so every recorded folder is a leftover.
+ * for the start of a runner: the runner assumes no process of an earlier run
+ * is still a session of it, as it does for every other folder it wipes at
+ * start, so every recorded folder is a leftover.
  *
  * Never fails, because a leftover is cleanup and must not keep the runner from
  * starting. A folder that cannot be removed (for example one that holds files
  * a container created as root) is logged with its path and the reason, and
  * its record stays for the next start. Each removed folder is logged with its
- * path. A record that does not hold an absolute path (a crash can leave an
- * empty file) is dropped with a warning, because there is no folder to find.
+ * path. A record that does not name a folder this runner made is dropped with
+ * a warning (see `sweepRecord`).
  */
 export const sweepRecordedFolders = (recordsDir: string): Effect.Effect<void> =>
   Effect.gen(function* () {
@@ -88,40 +151,12 @@ export const sweepRecordedFolders = (recordsDir: string): Effect.Effect<void> =>
       catch: (error) => error,
     }).pipe(
       Effect.catch((error) =>
-        (error as NodeJS.ErrnoException).code === "ENOENT"
+        hasCode(error, "ENOENT")
           ? Effect.succeed([])
           : Effect.logWarning(
               `could not list the records of leftover folders in ${recordsDir}: ${describeFailure(error)}`,
             ).pipe(Effect.as([])),
       ),
     );
-    for (const name of names) {
-      const record = join(recordsDir, name);
-      yield* Effect.try({
-        try: () => {
-          const folder = readFileSync(record, "utf8");
-          if (!isAbsolute(folder)) return { folder: undefined };
-          rmSync(folder, { recursive: true, force: true });
-          rmSync(record, { force: true });
-          return { folder };
-        },
-        catch: describeFailure,
-      }).pipe(
-        Effect.flatMap(({ folder }) =>
-          folder === undefined
-            ? Effect.sync(() => rmSync(record, { force: true })).pipe(
-                Effect.andThen(
-                  Effect.logWarning(`dropped the record ${record}: it holds no folder path`),
-                ),
-              )
-            : Effect.logInfo(`removed the leftover folder ${folder} of an earlier run`),
-        ),
-        Effect.catch((reason) =>
-          Effect.logWarning(
-            `could not delete the leftover folder recorded in ${record}: ${reason}. ` +
-              "Delete the folder by hand, or change the owner of the files in it to the runner's user.",
-          ),
-        ),
-      );
-    }
+    for (const name of names) yield* sweepRecord(recordsDir, name);
   });

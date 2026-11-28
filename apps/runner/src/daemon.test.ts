@@ -275,7 +275,7 @@ describe("runDaemon", () => {
       const storageDir = join(locateRunnerDir(home), "deadbeefdeadbeef");
       // What a crashed run leaves: folders its adapters made and never removed,
       // in the temp directory and in a Harness Home.
-      const folders = makeRecordedFolders(join(storageDir, "recorded-folders"));
+      const folders = makeRecordedFolders(join(locateRunnerDir(home), "recorded-folders"));
       const harnessHome = join(storageDir, "providers", "0199e0e7-0000-7000-8000-0000000000cc");
       mkdirSync(harnessHome, { recursive: true });
       const tempFolder = folders.make(tmpdir(), "hercule-agy-");

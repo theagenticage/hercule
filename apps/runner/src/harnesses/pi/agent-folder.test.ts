@@ -5,7 +5,6 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,25 +18,6 @@ import { cleanupHomes, createPiHome } from "./testing";
 
 describe("a private agent folder", () => {
   const NO_FILES = { store: undefined, modelsText: undefined, toolsFolder: undefined };
-
-  it("is readable by this user only", () => {
-    const folder = createAgentFolder(unrecordedFolders, NO_FILES);
-    try {
-      expect(statSync(folder).mode & 0o777).toBe(0o700);
-    } finally {
-      removeAgentFolder(unrecordedFolders, folder);
-    }
-  });
-
-  it("is a new folder each time", () => {
-    const first = createAgentFolder(unrecordedFolders, NO_FILES);
-    const second = createAgentFolder(unrecordedFolders, NO_FILES);
-
-    expect(second).not.toBe(first);
-    removeAgentFolder(unrecordedFolders, first);
-    expect(existsSync(second)).toBe(true);
-    removeAgentFolder(unrecordedFolders, second);
-  });
 
   it("is recorded, so the next start of a runner that crashed removes it", async () => {
     const recordsDir = mkdtempSync(join(tmpdir(), "hercule-pi-records-"));

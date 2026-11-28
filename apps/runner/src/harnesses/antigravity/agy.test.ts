@@ -335,15 +335,15 @@ describe("the login command", () => {
 });
 
 describe("the login command's folder", () => {
-  it("is recorded, and removing it removes the record, so a crashed sign-in is swept at the next start", () => {
+  it("is recorded, so a sign-in that a crash cut short is swept at the next start", async () => {
     const home = createScratchHome("agy");
     const recordsDir = createScratchHome("agy-records");
     const ctx = { ...buildContext(home), recordedFolders: makeRecordedFolders(recordsDir) };
 
     const login = buildLoginCommand(ctx, BINARY);
-
     expect(readdirSync(recordsDir)).toHaveLength(1);
-    login.removeScratchFolder!();
+    await Effect.runPromise(sweepRecordedFolders(recordsDir));
+
     expect(existsSync(login.scratchFolder!)).toBe(false);
     expect(readdirSync(recordsDir)).toEqual([]);
   });

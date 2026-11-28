@@ -197,8 +197,10 @@ export const runDaemon = (
       // the session exits.
       const sessionSkillsDir = joinPath(storageDir, "session-skills");
       // The record of the private folders harness adapters make for their
-      // processes (`makeRecordedFolders`).
-      const recordedFoldersDir = joinPath(storageDir, "recorded-folders");
+      // processes (`makeRecordedFolders`). It sits beside the storage
+      // directories, not in one, so a runner that joined again still removes
+      // the folders its earlier identity left in the temp directory.
+      const recordedFoldersDir = joinPath(locateRunnerDir(home), "recorded-folders");
       const recordedFolders = makeRecordedFolders(recordedFoldersDir);
       const socketPath = buildSocketPath(storageDir);
       // The runner's own git gets its credentials the same way a session's git

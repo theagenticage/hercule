@@ -575,6 +575,36 @@ describe("a plain-pipe login that ends at its exit", () => {
     expect(answer).toEqual({ _tag: "loginFailed", message: FAILURE_MESSAGE });
   });
 
+  it("removes the login's scratch folder through the command's own removal when the child exits", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+    const removed: Array<string> = [];
+    const adapter: HarnessAdapter = {
+      ...claudeCode,
+      login: {
+        methods: ["sign-in", "create-token"],
+        build: () => ({
+          command: ["agy", "acp", "--login"],
+          env: {},
+          endsAtExit: true,
+          scratchFolder: "/scratch/hercule-log-abc123",
+          removeScratchFolder: () => removed.push("/scratch/hercule-log-abc123"),
+        }),
+      },
+    };
+
+    await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapter);
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.exit(0));
+        yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(removed).toEqual(["/scratch/hercule-log-abc123"]);
+  });
+
   it("fails the same way when the child exits non-zero without printing anything", async () => {
     const { spawn, children } = createMachine();
     const driver = makeLogins(spawn);

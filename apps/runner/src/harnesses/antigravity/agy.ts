@@ -340,20 +340,6 @@ const buildAccountFlags = (home: string, logFolder: string): ReadonlyArray<strin
 ];
 
 /**
- * Makes an empty folder for the log of the sign-in, readable by the runner's
- * user only (mode 0700), directly in the Harness Home, and returns its path.
- * The login removes it when it ends. Throws when the folder cannot be made.
- * The runner records the folder, so a runner that crashes during the sign-in
- * removes it at its next start.
- *
- * The folder is in the Harness Home, not in the system's temporary folder,
- * because the `agy` processes of an account keep nothing outside its Harness
- * Home.
- */
-const createLoginLogFolder = (ctx: HarnessRunnerContext): string =>
-  ctx.recordedFolders.make(ctx.home, LOG_FOLDER_PREFIX);
-
-/**
  * Makes an empty folder named `prefix` plus random characters in `parent`,
  * readable by the runner's user only (mode 0700), and removes it with
  * everything in it when the scope closes. A failed removal is logged as a
@@ -388,7 +374,7 @@ const makeScopedFolder = (
 
 /**
  * Makes an empty folder for the log of a session or probe process, like
- * `createLoginLogFolder`, and removes it when the scope closes (see
+ * the login command's, and removes it when the scope closes (see
  * `makeScopedFolder`).
  */
 const makeSessionLogFolder = (
@@ -417,11 +403,15 @@ const makeAgyTempFolder = (
  * when the code was refused. The exit alone decides (`endsAtExit`).
  *
  * The command logs to a folder of its own in the Harness Home, which is the
- * command's `scratchFolder`. The caller must start the command, which removes
- * the folder when the login ends. Throws when the folder cannot be made.
+ * command's `scratchFolder`. The folder is in the Harness Home, not in the
+ * system's temporary folder, because the `agy` processes of an account keep
+ * nothing outside its Harness Home. The runner records the folder, so a runner
+ * that crashes during the sign-in removes it at its next start. The caller
+ * must start the command, which removes the folder when the login ends.
+ * Throws when the folder cannot be made.
  */
 export const buildLoginCommand = (ctx: HarnessRunnerContext, binary: string): LoginCommand => {
-  const logFolder = createLoginLogFolder(ctx);
+  const logFolder = ctx.recordedFolders.make(ctx.home, LOG_FOLDER_PREFIX);
   return {
     command: [binary, "acp", "--login", ...buildAccountFlags(ctx.home, logFolder)],
     env: buildAgyEnv(ctx),

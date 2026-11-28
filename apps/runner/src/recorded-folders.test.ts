@@ -76,6 +76,18 @@ describe("making and removing a recorded folder", () => {
     expect(folders.make(root, "x-")).not.toBe(folders.make(root, "x-"));
   });
 
+  it("makes no folder when its record cannot be written", () => {
+    const root = createScratch();
+    const recordsDir = join(root, "records");
+    mkdirSync(recordsDir);
+    chmodSync(recordsDir, 0o500);
+    locked.push(recordsDir);
+
+    expect(() => makeRecordedFolders(recordsDir).make(root, "hercule-x-")).toThrow();
+
+    expect(readdirSync(root)).toEqual(["records"]);
+  });
+
   it("leaves no record when the folder cannot be made", () => {
     const root = createScratch();
     const recordsDir = join(root, "records");
@@ -153,6 +165,42 @@ describe("the sweep at runner start", () => {
 
     expect(readdirSync(recordsDir)).toEqual([]);
     expect(log).toHaveLength(1);
-    expect(log[0]).toContain("holds no folder path");
+    expect(log[0]).toContain("does not name a folder this runner made");
+  });
+
+  it("never removes a path a record names when the record is not the runner's own", async () => {
+    const root = createScratch();
+    const recordsDir = join(root, "records");
+    const home = join(root, "harness-home");
+    mkdirSync(home);
+    writeFileSync(join(home, "login.json"), "the account's login");
+    const lookalike = join(root, "hercule-agy-abcdef");
+    mkdirSync(lookalike);
+    // A record in the right shape, named after the wrong thing: its file name
+    // is not the hash of the path it holds.
+    mkdirSync(recordsDir);
+    writeFileSync(join(recordsDir, "planted"), home);
+    writeFileSync(join(recordsDir, "planted-lookalike"), lookalike);
+
+    const log = await sweepAndReadLog(recordsDir);
+
+    expect(existsSync(join(home, "login.json"))).toBe(true);
+    expect(existsSync(lookalike)).toBe(true);
+    expect(readdirSync(recordsDir)).toEqual([]);
+    expect(log).toHaveLength(2);
+  });
+
+  it("does not stop the start when a record cannot be dropped", async () => {
+    const root = createScratch();
+    const recordsDir = join(root, "records");
+    mkdirSync(recordsDir);
+    writeFileSync(join(recordsDir, "half-written"), "");
+    chmodSync(recordsDir, 0o500);
+    locked.push(recordsDir);
+
+    const log = await sweepAndReadLog(recordsDir);
+
+    expect(log).toHaveLength(1);
+    expect(log[0]).toMatch(/^Warn: could not delete/);
   });
 });
