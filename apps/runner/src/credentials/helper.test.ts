@@ -192,6 +192,7 @@ describe("the actions git passes", () => {
   it.each([["store"], ["erase"]])("prints nothing for `%s`", async (action) => {
     await runCredentialAction([action]);
 
+    expect(stdin).not.toHaveBeenCalled();
     expect(stdout).not.toHaveBeenCalled();
     expect(stderr).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
@@ -207,9 +208,23 @@ describe("the actions git passes", () => {
     expect(process.exitCode).toBe(0);
   });
 
+  // gitcredentials(7) says a helper ignores any operation it does not know, so
+  // that git can add one later. That is not an error.
+  it.each([["foo"], ["git-credential"], ["future-operation"]])(
+    "silently ignores the unknown action `%s`",
+    async (action) => {
+      await runCredentialAction([action]);
+
+      expect(stdin).not.toHaveBeenCalled();
+      expect(stdout).not.toHaveBeenCalled();
+      expect(stderr).not.toHaveBeenCalled();
+      expect(process.exitCode).toBe(0);
+    },
+  );
+
   // `--local` once reached the runner role as a daemon option and started a
-  // local runner. The others were accepted silently.
-  it.each([[[]], [["--local"]], [["--help"]], [["foo"]], [["git-credential"]]])(
+  // local runner. git never passes a flag, or nothing, as the action.
+  it.each([[[]], [["--local"]], [["--help"]], [["-x"]]])(
     "refuses %j with a message and exit code 2, and reads no stdin",
     async (args) => {
       await runCredentialAction(args);

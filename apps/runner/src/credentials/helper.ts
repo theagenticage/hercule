@@ -98,27 +98,30 @@ export const answerCredentialQuestion = async (
 /**
  * Runs `hercule git-credential <action>`. git passes the request on stdin.
  *
- * `args` are the words after `git-credential`, global options excluded. The
- * first must be an action git passes. Words after it are ignored, so
- * `get --help` still answers a well-formed request.
+ * `args` are the words after `git-credential`, global options excluded. Only
+ * the first word is read, so `get --help` still answers a well-formed request.
  *
  * - `get` prints the credential, or nothing when there is none.
  * - `store` and `erase` do nothing, because this helper stores no credentials.
- *
- * With any other first word, or none, this prints a refusal on stderr, reads
- * nothing from stdin, and sets the exit code to 2. git never does that, so it
- * only happens when a person or a script runs the command by hand.
+ * - Any other action word also does nothing and exits 0, reading no stdin.
+ * - No word, or a word that starts with `-`, prints a refusal on stderr, reads
+ *   nothing from stdin, and sets the exit code to 2. git never passes a flag as
+ *   the action, so this only happens when a person or a script runs the
+ *   command by hand. The refusal also keeps the flag from being read as an
+ *   option of the runner daemon, such as `--local`.
  */
 export const runCredentialAction = async (args: readonly string[]): Promise<void> => {
   const action = args[0];
-  if (action !== "get" && action !== "store" && action !== "erase") {
+  if (action === undefined || action.startsWith("-")) {
     process.stderr.write(
       `hercule: git-credential takes one action: get, store or erase. git runs it for you. Run "git help credential" for help.\n`,
     );
     process.exitCode = 2;
     return;
   }
-  if (action === "get") {
-    process.stdout.write(await answerCredentialQuestion(await Bun.stdin.text(), process.env));
-  }
+  // gitcredentials(7): "If a helper receives any other operation, it should
+  // silently ignore the request. This leaves us room for future operations to
+  // be introduced." An error here would show on every git call once git adds one.
+  if (action !== "get") return;
+  process.stdout.write(await answerCredentialQuestion(await Bun.stdin.text(), process.env));
 };
