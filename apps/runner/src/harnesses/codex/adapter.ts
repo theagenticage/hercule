@@ -60,6 +60,7 @@ import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
 import { isExecutableNotFound, runProcess, spawnAppServer, stopChild, type Run } from "../process";
+import { keepStderrTail } from "../stderr-tail";
 import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
 import {
   buildAdapterFailed,
@@ -205,12 +206,6 @@ const readReply =
 const readThreadOpenedReply = (method: string) => readReply(decodeThreadOpenedReply, method);
 const readTurnStartedReply = readReply(decodeTurnStartedReply, "turn/start");
 const readTurnSteeredReply = readReply(decodeTurnSteeredReply, "turn/steer");
-
-/**
- * How many of the app-server's last non-frame lines are kept, so they can be
- * reported if it fails.
- */
-const MAX_COMPLAINT_LINES = 5;
 
 /**
  * How many notifications with no thread id a session's host keeps while the
@@ -795,20 +790,10 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     overrides: ReadonlyArray<string>,
     textGeneration: TextGenerationWatch | undefined,
   ): Host => {
-    const complaints: Array<string> = [];
     const child = seam.appServer(buildAppServerCommand(binary, overrides), env);
-    const rememberComplaint = (line: string): void => {
-      complaints.push(line);
-      if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
-    };
-    void (async () => {
-      try {
-        for await (const line of child.stderr) if (line.trim() !== "") rememberComplaint(line);
-      } catch {
-        // A child killed while stderr is being read writes nothing more, and
-        // the lines already kept are still worth reporting.
-      }
-    })();
+    // Kept with the lines the codec warns about, so a failed request can say
+    // what the app-server complained of.
+    const complaints = keepStderrTail(child.stderr);
     const host: Host = {
       rpc: makeRpc(child, {
         // Nothing Codex sends may crash the reader. A request whose handling
@@ -836,20 +821,20 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           }
         },
         onWarning: (message) => {
-          rememberComplaint(message);
+          complaints.remember(message);
           warn(host, message);
         },
         // The app-server is stopped, and its exit then ends the session with
         // the cause as the reason.
         onReadError: (message) => {
           host.readFailure = message;
-          rememberComplaint(message);
+          complaints.remember(message);
           void Effect.runPromise(host.stop);
         },
       }),
       kill: child.kill,
       stop: stopChild(child),
-      complaint: () => complaints.join("\n"),
+      complaint: () => complaints.lastLines().join("\n"),
       readFailure: undefined,
       sessionId,
       textGeneration,
