@@ -5,7 +5,7 @@
 // only the client's small chunk and never the dispatcher's.
 if (process.argv[2] === "github-token") {
   const { runGithubToken } = await import("@hercule/runner/github-token");
-  await runGithubToken();
+  await runGithubToken(process.argv.slice(3));
 } else if (process.argv[2] === "measure-disk-usage") {
   // The runner starts this verb in a child process to walk a folder. It reads
   // no Home, so it is chosen here, before the dispatcher is imported.

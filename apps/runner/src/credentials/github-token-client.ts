@@ -65,18 +65,47 @@ const parseReply = (line: string): GithubTokenResult => {
   return { reason: "the runner sent an answer that could not be read" };
 };
 
+const HELP = `hercule github-token
+
+Prints the GitHub token of this session on stdout, for one command. The "gh"
+shim runs it for you on every "gh" call. For another tool that reads
+GH_TOKEN, run:
+
+  token=$(hercule github-token) && GH_TOKEN=$token sometool
+
+It takes no arguments. Exit code 1 means there is no fresh token, and the reason
+is on stderr.
+`;
+
 /**
  * Prints the session's GitHub token on stdout, or one line on stderr saying why
  * there is none, and sets the exit code to 0 or 1.
+ *
+ * `args` are the words after `github-token`. With `-h` or `--help`, this
+ * prints the help text and no token. With any other argument it prints a
+ * refusal on stderr and no token, and sets the exit code to 2. Without
+ * arguments, which is how the `gh` shim calls it, nothing changes.
  *
  * `env` is where the runner's socket path and the session token are read from.
  * Without both, this is not a session the runner started, so it does not
  * connect at all.
  */
 export const runGithubToken = async (
+  args: readonly string[],
   env: Record<string, string | undefined> = process.env,
   deadlineMs: number = CREDENTIAL_DEADLINE_MS,
 ): Promise<void> => {
+  if (args.length > 0) {
+    if (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) {
+      process.stdout.write(HELP);
+      return;
+    }
+    process.stderr.write(
+      `hercule: github-token takes no arguments. Run "hercule github-token --help" for help.\n`,
+    );
+    process.exitCode = 2;
+    return;
+  }
   const path = env[RUNNER_SOCKET_VARIABLE];
   const sessionToken = env[SESSION_TOKEN_VARIABLE];
   const outcome: GithubTokenResult =
