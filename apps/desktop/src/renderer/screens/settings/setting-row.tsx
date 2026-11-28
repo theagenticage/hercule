@@ -18,7 +18,7 @@ export interface SettingControlLabels {
 export function SettingRow({
   label,
   hint,
-  error = null,
+  error: errorProp,
   control,
 }: {
   readonly label: string;
@@ -26,6 +26,7 @@ export function SettingRow({
   readonly error?: string | null;
   readonly control: (labels: SettingControlLabels) => ReactNode;
 }): JSX.Element {
+  const error = errorProp ?? null;
   const id = useId();
   const labelId = `${id}-label`;
   const hintId = `${id}-hint`;

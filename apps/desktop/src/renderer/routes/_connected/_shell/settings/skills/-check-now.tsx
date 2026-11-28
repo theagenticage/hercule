@@ -18,11 +18,12 @@ import { SettingsHeaderActions } from "../../../../../screens/settings/settings-
  */
 export function CheckNow({
   name,
-  lastCheckedAt = null,
+  lastCheckedAt: lastCheckedAtProp,
 }: {
   readonly name?: string;
   readonly lastCheckedAt?: string | null;
 }): JSX.Element {
+  const lastCheckedAt = lastCheckedAtProp ?? null;
   const { client } = useRouteContext({ from: "/_connected" }).controller;
   const check = useMutation({
     mutationFn: () => client.skill.check({ payload: name === undefined ? {} : { name } }),

@@ -37,7 +37,7 @@ export function GlassDialog({
   onClose,
   onCloseRequest,
   onKeyDown,
-  locked = false,
+  locked: lockedProp,
   children,
 }: {
   readonly dialogRef: RefObject<HTMLDialogElement | null>;
@@ -49,6 +49,7 @@ export function GlassDialog({
   readonly locked?: boolean;
   readonly children: ReactNode;
 }): JSX.Element {
+  const locked = lockedProp ?? false;
   // Whether the last press began on the scrim. A press inside the dialog that
   // is released on the scrim, as when the user selects text, fires its click
   // on the dialog element itself, just as a click on the scrim does.

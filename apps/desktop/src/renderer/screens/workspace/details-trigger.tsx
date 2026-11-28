@@ -8,14 +8,16 @@ const WorkspaceDetails = lazy(() =>
 export function WorkspaceDetailsTrigger({
   workspaceId,
   children,
-  className = "workspace-details-trigger",
-  label = "Workspace details",
+  className: classNameProp,
+  label: labelProp,
 }: {
   readonly workspaceId: string;
   readonly children: ReactNode;
   readonly className?: string;
   readonly label?: string;
 }): JSX.Element {
+  const className = classNameProp ?? "workspace-details-trigger";
+  const label = labelProp ?? "Workspace details";
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   return (

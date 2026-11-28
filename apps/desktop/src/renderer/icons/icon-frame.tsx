@@ -14,9 +14,10 @@ export interface IconProps {
  * matches what the book's crew.js draws attribute for attribute.
  */
 export function IconFrame({
-  size = 16,
+  size: sizeProp,
   children,
 }: IconProps & { readonly children: ReactNode }): JSX.Element {
+  const size = sizeProp ?? 16;
   return (
     <svg
       className="ic"

@@ -81,10 +81,13 @@ export const useVirtualLines = <Item extends { readonly key: string }>({
   items,
   scrollRef,
   estimateSize,
-  selectedKey = null,
-  focusedKey = null,
-  scrollMargin = 0,
+  selectedKey: selectedKeyProp,
+  focusedKey: focusedKeyProp,
+  scrollMargin: scrollMarginProp,
 }: VirtualLinesOptions<Item>): VirtualLines<Item> => {
+  const selectedKey = selectedKeyProp ?? null;
+  const focusedKey = focusedKeyProp ?? null;
+  const scrollMargin = scrollMarginProp ?? 0;
   const selectedIndex = useMemo(
     () => items.findIndex((item) => item.key === selectedKey),
     [items, selectedKey],

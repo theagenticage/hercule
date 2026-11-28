@@ -58,11 +58,12 @@ const MARK_GLYPHS: { readonly [State in MarkState]: JSX.Element } = {
  */
 export function Mark({
   state,
-  size = 14,
+  size: sizeProp,
 }: {
   readonly state: MarkState;
   readonly size?: 10 | 12 | 14 | 16;
 }): JSX.Element {
+  const size = sizeProp ?? 14;
   return (
     <span className={`mark mark--${state}`} aria-hidden="true">
       <IconFrame size={size}>{MARK_GLYPHS[state]}</IconFrame>

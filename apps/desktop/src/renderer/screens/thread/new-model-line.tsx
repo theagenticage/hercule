@@ -17,7 +17,7 @@ import { CloseIcon } from "../../icons/close";
  */
 export function NewModelLine({
   row,
-  actions = null,
+  actions: actionsProp,
 }: {
   readonly row: NewModelRow;
   readonly actions?: {
@@ -26,6 +26,7 @@ export function NewModelLine({
     readonly busy: boolean;
   } | null;
 }): JSX.Element {
+  const actions = actionsProp ?? null;
   return (
     <div className="line line--new">
       <span className="new-pill">New</span>
