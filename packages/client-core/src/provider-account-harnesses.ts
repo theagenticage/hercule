@@ -4,7 +4,13 @@
  * cannot. The account sheet's Default harness section reads this, so a
  * harness is struck through for the same reason wherever it is drawn.
  */
-import type { Harness, Provider, ProviderAccount, Runner } from "@hercule/contract";
+import {
+  decideAccountKindHarness,
+  type Harness,
+  type Provider,
+  type ProviderAccount,
+  type Runner,
+} from "@hercule/contract";
 import { findHarnessName } from "./model-profiles/profile-entries";
 import { formatNameList } from "./name-list";
 import { buildProviderAccountName, findProviderAccountKind } from "./provider-accounts";
@@ -54,18 +60,6 @@ const isInstalledOnAnyRunner = (harness: Harness, runners: ReadonlyArray<Runner>
   listActiveRunners(runners).some((runner) => isHarnessInstalledOnRunner(harness, runner));
 
 /**
- * Checks that the harness lists the account's provider and kind among what it
- * runs, which is what `harness.runs` declares.
- */
-const doesHarnessRunAccountKind = (
-  account: Pick<ProviderAccount, "providerId" | "kind">,
-  harness: Harness,
-): boolean =>
-  harness.runs
-    .find((support) => support.providerId === account.providerId)
-    ?.kinds.some((each) => each.kind === account.kind) === true;
-
-/**
  * Checks that the account's kind can run in the harness at all: the provider's
  * terms allow the kind in it, and the harness runs the provider and the kind.
  * It does not ask whether the harness is installed on any machine, because
@@ -75,9 +69,10 @@ export const canAccountKindRunInHarness = (
   account: Pick<ProviderAccount, "providerId" | "kind">,
   providers: ReadonlyArray<Provider>,
   harness: Harness,
-): boolean =>
-  findProviderAccountKind(providers, account)?.harnesses.includes(harness.id) === true &&
-  doesHarnessRunAccountKind(account, harness);
+): boolean => {
+  const kind = findProviderAccountKind(providers, account);
+  return kind !== undefined && decideAccountKindHarness(account, kind, harness) === "runs";
+};
 
 /**
  * Returns one entry for each harness in `harnesses`, in that order, saying
@@ -108,13 +103,14 @@ export const listProviderAccountHarnessChoices = (
     if (kind === undefined) {
       return `${providerName} no longer offers this kind of account`;
     }
-    if (!kind.harnesses.includes(harness.id)) {
+    const verdict = decideAccountKindHarness(account, kind, harness);
+    if (verdict === "disallowed-by-provider") {
       return `${providerName} allows ${withArticle(readKindNoun(kind.title))} only in ${formatNameList(
         kind.harnesses.map((harnessId) => findHarnessName(harnesses, harnessId)),
         "and",
       )}`;
     }
-    if (!doesHarnessRunAccountKind(account, harness)) {
+    if (verdict === "unsupported-by-harness") {
       return `${harness.displayName} can't run ${providerName}'s ${readKindNoun(kind.title)}`;
     }
     return isInstalledOnAnyRunner(harness, runners)
