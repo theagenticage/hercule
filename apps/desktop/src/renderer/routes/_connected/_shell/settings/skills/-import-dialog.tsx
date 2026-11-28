@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type JSX } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
 import {
+  ConnectionError,
   countSkillImportOutcomes,
   describeFolderWithoutSkills,
   describeLockedSkillSource,
@@ -353,10 +354,14 @@ const describeProgress = (progress: ImportProgress | null): string =>
 
 /**
  * Returns the line that replaces the summary when `error` stopped the import:
- * "The import stopped at `teach`: cannot reach http://…", naming the skill
- * `progress` was at. The skill's name is a code span, between backticks.
+ * "The import stopped at `teach`: cannot connect to http://…", naming the
+ * skill `progress` was at. The skill's name is a code span, between
+ * backticks. A `ConnectionError` gives its reason, without the operation's
+ * name, which the user has no use for.
  */
-const describeImportStop = (progress: ImportProgress | null, error: Error): string =>
-  progress === null
-    ? `The import stopped: ${readErrorMessage(error)}`
-    : `The import stopped at \`${progress.name}\`: ${readErrorMessage(error)}`;
+const describeImportStop = (progress: ImportProgress | null, error: Error): string => {
+  const problem = error instanceof ConnectionError ? error.reason : readErrorMessage(error);
+  return progress === null
+    ? `The import stopped: ${problem}`
+    : `The import stopped at \`${progress.name}\`: ${problem}`;
+};

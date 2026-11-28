@@ -709,7 +709,7 @@ describe("Settings > Skills, Import from a folder", () => {
     {
       stop: "a controller that cannot be reached",
       answer: refuseConnection,
-      line: /^The import stopped at teach: cannot reach /,
+      line: /^The import stopped at teach: cannot connect to http:\/\//,
     },
     {
       stop: "a refused credential",

@@ -13,6 +13,7 @@ import {
   listDecodeIssues,
   type ErrorCode,
   type Issue,
+  type OperationId,
 } from "@hercule/contract";
 import { Schema } from "effect";
 import * as HttpClientError from "effect/http/HttpClientError";
@@ -83,14 +84,39 @@ export class RequestError extends Error {
   }
 }
 
-/** The controller could not be reached: there was no response, so there is no envelope. */
+/**
+ * No complete answer arrived from the controller, so there is no envelope.
+ * The request could not connect, timed out, lost its connection while the
+ * body arrived, or got the bare 503 of a controller that is stopping.
+ *
+ * The message names the operation and says what went wrong, such as
+ * "workspace.query: the controller did not answer within 5 s" or
+ * "setup.read: cannot connect to http://127.0.0.1:4937: ECONNREFUSED". The
+ * original failure is kept as `cause`.
+ */
 export class ConnectionError extends Error {
   override readonly name = "ConnectionError";
+  /** The controller's address. */
   readonly url: string;
+  /** The operation that failed, such as `workspace.query`. */
+  readonly operation: OperationId;
+  /**
+   * What went wrong, as a phrase that starts in lower case and has no final
+   * period, such as "the controller did not answer within 5 s". The message is
+   * the operation and this phrase.
+   */
+  readonly reason: string;
 
-  constructor(url: string, cause: unknown) {
-    super(`cannot reach ${url}`, { cause });
-    this.url = url;
+  constructor(details: {
+    readonly operation: OperationId;
+    readonly url: string;
+    readonly reason: string;
+    readonly cause: unknown;
+  }) {
+    super(`${details.operation}: ${details.reason}`, { cause: details.cause });
+    this.url = details.url;
+    this.operation = details.operation;
+    this.reason = details.reason;
   }
 }
 
@@ -199,6 +225,51 @@ const isConnectionLoss = (error: unknown): boolean => {
 };
 
 /**
+ * Checks whether `error` is the `TimeoutError` a request's time limit aborts
+ * it with. Like `isConnectionLoss`, it recognizes the error by its name.
+ */
+const isTimeout = (error: unknown): error is { readonly message: string } =>
+  typeof error === "object" &&
+  error !== null &&
+  "name" in error &&
+  error.name === "TimeoutError" &&
+  "message" in error &&
+  typeof error.message === "string";
+
+/**
+ * Chromium's message for every request that fails before an answer arrives:
+ * a refused connection, an unknown host, a CORS refusal. It says nothing more
+ * than that the request failed, so it is left out of a `ConnectionError`.
+ */
+const CHROMIUM_FETCH_FAILURE = "Failed to fetch";
+
+/**
+ * Returns what went wrong with a request to the controller at `url` that
+ * failed with `httpFailure`, for the message of a `ConnectionError`.
+ *
+ * A time limit's own message is used as it is: the code that aborts the
+ * request knows the limit, and says it, as in "the controller did not answer
+ * within 5 s". A request that could not connect adds the transport's reason
+ * where it gives one: Bun does ("ECONNREFUSED: Unable to connect..."),
+ * Chromium does not.
+ */
+const describeConnectionFailure = (
+  httpFailure: HttpClientError.HttpClientError["reason"],
+  url: string,
+): string => {
+  const cause: unknown = httpFailure.cause;
+  if (isTimeout(cause)) return cause.message;
+  if (httpFailure._tag === "InvalidUrlError") return `the address ${url} is not valid`;
+  if (httpFailure._tag === "DecodeError") {
+    return `the connection to ${url} was lost while the answer arrived`;
+  }
+  const detail = cause instanceof Error ? cause.message : "";
+  return detail === "" || detail === CHROMIUM_FETCH_FAILURE
+    ? `cannot connect to ${url}`
+    : `cannot connect to ${url}: ${detail}`;
+};
+
+/**
  * Converts any failure of the derived client into a `RequestError`, an
  * `ApiError` or a `ConnectionError`.
  *
@@ -211,7 +282,8 @@ const isConnectionLoss = (error: unknown): boolean => {
  * could not be sent, the connection was lost or aborted while the body
  * arrived, or the response is a 503 that is not an error envelope. The last
  * is what a stopping controller answers with, and no client can do more than
- * try again later, as for the others.
+ * try again later, as for the others. `operation` and `url` go into its
+ * message.
  *
  * A response that arrived but could not be decoded becomes an `internal`
  * `ApiError`, with the original failure kept as `cause`. That covers:
@@ -224,6 +296,7 @@ const isConnectionLoss = (error: unknown): boolean => {
  */
 export const toClientError = (
   failure: unknown,
+  operation: OperationId,
   url: string,
   sent: boolean,
 ): RequestError | ApiError | ConnectionError => {
@@ -237,23 +310,33 @@ export const toClientError = (
   }
 
   if (HttpClientError.isHttpClientError(failure)) {
-    const reason = failure.reason;
+    const httpFailure = failure.reason;
     if (
-      reason._tag === "TransportError" ||
-      reason._tag === "InvalidUrlError" ||
-      (reason._tag === "DecodeError" && isConnectionLoss(reason.cause))
+      httpFailure._tag === "TransportError" ||
+      httpFailure._tag === "InvalidUrlError" ||
+      (httpFailure._tag === "DecodeError" && isConnectionLoss(httpFailure.cause))
     ) {
-      return new ConnectionError(url, failure);
+      return new ConnectionError({
+        operation,
+        url,
+        reason: describeConnectionFailure(httpFailure, url),
+        cause: failure,
+      });
     }
     // A 503 that is not an error envelope is not the controller's answer to
     // the request: the controller is stopping, or something in front of it
     // is not serving. A 503 that is the `controller_sealed` envelope never
     // gets here, because the check above already turned it into an `ApiError`.
     if (
-      (reason._tag === "DecodeError" || reason._tag === "StatusCodeError") &&
-      reason.response.status === 503
+      (httpFailure._tag === "DecodeError" || httpFailure._tag === "StatusCodeError") &&
+      httpFailure.response.status === 503
     ) {
-      return new ConnectionError(url, failure);
+      return new ConnectionError({
+        operation,
+        url,
+        reason: `the controller at ${url} is not serving (HTTP 503)`,
+        cause: failure,
+      });
     }
   }
 

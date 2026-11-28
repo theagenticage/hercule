@@ -8,10 +8,11 @@
  * derived from `api`, so an operation added to the contract appears here with
  * no edit.
  */
-import { api, MAX_INPUT_ANSWER_WAIT, type Attachment } from "@hercule/contract";
-import { Context, Duration, Effect, Result } from "effect";
+import { api, MAX_INPUT_ANSWER_WAIT, type Attachment, type OperationId } from "@hercule/contract";
+import { Cause, Context, Duration, Effect, Result } from "effect";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import type * as HttpApi from "effect/http-api/HttpApi";
@@ -166,6 +167,29 @@ const SentToken = Context.Reference<string | null>("@hercule/client-core/SentTok
   defaultValue: () => null,
 });
 
+/**
+ * Returns the failure of a call that `toClientError` should convert, or
+ * `undefined` when the cause holds anything but failures (an interruption or
+ * a defect), which must reach the caller unchanged.
+ *
+ * A declared error status (such as 401) whose body fails to read fails with
+ * two failures in one cause: first a `StatusCodeError`, then the `DecodeError`
+ * that says why the body could not be read. `Effect.result` keeps only the
+ * first, which would report the status and hide that the connection broke. So
+ * the `DecodeError` is returned when the cause has one, and otherwise the
+ * first failure.
+ */
+const pickReportedFailure = (cause: Cause.Cause<unknown>): unknown => {
+  if (!cause.reasons.every(Cause.isFailReason)) return undefined;
+  const failures = cause.reasons.map((reason) => reason.error);
+  return (
+    failures.find(
+      (failure) =>
+        HttpClientError.isHttpClientError(failure) && failure.reason._tag === "DecodeError",
+    ) ?? failures[0]
+  );
+};
+
 /** Creates a client for the controller at `options.baseUrl`. */
 export const createClient = (options: ClientOptions): HerculeClient => {
   const store = options.tokenStore;
@@ -235,9 +259,9 @@ export const createClient = (options: ClientOptions): HerculeClient => {
   };
 
   /**
-   * Runs one call and converts its failure into a client error. When the call
-   * is one of `TOKEN_FROM`'s operations, `tokenFrom` reads the new token from
-   * its result.
+   * Runs one call of `operation` (`<group>.<name>`) and converts its failure
+   * into a client error. When the call is one of `TOKEN_FROM`'s operations,
+   * `tokenFrom` reads the new token from its result.
    *
    * The call sends the token that is current when `run` starts. A result that
    * sets a token (login, setup) always replaces the current one. A result that
@@ -262,6 +286,7 @@ export const createClient = (options: ClientOptions): HerculeClient => {
    * exports no spans.
    */
   const run = (
+    operation: OperationId,
     effect: Effect.Effect<unknown, unknown>,
     tokenFrom: ((result: unknown) => string | null) | undefined,
     signal?: AbortSignal,
@@ -280,6 +305,10 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     return Effect.runPromise(
       Effect.result(
         effect.pipe(
+          Effect.catchCause((cause) => {
+            const failure = pickReportedFailure(cause);
+            return failure === undefined ? Effect.failCause(cause) : Effect.fail(failure);
+          }),
           Effect.provideService(FetchHttpClient.Fetch, send as typeof globalThis.fetch),
           Effect.provideService(HttpClient.TracerPropagationEnabled, false),
           Effect.provideService(SentToken, sentToken),
@@ -288,8 +317,10 @@ export const createClient = (options: ClientOptions): HerculeClient => {
       signal === undefined ? undefined : { signal },
     ).then(
       (result) => {
+        // The caller cancelled: its reason wins over any failure the call ended with.
+        if (signal?.aborted === true) throw signal.reason;
         if (Result.isFailure(result)) {
-          const error = toClientError(result.failure, options.baseUrl, sent);
+          const error = toClientError(result.failure, operation, options.baseUrl, sent);
           if (error instanceof ApiError && error.code === "unauthenticated") {
             clearTokenIfCurrent(sentToken);
           }
@@ -329,6 +360,7 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     readAttachmentContent: async (id: string) => {
       readContentCall ??= buildCall("attachment", "readContent");
       const [bytes, response] = (await run(
+        "attachment.readContent",
         readContentCall({ params: { id }, responseMode: "decoded-and-response" }),
         undefined,
       )) as [Uint8Array<ArrayBuffer>, { readonly headers: Readonly<Record<string, string>> }];
@@ -339,13 +371,17 @@ export const createClient = (options: ClientOptions): HerculeClient => {
   for (const group of Object.values(api.groups)) {
     client[group.identifier] = Object.fromEntries(
       Object.keys(group.endpoints).map((name) => {
-        const tokenFrom = TOKEN_FROM[`${group.identifier}.${name}`];
+        // True because the contract builds each endpoint's id as
+        // `<group identifier>.<endpoint name>`, and every id is in the
+        // operation table (checked by the contract's api test).
+        const operation = `${group.identifier}.${name}` as OperationId;
+        const tokenFrom = TOKEN_FROM[operation];
         let call: Call | undefined;
         return [
           name,
           (request?: unknown, callOptions?: CallOptions) => {
             call ??= buildCall(group.identifier, name);
-            return run(call(request), tokenFrom, callOptions?.signal);
+            return run(operation, call(request), tokenFrom, callOptions?.signal);
           },
         ];
       }),

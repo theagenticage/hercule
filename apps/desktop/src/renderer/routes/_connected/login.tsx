@@ -19,15 +19,19 @@ export const Route = createFileRoute("/_connected/login")({
 const SIGN_IN_KEY = ["auth.login"];
 
 /**
- * Returns the line that explains why signing in to the controller at `url`
- * failed. A wrong username and a wrong password get one message, so the form
- * never reveals which one was right.
+ * Returns the line that explains why signing in failed. A wrong username and
+ * a wrong password get one message, so the form never reveals which one was
+ * right. A `ConnectionError` shows its reason as a sentence, such as "The
+ * controller did not answer within 5 s.", without the operation's name. Any
+ * other failure shows its own message.
  */
-const describeSignInFailure = (error: Error, url: string): string => {
+const describeSignInFailure = (error: Error): string => {
   if (error instanceof ApiError && error.code === "unauthenticated") {
     return "Wrong username or password.";
   }
-  if (error instanceof ConnectionError) return `Could not reach ${url}.`;
+  if (error instanceof ConnectionError) {
+    return `${error.reason.charAt(0).toUpperCase()}${error.reason.slice(1)}.`;
+  }
   return error.message;
 };
 
@@ -87,7 +91,7 @@ function SignIn(): JSX.Element {
         />
         {signIn.isError ? (
           <p className="centered-error" role="alert">
-            {describeSignInFailure(signIn.error, controller.url)}
+            {describeSignInFailure(signIn.error)}
           </p>
         ) : null}
         <button
