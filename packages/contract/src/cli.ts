@@ -4986,7 +4986,7 @@ export const CLI = {
       thread: { hidden: true },
       workspaceId: {
         flag: "workspace",
-        help: "Only the sessions placed in this workspace, by its id or a tail of eight or more characters; repeat the flag to list the sessions of up to 150 workspaces. Find a workspace with `hercule workspace list`.",
+        help: "Only the sessions placed in this workspace, by its id or a tail of eight or more characters; repeat the flag to list the sessions of several workspaces. Find a workspace with `hercule workspace list`.",
         resolves: "workspace.query",
       },
       done: {
