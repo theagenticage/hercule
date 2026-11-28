@@ -106,6 +106,7 @@ const buildRevision = (
   fileCount: 1,
   sizeBytes: 4463,
   description: "",
+  approvalEffects: { allowedTools: null, hooks: null },
   createdAt: LONG_AGO,
   createdBy: "user",
   appliedAt: LONG_AGO,
@@ -114,6 +115,11 @@ const buildRevision = (
   ...over,
 });
 
+const RELEASE_CHECKLIST_EFFECTS = {
+  allowedTools: "Bash(git tag:*) Bash(gh release:*)",
+  hooks: null,
+};
+
 const RELEASE_CHECKLIST_PROPOSED = buildRevision({
   revisionHash: RELEASE_CHECKLIST_HASH,
   origin: "session",
@@ -121,6 +127,7 @@ const RELEASE_CHECKLIST_PROPOSED = buildRevision({
   sizeBytes: 2316,
   description:
     "Walk through the release checklist for a Hercule edge build - changelog, version bump, tag, and the GitHub release. Use when the user asks to cut, tag or publish a release.",
+  approvalEffects: RELEASE_CHECKLIST_EFFECTS,
   createdAt: todayAt(8, 12),
   createdBy: ADA_SESSION,
   appliedAt: null,
@@ -129,7 +136,7 @@ const RELEASE_CHECKLIST_PROPOSED = buildRevision({
 
 const RELEASE_CHECKLIST_LINES = RELEASE_CHECKLIST_MD.trimEnd().split("\n");
 const RELEASE_CHECKLIST_DIFF: SkillRevisionDiff = {
-  approvalEffects: { allowedTools: "Bash(git tag:*) Bash(gh release:*)", hooks: null },
+  approvalEffects: RELEASE_CHECKLIST_EFFECTS,
   files: [
     {
       path: "SKILL.md",
@@ -193,7 +200,7 @@ export const buildSkillsRecords = (state: SkillsState): SkillsSettingsRecords =>
     ? buildSkill({
         name: "release-checklist",
         currentRevisionHash: RELEASE_CHECKLIST_HASH,
-        currentApprovalEffects: RELEASE_CHECKLIST_DIFF.approvalEffects,
+        currentApprovalEffects: RELEASE_CHECKLIST_EFFECTS,
         currentFileCount: 2,
         currentSizeBytes: 2316,
         createdBy: ADA_SESSION,
