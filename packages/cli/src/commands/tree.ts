@@ -129,12 +129,11 @@ export interface Field {
    */
   readonly resolves: OperationId | undefined;
   /**
-   * The queries sent to the list operation in `resolves`, whose answers are
-   * read together to match a tail. One query such as `{ closed: true }`
-   * matches among the closed initiatives; `[{}]`, the default, is the listing
-   * as it comes, which holds the ids this field takes.
+   * The query sent to the list operation in `resolves`, whose answer is
+   * matched against a tail. `{}`, the default, is the listing as it comes,
+   * which holds the ids this field takes.
    */
-  readonly resolvesQueries: ReadonlyArray<ResolvingQuery>;
+  readonly resolvesQuery: ResolvingQuery;
   /**
    * The key under which each word of a list positional is sent as an object,
    * for a list of objects; absent when the list holds the words themselves.
@@ -383,15 +382,6 @@ const readItemKeyType = (name: string, element: Ast | undefined, itemKey: string
 };
 
 /**
- * Returns the queries a field's row sends to its list operation: the row's
- * `resolvesQuery` as a list, or `[{}]` (the listing as it comes) when the row
- * names none.
- */
-const listResolvingQueries = (
-  query: ResolvingQuery | ReadonlyArray<ResolvingQuery> | undefined,
-): ReadonlyArray<ResolvingQuery> => (query === undefined ? [{}] : [query].flat());
-
-/**
  * Builds one field from its schema type and its CLI row.
  *
  * `schema` is the field's own schema, when the operation declares one; the
@@ -443,7 +433,7 @@ const buildField = (
     standsInForStdin: "standsInForStdin" in row && row.standsInForStdin === true,
     readsSkillFolder,
     resolves: "resolves" in row ? row.resolves : undefined,
-    resolvesQueries: listResolvingQueries("resolvesQuery" in row ? row.resolvesQuery : undefined),
+    resolvesQuery: "resolvesQuery" in row ? (row.resolvesQuery ?? {}) : {},
     itemKey,
     within: undefined,
     help: row.help,
