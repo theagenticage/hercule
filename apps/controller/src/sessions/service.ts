@@ -199,7 +199,13 @@ import {
   type StoredSubagent,
   type SubagentEventFacts,
 } from "./subagents";
-import { hasOtherTurn, omitRawPayload, readAssistantTexts, readOpenTurnId } from "./transcript-log";
+import {
+  hasOtherTurn,
+  omitRawPayload,
+  readAssistantTexts,
+  readOpenTurnId,
+  readTurnStanding,
+} from "./transcript-log";
 import { buildStepKey, buildTurnInput } from "./turn-input";
 import { addUsageReport, clearProcessShare } from "./usage";
 
@@ -4125,7 +4131,13 @@ const make = Effect.gen(function* () {
         // other session is ignored.
         if (Option.isNone(found) || found.value.runnerId !== runnerId) return undefined;
         const held = tracking.get(id) ?? startTracking(yield* sessions.ingestState(id));
-        const folded = fold(held, seq, event);
+        // Where the turn stands is read only for a turn end, so a delta or any
+        // other event costs no extra read.
+        const standing =
+          event._tag === "turn.completed"
+            ? yield* readTurnStanding(sql, id, event.subagentId, event.turnId)
+            : undefined;
+        const folded = fold(held, seq, event, standing);
         if (folded === undefined) return undefined;
         if (event._tag === "content.delta") {
           yield* announce({
@@ -4171,12 +4183,28 @@ const make = Effect.gen(function* () {
         const before = session.status;
         // An event for a session that has already exited is still recorded,
         // but changes nothing else: no Request, no subagent, no usage.
-        const sessionAcceptsChanges = before !== "exited";
+        //
+        // A record-only `turn.completed` is the same: the end of a past turn
+        // must not end the agent's current turn, so it closes no Request and
+        // ends no subagent (spec 06 section 6.2).
+        const eventChangesSession = before !== "exited" && !folded.recordOnly;
         // An archived session may still run until its stop arrives. A Request
         // it opens in that time would wait for an answer that is refused, so
         // it is recorded in the stream and opens nothing. Events that close
         // Requests (resolved, turn end, exit) apply as for any session.
         const opensNothing = event._tag === "request.opened" && session.archived !== null;
+        if (folded.recordOnly && event._tag === "turn.completed") {
+          yield* Effect.logInfo(
+            "Ignored the end of an earlier turn, because a newer turn of the agent started or the turn had already ended",
+          ).pipe(
+            Effect.annotateLogs({
+              runnerId,
+              sessionId: id,
+              agent: event.subagentId ?? "the session's own agent",
+              turnId: event.turnId,
+            }),
+          );
+        }
         const at = yield* nowIso;
         let toolCallsChanged = false;
         for (const row of folded.rows) {
@@ -4206,7 +4234,7 @@ const make = Effect.gen(function* () {
         // only while the session accepts changes. The time is the one the
         // board shows as the end of the turn.
         if (
-          sessionAcceptsChanges &&
+          eventChangesSession &&
           event._tag === "turn.completed" &&
           attributeEvent(event) === undefined
         ) {
@@ -4220,16 +4248,16 @@ const make = Effect.gen(function* () {
         }
         // Before the Requests, so a Request a subagent opens can name it by
         // the description this same event may have filled in.
-        const askers = sessionAcceptsChanges
+        const askers = eventChangesSession
           ? yield* applySubagentEvent(session, event)
           : new Map<SubagentId, StoredSubagent>();
         let requestsChanged = false;
-        if (sessionAcceptsChanges && !opensNothing && isRequestEvent(event)) {
+        if (eventChangesSession && !opensNothing && isRequestEvent(event)) {
           const openRequests = computeOpenRequestsAfter(event, session.openRequests);
           requestsChanged = openRequests !== session.openRequests;
           if (requestsChanged) yield* replaceOpenRequests(session, openRequests, event, askers);
         }
-        const usageChanged = sessionAcceptsChanges && (yield* applySessionUsage(session, event));
+        const usageChanged = eventChangesSession && (yield* applySessionUsage(session, event));
         // A session starting or exiting is what counts as use of its
         // workspace. The time is shown to the user; how long the workspace is
         // kept is decided by its leases, not by this time.
