@@ -246,10 +246,23 @@ export const runDaemon = (
       // No session outlives this process, so anything in these directories
       // was left behind by the last run. Delete them here, so they do not
       // grow with every crash.
-      rmSync(scratchDir, { recursive: true, force: true });
-      rmSync(attachmentsDir, { recursive: true, force: true });
-      rmSync(editMarksDir, { recursive: true, force: true });
-      rmSync(sessionSkillsDir, { recursive: true, force: true });
+      //
+      // A folder that cannot be deleted (for example one that holds files a
+      // container created as root) is logged with its path and the reason, and
+      // does not stop the start: leftovers are cleanup, not a precondition.
+      for (const leftover of [scratchDir, attachmentsDir, editMarksDir, sessionSkillsDir]) {
+        yield* Effect.try({
+          try: () => rmSync(leftover, { recursive: true, force: true }),
+          catch: (error) => (error instanceof Error ? error.message : String(error)),
+        }).pipe(
+          Effect.catch((reason) =>
+            Effect.logWarning(
+              `could not delete the leftover folder ${leftover}: ${reason}. ` +
+                "Delete it by hand, or change the owner of the files in it to the runner's user.",
+            ),
+          ),
+        );
+      }
       // A token login keeps its scratch folder in the machine's temp directory,
       // where a runner killed in the middle of one leaves it.
       removeStaleSetupTokenFolders(tmpdir(), Date.now());

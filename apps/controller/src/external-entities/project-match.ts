@@ -24,11 +24,11 @@ import {
 } from "@hercule/contract";
 import { uuidFromString, uuidToString, withReadSnapshot } from "../db";
 import { EFFECTIVE_LINK_SQL } from "./entity-links";
-import { READABLE_RECORD_SQL } from "./inbox-relation";
+import { buildReadableCondition } from "./entity-records";
 
 /** The columns that name a thing as evidence: its id, identifier, and a title only a readable record shows. */
 const MENTION_COLUMNS = `t.id AS id, t.identifier AS identifier,
-  CASE WHEN ${READABLE_RECORD_SQL} THEN t.title END AS title`;
+  CASE WHEN ${buildReadableCondition("t")} THEN t.title END AS title`;
 
 /** The remote of the repository the work of thing `t` lands in, or NULL when its kind has none. */
 const TARGET_REMOTE_SQL = `json_extract(t.repository, '$.target.remote')`;

@@ -446,7 +446,7 @@ describe("takeOn", () => {
         yield* report(connectionId, [buildObservation("1")]);
         const id = yield* entityId(ticketRef("1"));
         const first = yield* service.takeOn(id);
-        yield* tasks.update({ id: first.taskId, stage: "done" });
+        yield* tasks.update({ taskId: first.taskId, stage: "done" });
         const second = yield* service.takeOn(id);
         return { first, second };
       }),
@@ -1242,8 +1242,8 @@ describe("undoTakeOn", () => {
         const two = yield* entityId(ticketRef("2"));
         const madeOne = yield* service.takeOn(one);
         const madeTwo = yield* service.takeOn(two);
-        yield* tasks.update({ id: madeOne.taskId, title: "Renamed" });
-        yield* tasks.update({ id: madeTwo.taskId, provenance: [{ ref: ticketRef("1") }] });
+        yield* tasks.update({ taskId: madeOne.taskId, title: "Renamed" });
+        yield* tasks.update({ taskId: madeTwo.taskId, provenance: [{ ref: ticketRef("1") }] });
         return {
           edited: yield* service.undoTakeOn(one, madeOne.taskId),
           linked: yield* service.undoTakeOn(two, madeTwo.taskId),
@@ -1430,7 +1430,7 @@ describe("takeOnTogether and undoTakeOnTogether", () => {
         const first = yield* service.takeOnTogether({ ids, title: "First" });
         const undone = yield* service.undoTakeOnTogether(first);
         const second = yield* service.takeOnTogether({ ids, title: "Second" });
-        yield* tasks.update({ id: second.taskId, title: "Renamed" });
+        yield* tasks.update({ taskId: second.taskId, title: "Renamed" });
         return {
           undone,
           kept: yield* service.undoTakeOnTogether(second),

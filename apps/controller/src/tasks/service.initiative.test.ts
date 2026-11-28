@@ -124,9 +124,9 @@ describe("putting a Task on an Initiative", () => {
         const initiative = yield* insertInitiative("Platform");
         const task = yield* createTask("Add a refund button", {});
         yield* TestClock.adjust(A_MINUTE);
-        const put = yield* tasks.update({ id: task.id, initiativeId: initiative });
+        const put = yield* tasks.update({ taskId: task.id, initiativeId: initiative });
         yield* TestClock.adjust(A_MINUTE);
-        const cleared = yield* tasks.update({ id: task.id, initiativeId: null });
+        const cleared = yield* tasks.update({ taskId: task.id, initiativeId: null });
         return { initiative, put, cleared, changes: yield* readChanges(task.id) };
       }),
     );
@@ -145,7 +145,7 @@ describe("putting a Task on an Initiative", () => {
         const task = yield* createTask("Add a refund button", { initiativeId: initiative });
         yield* TestClock.adjust(A_MINUTE);
         const tasks = yield* TaskService;
-        const again = yield* tasks.update({ id: task.id, initiativeId: initiative });
+        const again = yield* tasks.update({ taskId: task.id, initiativeId: initiative });
         return { task, again, changes: yield* readChanges(task.id) };
       }),
     );
@@ -219,7 +219,7 @@ describe("putting a Task on an Initiative", () => {
         const initiative = yield* insertInitiative("Platform");
         const created = yield* createTask("Add a refund button", {});
         const tasks = yield* TaskService;
-        return yield* tasks.update({ id: created.id, initiativeId: initiative });
+        return yield* tasks.update({ taskId: created.id, initiativeId: initiative });
       }),
       SESSION,
     );
@@ -239,7 +239,7 @@ describe("putting a Task on an Initiative", () => {
         Effect.gen(function* () {
           const task = yield* createTask("Existing", {});
           return yield* Effect.flatMap(TaskService, (tasks) =>
-            tasks.update({ id: task.id, initiativeId }),
+            tasks.update({ taskId: task.id, initiativeId }),
           );
         }),
     ],
@@ -292,7 +292,7 @@ describe("putting a Task on an Initiative", () => {
         const closed = yield* insertInitiative("Done", { closed: true });
         const task = yield* createTask("Add a refund button", {});
         const error = yield* Effect.flip(
-          tasks.update({ id: task.id, title: "Renamed", initiativeId: closed }),
+          tasks.update({ taskId: task.id, title: "Renamed", initiativeId: closed }),
         );
         return { error, after: yield* tasks.read(task.id) };
       }),
@@ -309,9 +309,9 @@ describe("putting a Task on an Initiative", () => {
         const task = yield* createTask("Add a refund button", { initiativeId: initiative });
         yield* setInitiativeState(initiative, "closed_at");
         yield* TestClock.adjust(A_MINUTE);
-        const renamed = yield* tasks.update({ id: task.id, title: "Renamed" });
+        const renamed = yield* tasks.update({ taskId: task.id, title: "Renamed" });
         const named = yield* tasks.update({
-          id: task.id,
+          taskId: task.id,
           initiativeId: initiative,
           priority: "high",
         });
@@ -320,7 +320,7 @@ describe("putting a Task on an Initiative", () => {
           stage: "building",
           initiativeId: initiative,
         });
-        const cleared = yield* tasks.update({ id: task.id, initiativeId: null });
+        const cleared = yield* tasks.update({ taskId: task.id, initiativeId: null });
         return { initiative, renamed, named, moved, cleared };
       }),
     );
@@ -337,7 +337,7 @@ describe("putting a Task on an Initiative", () => {
         const open = yield* insertInitiative("Platform");
         const closed = yield* insertInitiative("Done", { closed: true });
         const task = yield* createTask("Add a refund button", { initiativeId: open });
-        return yield* Effect.flip(tasks.update({ id: task.id, initiativeId: closed }));
+        return yield* Effect.flip(tasks.update({ taskId: task.id, initiativeId: closed }));
       }),
     );
     expect(error).toMatchObject({ error: { code: "invalid_state" } });
@@ -399,7 +399,7 @@ describe("clearInitiative", () => {
           const other = yield* insertInitiative("Storefront");
           const building = yield* createTask("Building", { initiativeId: initiative });
           const finished = yield* createTask("Finished", { initiativeId: initiative });
-          yield* tasks.update({ id: finished.id, stage: "done" });
+          yield* tasks.update({ taskId: finished.id, stage: "done" });
           const deleted = yield* createTask("Deleted", { initiativeId: initiative });
           yield* tasks.delete(deleted.id);
           const kept = yield* createTask("Elsewhere", { initiativeId: other });

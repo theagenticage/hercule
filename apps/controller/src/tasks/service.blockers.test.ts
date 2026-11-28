@@ -412,7 +412,7 @@ describe("loops of blockers", () => {
         const first = yield* createTask("Add a refund button");
         const second = yield* createTask("Ship refund emails");
         yield* block(second, first);
-        yield* tasks.update({ id: first.id, stage: "done" });
+        yield* tasks.update({ taskId: first.id, stage: "done" });
         return yield* Effect.flip(tasks.addBlocker(first.id, second.id));
       }),
     );
@@ -714,7 +714,7 @@ describe("checking a merge before it is made", () => {
           "Survivor",
           "Finished",
         );
-        yield* tasks.update({ id: finished.id, stage: "done" });
+        yield* tasks.update({ taskId: finished.id, stage: "done" });
         yield* block(source, middle);
         yield* block(middle, survivor);
         const unknown = uuidToString(mintUuid());
@@ -815,7 +815,7 @@ describe("announcing the Tasks on the other end of an edge when a Task is edited
         yield* block(middle, upstream);
         yield* block(downstream, middle);
         const announcedBefore = announced.length;
-        yield* tasks.update({ id: middle.id, ...patch });
+        yield* tasks.update({ taskId: middle.id, ...patch });
         return {
           upstream,
           middle,
@@ -841,7 +841,7 @@ describe("announcing the Tasks on the other end of an edge when a Task is edited
         const [upstream, middle] = yield* createTasks("Upstream", "Middle");
         yield* block(middle, upstream);
         const announcedBefore = announced.length;
-        yield* tasks.update({ id: middle.id, stage: "in-review" });
+        yield* tasks.update({ taskId: middle.id, stage: "in-review" });
         return { upstream, derived: derivedIds(announced.slice(announcedBefore)) };
       }).pipe(Effect.provide(listener)),
     );
@@ -915,9 +915,9 @@ describe("what the board and the pane read of blockers", () => {
         const dropped = yield* createTask("Dropped blocker", { stage: "building" });
         const open = yield* createTask("Open blocker", { stage: "building" });
         for (const blocker of [landed, done, dropped, open]) yield* block(waiting, blocker);
-        yield* tasks.update({ id: landed.id, stage: "landed" });
-        yield* tasks.update({ id: done.id, stage: "done" });
-        yield* tasks.update({ id: dropped.id, stage: "dropped" });
+        yield* tasks.update({ taskId: landed.id, stage: "landed" });
+        yield* tasks.update({ taskId: done.id, stage: "done" });
+        yield* tasks.update({ taskId: dropped.id, stage: "dropped" });
         const board = yield* Effect.flatMap(TaskBoard, (reader) => reader.query());
         const detail = yield* details.read(waiting.id);
         return {

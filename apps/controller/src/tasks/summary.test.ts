@@ -134,13 +134,16 @@ describe("what marks a Task dirty", () => {
   it.each([
     [
       "a new title",
-      (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.update({ id, title: "New" })),
+      (id: string) =>
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: id, title: "New" })),
       1,
     ],
     [
       "a new description",
       (id: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id, description: "More words" })),
+        Effect.flatMap(TaskService, (tasks) =>
+          tasks.update({ taskId: id, description: "More words" }),
+        ),
       1,
     ],
     ["a Thread joining it", (id: string) => joinAs("thread", id), 1],
@@ -164,8 +167,8 @@ describe("what marks a Task dirty", () => {
       (id: string) =>
         Effect.flatMap(TaskService, (tasks) =>
           Effect.andThen(
-            tasks.update({ id, stage: "done" }),
-            tasks.update({ id, stage: "building" }),
+            tasks.update({ taskId: id, stage: "done" }),
+            tasks.update({ taskId: id, stage: "building" }),
           ),
         ),
       1,
@@ -173,21 +176,23 @@ describe("what marks a Task dirty", () => {
     [
       "the same title again",
       (id: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id, title: "Add a refund button" })),
+        Effect.flatMap(TaskService, (tasks) =>
+          tasks.update({ taskId: id, title: "Add a refund button" }),
+        ),
       0,
     ],
     [
       "a priority or a label",
       (id: string) =>
         Effect.flatMap(TaskService, (tasks) =>
-          tasks.update({ id, priority: "high", addLabels: ["payments"] }),
+          tasks.update({ taskId: id, priority: "high", addLabels: ["payments"] }),
         ),
       0,
     ],
     [
       "a move to another live stage",
       (id: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "planned" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: id, stage: "planned" })),
       0,
     ],
     ["an agent session joining it", (id: string) => joinAs("agent", id), 0],
@@ -195,7 +200,7 @@ describe("what marks a Task dirty", () => {
       "a new outside thing linked to it",
       (id: string) =>
         Effect.flatMap(TaskService, (tasks) =>
-          tasks.update({ id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
+          tasks.update({ taskId: id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
         ),
       1,
     ],
@@ -204,8 +209,8 @@ describe("what marks a Task dirty", () => {
       (id: string) =>
         Effect.flatMap(TaskService, (tasks) =>
           Effect.andThen(
-            tasks.update({ id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
-            tasks.update({ id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
+            tasks.update({ taskId: id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
+            tasks.update({ taskId: id, provenance: [{ ref: "github:issue:acme/api#7" }] }),
           ),
         ),
       1,
@@ -306,12 +311,13 @@ describe("what stops a Task being dirty", () => {
   it.each([
     [
       "Done",
-      (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "done" })),
+      (id: string) =>
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: id, stage: "done" })),
     ],
     [
       "Drop",
       (id: string) =>
-        Effect.flatMap(TaskService, (tasks) => tasks.update({ id, stage: "dropped" })),
+        Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: id, stage: "dropped" })),
     ],
     ["a delete", (id: string) => Effect.flatMap(TaskService, (tasks) => tasks.delete(id))],
   ])("is %s: no summary is waiting, and a later change marks nothing", async (_name, end) => {
@@ -338,7 +344,7 @@ describe("what stops a Task being dirty", () => {
         const tasks = yield* TaskService;
         const task = yield* createTask("Add a refund button");
         yield* makeDue(task.id);
-        yield* tasks.update({ id: task.id, stage: "done" });
+        yield* tasks.update({ taskId: task.id, stage: "done" });
         yield* tasks.move({ id: task.id, stage: "in-review" });
         return yield* readRow(task.id);
       }),

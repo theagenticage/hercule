@@ -25,7 +25,7 @@ import {
   type InboxClause,
 } from "@hercule/plugin-host";
 import { uuidFromString } from "../db";
-import type { ActiveEntityKind } from "./entity-records";
+import { buildReadableCondition, type ActiveEntityKind } from "./entity-records";
 import {
   buildSourceOfKindSql,
   CORE_KEYS,
@@ -33,7 +33,6 @@ import {
   joinConditions,
   OBSERVING_SQL,
   parseSourceOfKind,
-  READABLE_RECORD_SQL,
   readCoreKeyType,
   UUID_TEXT,
   type CompiledSql,
@@ -156,7 +155,7 @@ const compileFieldCondition = (
         sql: buildFieldRowSql(
           `f.text_value IS NOT NULL AND (f.text_value = ? OR EXISTS (
             SELECT 1 FROM external_entities t
-            WHERE t.ref = f.text_value AND t.title = ? COLLATE NOCASE AND ${READABLE_RECORD_SQL}))`,
+            WHERE t.ref = f.text_value AND t.title = ? COLLATE NOCASE AND ${buildReadableCondition("t")}))`,
         ),
         params: [key, text, text],
       };
@@ -325,7 +324,7 @@ const compileText = (text: string): CompiledSql | string => {
           SELECT 1 FROM external_entity_fields f
           WHERE f.ref = e.ref AND f.text_value IS NOT NULL AND (f.text_value LIKE ? ESCAPE '\\'
             OR EXISTS (SELECT 1 FROM external_entities t
-              WHERE t.ref = f.text_value AND t.title LIKE ? ESCAPE '\\' AND ${READABLE_RECORD_SQL})))`,
+              WHERE t.ref = f.text_value AND t.title LIKE ? ESCAPE '\\' AND ${buildReadableCondition("t")})))`,
         params: [pattern, pattern, pattern, pattern],
       };
     }),

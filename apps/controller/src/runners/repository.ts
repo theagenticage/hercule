@@ -30,6 +30,7 @@ import {
   type CursorScope,
   type Page,
 } from "../db";
+import { isDiskBelowLimit } from "./disk-limit";
 
 export interface RunnerPageRequest {
   readonly limit: number;
@@ -512,8 +513,8 @@ const make = Effect.gen(function* () {
         yield* sql`UPDATE runners
                    SET metrics = ${JSON.stringify(metrics)}, updated_at = ${at}
                    WHERE id = ${key}`;
-        const wasAccepting = was === null ? true : was.diskFreeBytes >= effective;
-        const accepting = metrics.diskFreeBytes >= effective;
+        const wasAccepting = !isDiskBelowLimit(was, effective);
+        const accepting = !isDiskBelowLimit(metrics, effective);
         return { crossed: wasAccepting !== accepting, accepting };
       }),
 

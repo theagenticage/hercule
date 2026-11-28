@@ -34,7 +34,12 @@ import {
   ProviderAccountRunners,
 } from "../../provider-accounts";
 import { Secrets } from "../../secrets";
-import { LocalRunnerId, RunnerConnections, runnerRepository } from "../../runners";
+import {
+  isDiskBelowLimit,
+  LocalRunnerId,
+  RunnerConnections,
+  runnerRepository,
+} from "../../runners";
 import { SessionService, type StartRequest } from "../../sessions";
 import { TaskService } from "../../tasks";
 import { githubAccounts } from "../../workspaces";
@@ -142,9 +147,7 @@ const make = Effect.gen(function* () {
               // its sessions yet. A start sent before that report arrives would
               // be missing from the report, so the report would mark it exited.
               if (!(yield* connections.hasReportedSessions(runnerId))) return [];
-              const metrics = runner.metrics;
-              // No metrics reported yet does not mean the disk is full.
-              if (metrics !== null && metrics.diskFreeBytes < runner.diskWatermarkBytes) {
+              if (isDiskBelowLimit(runner.metrics, runner.diskWatermarkBytes)) {
                 return [];
               }
               const room =

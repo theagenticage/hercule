@@ -115,7 +115,7 @@ const drag = (taskId: string, stage: TaskStage) =>
   Effect.gen(function* () {
     yield* TestClock.adjust(A_MINUTE);
     const tasks = yield* TaskService;
-    yield* tasks.update({ id: taskId, stage });
+    yield* tasks.update({ taskId, stage });
   });
 
 /** Sends the stage write a workflow sends when a fact arrives. */
@@ -124,7 +124,7 @@ const deliverFact = (taskId: string, factId: number, stage: TaskStage) =>
     yield* TestClock.adjust(A_MINUTE);
     const tasks = yield* TaskService;
     yield* tasks
-      .update({ id: taskId, stage, stageFactId: factId })
+      .update({ taskId, stage, stageFactId: factId })
       .pipe(Effect.provideService(CurrentActor, RUN));
   });
 

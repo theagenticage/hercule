@@ -53,11 +53,7 @@ import {
   TaskFilter,
   TaskMoveInput,
   TaskStageReportInput,
-  TaskUpdateInput,
-  refuseEmptyTaskUpdate,
-  refuseFinishedCheckWithoutStageFact,
-  refuseStageFactWithoutStage,
-  refuseStageWithStatus,
+  TaskUpdateCall,
   InvalidState,
   NotFound,
   Validation,
@@ -132,23 +128,6 @@ const QueryInput = Schema.Struct({
 
 export type QueryInput = Schema.Schema.Type<typeof QueryInput>;
 
-/**
- * The input of `task.update`: the task's id and the fields to change. Decoding
- * fails when the edit sets no field, sets both `stage` and `status`, sends
- * `stageFactId` without `stage`, or sends `onlyWhenLinkedWorkFinished` without
- * `stageFactId`. The checks are the same ones the request schema uses, so both
- * reject the same edits. Spreading the fields drops the checks of `TaskUpdateInput`, so they
- * are attached again here; a workflow step calls this service directly.
- */
-const UpdateInput = Schema.Struct({ id: Id, ...TaskUpdateInput.fields }).check(
-  refuseEmptyTaskUpdate,
-  refuseStageWithStatus,
-  refuseStageFactWithoutStage,
-  refuseFinishedCheckWithoutStageFact,
-);
-
-export type UpdateInput = Schema.Schema.Type<typeof UpdateInput>;
-
 /** The input of `task.move`: the Task's id and where it goes. */
 const MoveInput = Schema.Struct({ id: Id, ...TaskMoveInput.fields });
 
@@ -161,7 +140,7 @@ export type LinkEntityInput = Schema.Schema.Type<typeof LinkEntityInput>;
 
 const decodeQuery = Schema.decodeUnknownEffect(QueryInput);
 const decodeCreate = Schema.decodeUnknownEffect(TaskCreateInput);
-const decodeUpdate = Schema.decodeUnknownEffect(UpdateInput);
+const decodeUpdate = Schema.decodeUnknownEffect(TaskUpdateCall);
 const decodeMove = Schema.decodeUnknownEffect(MoveInput);
 const decodeStageReport = Schema.decodeUnknownEffect(TaskStageReportInput);
 const decodeEntityLink = Schema.decodeUnknownEffect(LinkEntityInput);
@@ -2011,14 +1990,14 @@ const make = Effect.gen(function* () {
      * `changes.initiativeId` as `{ old, new }`.
      */
     update: (
-      input: UpdateInput,
+      input: TaskUpdateCall,
     ): Effect.Effect<
       Task,
       Unauthenticated | Forbidden | Validation | NotFound | InvalidState | SqlError
     > =>
       Effect.gen(function* () {
         yield* requireGrant("task.update");
-        const { id, ...patch } = yield* Effect.mapError(
+        const { taskId, ...patch } = yield* Effect.mapError(
           decodeUpdate(input),
           createDecodeValidationError,
         );
@@ -2027,10 +2006,10 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             if (typeof patch.initiativeId === "string") {
-              const held = (yield* readLiveTaskOrFail(id)).initiativeId;
+              const held = (yield* readLiveTaskOrFail(taskId)).initiativeId;
               yield* ensureInitiativeAcceptsTask(patch.initiativeId, held);
             }
-            return yield* updateTask(id, patch, stamp);
+            return yield* updateTask(taskId, patch, stamp);
           }),
         );
       }),

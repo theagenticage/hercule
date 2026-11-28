@@ -53,6 +53,7 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { Settings, type SettingError } from "../settings";
+import { isDiskBelowLimit } from "./disk-limit";
 import { announceProviderRunnerChange } from "./announce-provider-change";
 import { JoinTokens } from "./join-tokens";
 import { RunnerConnections } from "./connections";
@@ -332,9 +333,9 @@ const make = Effect.gen(function* () {
             // this runner already reported. That is the same change a report of
             // the Runner Metrics would detect, and it is recorded the same way.
             let becameAccepting = false;
-            if (before.metrics !== null && edit.diskWatermarkBytes !== undefined) {
-              const wasAccepting = before.metrics.diskFreeBytes >= before.diskWatermarkBytes;
-              const accepting = before.metrics.diskFreeBytes >= edit.diskWatermarkBytes;
+            if (edit.diskWatermarkBytes !== undefined) {
+              const wasAccepting = !isDiskBelowLimit(before.metrics, before.diskWatermarkBytes);
+              const accepting = !isDiskBelowLimit(before.metrics, edit.diskWatermarkBytes);
               becameAccepting = !wasAccepting && accepting;
               if (wasAccepting !== accepting) {
                 yield* audit.append({
@@ -352,7 +353,7 @@ const make = Effect.gen(function* () {
               // Only a change that gives the runner room for work it could
               // not take before counts:
               // - a raised cap;
-              // - a lowered watermark that brings the free disk above it;
+              // - a lowered watermark that brings the free disk to or above it;
               // - no longer reserved, so it can take work that names no
               //   runner, such as a run waiting for one. `edit.reserved` is
               //   set only when the value changed.

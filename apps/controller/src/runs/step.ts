@@ -329,12 +329,7 @@ export const makeStepExecution = ({
       },
       "task.update": {
         inTransaction: true,
-        execute: (input) => {
-          // A request sends the task id in the path; a step has no path, so it
-          // sends the id as taskId.
-          const { taskId, ...fields } = input as TaskUpdateCall;
-          return tasks.update({ id: taskId, ...fields });
-        },
+        execute: (input) => tasks.update(input as TaskUpdateCall),
       },
       // The action returns the first page. A step reads it to decide what the
       // run does next, and the first page is enough for that.

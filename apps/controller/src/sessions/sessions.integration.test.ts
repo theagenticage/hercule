@@ -4538,7 +4538,7 @@ describe("session.spawn onto a runner that is short of disk", () => {
       await waitToSettle();
       expect(listStartFrames(arranged.wire).map((frame) => frame.sessionId)).toEqual([first.id]);
 
-      reportDiskFree(arranged.wire, 40 * GIB);
+      reportDiskFree(arranged.wire, 10 * GIB);
 
       await waitForSession(arranged, waiting.id, hasStarted);
       const sent = await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 2);
@@ -4546,7 +4546,7 @@ describe("session.spawn onto a runner that is short of disk", () => {
     });
   });
 
-  it("starts a queued session when the owner lowers the watermark below the runner's free disk", async () => {
+  it("starts a queued session when the owner lowers the watermark to the runner's free disk", async () => {
     await withFleet(async (arranged) => {
       reportDiskFree(arranged.wire, 4 * GIB);
       await waitUntil("stored the low reading", async () => {
@@ -4561,7 +4561,7 @@ describe("session.spawn onto a runner that is short of disk", () => {
       const waiting = await spawnSessionOrFail(arranged, { prompt: "no room" });
       expect(waiting.status).toBe("queued");
 
-      await setDiskWatermark(arranged, 1 * GIB);
+      await setDiskWatermark(arranged, 4 * GIB);
 
       await waitForSession(arranged, waiting.id, hasStarted);
       const sent = await waitForFrames<SessionStart>(arranged.wire, "sessionStart", 1);

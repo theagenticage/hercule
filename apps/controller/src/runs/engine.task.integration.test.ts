@@ -634,7 +634,7 @@ describe("task.undoTryAgain", () => {
       name: "keeps a Task that was marked Done",
       disturb: (arranged) =>
         Effect.flatMap(TaskService, (tasks) =>
-          tasks.update({ id: arranged.taskId, stage: "done" }),
+          tasks.update({ taskId: arranged.taskId, stage: "done" }),
         ),
       answer: { outcome: "stopped", stopRequested: true },
       reasonIncludes: FINISHED,
@@ -645,7 +645,7 @@ describe("task.undoTryAgain", () => {
       name: "keeps a Task that was dropped",
       disturb: (arranged) =>
         Effect.flatMap(TaskService, (tasks) =>
-          tasks.update({ id: arranged.taskId, stage: "dropped" }),
+          tasks.update({ taskId: arranged.taskId, stage: "dropped" }),
         ),
       answer: { outcome: "stopped", stopRequested: true },
       reasonIncludes: FINISHED,

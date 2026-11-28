@@ -84,7 +84,7 @@ describe("the link a Task's provenance writes", () => {
         const task = yield* createTaskOnRef("First", REF);
         const first = yield* readLinks(task.id);
         yield* TestClock.adjust(A_MINUTE);
-        yield* tasks.update({ id: task.id, provenance: [{ ref: OTHER_REF }, { ref: REF }] });
+        yield* tasks.update({ taskId: task.id, provenance: [{ ref: OTHER_REF }, { ref: REF }] });
         return { first, after: yield* readLinks(task.id) };
       }),
     );
@@ -104,7 +104,7 @@ describe("the active Task of a ref", () => {
         const newer = yield* createTaskOnRef("Newer");
         yield* TestClock.adjust(A_MINUTE);
         // The newer Task is now the most recently updated one.
-        yield* tasks.update({ id: newer.id, title: "Newer, renamed" });
+        yield* tasks.update({ taskId: newer.id, title: "Newer, renamed" });
         const active = yield* repository.findActiveTaskForRef(REF);
         return { olderId: older.id, activeId: active._tag === "Some" ? active.value.id : null };
       }),
@@ -125,16 +125,16 @@ describe("the active Task of a ref", () => {
           found._tag === "Some" ? found.value.title : null,
         );
         const steps = [yield* readActive];
-        yield* tasks.update({ id: first.id, stage: "done" });
+        yield* tasks.update({ taskId: first.id, stage: "done" });
         steps.push(yield* readActive);
-        yield* tasks.update({ id: second.id, stage: "dropped" });
+        yield* tasks.update({ taskId: second.id, stage: "dropped" });
         steps.push(yield* readActive);
         yield* tasks.delete(third.id);
         steps.push(yield* readActive);
-        yield* tasks.update({ id: fourth.id, stage: "done" });
+        yield* tasks.update({ taskId: fourth.id, stage: "done" });
         steps.push(yield* readActive);
         // Reopening a finished Task makes its old link count again.
-        yield* tasks.update({ id: first.id, stage: "planned" });
+        yield* tasks.update({ taskId: first.id, stage: "planned" });
         steps.push(yield* readActive);
         return steps;
       }),
@@ -151,7 +151,7 @@ describe("the active Task of a ref", () => {
         yield* createTaskOnRef("Newer", REF);
         const other = yield* createTaskOnRef("Other", OTHER_REF);
         const finished = yield* createTaskOnRef("Finished", "github:issue:acme/api#9");
-        yield* tasks.update({ id: finished.id, stage: "done" });
+        yield* tasks.update({ taskId: finished.id, stage: "done" });
         const rows = yield* repository.listActiveTasksForRefs([
           REF,
           OTHER_REF,
@@ -274,7 +274,7 @@ describe("taking back a Task made for a ref", () => {
         const tasks = yield* TaskService;
         const task = yield* makeTask;
         yield* TestClock.adjust(A_MINUTE);
-        yield* tasks.update({ id: task.id, priority: "high" });
+        yield* tasks.update({ taskId: task.id, priority: "high" });
         return {
           outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
           deleted: yield* isDeleted(task.id),
@@ -291,7 +291,7 @@ describe("taking back a Task made for a ref", () => {
         const tasks = yield* TaskService;
         const task = yield* makeTask;
         // The clock does not move, so `updatedAt` still equals `createdAt`.
-        const edited = yield* tasks.update({ id: task.id, title: "Renamed" });
+        const edited = yield* tasks.update({ taskId: task.id, title: "Renamed" });
         expect(edited.updatedAt).toBe(task.createdAt);
         return {
           outcome: yield* tasks.undoCreatedTask(task.id, [REF]),
@@ -496,7 +496,7 @@ describe("merging Tasks that link refs", () => {
         const repository = yield* taskRepository;
         const survivor = yield* createTaskOnRef("Survivor", REF);
         const source = yield* createTaskOnRef("Source", OTHER_REF);
-        yield* tasks.update({ id: source.id, provenance: [{ ref: REF }] });
+        yield* tasks.update({ taskId: source.id, provenance: [{ ref: REF }] });
         yield* setLink(source.id, REF, { linkedAt: "2020-01-01T00:00:00.000Z", following: false });
         const before = yield* repository.findActiveTaskForRef(REF);
         yield* tasks.merge(source.id, { intoTaskId: survivor.id });
@@ -520,7 +520,7 @@ describe("merging Tasks that link refs", () => {
         const survivor = yield* createTaskOnRef("Survivor", REF);
         const source = yield* createTaskOnRef("Source", REF);
         yield* tasks.merge(source.id, { intoTaskId: survivor.id });
-        yield* tasks.update({ id: source.id, provenance: [{ ref: OTHER_REF }] });
+        yield* tasks.update({ taskId: source.id, provenance: [{ ref: OTHER_REF }] });
         yield* tasks.recordHandoff({
           taskId: source.id,
           entry: { signalId: SIGNAL_ID, runId: RUN_ID, ref: THIRD_REF },

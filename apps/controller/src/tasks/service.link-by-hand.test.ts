@@ -146,7 +146,7 @@ describe("linking a thing by hand", () => {
         yield* arrange({ ref: pr(1), lifecycle: "open" });
         const task = yield* createBareTask;
         const tasks = yield* minuteLater;
-        yield* tasks.update({ id: task.id, stage: "done" });
+        yield* tasks.update({ taskId: task.id, stage: "done" });
         yield* tasks.linkEntity({ id: task.id, ref: pr(1) });
         return { links: yield* readLinks(task.id), facts: yield* readFacts };
       }),
@@ -296,7 +296,7 @@ describe("unlinking a thing by hand", () => {
         yield* tasks.unlinkEntity({ id: task.id, ref: pr(1) });
         const queued = (key: number) =>
           Effect.flatMap(minuteLater, (service) =>
-            service.update({ id: task.id, stage: "in-review", stageFactId: key }),
+            service.update({ taskId: task.id, stage: "in-review", stageFactId: key }),
           );
         const afterUnlink = (yield* queued(2)).stage;
         yield* tasks.linkEntity({ id: task.id, ref: pr(1) }); // fact 3
@@ -342,7 +342,7 @@ describe("an unlink that sticks", () => {
         const tasks = yield* minuteLater;
         yield* tasks.unlinkEntity({ id: task.id, ref: pr(1) });
         yield* tasks.unlinkEntity({ id: task.id, ref: pr(1) });
-        yield* tasks.update({ id: task.id, provenance: [{ ref: pr(1) }] });
+        yield* tasks.update({ taskId: task.id, provenance: [{ ref: pr(1) }] });
         return {
           suppressions: yield* readSuppressions(task.id),
           links: (yield* readLinks(task.id)).map((link) => link.ref),

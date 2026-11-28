@@ -10,7 +10,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 import type { CardFace, EntityFieldValue } from "@hercule/contract";
-import type { ActiveEntityKind } from "./entity-records";
+import { buildReadableCondition, type ActiveEntityKind } from "./entity-records";
 import { decodeEntityFields, type EncodedField, type TitledField } from "./field-values";
 
 /** One stored field value, as read from `external_entity_fields`. */
@@ -119,8 +119,7 @@ interface EntityFieldRow {
  *
  * A field whose text is the ref of another record shows that record's title,
  * which is null when no such record exists and when no Connection reads it
- * now (some observation of it has `access = 'ok'`, the rule of
- * `deriveAccess`), so a place nobody can read never shows its title.
+ * now (`buildReadableCondition`), so a place nobody can read never shows its title.
  */
 export const readFieldValues = (
   refs: ReadonlyArray<string>,
@@ -137,8 +136,7 @@ export const readFieldValues = (
       LEFT JOIN external_entity_fields f ON f.ref = e.ref
       LEFT JOIN external_entities t
         ON t.ref = f.text_value
-        AND EXISTS (SELECT 1 FROM external_entity_observations o
-                    WHERE o.ref = t.ref AND o.access = 'ok')
+        AND ${sql.literal(buildReadableCondition("t"))}
       WHERE e.ref IN (SELECT value FROM json_each(${JSON.stringify(refs)}))
       ORDER BY e.ref, f.key`;
     const byRef = new Map<string, { kind: string; fields: Array<TitledField> }>();
