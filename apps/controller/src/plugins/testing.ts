@@ -6,7 +6,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll } from "vitest";
 import { Effect, Layer, Option, Schema } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
@@ -184,25 +183,28 @@ export const buildPluginWithProviderPerHarness = (
 
 const SUBSCRIPTION_KIND = "subscription";
 
-const homes: Array<string> = [];
-
-// Registered on the suite of the file that imports this module, which is the
-// only scope that knows when its last stack is no longer used.
-afterAll(() => {
-  for (const home of homes) rmSync(home, { recursive: true, force: true });
-  homes.length = 0;
-});
+/**
+ * Provides a `HerculeHome` in a new temporary folder, which is deleted when the
+ * scope of the layer closes. Each build of the layer gets its own folder.
+ */
+const TemporaryHomeLayer = Layer.effect(
+  HerculeHome,
+  Effect.acquireRelease(
+    Effect.sync(() => mkdtempSync(join(tmpdir(), "hercule-plugins-"))),
+    (home) => Effect.sync(() => rmSync(home, { recursive: true, force: true })),
+  ).pipe(Effect.map((home) => buildHomePaths(home, join(home, "data")))),
+);
 
 /**
  * Builds the real plugin services on a temporary database file, including a real
  * master key file, with a `PluginObserver` that does nothing. A plugin's
  * secrets are rows in the secrets table, so the encryption is part of what
  * is tested.
+ *
+ * The folder with the key file is deleted when the scope of the layer closes.
  */
-export const buildPluginStack = () => {
-  const home = mkdtempSync(join(tmpdir(), "hercule-plugins-"));
-  homes.push(home);
-  return PluginsLayer.pipe(
+export const buildPluginStack = () =>
+  PluginsLayer.pipe(
     // This stack stores no workflows, so no one listens to a status change.
     Layer.provide(Layer.succeed(PluginObserver)({ pluginStatusChanged: () => Effect.void })),
     Layer.provideMerge(
@@ -224,9 +226,8 @@ export const buildPluginStack = () => {
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(TestDatabase),
-    Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),
+    Layer.provideMerge(TemporaryHomeLayer),
   );
-};
 
 /** The actor every call runs as, the same as a request through the API. */
 export const USER: Actor = {
