@@ -83,6 +83,13 @@ export interface RpcHandlers {
   readonly onServerRequest: (frame: ServerRequestFrame) => void;
   readonly onNotification: (frame: NotificationFrame) => void;
   readonly onWarning: (message: string) => void;
+  /**
+   * Called once when reading the app-server's output fails, for example
+   * because a line is too long. `message` says why, in text for the user. The
+   * output cannot be read any more, so the handler must stop the app-server.
+   * The waiting requests fail right after this returns.
+   */
+  readonly onReadError: (message: string) => void;
 }
 
 export interface Rpc {
@@ -97,8 +104,8 @@ export interface Rpc {
   /**
    * Reads stdout until the app-server closes it, handling each frame as it is
    * read, then fails the requests still waiting. No reply is delivered until
-   * this runs. Completes only once the output has reached its end, and never
-   * when the output stays open.
+   * this runs. Completes only once the output has reached its end or failed
+   * (see `onReadError`), and never when the output stays open.
    */
   readonly pump: Effect.Effect<void>;
 }
@@ -248,14 +255,38 @@ export const makeRpc = (child: RpcChild, handlers: RpcHandlers): Rpc => {
 
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {
-        try {
-          for await (const line of child.stdout) {
-            if (signal.aborted) return;
-            if (line.trim() !== "") deliver(line);
+        const lines = child.stdout[Symbol.asyncIterator]();
+        for (;;) {
+          // Only the read is guarded here. A failure while handling a frame is
+          // not a read failure, and stopping the app-server for it would
+          // blame the pipe for a fault in this build.
+          let next: IteratorResult<string>;
+          try {
+            next = await lines.next();
+          } catch (error) {
+            // The output cannot be read any more, so whatever the app-server
+            // writes next is lost. The cause goes to the handler, which stops
+            // the app-server: a session that goes on without its output would
+            // hang.
+            if (!signal.aborted) {
+              handlers.onReadError(
+                `reading the app-server's output failed: ${describeError(error)}`,
+              );
+            }
+            break;
           }
-        } catch {
-          // A pipe that throws while reading means the app-server is gone,
-          // just like a pipe that ends. Either way, the waiting requests fail.
+          if (signal.aborted) return;
+          if (next.done === true) break;
+          if (next.value.trim() === "") continue;
+          try {
+            deliver(next.value);
+          } catch (error) {
+            // Like a line that is not JSON, one frame this build cannot handle
+            // must not close the connection.
+            handlers.onWarning(
+              `the app-server sent a frame this build could not handle: ${describeError(error)}`,
+            );
+          }
         }
         if (signal.aborted) return;
         // The app-server is gone, so fail every waiting request now instead

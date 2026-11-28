@@ -11,7 +11,7 @@
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import type { FramedChild } from "../process";
+import { stopChild, type FramedChild } from "../process";
 
 /**
  * pi's stdio, split into lines, because a frame split across two reads cannot
@@ -61,8 +61,9 @@ export interface PiRpc {
     deadline?: Duration.Duration,
   ) => Effect.Effect<Record<string, unknown>, PiRpcFailure>;
   /**
-   * Reads pi's stdout until it closes. No response reaches `send` until this
-   * is running.
+   * Reads pi's stdout until it closes or cannot be read. No response reaches
+   * `send` until this is running. When the output cannot be read, for example
+   * because a line is too long, pi is stopped and `onReadError` gets the cause.
    */
   readonly pump: Effect.Effect<void>;
 }
@@ -119,6 +120,12 @@ export const makeRpc = (
    * that is not JSON, `frame` is undefined.
    */
   onLine: (line: string, frame: unknown) => void,
+  /**
+   * Called once when pi's output cannot be read or handled, with the cause in
+   * text for the user. pi is stopped right after, because a session that goes
+   * on without its output would hang.
+   */
+  onReadError: (message: string) => void = () => undefined,
 ): PiRpc => {
   const pending = new Map<string, Deferred.Deferred<Record<string, unknown>, PiRpcFailure>>();
   let next = 1;
@@ -165,6 +172,12 @@ export const makeRpc = (
     settle(frame as Record<string, unknown>);
   };
 
+  /** Reports why pi's output stopped being read and stops pi, which nobody reads any more. */
+  const failReading = (message: string): void => {
+    onReadError(message);
+    Effect.runFork(stopChild(child));
+  };
+
   const abandon = (): void => {
     gone = true;
     for (const [id, waiting] of pending) {
@@ -205,14 +218,26 @@ export const makeRpc = (
 
     pump: Effect.callback<void>((resume, signal) => {
       void (async () => {
-        try {
-          for await (const line of child.stdout) {
-            if (signal.aborted) return;
-            if (line.trim() !== "") deliver(line);
+        const lines = child.stdout[Symbol.asyncIterator]();
+        for (;;) {
+          let next: IteratorResult<string>;
+          try {
+            next = await lines.next();
+          } catch (error) {
+            if (!signal.aborted) failReading(`reading pi's output failed: ${describeError(error)}`);
+            break;
           }
-        } catch {
-          // A pipe that throws while reading means pi is gone, just like a pipe
-          // that ends. Either way, the commands still waiting must fail.
+          if (signal.aborted) return;
+          if (next.done === true) break;
+          if (next.value.trim() === "") continue;
+          try {
+            deliver(next.value);
+          } catch (error) {
+            // A reader that stopped at a throw would leave pi running with
+            // nobody reading it, as a read failure does.
+            failReading(`pi sent a line this build could not handle: ${describeError(error)}`);
+            break;
+          }
         }
         if (signal.aborted) return;
         abandon();

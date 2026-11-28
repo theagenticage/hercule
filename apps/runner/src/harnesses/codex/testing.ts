@@ -148,6 +148,8 @@ export interface Spawn {
   readonly push: (frame: unknown) => void;
   /** Makes the app-server exit on its own, without the adapter killing it. */
   readonly crash: () => void;
+  /** Makes reading the app-server's stdout fail, as a line over the limit does. */
+  readonly failRead: (message: string) => void;
   /** Writes one line to the app-server's stderr. */
   readonly complain: (line: string) => void;
 }
@@ -298,6 +300,7 @@ export const buildScriptedSeam = (
           err.end();
           resolveExited(1);
         },
+        failRead: (message) => out.fail(new Error(message)),
         complain: (line) => err.push(line),
       });
       return {

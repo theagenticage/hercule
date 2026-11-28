@@ -204,6 +204,12 @@ export interface Spawn {
    * the given lines to stderr.
    */
   readonly crash: (...complaints: ReadonlyArray<string>) => void;
+  /**
+   * Makes reading pi's stdout fail, as a line over the limit does, while pi
+   * itself keeps running until the adapter stops it. `complaints` are written
+   * to stderr first.
+   */
+  readonly failRead: (message: string, ...complaints: ReadonlyArray<string>) => void;
 }
 
 /** Returns the private agent folder pi was started in. */
@@ -307,6 +313,8 @@ export interface FakePiBehaviour {
   readonly lingers?: boolean;
   /** A pi that, once killed, exits only when this promise resolves, like one that shuts down slowly. */
   readonly exitsAfterKill?: Promise<void>;
+  /** The exit code of a killed pi. It is 143, a pi stopped by SIGTERM, unless set; 0 is a pi that caught the signal and exited cleanly. */
+  readonly exitCodeAfterKill?: number;
 }
 
 /**
@@ -399,7 +407,9 @@ export const buildFakePiSeam = (
         kills += 1;
         out.end();
         err.end();
-        void (behaviour.exitsAfterKill ?? Promise.resolve()).then(() => resolveExited(143));
+        void (behaviour.exitsAfterKill ?? Promise.resolve()).then(() =>
+          resolveExited(behaviour.exitCodeAfterKill ?? 143),
+        );
       },
       exited: done,
     };
@@ -411,6 +421,10 @@ export const buildFakePiSeam = (
       sent: sentToThisPi,
       stdinClosed: () => closed,
       kills: () => kills,
+      failRead: (message, ...complaints) => {
+        for (const line of complaints) err.push(line);
+        out.fail(new Error(message));
+      },
       crash: (...complaints) => {
         for (const line of complaints) err.push(line);
         out.end();
