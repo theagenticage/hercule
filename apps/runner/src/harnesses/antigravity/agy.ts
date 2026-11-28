@@ -745,7 +745,7 @@ export const openSignedInAgy = (
       }),
       (spawned) => stopChild(spawned),
     );
-    const stderr = keepStderrTail(child.stderr);
+    const stderr = keepStderrTail(child.stderr, (line) => truncateFact(line.trim()));
 
     // Covers the failures of opening the connection and of `authenticate`, the
     // two calls made while the process may still be starting up. A connection
@@ -759,10 +759,7 @@ export const openSignedInAgy = (
             STDERR_WAIT,
           );
         }
-        const lastLines = stderr
-          .lastLines()
-          .map((line) => truncateFact(line.trim()))
-          .join(" ");
+        const lastLines = stderr.lastLines().join(" ");
         return yield* Effect.fail(
           buildStartFailure(
             ANTIGRAVITY_NAME,

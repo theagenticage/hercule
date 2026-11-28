@@ -821,14 +821,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           }
         },
         onWarning: (message) => {
-          complaints.remember(message);
+          complaints.appendLine(message);
           warn(host, message);
         },
         // The app-server is stopped, and its exit then ends the session with
         // the cause as the reason.
         onReadError: (message) => {
           host.readFailure = message;
-          complaints.remember(message);
+          complaints.appendLine(message);
           void Effect.runPromise(host.stop);
         },
       }),

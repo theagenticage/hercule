@@ -3,33 +3,56 @@
  * the test writes to and closes.
  */
 import { describe, expect, it } from "vitest";
-import { STDERR_TAIL_LINES, keepStderrTail } from "./stderr-tail";
-import { createLines } from "./testing";
+import { keepStderrTail } from "./stderr-tail";
+import { createLines, waitUntil } from "./testing";
 
 describe("the last lines of stderr", () => {
-  it("keeps only the last lines, oldest first, and skips blank ones", async () => {
+  it("keeps only the last five lines, oldest first, and skips blank ones", async () => {
     const pipe = createLines();
     const tail = keepStderrTail(pipe.iterable);
 
-    pipe.push("");
-    for (let line = 1; line <= STDERR_TAIL_LINES + 2; line += 1) pipe.push(`line ${line}`);
-    pipe.push("   ");
+    for (const line of ["", "1", "2", "3", "4", "5", "6", "7", "   "]) pipe.push(line);
     pipe.end();
     await tail.ended;
 
-    expect(tail.lastLines()).toEqual(["line 3", "line 4", "line 5", "line 6", "line 7"]);
+    expect(tail.lastLines()).toEqual(["3", "4", "5", "6", "7"]);
   });
 
-  it("gives the lines read so far while the pipe is still open", async () => {
+  it("shows lines while the pipe is open, keeps a line from elsewhere in order, and ends only with the pipe", async () => {
     const pipe = createLines();
     const tail = keepStderrTail(pipe.iterable);
+    let ended = false;
+    void tail.ended.then(() => void (ended = true));
 
-    pipe.push("first");
-    // The pipe is not closed, so `ended` never resolves: wait on the line itself.
-    while (tail.lastLines().length === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+    try {
+      pipe.push("a");
+      pipe.push("b");
+      await waitUntil("kept two lines", () => tail.lastLines().length === 2);
+      tail.appendLine("warning");
+      pipe.push("c");
+      pipe.push("d");
+      pipe.push("e");
+      await waitUntil("kept the later lines", () => tail.lastLines().length === 5);
+      expect(tail.lastLines()).toEqual(["b", "warning", "c", "d", "e"]);
+      // Nothing has closed the pipe, so a reader of `ended` must still be waiting.
+      expect(ended).toBe(false);
+    } finally {
+      pipe.end();
+    }
+    await tail.ended;
+    expect(ended).toBe(true);
+  });
 
-    expect(tail.lastLines()).toEqual(["first"]);
+  it("keeps each line as `formatLine` returns it, and a line from elsewhere as it is", async () => {
+    const pipe = createLines();
+    const tail = keepStderrTail(pipe.iterable, (line) => line.trim().slice(0, 3));
+
+    pipe.push("  abcdef  ");
     pipe.end();
+    await tail.ended;
+    tail.appendLine("  as is  ");
+
+    expect(tail.lastLines()).toEqual(["abc", "  as is  "]);
   });
 
   it("resolves when the pipe fails, and keeps the lines read before", async () => {
@@ -41,17 +64,5 @@ describe("the last lines of stderr", () => {
     await tail.ended;
 
     expect(tail.lastLines()).toEqual(["before the failure"]);
-  });
-
-  it("counts a remembered line toward the same limit", async () => {
-    const pipe = createLines();
-    const tail = keepStderrTail(pipe.iterable);
-
-    for (let line = 1; line <= STDERR_TAIL_LINES; line += 1) pipe.push(`stderr ${line}`);
-    pipe.end();
-    await tail.ended;
-    tail.remember("a warning");
-
-    expect(tail.lastLines()).toEqual(["stderr 2", "stderr 3", "stderr 4", "stderr 5", "a warning"]);
   });
 });
