@@ -105,7 +105,7 @@ describe("hercule github-token", () => {
 
         expect(printed()).toEqual({
           out: "",
-          err: `hercule: github-token takes no arguments, got "${args.join(" ")}". Run "hercule github-token --help" for help.\n`,
+          err: `hercule: github-token takes no arguments. Run "hercule github-token --help" for help.\n`,
         });
         expect(process.exitCode).toBe(2);
       },

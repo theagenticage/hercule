@@ -65,7 +65,6 @@ const parseReply = (line: string): GithubTokenResult => {
   return { reason: "the runner sent an answer that could not be read" };
 };
 
-/** The text of `hercule github-token --help`. It names no token and reads no environment. */
 const HELP = `hercule github-token
 
 Prints the GitHub token of this session on stdout, for one command. The "gh"
@@ -102,7 +101,7 @@ export const runGithubToken = async (
       return;
     }
     process.stderr.write(
-      `hercule: github-token takes no arguments, got "${args.join(" ")}". Run "hercule github-token --help" for help.\n`,
+      `hercule: github-token takes no arguments. Run "hercule github-token --help" for help.\n`,
     );
     process.exitCode = 2;
     return;
