@@ -101,12 +101,6 @@ export const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 export const OBSERVING_SQL = `(o.access = 'ok' OR o.concerns <> '[]')`;
 
 /**
- * Some Connection reads the record `t` now: the readability rule for a title
- * that belongs to another record, which is restricted data otherwise.
- */
-export const READABLE_RECORD_SQL = `EXISTS (SELECT 1 FROM external_entity_observations o WHERE o.ref = t.ref AND o.access = 'ok')`;
-
-/**
  * The refs that concern the user: some Connection's inventory reports a
  * concern for them. Every question about who is on the Inbox starts from this
  * one query, so a thing that is on the Inbox is also kept, read and suggested.

@@ -59,6 +59,7 @@ import { signalRepository } from "../signals";
 import type { RegisteredSavedQuery, RegisteredSignalKind } from "../plugins";
 import {
   buildLockedLabel,
+  buildReadableCondition,
   deriveAccess,
   deriveObservedAt,
   deriveStale,
@@ -97,7 +98,6 @@ import {
   OBSERVING_SQL,
   ORDER_BY,
   parseSourceOfKind,
-  READABLE_RECORD_SQL,
   UUID_TEXT,
   type CompiledSql,
   type SortTuple,
@@ -367,7 +367,7 @@ const readFacetRows = (
             known_all AS (
               SELECT c.source AS source, c.key AS key, t.ref AS value, NULL AS connection_id, 0 AS n
               FROM contexts c JOIN external_entities t ON t.kind = c.ctx
-              WHERE ${READABLE_RECORD_SQL}
+              WHERE ${buildReadableCondition("t")}
                 AND NOT EXISTS (SELECT 1 FROM by_source h
                                 WHERE h.source = c.source AND h.key = c.key AND h.value = t.ref)),
             known_account AS (
@@ -388,8 +388,8 @@ const readFacetRows = (
         UNION ALL SELECT source, key, value, connection_id, n FROM by_account
         ${known ? "UNION ALL SELECT * FROM known_all UNION ALL SELECT * FROM known_account" : ""}),
       titled AS (
-        SELECT g.*, CASE WHEN ${READABLE_RECORD_SQL} THEN t.title END AS title,
-          t.noun AS noun, CASE WHEN ${READABLE_RECORD_SQL} THEN t.status END AS status
+        SELECT g.*, CASE WHEN ${buildReadableCondition("t")} THEN t.title END AS title,
+          t.noun AS noun, CASE WHEN ${buildReadableCondition("t")} THEN t.status END AS status
         FROM grouped g LEFT JOIN external_entities t ON t.ref = g.value),
       ranked AS (
         SELECT *,
@@ -1409,7 +1409,7 @@ export const externalEntityInbox = Effect.gen(function* () {
                 readonly title: string | null;
               }>(
                 sql,
-                `SELECT t.ref, t.noun, CASE WHEN ${READABLE_RECORD_SQL} THEN t.title END AS title
+                `SELECT t.ref, t.noun, CASE WHEN ${buildReadableCondition("t")} THEN t.title END AS title
                  FROM external_entities t WHERE t.ref IN (SELECT value FROM json_each(?))`,
                 [JSON.stringify(pinRefs)],
               )).map((row) => [row.ref, { title: row.title, noun: row.noun }]),
@@ -1544,7 +1544,7 @@ export const externalEntityInbox = Effect.gen(function* () {
             ${sourceSql} AS source, m.ref AS ref
           FROM matched m JOIN external_entity_fields f ON f.ref = m.ref AND f.key = ?
             AND f.text_value IS NOT NULL
-          LEFT JOIN external_entities t ON t.ref = f.text_value AND ${READABLE_RECORD_SQL}
+          LEFT JOIN external_entities t ON t.ref = f.text_value AND ${buildReadableCondition("t")}
           WHERE m.kind IN (SELECT value FROM json_each(?))
             AND (t.ref IS NOT NULL OR m.kind NOT IN (SELECT value FROM json_each(?)))`;
         tupleParams = [
@@ -1563,7 +1563,7 @@ export const externalEntityInbox = Effect.gen(function* () {
           SELECT t.ref AS value, t.title AS label, ${buildSourceOfKindSql("t")} AS source,
             NULL AS ref
           FROM external_entities t
-          WHERE t.kind IN (SELECT value FROM json_each(?)) AND ${READABLE_RECORD_SQL}
+          WHERE t.kind IN (SELECT value FROM json_each(?)) AND ${buildReadableCondition("t")}
             ${
               query.connectionId === undefined
                 ? ""

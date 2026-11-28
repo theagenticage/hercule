@@ -50,6 +50,7 @@ import {
 import {
   buildEntityFields,
   buildPlace,
+  buildReadableCondition,
   buildWorkRecordCondition,
   decideContextComplete,
   deriveAccess,
@@ -1499,8 +1500,7 @@ const make = Effect.gen(function* () {
                      CASE WHEN ${sql.literal(buildWorkRecordCondition("e"))}
                           THEN 1 ELSE 0 END AS is_work_record,
                      CASE
-                       WHEN EXISTS (SELECT 1 FROM external_entity_observations o
-                                    WHERE o.ref = e.ref AND o.access = 'ok') THEN 'ok'
+                       WHEN ${sql.literal(buildReadableCondition("e"))} THEN 'ok'
                        WHEN EXISTS (SELECT 1 FROM external_entity_observations o
                                     WHERE o.ref = e.ref AND o.access = 'deleted') THEN 'deleted'
                        ELSE 'inaccessible'
