@@ -1,6 +1,8 @@
 ## What and why
 
-<!-- One or two sentences: what was wrong, and what you get now. Closes #<ticket> -->
+<!-- One or two sentences: what was wrong, and what you get now. -->
+
+Closes #
 
 ## Checks
 
@@ -12,7 +14,7 @@
 - `pnpm test` (or the files you ran):
 - `pnpm build:binary` and `pnpm test:binary`:
 - Desktop: `pnpm build:desktop` and `pnpm test:desktop` (or `:container`), on Linux or Mac:
-- Desktop looks: `ui:metrics`, goldens, perf counts:
+- Desktop looks: `pnpm --filter @hercule/desktop ui:metrics`, goldens, perf counts:
 - Android: `./gradlew assembleDebug testDebugUnitTest verifyRoborazziDebug lintDebug`:
 
 ## Needs updating to see the change

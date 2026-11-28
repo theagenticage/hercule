@@ -53,15 +53,15 @@ while IFS=$'\t' read -r _ _ run_id name status conclusion attempt url; do
     echo
     echo "-- job '$job_name', step '$step_name'"
     # A log can be gone or not ready yet. Say so and go on to the next failed step.
-    if ! log=$(gh api --allow-escape-sequences "repos/$repo/actions/jobs/$job_id/steps/$step_number/logs" 2>&1); then
+    if ! log=$(gh api --allow-escape-sequences "repos/$repo/actions/jobs/$job_id/steps/$step_number/logs"); then
       echo "log not available, see $job_url"
       continue
     fi
     # A log is text from the pull request's own code, so it must not drive the terminal:
-    # remove colour codes, then every other control character except newline.
+    # remove colour codes, then every other control character except tab and newline.
     printf '%s\n' "$log" \
       | sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g; s/^[0-9T:.Z-]+ //' \
-      | tr -d '\000-\011\013-\037\177' \
+      | tr -d '\000-\010\013-\037\177' \
       | tail -n "$log_lines"
   done <<<"$failed"
 done <<<"$runs"
