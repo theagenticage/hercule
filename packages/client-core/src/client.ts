@@ -168,18 +168,20 @@ const SentToken = Context.Reference<string | null>("@hercule/client-core/SentTok
 });
 
 /**
- * Returns the failure of a call that `toClientError` should convert.
+ * Returns the failure of a call that `toClientError` should convert, or
+ * `undefined` when the cause holds anything but failures (an interruption or
+ * a defect), which must reach the caller unchanged.
  *
  * A declared error status (such as 401) whose body fails to read fails with
  * two failures in one cause: first a `StatusCodeError`, then the `DecodeError`
  * that says why the body could not be read. `Effect.result` keeps only the
  * first, which would report the status and hide that the connection broke. So
  * the `DecodeError` is returned when the cause has one, and otherwise the
- * first failure. Returns `undefined` for a cause without failures, such as an
- * interruption.
+ * first failure.
  */
 const pickReportedFailure = (cause: Cause.Cause<unknown>): unknown => {
-  const failures = cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error);
+  if (!cause.reasons.every(Cause.isFailReason)) return undefined;
+  const failures = cause.reasons.map((reason) => reason.error);
   return (
     failures.find(
       (failure) =>
@@ -303,11 +305,10 @@ export const createClient = (options: ClientOptions): HerculeClient => {
     return Effect.runPromise(
       Effect.result(
         effect.pipe(
-          Effect.catchCause((cause) =>
-            cause.reasons.some(Cause.isFailReason)
-              ? Effect.fail(pickReportedFailure(cause))
-              : Effect.failCause(cause),
-          ),
+          Effect.catchCause((cause) => {
+            const failure = pickReportedFailure(cause);
+            return failure === undefined ? Effect.failCause(cause) : Effect.fail(failure);
+          }),
           Effect.provideService(FetchHttpClient.Fetch, send as typeof globalThis.fetch),
           Effect.provideService(HttpClient.TracerPropagationEnabled, false),
           Effect.provideService(SentToken, sentToken),
@@ -316,6 +317,8 @@ export const createClient = (options: ClientOptions): HerculeClient => {
       signal === undefined ? undefined : { signal },
     ).then(
       (result) => {
+        // The caller cancelled: its reason wins over any failure the call ended with.
+        if (signal?.aborted === true) throw signal.reason;
         if (Result.isFailure(result)) {
           const error = toClientError(result.failure, operation, options.baseUrl, sent);
           if (error instanceof ApiError && error.code === "unauthenticated") {

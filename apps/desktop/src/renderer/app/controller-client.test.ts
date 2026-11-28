@@ -200,6 +200,28 @@ describe("fetchWithTimeout", () => {
     await expect(response.text()).rejects.toBe(reason);
   });
 
+  it("starts no timer for a chunk that is written after the caller aborted", async () => {
+    // Two chunks wait: the first fills the body's queue, the second waits
+    // behind it and is written only once the first is read.
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("{"));
+        controller.enqueue(new TextEncoder().encode("}"));
+      },
+    });
+    stubFetch(() => Promise.resolve(new Response(body)));
+    const caller = new AbortController();
+    const response = await fetchWithTimeout(SETUP_URL, { signal: caller.signal });
+    await vi.advanceTimersByTimeAsync(0);
+
+    caller.abort(new Error("a newer search replaced this one"));
+    const reader = response.body!.getReader();
+    await reader.read();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it.each<[string, () => Promise<void>]>([
     [
       "the body has been read to the end",

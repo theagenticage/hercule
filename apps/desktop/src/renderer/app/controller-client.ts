@@ -37,7 +37,7 @@ export const HEADER_WAIT_MS = 5000;
  * up. The limit applies to silence, not to the whole body, so a large answer
  * on a slow link is never cut off while its bytes keep arriving.
  */
-const BODY_SILENCE_MS = 5000;
+export const BODY_SILENCE_MS = 5000;
 
 /**
  * How long a request to an operation in RUNNER_WAITING_OPERATIONS waits for
@@ -128,6 +128,9 @@ const decideHeaderWait = (url: string, method: string): number => {
 /** Returns `ms` as whole seconds for a message, such as "5 s". */
 const formatSeconds = (ms: number): string => `${String(Math.round(ms / 1000))} s`;
 
+/** The reason a request is aborted with when its body stops arriving. */
+const BODY_SILENCE_MESSAGE = `the controller stopped sending its answer for ${formatSeconds(BODY_SILENCE_MS)}`;
+
 /**
  * Sends one request like `fetch`, and aborts it with a `TimeoutError` when:
  *
@@ -153,23 +156,26 @@ const formatSeconds = (ms: number): string => `${String(Math.round(ms / 1000))} 
  */
 export const fetchWithTimeout: FetchLike = async (url, init) => {
   const timeout = new AbortController();
+  const signal = init?.signal ? AbortSignal.any([init.signal, timeout.signal]) : timeout.signal;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const startTimer = (ms: number, message: string): void => {
+  const stopTimer = (): void => {
     clearTimeout(timer);
+  };
+  // Starts no timer once the request is aborted: a piece of the body can be
+  // written, or the headers can arrive, after the abort has stopped the timer.
+  const startTimer = (ms: number, message: string): void => {
+    stopTimer();
+    if (signal.aborted) return;
     timer = setTimeout(() => {
       timeout.abort(new DOMException(message, "TimeoutError"));
     }, ms);
   };
-  const stopTimer = (): void => {
-    clearTimeout(timer);
-  };
-
-  const headerWait = decideHeaderWait(url, init?.method ?? "GET");
-  startTimer(headerWait, `the controller did not answer within ${formatSeconds(headerWait)}`);
-  const signal = init?.signal ? AbortSignal.any([init.signal, timeout.signal]) : timeout.signal;
   // Whoever aborts the request, the timer has nothing left to guard. Without
   // this, the timer of a body that nobody reads would keep running.
   signal.addEventListener("abort", stopTimer, { once: true });
+
+  const headerWait = decideHeaderWait(url, init?.method ?? "GET");
+  startTimer(headerWait, `the controller did not answer within ${formatSeconds(headerWait)}`);
   let response: Response;
   try {
     response = await fetch(url, { ...init, signal });
@@ -183,10 +189,7 @@ export const fetchWithTimeout: FetchLike = async (url, init) => {
   }
 
   const restartSilenceTimer = (): void => {
-    startTimer(
-      BODY_SILENCE_MS,
-      `the controller stopped sending its answer for ${formatSeconds(BODY_SILENCE_MS)}`,
-    );
+    startTimer(BODY_SILENCE_MS, BODY_SILENCE_MESSAGE);
   };
   restartSilenceTimer();
   // The body passes through unchanged, and each piece of it restarts the

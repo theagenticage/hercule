@@ -644,6 +644,46 @@ describe("createClient with a token store", () => {
     assert.strictEqual(store.held, "tok_kept");
   });
 
+  it("rejects with the caller's reason when the call is cancelled while a declared error's body is pending", async () => {
+    // The 401 headers arrive, then the body never does. Like the body of a
+    // real fetch, it fails with an `AbortError` when the request is aborted.
+    const store = createFakeStore("tok_kept");
+    let requested = false;
+    let failBody: (() => void) | undefined;
+    const caller = new AbortController();
+    // Registered before the call starts, so the body fails before the call is
+    // interrupted: the order a real fetch can produce.
+    caller.signal.addEventListener("abort", () => failBody?.());
+    const fetch: FetchLike = () => {
+      requested = true;
+      const body = new ReadableStream({
+        start: (controller) => {
+          failBody = () => {
+            controller.error(new DOMException("aborted", "AbortError"));
+          };
+        },
+      });
+      return Promise.resolve(
+        new Response(body, { status: 401, headers: { "content-type": "application/json" } }),
+      );
+    };
+    const client = createClient({ baseUrl: BASE, fetch, tokenStore: store });
+
+    const outcome = client.profile.read(PROFILE, { signal: caller.signal }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    await vi.waitFor(() => {
+      assert.isTrue(requested);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const reason = new Error("a newer search replaced this one");
+    caller.abort(reason);
+
+    assert.strictEqual(await outcome, reason);
+    assert.strictEqual(store.held, "tok_kept");
+  });
+
   it("keeps the token on any other failure", async () => {
     const store = createFakeStore("tok_kept");
     const { fetch } = stubFetch(() =>

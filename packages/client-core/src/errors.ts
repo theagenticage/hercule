@@ -245,7 +245,7 @@ const CHROMIUM_FETCH_FAILURE = "Failed to fetch";
 
 /**
  * Returns what went wrong with a request to the controller at `url` that
- * failed with `reason`, for the message of a `ConnectionError`.
+ * failed with `httpFailure`, for the message of a `ConnectionError`.
  *
  * A time limit's own message is used as it is: the code that aborts the
  * request knows the limit, and says it, as in "the controller did not answer
@@ -254,13 +254,13 @@ const CHROMIUM_FETCH_FAILURE = "Failed to fetch";
  * Chromium does not.
  */
 const describeConnectionFailure = (
-  reason: HttpClientError.HttpClientError["reason"],
+  httpFailure: HttpClientError.HttpClientError["reason"],
   url: string,
 ): string => {
-  const cause: unknown = reason.cause;
+  const cause: unknown = httpFailure.cause;
   if (isTimeout(cause)) return cause.message;
-  if (reason._tag === "InvalidUrlError") return `the address ${url} is not valid`;
-  if (reason._tag === "DecodeError") {
+  if (httpFailure._tag === "InvalidUrlError") return `the address ${url} is not valid`;
+  if (httpFailure._tag === "DecodeError") {
     return `the connection to ${url} was lost while the answer arrived`;
   }
   const detail = cause instanceof Error ? cause.message : "";
@@ -307,16 +307,16 @@ export const toClientError = (
   }
 
   if (HttpClientError.isHttpClientError(failure)) {
-    const reason = failure.reason;
+    const httpFailure = failure.reason;
     if (
-      reason._tag === "TransportError" ||
-      reason._tag === "InvalidUrlError" ||
-      (reason._tag === "DecodeError" && isConnectionLoss(reason.cause))
+      httpFailure._tag === "TransportError" ||
+      httpFailure._tag === "InvalidUrlError" ||
+      (httpFailure._tag === "DecodeError" && isConnectionLoss(httpFailure.cause))
     ) {
       return new ConnectionError({
         operation,
         url,
-        reason: describeConnectionFailure(reason, url),
+        reason: describeConnectionFailure(httpFailure, url),
         cause: failure,
       });
     }
