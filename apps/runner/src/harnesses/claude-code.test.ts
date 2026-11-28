@@ -4509,8 +4509,26 @@ describe("the text Claude gets for the Skill References of an input", () => {
   });
 
   it("keeps a colon after the skill in the command's text", () => {
+    expect(buildClaudePromptParts(buildSkillInput("$review: now"))).toEqual({
+      leading: "",
+      command: "/skills:review : now",
+    });
     expect(buildClaudePromptParts(buildSkillInput("run $review: now"))).toEqual({
       leading: "run /skills:review: now",
+      command: "/skills:review",
+    });
+  });
+
+  it("treats whitespace before the skill as nothing before it", () => {
+    expect(buildClaudePromptParts(buildSkillInput("\n $review this"))).toEqual({
+      leading: "",
+      command: "/skills:review this",
+    });
+  });
+
+  it("keeps trailing whitespace of the text as the user wrote it", () => {
+    expect(buildClaudePromptParts(buildSkillInput("please $review this  \n"))).toEqual({
+      leading: "please /skills:review this  \n",
       command: "/skills:review",
     });
   });

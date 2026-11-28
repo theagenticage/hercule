@@ -898,7 +898,7 @@ interface ClaudePromptParts {
  * is replaced by its Claude name. Claude runs only the command, and the model
  * runs any other skill only if it chooses to call it.
  *
- * - When the last reference starts the text, `command` is its Claude name, then
+ * - When only whitespace comes before the last reference, `command` is its Claude name, then
  *   a space and the text after it without its leading whitespace (no space
  *   when that text is empty), and `leading` holds only the sender header and
  *   image lines.
@@ -925,7 +925,7 @@ export const buildClaudePromptParts = (turn: AdapterTurnInput): ClaudePromptPart
   const rest = turn.text.slice(last.end);
   if (before.trim() !== "") {
     return {
-      leading: buildHarnessPrompt(turn, `${before}${name}${rest}`.trimEnd()),
+      leading: buildHarnessPrompt(turn, `${before}${name}${rest}`),
       command: name,
     };
   }
