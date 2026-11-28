@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { ALL_THEMES } from "../src/renderer/specimens/sheet-themes.ts";
-import { parseThemeList } from "./ui-screens.ts";
+import { parseScreenList, parseThemeList, UI_SCREENS } from "./ui-screens.ts";
 
 describe("parseThemeList", () => {
   it("returns the names in the order given", () => {
@@ -17,6 +17,24 @@ describe("parseThemeList", () => {
   it("fails on an empty list and on a theme named twice", () => {
     expect(() => parseThemeList("")).toThrow(/Unknown theme ""/);
     expect(() => parseThemeList("nile,nile")).toThrow(/"nile" appears twice/);
+  });
+});
+
+describe("parseScreenList", () => {
+  it("returns the names in the order given", () => {
+    expect(parseScreenList("inbox, thread")).toEqual(["inbox", "thread"]);
+  });
+
+  it("fails on an unknown screen and lists the valid ones", () => {
+    const valid = UI_SCREENS.map((screen) => screen.name).join(", ");
+    expect(() => parseScreenList("inbox,paris")).toThrow(
+      `Unknown screen "paris" in --screens. The screens are ${valid}.`,
+    );
+  });
+
+  it("fails on an empty list and on a screen named twice", () => {
+    expect(() => parseScreenList("")).toThrow(/Unknown screen ""/);
+    expect(() => parseScreenList("inbox,inbox")).toThrow(/"inbox" appears twice/);
   });
 });
 

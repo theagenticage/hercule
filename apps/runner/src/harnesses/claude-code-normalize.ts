@@ -51,6 +51,7 @@ import {
 import { clampCount, toJson } from "./normalize";
 import { judgeAnswer, type HarnessAnswer } from "./structured-result";
 import { buildEditedPathFields, type EditedPathFields } from "./edited-paths";
+import { splitPrefixedGatewayToolName } from "./gateway-tool-name";
 import {
   convertAdvisorResult,
   convertBashCodeExecutionResult,
@@ -1022,9 +1023,11 @@ const startLocalTool = (block: AssistantBlockFor<"tool_use">, scope: BlockScope)
   const subagentIds = listMessagedSubagents(state, block.name, block.input);
   // Built before the tool is recorded: a read above that throws must not leave
   // an open tool whose item never started.
+  const gateway = splitPrefixedGatewayToolName(block.name);
   const started = buildItemStarted(state, turn, itemId, kind, {
-    name: block.name,
+    name: gateway === undefined ? block.name : truncateFact(gateway.tool),
     input: block.input,
+    ...(gateway === undefined ? {} : { server: truncateFact(gateway.server) }),
     ...buildFileFields(kind, block.input),
     ...buildWebFields(block.name, block.input),
     ...editedPaths,

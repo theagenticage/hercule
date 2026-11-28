@@ -110,7 +110,7 @@ const COLUMNS =
   "id, kind, name, system_prompt, provider_account_id, harness_id, permission_profile_id, " +
   "access_mode, model_selection, disallowed_tools, created_at, updated_at, " +
   // The harness the agent runs in, which determines whether its disallowed
-  // tools are enforced.
+  // tools are enforced and whether it can give a structured result.
   "coalesce(harness_id, (SELECT default_harness_id FROM provider_accounts " +
   "WHERE provider_accounts.id = agents.provider_account_id)) AS effective_harness_id";
 
@@ -154,22 +154,6 @@ const make = Effect.gen(function* () {
               SELECT ${sql.literal(COLUMNS)} FROM agents WHERE id IN ${sql.in(ids.map(uuidFromString))}
             `,
             (rows) => rows.map(toAgent),
-          ),
-
-    /**
-     * Returns the kind of each of `ids` that names an existing agent row, by
-     * id, using one query. An id that names no row is not in the map.
-     */
-    readKinds: (
-      ids: ReadonlyArray<string>,
-    ): Effect.Effect<ReadonlyMap<string, AgentKind>, SqlError> =>
-      ids.length === 0
-        ? Effect.succeed(new Map())
-        : Effect.map(
-            sql<{ readonly id: Uint8Array; readonly kind: string }>`
-              SELECT id, kind FROM agents WHERE id IN ${sql.in(ids.map(uuidFromString))}
-            `,
-            (rows) => new Map(rows.map((row) => [uuidToString(row.id), row.kind as AgentKind])),
           ),
 
     insert: (agent: NewAgent): Effect.Effect<StoredAgent, SqlError> =>

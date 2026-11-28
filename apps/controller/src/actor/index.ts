@@ -244,7 +244,7 @@ export const currentStampOrSystem: Effect.Effect<string> = Effect.map(CurrentAct
  * Returns the grant an operation requires, or `undefined` when its requirement
  * is not a grant.
  */
-const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
+export const findRequiredGrant = (requirement: Requirement): Grant | undefined => {
   switch (requirement) {
     case "unauthenticated":
     case "setup-token":

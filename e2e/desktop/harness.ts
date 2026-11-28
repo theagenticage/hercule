@@ -412,12 +412,9 @@ export async function openSignedIn(url: string, username: string = USERNAME): Pr
 
 /** Opens the Fleet page from the sidebar: the Hercule face, then its Fleet row. */
 export async function openFleet(page: Page): Promise<void> {
+  await page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab", { name: "Work" }).click();
   await page
-    .getByRole("tablist", { name: "Sidebar" })
-    .getByRole("tab", { name: "Hercule" })
-    .click();
-  await page
-    .getByRole("navigation", { name: "Hercule", exact: true })
+    .getByRole("navigation", { name: "Work", exact: true })
     .getByRole("link", { name: "Fleet" })
     .click();
   await page.getByRole("heading", { level: 1, name: "Fleet" }).waitFor();

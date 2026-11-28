@@ -145,7 +145,15 @@ const events: ReadonlyArray<Event> = [
     ...baseFields,
     usageReport: { status: "incomplete", counts: { inputTokens: 0, outputTokens: 0 } },
   },
-  { _tag: "runtime.warning", ...baseFields, message: "retrying after a 529" },
+  {
+    _tag: "runtime.warning",
+    ...baseFields,
+    message: "Sentry needs sign-in",
+    mcpServers: [
+      { mcpServerId: "01a06d02-0001-7000-8000-000000000001", reason: "needs-sign-in" },
+      { mcpServerId: "01a06d02-0002-7000-8000-000000000001", reason: "timed-out" },
+    ],
+  },
   { _tag: "runtime.notice", ...baseFields, message: "Conversation was cleared" },
   { _tag: "runtime.error", ...baseFields, class: "ContextWindowExceeded", message: "too long" },
   {
@@ -425,6 +433,19 @@ describe("the normalized event taxonomy", () => {
     // socket, so the limit is well above a fact's.
     expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH))).toBe("Success");
     expect(decodeWarning("x".repeat(MAX_MESSAGE_LENGTH + 1))).toBe("Failure");
+  });
+
+  it("refuses a warning that names an MCP server for a reason nobody defined", () => {
+    const warning = (reason: string) =>
+      decode(HarnessEvent, {
+        _tag: "runtime.warning",
+        ...baseFields,
+        message: "an MCP server was left out",
+        mcpServers: [{ mcpServerId: "01a06d02-0001-7000-8000-000000000001", reason }],
+      })._tag;
+    expect(warning("harness-unsupported")).toBe("Success");
+    expect(warning("not-in-list")).toBe("Success");
+    expect(warning("out-of-coffee")).toBe("Failure");
   });
 
   it("accepts a notice inside a turn and between turns, but not without a message", () => {

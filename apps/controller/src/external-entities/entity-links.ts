@@ -109,7 +109,8 @@ const buildHint = (row: PairRow): EntityHint => ({
  * oldest wins. A thing linked to itself is no pair, and a pending target is no
  * end. `claimTest` is the SQL test a claim must pass to be read. At most
  * `limit + 1` rows of each list (links and hints) are returned, so the caller
- * can tell that more exist; with no `limit`, every row is.
+ * can tell that more exist; with no `limit`, every row is. With `bothEnds`,
+ * only pairs whose two ends are both in `refs` are read.
  *
  * One statement however many refs there are.
  */
@@ -118,11 +119,13 @@ const readFirmestPairs = (
   refs: ReadonlyArray<string>,
   claimTest: string,
   limit: number | undefined,
+  bothEnds = false,
 ): Effect.Effect<ReadonlyArray<PairRow>, SqlError> => {
   if (refs.length === 0) return Effect.succeed([]);
   const refsJson = JSON.stringify(refs);
   const claimTestSql = sql.literal(claimTest);
   const rowsPerList = limit === undefined ? Number.MAX_SAFE_INTEGER : limit + 1;
+  const onlyBothEnds = bothEnds ? 1 : 0;
   // CROSS JOIN pins the order, so each ref seeks its claims by index. UNION
   // drops the claim that both of its ends find when both are in `refs`.
   return sql<PairRow>`
@@ -131,11 +134,13 @@ const readFirmestPairs = (
       FROM json_each(${refsJson}) r CROSS JOIN external_entity_relation_claims c
         ON c.from_ref = r.value AND ${claimTestSql}
       WHERE c.from_ref <> c.to_ref
+        AND (${onlyBothEnds} = 0 OR c.to_ref IN (SELECT value FROM json_each(${refsJson})))
       UNION
       SELECT c.id, c.from_ref, c.to_ref, c.claim_type, c.actor, c.connection_id, c.evidence_key
       FROM json_each(${refsJson}) r CROSS JOIN external_entity_relation_claims c
         ON c.to_ref = r.value AND ${claimTestSql}
       WHERE c.from_ref <> c.to_ref
+        AND (${onlyBothEnds} = 0 OR c.from_ref IN (SELECT value FROM json_each(${refsJson})))
     ),
     ranked AS (
       SELECT t.*,
@@ -176,6 +181,24 @@ export const readLinks = (
   Effect.map(readFirmestPairs(sql, refs, EFFECTIVE_LINK_SQL, undefined), (rows) =>
     rows.filter(isLinkRow).map(buildLink),
   );
+
+/**
+ * Reads the links between two things of `refs`: every pair that a source or a
+ * person claims and whose two ends are both in `refs`, once, under its firmest
+ * claim, in the order of that claim's id, as `readLinks` reads them. At most
+ * `limit` links are returned, and `complete` is false when more exist.
+ *
+ * One statement however many refs there are.
+ */
+export const readLinksAmong = (
+  sql: SqlClient.SqlClient,
+  refs: ReadonlyArray<string>,
+  limit: number,
+): Effect.Effect<{ readonly links: Array<EntityLink>; readonly complete: boolean }, SqlError> =>
+  Effect.map(readFirmestPairs(sql, refs, EFFECTIVE_LINK_SQL, limit, true), (rows) => ({
+    links: rows.filter(isLinkRow).slice(0, limit).map(buildLink),
+    complete: rows.length <= limit,
+  }));
 
 /**
  * Reads the links and the hints of `refs`: every pair that has a current

@@ -7,6 +7,7 @@ describe("describeReadOnlySecret", () => {
     expect(describeReadOnlySecret("core")).toBe("controller key");
     expect(describeReadOnlySecret("connection")).toBe("connection credential");
     expect(describeReadOnlySecret("provider-account")).toBe("account credential");
+    expect(describeReadOnlySecret("mcp-server")).toBe("MCP server sign-in");
   });
 
   it("has a note for exactly the owner kinds the user may not write", () => {

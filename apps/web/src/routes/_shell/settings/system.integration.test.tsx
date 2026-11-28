@@ -344,6 +344,20 @@ describe("Settings > System: text generation", () => {
       );
     });
 
+    it("shows why text generation cannot run, before any call has failed", async () => {
+      await openApp({
+        textGeneration: {
+          model: null,
+          lastFailure: null,
+          unavailableReason: "Automatic finds no model",
+        },
+      });
+
+      await findModelField();
+
+      expect(readPageText()).toContain("Unavailable: Automatic finds no model");
+    });
+
     it("shows nothing when there has been no failure", async () => {
       await openApp();
 

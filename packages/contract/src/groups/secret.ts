@@ -6,7 +6,7 @@
  * (`/secrets/{ownerKind}/{ownerId}/{name}`); neither may contain the `|` the
  * encryption's associated data is built with.
  *
- * The service layer rejects a set or delete for three owner kinds:
+ * The service layer rejects a set or delete for four owner kinds:
  *
  * - `core`, the controller's own key material, where its signing key lives.
  * - `connection`, a Connection's credentials. New credentials must be checked
@@ -14,6 +14,8 @@
  * - `provider-account`, a Provider Account's key or token. Only
  *   `providerAccount.update` and `providerAccount.signIn` write them, because
  *   they also read the account again and clear its expiry warnings.
+ * - `mcp-server`, the sign-in of an MCP Server added by URL. Only the
+ *   server's own operations write it, because they also restart its checks.
  */
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
@@ -31,6 +33,7 @@ export const OwnerKind = Schema.Literals([
   "runner",
   "core",
   "provider-account",
+  "mcp-server",
 ]);
 
 export type OwnerKind = Schema.Schema.Type<typeof OwnerKind>;

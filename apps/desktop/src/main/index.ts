@@ -16,7 +16,8 @@
  *
  * The rest runs on one Effect runtime, made here. Each Electron callback is
  * one line that runs an effect on it. The runtime is disposed when the app
- * quits.
+ * quits. Everything it logs also goes to `logs/main.log` in the app's data
+ * folder (see `./main-log.ts`).
  *
  * The top level stays synchronous and does little: Electron waits for this
  * module to finish before it emits `ready`.
@@ -39,6 +40,7 @@ import { fetchWithoutRedirects } from "./fetch-without-redirects";
 import { makeThisMacLayer } from "./this-mac";
 import { registerIpcHandlers } from "./ipc";
 import { MainWindow } from "./main-window";
+import { locateMainLog, makeMainLogLayer } from "./main-log";
 import { makeMainMenuLayer } from "./menu";
 import { PickedSkillFoldersLayer } from "./picked-skill-folders";
 import { findRefusedArgument, readBinaryPathArgument } from "./refused-arguments";
@@ -47,6 +49,12 @@ import { APP_SCHEME } from "./renderer-origin";
 import { makeRunnerIdentityLayer } from "./runner-identity";
 import { makeSafeStorageLayer } from "./safe-storage";
 import { secureSession, secureWebContents } from "./security";
+import {
+  cancelWhenPageEnds,
+  makeSignInReturnLayer,
+  SIGN_IN_RETURN_LIFETIME_MILLISECONDS,
+  SignInReturn,
+} from "./sign-in-return";
 import { StoredTokenLayer } from "./stored-token";
 import { makeUrgentSignalNotificationsLayer } from "./urgent-signal-notifications";
 import { makeWaitingNotificationsLayer } from "./waiting-notifications";
@@ -124,10 +132,14 @@ const startApp = (): void => {
       makeRunnerIdentityLayer(fetchWithoutRedirects),
       makeAppSchemeLayer(devServerUrl),
       PickedSkillFoldersLayer,
+      makeSignInReturnLayer(SIGN_IN_RETURN_LIFETIME_MILLISECONDS),
     ).pipe(
       Layer.provideMerge(windowMenuAndNotifications),
       Layer.provideMerge(makeAppSettingsLayer(path.join(app.getPath("userData"), "settings.json"))),
       Layer.provide(NodeFileSystem.layer),
+      // Last, so that every layer above logs to the file too, the effects they
+      // start in the background included.
+      Layer.provideMerge(makeMainLogLayer(locateMainLog(app.getPath("userData")))),
     ),
   );
 
@@ -137,9 +149,10 @@ const startApp = (): void => {
       runtime.runPromise(AppSettings.use((settings) => settings.readControllerUrl)),
     );
   });
-  app.on("web-contents-created", (_event, contents) =>
-    secureWebContents(contents, (effect) => runtime.runFork(effect)),
-  );
+  app.on("web-contents-created", (_event, contents) => {
+    secureWebContents(contents, (effect) => runtime.runFork(effect));
+    cancelWhenPageEnds(contents, () => runtime.runFork(SignInReturn.use((r) => r.cancelCurrent)));
+  });
   registerIpcHandlers(runtime);
 
   app.on("activate", () => runtime.runFork(MainWindow.use((window) => window.show)));

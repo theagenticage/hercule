@@ -115,3 +115,23 @@ describe("the pi adapter in this runner build", () => {
     expect(findAdapter("pi/pi")?.install).toBeDefined();
   });
 });
+
+describe("the Antigravity adapter in this runner build", () => {
+  it("finds Antigravity by the harness id and binary name its plugin declares", () => {
+    const antigravity = findAdapter("antigravity/antigravity");
+
+    expect(antigravity?.harnessId).toBe("antigravity/antigravity");
+    expect(antigravity?.binaryName).toBe("agy");
+    expect(ADAPTER_IDS).toContain("antigravity/antigravity");
+    // The existing adapters are still registered.
+    expect(ADAPTER_IDS).toContain("claude-code/claude-code");
+    expect(ADAPTER_IDS).toContain("codex/codex");
+    expect(ADAPTER_IDS).toContain("pi/pi");
+    // An adapter missing from this array would have no subscriber for its events.
+    expect(adapters).toContain(antigravity);
+  });
+
+  it("can install the harness on a machine that does not have it", () => {
+    expect(findAdapter("antigravity/antigravity")?.install).toBeDefined();
+  });
+});

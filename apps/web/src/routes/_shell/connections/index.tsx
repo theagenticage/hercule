@@ -13,17 +13,32 @@ export const Route = createFileRoute("/_shell/connections/")({
   staticData: { title: "Connections" },
   // The browser lands here after a provider redirect. The controller has
   // already finished the setup and puts the outcome in the `oauth` parameter.
+  // A thread's line or a server's page sends the user here with `reconnect`,
+  // the id of the Connection whose Reconnect panel to open.
   // An invalid param is returned as `undefined` rather than left out: the
   // router lays the returned params over the URL's, so a param left out would
   // keep the URL's value.
-  validateSearch: (search: Record<string, unknown>): { readonly oauth?: string | undefined } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { readonly oauth?: string | undefined; readonly reconnect?: string | undefined } => ({
     oauth: typeof search["oauth"] === "string" ? search["oauth"] : undefined,
+    reconnect: typeof search["reconnect"] === "string" ? search["reconnect"] : undefined,
   }),
+  loaderDeps: ({ search }) => ({ reconnect: search.reconnect }),
   // Loads the connections and the plugin catalog (which the offers are built
-  // from) before the screen renders, so it never renders empty.
-  loader: async ({ context }) => {
+  // from) before the screen renders, so it never renders empty. The agent
+  // tools note of a row reads the MCP servers itself: a failed read of them
+  // must not stop the Connections from showing.
+  //
+  // A link that names a Connection to reconnect needs the list as it is now,
+  // not the one the cache holds from an earlier visit: the screen decides
+  // from it whether the target exists, and does so once. So with `reconnect`
+  // the list is always read again.
+  loader: async ({ context, deps }) => {
     await Promise.all([
-      context.queryClient.ensureQueryData(connectionsQuery(context.client)),
+      deps.reconnect === undefined
+        ? context.queryClient.ensureQueryData(connectionsQuery(context.client))
+        : context.queryClient.fetchQuery({ ...connectionsQuery(context.client), staleTime: 0 }),
       context.queryClient.ensureQueryData(pluginsQuery(context.client)),
     ]);
   },
@@ -53,20 +68,42 @@ const OAUTH_FAILURES: Readonly<Record<string, string>> = {
 function Connections(): JSX.Element {
   const { client, queryClient, live } = Route.useRouteContext();
   const navigate = useNavigate();
-  // Read once, on the first render: the effect below clears the parameter from
-  // the address, and the notice is only about the redirect that just happened.
-  const [notice] = useState(Route.useSearch().oauth);
+  // Read once, on the first render: the effect below clears the parameters
+  // from the address. The notice is only about the redirect that just
+  // happened, and the Reconnect panel opens only for the visit that asked.
+  const search = Route.useSearch();
+  const [{ notice, reconnect }] = useState(() => ({
+    notice: search.oauth,
+    reconnect: search.reconnect,
+  }));
 
   useLiveInvalidation(live, queryClient, "connection");
+  // The agent tools note of a row shows its server's status.
+  useLiveInvalidation(live, queryClient, "mcpServer");
 
-  // Replacing the history entry removes the outcome from both the address bar
-  // and the back button, so a reload does not show the notice again.
+  // Replacing the history entry removes the parameters from both the address
+  // bar and the back button, so a reload does not show the notice again or
+  // open the panel again.
   useEffect(() => {
-    if (notice !== undefined) void navigate({ to: "/connections", search: {}, replace: true });
-  }, [notice, navigate]);
+    if (notice !== undefined || reconnect !== undefined) {
+      void navigate({ to: "/connections", search: {}, replace: true });
+    }
+  }, [notice, reconnect, navigate]);
 
   const connections = useSuspenseQuery(connectionsQuery(client)).data.items;
   const types = listConnectionTypes(useSuspenseQuery(pluginsQuery(client)).data);
+  // Decided once, with the parameter: deleting the Connection afterwards must
+  // not make the screen claim the link was wrong.
+  const [reconnectFailure] = useState(() => {
+    if (reconnect === undefined) return null;
+    const target = connections.find((connection) => connection.id === reconnect);
+    if (target === undefined) {
+      return "That connection no longer exists, so there is nothing to reconnect.";
+    }
+    return types.some((type) => type.type === target.type)
+      ? null
+      : "The plugin for that connection is no longer installed, so it cannot be reconnected.";
+  });
 
   const [connecting, setConnecting] = useState<string | null>(null);
   const chosen = types.find((type) => type.type === connecting);
@@ -106,6 +143,12 @@ function Connections(): JSX.Element {
         </p>
       )}
 
+      {reconnectFailure === null ? null : (
+        <p className="text-row text-fail" role="alert">
+          {reconnectFailure}
+        </p>
+      )}
+
       {connections.length === 0 ? (
         <EmptyState
           headline="Nothing connected yet."
@@ -125,6 +168,7 @@ function Connections(): JSX.Element {
                     client={client}
                     connection={connection}
                     type={types.find((type) => type.type === connection.type)}
+                    reconnecting={connection.id === reconnect}
                   />
                 ))}
               </ul>

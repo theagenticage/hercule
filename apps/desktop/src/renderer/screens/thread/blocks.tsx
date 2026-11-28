@@ -21,7 +21,7 @@
  * current day, so every block draws again when the day changes and "09:04"
  * becomes "4 Sep 09:04".
  */
-import { Fragment, memo, type JSX } from "react";
+import { Fragment, memo, type JSX, type ReactNode } from "react";
 import {
   buildWorkRows,
   describeMessageMeta,
@@ -316,6 +316,11 @@ const RUNTIME_NOTE_CLASS: Record<RuntimeNoteKind, string> = {
  *
  * The marker is named so a screen reader says what kind of note this is.
  *
+ * `failing` draws the note in the failure colours whatever its kind, as an
+ * `error` is drawn, while the marker keeps the kind's name: a warning the user
+ * must act on. `actions`, such as the buttons that fix what the note says,
+ * are drawn after the message and before the time.
+ *
  * A command the runner wrote between backticks, such as the one that installs a missing
  * harness, is drawn as inline code in a note of any kind. A word of the command stays
  * whole, so the command wraps only at its spaces, never inside a flag or an id. A word
@@ -328,16 +333,20 @@ export const RuntimeNote = memo(function RuntimeNote({
   at,
   timezone,
   today,
+  failing,
+  actions,
 }: {
   readonly kind: RuntimeNoteKind;
   readonly message: string;
   readonly at: string;
   readonly timezone: string;
   readonly today: number;
+  readonly failing?: boolean | undefined;
+  readonly actions?: ReactNode;
 }): JSX.Element {
   const time = formatBlockTime(at, timezone, today);
   return (
-    <div className={RUNTIME_NOTE_CLASS[kind]}>
+    <div className={failing === true ? RUNTIME_NOTE_CLASS.error : RUNTIME_NOTE_CLASS[kind]}>
       {kind === "runtime-notice" ? (
         <span className="runtime-notice-icon" role="img" aria-label="Notice">
           <InfoIcon size={14} />
@@ -364,6 +373,7 @@ export const RuntimeNote = memo(function RuntimeNote({
             part.text
           ),
         )}
+        {actions === undefined ? null : <span className="note-actions">{actions}</span>}
         {time === undefined ? null : <span className="time">{time}</span>}
       </p>
     </div>

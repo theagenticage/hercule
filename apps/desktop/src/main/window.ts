@@ -39,6 +39,7 @@ import {
   MINIMUM_WINDOW_SIZE,
   placeWindowOnDisplays,
 } from "./window-placement";
+import { logPageHangs } from "./page-hang-log";
 import { makeWindowVisibility } from "./window-visibility";
 
 /**
@@ -140,6 +141,11 @@ const make = Effect.fnUntraced(function* (platform: DesktopPlatform) {
     logError: (message) => {
       runInBackground(Effect.logError(message));
     },
+  });
+  logPageHangs(window.webContents, {
+    logWarning: (message) => runInBackground(Effect.logWarning(message)),
+    logError: (message) => runInBackground(Effect.logError(message)),
+    logInfo: (message) => runInBackground(Effect.logInfo(message)),
   });
   // A save that keeps the theme, such as a Glass change, leaves the colour as
   // it is, so Electron is not asked to repaint the window for nothing.

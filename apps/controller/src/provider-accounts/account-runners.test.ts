@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
+import { CODEX_VERSION } from "@hercule/home/version";
 import { withTransaction } from "../db";
+import { buildHarnessDefinition, buildPluginWithProviderPerHarness } from "../plugins/testing";
 import { findModels, findRunnerRefusal, ProviderAccountRunners } from "./account-runners";
 import { providerAccountRepository, type StoredSnapshot } from "./repository";
 import {
@@ -72,6 +74,20 @@ describe("ProviderAccountRunners.list", () => {
 
       expect(available.runnerIds).toEqual([]);
       expect(available.noRunnerMessage).toContain("is not installed on any connected machine");
+    });
+
+    it("runs nowhere, and says to update Hercule, when every runner's build lacks the adapter", async () => {
+      const available = await runWithAccounts(
+        Effect.gen(function* () {
+          const account = yield* addAccount({ kind: KEY_KIND });
+          yield* storeCredential(account.id, "apiKey");
+          yield* addRunner("old-build", { adapters: [] });
+          return yield* listRunners(account.id);
+        }),
+      );
+
+      expect(available.runnerIds).toEqual([]);
+      expect(available.noRunnerMessage).toContain("update Hercule");
     });
   });
 
@@ -217,6 +233,77 @@ describe("ProviderAccountRunners.list", () => {
   });
 });
 
+describe("a Codex below the version this build supports", () => {
+  const CODEX_HARNESS_ID = "codex/codex";
+  const plugins = [
+    buildPluginWithProviderPerHarness("codex", [
+      { ...buildHarnessDefinition("codex"), displayName: "Codex" },
+    ]),
+  ];
+
+  /** Lists where a Codex account can run, on a runner whose probe found Codex at `version`. */
+  const listWithCodexAt = (version: string) =>
+    runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({
+          providerId: CODEX_HARNESS_ID,
+          kind: MACHINE_KIND,
+          defaultHarnessId: CODEX_HARNESS_ID,
+        });
+        const laptop = yield* addRunner("laptop", { adapters: [CODEX_HARNESS_ID] });
+        yield* addSnapshot(account.id, CODEX_HARNESS_ID, laptop, {
+          ...SIGNED_IN,
+          harnessVersion: version,
+        });
+        const available = yield* Effect.flatMap(ProviderAccountRunners, (runners) =>
+          runners.list(account.id, CODEX_HARNESS_ID),
+        );
+        return { available, laptop };
+      }),
+      undefined,
+      plugins,
+    );
+
+  it("refuses 0.169.0, and tells the user to update Codex, whether Hercule chooses the runner or the caller names it", async () => {
+    const { available, laptop } = await listWithCodexAt("0.169.0");
+
+    expect(available.runnerIds).toEqual([]);
+    expect(available.noRunnerMessage).toBe(
+      `Codex is older than this version of Hercule supports on every machine that has it; update it to ${CODEX_VERSION} or newer`,
+    );
+    expect(findRunnerRefusal(available, laptop)).toBe(
+      `Codex on laptop is older than Hercule supports; update it to ${CODEX_VERSION} or newer`,
+    );
+  });
+
+  it("accepts the floor itself", async () => {
+    const { available, laptop } = await listWithCodexAt(CODEX_VERSION);
+
+    expect(available.runnerIds).toEqual([laptop]);
+  });
+});
+
+describe("ProviderAccountRunners.listReadiness", () => {
+  it("gives a runner with no adapter the same state as a runner without the binary", async () => {
+    const { rows, bare, oldBuild } = await runWithAccounts(
+      Effect.gen(function* () {
+        const account = yield* addAccount({ kind: KEY_KIND });
+        yield* storeCredential(account.id, "apiKey");
+        const bare = yield* addRunner("bare", { binaryPresent: false });
+        const oldBuild = yield* addRunner("old-build", { adapters: [] });
+        const runners = yield* ProviderAccountRunners;
+        const readiness = yield* runners.listReadiness([account.id]);
+        return { rows: readiness.get(account.id) ?? [], bare, oldBuild };
+      }),
+    );
+
+    expect(rows).toEqual([
+      { harnessId: ALPHA_HARNESS_ID, runnerId: bare, state: "harness-missing" },
+      { harnessId: ALPHA_HARNESS_ID, runnerId: oldBuild, state: "harness-missing" },
+    ]);
+  });
+});
+
 describe("findRunnerRefusal", () => {
   it("names the one cause that applies to each runner, in one line", async () => {
     const { available, runners } = await runWithAccounts(
@@ -225,10 +312,11 @@ describe("findRunnerRefusal", () => {
         const ready = yield* addRunner("moss");
         const signedOut = yield* addRunner("atlas");
         const bare = yield* addRunner("bare", { binaryPresent: false });
+        const oldBuild = yield* addRunner("old-build", { adapters: [] });
         yield* addSnapshot(account.id, ALPHA_HARNESS_ID, ready);
         return {
           available: yield* listRunners(account.id),
-          runners: { ready, signedOut, bare },
+          runners: { ready, signedOut, bare, oldBuild },
         };
       }),
     );
@@ -240,6 +328,7 @@ describe("findRunnerRefusal", () => {
     expect(findRunnerRefusal(available, runners.bare)).toBe(
       "Harness alpha is not installed on bare",
     );
+    expect(findRunnerRefusal(available, runners.oldBuild)).toContain("update Hercule");
     expect(findRunnerRefusal(available, "not-in-the-fleet")).toBe("that machine is retired");
   });
 

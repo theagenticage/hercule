@@ -126,6 +126,11 @@ const bridge: Bridge = {
   link: {
     open: (request) => invokeChannel("link.open", request),
   },
+  signInReturn: {
+    listen: () => invokeChannel("signInReturn.listen"),
+    wait: (request) => invokeChannel("signInReturn.wait", request),
+    cancel: (request) => invokeChannel("signInReturn.cancel", request),
+  },
   menu: {
     onCommand: (listener) => subscribeToChannel("menu.command", listener),
   },

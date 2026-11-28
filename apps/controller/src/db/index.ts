@@ -16,9 +16,17 @@ export {
   openDatabaseCopy,
   lockDatabaseFile,
   takeControllerLock,
+  withReadSnapshot,
   withTransaction,
   type DatabaseFiles,
 } from "./client";
+export {
+  PROFILE_GRANTS_TOPIC,
+  RecordChanges,
+  RecordChangesLayer,
+  type ChangeTopic,
+  type RecordChange,
+} from "./record-changes";
 export { buildMatchExpression } from "./full-text";
 export { mintUuid, uuidFromString, uuidHexToString, uuidToString, UUID_PATTERN } from "./id";
 export {

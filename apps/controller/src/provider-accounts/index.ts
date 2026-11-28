@@ -41,6 +41,7 @@ export {
   type DefaultHarnessClash,
   type DefaultSelection,
 } from "./model-profile-membership";
+export { ProviderAccountObserver } from "./observer";
 export {
   ProviderAccountProbes,
   ProviderAccountProbesLayer,
@@ -54,7 +55,7 @@ export {
   type StoredProviderAccount,
   type StoredSnapshot,
 } from "./repository";
-export { describeProviderAccount } from "./runnability";
+export { describeFloorToUpdateTo, describeProviderAccount } from "./runnability";
 export { findRunDescriptor, takesCatalogDeclarations } from "./run-descriptor";
 export {
   ProviderAccountService,

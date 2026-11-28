@@ -375,25 +375,6 @@ describe("launches that share one Harness Home", () => {
     answerStarted(listAgentSpawns(spawns)[0]!, ONE.slug);
     await start;
   });
-
-  it("keeps the folder of a session until its subagent's pi has exited too", async () => {
-    const run = await startBusySession({ lingers: true });
-    const folder = agentFolderOf(run.child);
-    askForSubagent(run.child);
-    await waitUntil("spawned the subagent", () => listAgentSpawns(run.spawns).length === 2);
-    const subagent = listAgentSpawns(run.spawns)[1]!;
-
-    run.child.crash();
-    await waitUntil(
-      "said the session ended",
-      () => filterByTag(run.seen, "session.exited").length === 1,
-    );
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(existsSync(folder)).toBe(true);
-
-    subagent.crash();
-    await waitUntil("removed the folder", () => !existsSync(folder));
-  });
 });
 
 /** Pushes a `subagent` call and its dialog to the parent, as pi does when the model calls the tool. */
@@ -439,7 +420,7 @@ describe("a subagent of a session that declares the catalog", () => {
     return { run, loaded };
   };
 
-  it("runs in its parent's folder, so it loads its parent's declarations, even after another start with another catalog", async () => {
+  it("runs in a folder of its own that holds its parent's declarations, even after another start with another catalog", async () => {
     const { run, loaded } = await startParent();
     await Effect.runPromise(
       run.adapter.startSession(OTHER_SESSION, buildSpecOn(TWO.slug), {
@@ -456,10 +437,11 @@ describe("a subagent of a session that declares the catalog", () => {
       () => filterByTag(run.seen, "subagent.started").length === 1,
     );
 
-    const subagentSpawn = loaded.find((one) => one.folder === agentFolderOf(run.child))!;
-    expect(loaded.filter((one) => one.folder === agentFolderOf(run.child))).toHaveLength(2);
+    // The last pi spawned is the subagent's, after the parent's and the other session's.
+    const subagentSpawn = loaded.at(-1)!;
+    expect(subagentSpawn.folder).not.toBe(agentFolderOf(run.child));
     expect(listDeclaredIds(subagentSpawn.models)).toEqual([ONE.slug]);
-    // It declared and listed nothing again: its pi is the only new process.
+    // It listed nothing again: its pi is the only new process.
     expect(run.spawns).toHaveLength(spawnsBefore + 1);
     // The subagent's pi passed the exact-model check, so it was prompted.
     await waitUntil("prompted the subagent", () =>
@@ -467,6 +449,37 @@ describe("a subagent of a session that declares the catalog", () => {
         (one) => one !== run.child && one.sent.some((sent) => sent.type === "prompt"),
       ),
     );
+  });
+
+  it("lists the models pi ships once for the launch, not again for each subagent", async () => {
+    const { run } = await startParent();
+
+    askForSubagent(run.child);
+    askForSubagent(run.child);
+    await waitUntil("spawned both subagents", () => listAgentSpawns(run.spawns).length === 3);
+
+    expect(run.spawns.filter((one) => !one.command.includes("-e"))).toHaveLength(1);
+  });
+
+  it("gives it the launch's model files, not what its parent wrote into its own folder since", async () => {
+    const { run, loaded } = await startParent();
+    const parentFolder = agentFolderOf(run.child);
+    // What an agent that may write files without asking could plant.
+    writeFileSync(join(parentFolder, "mcp.json"), '{"mcpServers":{}}');
+    writeFileSync(
+      join(parentFolder, "models.json"),
+      JSON.stringify({ providers: { openrouter: { baseUrl: "http://127.0.0.1:9", models: [] } } }),
+    );
+
+    askForSubagent(run.child);
+    await waitUntil("spawned the subagent", () => listAgentSpawns(run.spawns).length === 2);
+
+    const subagentFolder = agentFolderOf(listAgentSpawns(run.spawns)[1]!);
+    expect(subagentFolder).not.toBe(parentFolder);
+    expect(existsSync(join(subagentFolder, "mcp.json"))).toBe(false);
+    expect(loaded[1]!.folder).toBe(subagentFolder);
+    expect(listDeclaredIds(loaded[1]!.models)).toEqual([ONE.slug]);
+    expect(loaded[1]!.models).not.toContain("baseUrl");
   });
 
   it("fails the subagent call loudly when its pi started on another model", async () => {

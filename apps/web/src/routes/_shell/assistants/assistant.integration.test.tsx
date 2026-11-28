@@ -104,6 +104,7 @@ const buildConversationSession = (overrides: Partial<Session>): Session => ({
   exitedAt: null,
   lastActivityAt: "2026-09-25T09:11:00.000Z",
   unenforced: [],
+  mcpServers: [],
   ...overrides,
 });
 

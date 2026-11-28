@@ -8,7 +8,7 @@
  * local runner is the one session that sees the user's own instructions, and
  * even then nothing is written into the Harness Home's Codex directory.
  */
-import { mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -22,7 +22,6 @@ import type {
   AccessMode,
   ApprovalDecision,
   ExitReason,
-  LoginMethod,
   ModelSelection,
   ProbeResult,
   HarnessEvent,
@@ -38,7 +37,6 @@ import type {
 import {
   AdapterFailed,
   AnswerNotDelivered,
-  HarnessLoginMissing,
   HarnessNotInstalled,
   HarnessProtocolError,
   SessionNotRunning,
@@ -53,11 +51,11 @@ import type {
   HarnessAdapter,
   HarnessRunnerContext,
   ProbeOptions,
+  SessionStartContext,
   SessionUsageReport,
   TextGenerationContext,
-  UserMaterial,
 } from "../index";
-import type { ResolvedSkillReference } from "../../skills";
+import { resolveSkillFiles, type FoundSkillFile } from "../../skills";
 import { buildFailedProbe } from "../probe";
 import { buildUserMessage } from "../events";
 import { buildHarnessPrompt, joinInstructions } from "../prompt";
@@ -66,6 +64,7 @@ import { buildSkillSteerRefusedMessage } from "../steer-refused-message";
 import {
   buildAdapterFailed,
   buildAnswerNotDelivered,
+  buildHarnessLoginMissing,
   buildHarnessNotInstalled,
   buildHarnessNotRunnable,
   buildHarnessProtocolError,
@@ -114,6 +113,7 @@ import {
   STANDARD_TIER,
   type AppServer,
 } from "./probe";
+import { decideMcpConfig } from "./mcp";
 import {
   buildUsageReadings,
   completeWindowDurations,
@@ -130,6 +130,7 @@ import {
   type TextGenerationWatch,
 } from "./text-generation";
 import {
+  buildAppServerCommand,
   makeRpc,
   type AppServerSpawn,
   type NotificationFrame,
@@ -137,6 +138,7 @@ import {
   type RpcReply,
   type ServerRequestFrame,
 } from "./rpc";
+import { removeMediaBytes } from "./tool-result-media";
 import type {
   AccountRateLimitsUpdatedNotification,
   ApprovalsReviewer,
@@ -322,6 +324,9 @@ const ACCESS_MODES: Readonly<
  * session.
  */
 export const CONTROL_DEADLINE: Duration.Duration = Duration.seconds(5);
+
+/** How long a session's exit waits for the app-server's output to end after the process has exited. */
+const OUTPUT_DRAIN_PATIENCE_MS = 2000;
 
 /** The error code for a server too busy to start a turn (spec 06 section 10.2). */
 const OVERLOADED = -32001;
@@ -602,91 +607,31 @@ const buildDeveloperInstructions = (
   ]) ?? "";
 
 /**
- * Reads the user's own instructions file. Returns its text, or `undefined`
- * when the session does not see the user's material or the user has no file.
- * Never fails: when the path is not a regular file or cannot be read, it logs
- * a warning with the path and the reason, never the file's text, and returns
- * `undefined`. A Thread never fails to start because of the user's own files
- * (spec 06 section 9.1).
- *
- * The file is read again every time a thread is opened, so a resumed or
- * forked thread gets the current text.
- */
-const readUserInstructions = (
-  material: UserMaterial | undefined,
-): Effect.Effect<string | undefined> => {
-  const path = material?.instructionsFile;
-  if (path === undefined) return Effect.succeed(undefined);
-  return Effect.try({
-    try: () => {
-      if (!statSync(path).isFile()) throw new Error("it is not a regular file");
-      return readFileSync(path, "utf8");
-    },
-    catch: describeError,
-  }).pipe(
-    Effect.catch((reason) =>
-      Effect.as(
-        Effect.logWarning(`Did not read ${path} into the Thread's instructions: ${reason}`),
-        undefined,
-      ),
-    ),
-  );
-};
-
-/** The `skill` items for a turn, and the references they were built from. */
-interface SkillInputs {
-  readonly items: ReadonlyArray<UserInput>;
-  /** One reference per item, in text order. A reference that got no item is not here. */
-  readonly translated: ReadonlyArray<ResolvedSkillReference>;
-}
-
-/**
- * Builds one `skill` item per distinct skill the turn's text references, and
- * returns the references that got an item. Codex ignores a plain `$name` in
- * the text for a name that has an item, so the item decides which skill the
- * name stands for: the library skill `release` or the repository skill
- * `webshop:release`, which Codex also knows as `release`.
+ * Builds one `skill` item per skill file `resolveSkillFiles` found. Codex
+ * ignores a plain `$name` in the text for a name that has an item, so the item
+ * decides which skill the name stands for: the library skill `release` or the
+ * repository skill `webshop:release`, which Codex also knows as `release`.
  *
  * Codex finds the skill by comparing the item's `path` with the SKILL.md path
- * it reported in `skills/list`, without resolving links itself. That path has
- * its symbolic links resolved, so this resolves them too. A skill gets no
- * item, and is not in `translated`, when:
- *
- * - its SKILL.md no longer exists on disk: Codex would drop an item with a
- *   path it does not know anyway;
- * - its SKILL.md now resolves to a file outside the skill folder, such as a
- *   link to another file the user can read: the item would hand that path to
- *   Codex.
- *
- * A skill folder staged as a link is fine, because the check compares
- * against the resolved folder.
+ * it reported in `skills/list`, without resolving links itself. The file
+ * `resolveSkillFiles` returns has its symbolic links resolved, as that path
+ * does. A skill whose SKILL.md is gone, or leads outside the skill folder, has
+ * no item: Codex would drop an item with a path it does not know, and an item
+ * with a path outside the folder would hand that path to Codex.
  */
-const buildSkillInputs = (references: ReadonlyArray<ResolvedSkillReference>): SkillInputs => {
-  const seen = new Set<string>();
-  const items: Array<UserInput> = [];
-  const translated: Array<ResolvedSkillReference> = [];
-  for (const reference of references) {
-    if (seen.has(reference.folder)) continue;
-    seen.add(reference.folder);
-    let path: string;
-    try {
-      path = realpathSync(join(reference.folder, "SKILL.md"));
-      if (path !== join(realpathSync(reference.folder), "SKILL.md")) continue;
-    } catch {
-      continue;
-    }
-    items.push({ type: "skill", name: reference.skillName, path });
-    translated.push(reference);
-  }
-  return { items, translated };
-};
+const buildSkillItems = (found: ReadonlyArray<FoundSkillFile>): ReadonlyArray<UserInput> =>
+  found.map(({ reference, skillFile }): UserInput => ({
+    type: "skill",
+    name: reference.skillName,
+    path: skillFile,
+  }));
 
 /**
  * Builds the items Codex takes as a turn's input: the prompt
  * `buildHarnessPrompt` builds first (the sender header when another agent
  * sent the input, the text, and a line per image naming the file it is saved
  * in), then one `localImage` item per image, then the `skill` items
- * (`buildSkillInputs`). Codex reads each image from that file itself, so its
+ * (`buildSkillItems`). Codex reads each image from that file itself, so its
  * bytes never cross the app-server's pipe. Item order does not matter to
  * Codex: it collects the `skill` items from the whole list.
  */
@@ -714,40 +659,6 @@ const listRolloutDayFolders = async (sessionsFolder: string): Promise<ReadonlyAr
   const years = await readChildFolders(sessionsFolder);
   const months = (await Promise.all(years.map(readChildFolders))).flat();
   return (await Promise.all(months.map(readChildFolders))).flat();
-};
-
-/**
- * Removes the generated image from a notification frame, in place, before
- * anything else reads the frame. An `imageGeneration` item holds the image
- * itself, base64 encoded, in `result`. Left in, it would be copied into the
- * frames the adapter queues and into every event's `raw`, and make each one
- * megabytes long, while the image reaches nobody through the stream. The frame
- * comes straight from the decoder, so nothing else holds it yet.
- *
- * A `ThreadItem` sits in the params of only these notifications:
- * `item/started` and `item/completed` hold it in `params.item`, and
- * `turn/started` and `turn/completed` hold a turn's items in
- * `params.turn.items`. `thread/started` holds whole threads, but it is dropped
- * and never attached to an event. The check goes by the item's `type` alone,
- * so an item whose other fields are malformed is covered too.
- */
-const stripImageBytes = (frame: NotificationFrame): void => {
-  const params = frame.params as
-    | { readonly item?: unknown; readonly turn?: { readonly items?: unknown } }
-    | null
-    | undefined;
-  const dropResult = (item: unknown): void => {
-    if (
-      typeof item === "object" &&
-      item !== null &&
-      (item as { type?: unknown }).type === "imageGeneration"
-    ) {
-      Reflect.deleteProperty(item, "result");
-    }
-  };
-  dropResult(params?.item);
-  const items = params?.turn?.items;
-  if (Array.isArray(items)) items.forEach(dropResult);
 };
 
 export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
@@ -879,20 +790,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     textGeneration: TextGenerationWatch | undefined,
   ): Host => {
     const complaints: Array<string> = [];
-    const child = seam.appServer(
-      // `--strict-config` makes a setting renamed in an upgrade fail the start
-      // instead of being silently ignored. The updater is off because a
-      // harness that updated itself would run a version nobody chose.
-      [
-        binary,
-        "app-server",
-        "--strict-config",
-        "-c",
-        "check_for_update_on_startup=false",
-        ...overrides,
-      ],
-      env,
-    );
+    const child = seam.appServer(buildAppServerCommand(binary, overrides), env);
     const rememberComplaint = (line: string): void => {
       complaints.push(line);
       if (complaints.length > MAX_COMPLAINT_LINES) complaints.shift();
@@ -925,7 +823,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // every request in flight on this connection.
         onNotification: (frame) => {
           try {
-            stripImageBytes(frame);
+            removeMediaBytes(frame);
             onNotification(host, frame);
           } catch {
             warn(host, `the app-server sent a ${frame.method} that this build could not read`);
@@ -944,11 +842,21 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       framesBeforeRegistration:
         sessionId === undefined ? undefined : { frames: [], bytes: 0, dropped: 0 },
     };
-    void child.exited.then(
-      () => onHostGone(host),
-      () => onHostGone(host),
-    );
-    Effect.runFork(host.rpc.pump);
+    // The process may exit before the session has read everything it wrote.
+    // The exit is reported only after the output has been read to its end,
+    // which is when the pump completes. A process that leaves the output open
+    // (a child of its own holds it) is waited for only a short while.
+    const pumped = Effect.runPromise(host.rpc.pump);
+    const handleExit = (): void => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const patience = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, OUTPUT_DRAIN_PATIENCE_MS);
+      });
+      void Promise.race([pumped, patience])
+        .finally(() => clearTimeout(timer))
+        .then(() => onHostGone(host));
+    };
+    void child.exited.then(handleExit, handleExit);
     return host;
   };
 
@@ -1043,13 +951,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         buildStartError(host, "Codex could not tell whether it is logged in", error),
       ),
       (account) =>
-        isLoginMissing(account)
-          ? Effect.fail(
-              new HarnessLoginMissing({ message: "Codex is not logged in on this runner." }),
-            )
-          : Effect.void,
+        isLoginMissing(account) ? Effect.fail(buildHarnessLoginMissing(CODEX_NAME)) : Effect.void,
     );
 
+  /**
+   * Starts the session's app-server and makes it ready: the handshake, the
+   * login check and the skill roots. Returns the host. Fails, and kills the
+   * app-server, when any step fails.
+   */
   const startSessionHost = (
     sessionId: string,
     spec: SessionSpec,
@@ -1073,17 +982,17 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       return Effect.flatMap(openHost(ctx, binary, sessionId, overrides), (host) =>
         Effect.matchEffect(
           Effect.andThen(
-            Effect.andThen(
-              Effect.mapError(
-                initializeAppServer(host),
-                (error) =>
-                  new HarnessProtocolError({
-                    message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
-                  }),
-              ),
-              requireLogin(host),
+            Effect.mapError(
+              initializeAppServer(host),
+              (error) =>
+                new HarnessProtocolError({
+                  message: describeStartFailure(CODEX_NAME, describeRpcError(host, error)),
+                }),
             ),
-            setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
+            Effect.andThen(
+              requireLogin(host),
+              setSkillRoots(host, ctx.librarySkillsFolder, ctx.repositorySkillsFolders),
+            ),
           ),
           {
             // Registered only after the handshake, the login check and the
@@ -1164,6 +1073,20 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           // for the rest of a long turn.
           if (frame.method === "item/completed") thread.fileChanges.delete(item.id);
           else thread.fileChanges.set(item.id, readApprovalPaths(item));
+        }
+        if (item.type === "mcpToolCall") {
+          // Kept while the call runs, so the question Codex asks before it
+          // runs the call can be filed under the call's item.
+          if (frame.method === "item/completed") thread.runningMcpCalls.delete(item.id);
+          else {
+            const { turnId } = frame.params as ItemStartedNotification;
+            thread.runningMcpCalls.set(item.id, {
+              itemId: item.id,
+              turnId,
+              server: item.server,
+              tool: item.tool,
+            });
+          }
         }
         if (asyncItem !== undefined) {
           openAsyncQuestion(
@@ -1441,6 +1364,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       requestId: crypto.randomUUID(),
       threadId: thread.state.threadId,
       paths: (itemId) => thread.fileChanges.get(itemId) ?? [],
+      listRunningMcpCalls: (turnId) =>
+        [...thread.runningMcpCalls.values()].filter((call) => call.turnId === turnId),
     });
     const park: Park = { id: frame.id, request, asked, params: frame.params };
     thread.parks.set(request.requestId, park);
@@ -1595,7 +1520,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
   const deliverInput = (
     held: Held,
     input: AdapterTurnInput,
-    skills: SkillInputs,
+    skillItems: ReadonlyArray<UserInput>,
   ): Effect.Effect<SendResult, AdapterError> =>
     Effect.gen(function* () {
       const ticket = held.threads.beginInput();
@@ -1607,18 +1532,16 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
           // does not load the skill, so the chip would show a skill that
           // never ran. Refuse before the input is submitted, so it stays
           // queued and runs normally when this turn ends.
-          if (running !== undefined && skills.translated.length > 0)
+          if (running !== undefined && skillItems.length > 0)
             return yield* Effect.fail(
               new SteerRefused({ message: buildSkillSteerRefusedMessage(CODEX_NAME) }),
             );
           yield* held.threads.submitInput(ticket, running);
           const steered =
-            running === undefined
-              ? undefined
-              : yield* steerTurn(held, input, skills.items, running);
+            running === undefined ? undefined : yield* steerTurn(held, input, skillItems, running);
           if (steered !== undefined) return steered;
           yield* held.threads.submitInput(ticket);
-          return yield* startTurn(held, input, skills.items);
+          return yield* startTurn(held, input, skillItems);
         }),
         () => Effect.sync(() => held.threads.finishInput(ticket)),
       );
@@ -1680,7 +1603,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         sessions.get(sessionId) === held &&
         held.asyncQuestions.get(question.requestId) === question;
       return Effect.uninterruptible(
-        Effect.matchEffect(deliverInput(held, input, { items: [], translated: [] }), {
+        Effect.matchEffect(deliverInput(held, input, []), {
           onFailure: (failure) => {
             // Only a failure of the connection leaves it unknown whether Codex took the input.
             const maybeDelivered = failure._tag === "HarnessProtocolError";
@@ -1768,14 +1691,18 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
    * account shares that directory, so a file there would reach assistant
    * sessions and workflow steps too.
    *
+   * The session's MCP servers go in `config`, in all three methods: Codex
+   * does not save them with the thread, so a resumed or forked thread has none
+   * unless they are sent again. Child threads (subagents) inherit them.
+   *
    * Nothing in this adapter reads `disallowedTools`. Codex cannot restrict
    * tools, and the Agent record and the Session record both report the field
    * as not enforced, so no behaviour is silently substituted.
    */
   const buildThreadParams = (
     spec: SessionSpec,
-    ctx: HarnessRunnerContext,
-    userInstructions: string | undefined,
+    ctx: SessionStartContext,
+    mcpConfig: Record<string, JsonValue> | undefined,
   ): Pick<
     ThreadStartParams,
     | "cwd"
@@ -1785,14 +1712,21 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     | "sandbox"
     | "approvalsReviewer"
     | "developerInstructions"
+    | "config"
   > => {
     const tier = readServiceTier(spec.modelSelection.options["serviceTier"]);
     return {
       cwd: ctx.cwd,
       model: formatModelArgument(ctx.modelArgument, spec.modelSelection.model),
-      developerInstructions: buildDeveloperInstructions(spec, userInstructions, ctx.herculeTool),
+      developerInstructions: buildDeveloperInstructions(
+        spec,
+        ctx.userMaterial?.instructions,
+        ctx.herculeTool,
+      ),
       ...(tier === undefined ? {} : { serviceTier: tier }),
       ...ACCESS_MODES[spec.accessMode],
+      // Left out when the thread gets no MCP server.
+      ...(mcpConfig === undefined ? {} : { config: mcpConfig }),
     };
   };
 
@@ -1848,6 +1782,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     harnessId: CODEX,
     harnessName: CODEX_NAME,
     binaryName: CODEX_BINARY,
+    mapsMcpServers: true,
 
     events: Stream.fromPubSub(published),
     usageReports: Stream.fromPubSub(publishedUsage),
@@ -1863,7 +1798,6 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
       Effect.gen(function* () {
         const binary = ctx.binary;
         if (binary === undefined) return yield* Effect.fail(buildHarnessNotInstalled(CODEX_NAME));
-        const userInstructions = yield* readUserInstructions(ctx.userMaterial);
         const host = yield* startSessionHost(sessionId, spec, ctx, binary);
         const carried = spec.continue;
         const method =
@@ -1872,16 +1806,23 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             : carried.mode === "resume"
               ? "thread/resume"
               : "thread/fork";
+        const mcp = yield* decideMcpConfig({
+          rpc: host.rpc,
+          cwd: ctx.cwd,
+          servers: ctx.mcpServers,
+          accessMode: spec.accessMode,
+        });
+        const threadParams = buildThreadParams(spec, ctx, mcp.config);
         const opened = yield* Effect.matchEffect(
           Effect.flatMap(
             carried === undefined
               ? host.rpc.request(method, {
-                  ...buildThreadParams(spec, ctx, userInstructions),
+                  ...threadParams,
                   ephemeral: false,
                 } satisfies ThreadStartParams)
               : host.rpc.request(method, {
                   threadId: carried.nativeSessionId,
-                  ...buildThreadParams(spec, ctx, userInstructions),
+                  ...threadParams,
                 } satisfies ThreadResumeParams & ThreadForkParams),
             readThreadOpenedReply(method),
           ),
@@ -1920,6 +1861,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
             sessionId,
             rootThreadId: opened,
             spec,
+            config: threadParams.config,
             rpc: host.rpc,
             emit,
             dispatch: (thread, frame, cancelled) =>
@@ -1931,6 +1873,7 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               // still need replies, without duplicate resolution events.
               cancelRequests(held, thread, false);
               thread.fileChanges.clear();
+              thread.runningMcpCalls.clear();
             },
             failSession: () => exitSession(held, "crash"),
             reports,
@@ -1950,6 +1893,9 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
         // After `session.started`, so a warning sent during start-up reads as
         // coming after the session began. Nothing can arrive in between: the
         // registration above and this call run without waiting.
+        for (const warning of mcp.warnings) warn(host, warning);
+        // What the user's instructions lost, so the user knows what Codex does not see.
+        for (const warning of ctx.userMaterial?.warnings ?? []) warn(host, warning);
         const dropped = deliverFramesBeforeRegistration(held);
         // The dropped ones belong to no thread, so the session is not told;
         // the runner's log is.
@@ -1967,15 +1913,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
     ): Effect.Effect<SendResult, AdapterError> =>
       Effect.gen(function* () {
         const held = yield* getHostedSession(sessionId);
-        const references = input.skillReferences ?? [];
-        const skills = buildSkillInputs(references);
-        const skipped = new Set(references.map((reference) => reference.referenceName));
-        for (const reference of skills.translated) skipped.delete(reference.referenceName);
-        if (skipped.size > 0)
-          yield* Effect.logWarning(
-            `Gave Codex no skill item for ${[...skipped].join(", ")}: its SKILL.md is missing or resolves outside the skill folder.`,
-          );
-        const sent = yield* deliverInput(held, input, skills);
+        const { found, skipped } = resolveSkillFiles(input.skillReferences ?? []);
+        const sent = yield* deliverInput(held, input, buildSkillItems(found));
         for (const event of sessions.get(sessionId) !== held
           ? []
           : buildUserMessage({
@@ -1983,7 +1922,8 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
               turnId: sent.turnId,
               text: input.text,
               attachments: input.attachments,
-              skillReferences: skills.translated,
+              skillReferences: found.map(({ reference }) => reference),
+              skippedSkills: { harnessName: CODEX_NAME, names: skipped },
               senderSessionId: input.senderSessionId,
               steered: sent.delivery === "steered",
               harnessRefs: { threadId: held.binding.nativeSessionId },
@@ -2114,14 +2054,14 @@ export const makeCodexAdapter = (seam: CodexSeam): HarnessAdapter => {
      * account's own home directories, like a session does, so the credential
      * is saved where the app-server looks for it.
      */
-    login: (ctx: HarnessRunnerContext, binary: string, method: LoginMethod) =>
-      method === "sign-in"
-        ? ({
-            command: [binary, "login", "--device-auth"],
-            env: prepareEnv(ctx),
-            userCode: USER_CODE,
-          } satisfies LoginCommand)
-        : undefined,
+    login: {
+      methods: ["sign-in"],
+      build: (ctx: HarnessRunnerContext, binary: string): LoginCommand => ({
+        command: [binary, "login", "--device-auth"],
+        env: prepareEnv(ctx),
+        userCode: USER_CODE,
+      }),
+    },
 
     install: makeCodexInstall(seam.run),
   };

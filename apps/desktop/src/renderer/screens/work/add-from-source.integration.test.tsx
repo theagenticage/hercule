@@ -834,34 +834,6 @@ describe("From a source: the suggestions and the contexts", () => {
     });
     expect(screen.getByText("WEB-279")).toBeTruthy();
   });
-
-  it("offers the contexts the suggestions and the cached Inbox mention, as well as the board's", async () => {
-    const queryClient = createQueryClient();
-    const LEDGER = buildPlace("relay:project:ledger", "Ledger tidy-up", {
-      kind: "relay/project",
-      caption: "Relay project",
-    });
-    queryClient.setQueryData(queryKeys.inbox(), {
-      cards: [],
-      places: [LEDGER],
-      edges: [],
-      counts: { onTheClock: 0, requests: 0, withSomeoneElse: 0, newestArrival: 0 },
-      truncated: false,
-    });
-    renderSheet({ queryClient, places: [BASKET] });
-
-    await screen.findByText("WEB-268");
-
-    const options = within(
-      screen.getByRole("combobox", { name: "Narrow the search" }),
-    ).getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "all of Relay",
-      "Basket rebuild (project)",
-      "Ledger tidy-up (project)",
-      "Pricing rules (project)",
-    ]);
-  });
 });
 
 describe("From a source: offline", () => {

@@ -121,9 +121,9 @@ async function showGroupCard(title: string): Promise<void> {
  * segment, or when the segment is not selected afterwards.
  */
 function pressFaceSegment(face: SidebarFace): void {
-  const label = face === "threads" ? "Threads" : "Hercule";
+  const label = face === "threads" ? "Threads" : "Work";
   const segment = [...document.querySelectorAll<HTMLElement>('.seg--side [role="tab"]')].find(
-    // The Hercule segment ends in its To do count, so only its first text is the label.
+    // The Work segment ends in its To do count, so only its first text is the label.
     (tab) => tab.firstChild?.textContent === label,
   );
   if (segment === undefined) throw new Error(`The face switch has no "${label}" segment.`);

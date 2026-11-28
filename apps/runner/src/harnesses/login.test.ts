@@ -20,7 +20,7 @@ import {
   type LoginChild,
   type LoginSpawn,
 } from "./login";
-import type { HarnessRunnerContext } from "./index";
+import type { HarnessAdapter, HarnessRunnerContext } from "./index";
 import { NO_CONTROLLER_UPLOADER } from "./testing";
 
 const ACCOUNT_ID = "0199e0e7-0000-7000-8000-00000000000a";
@@ -87,10 +87,23 @@ interface Fake {
   readonly complains: (line: string) => void;
   readonly stdin: ReadonlyArray<string>;
   readonly exit: (code: number) => void;
+  /** Reports the exit but leaves stdout and stderr open, as a pipe a grandchild still holds. */
+  readonly exitWithOutputOpen: (code: number) => void;
+  readonly closeOutput: () => void;
   readonly killed: () => boolean;
+  /** The signals the child was sent, in order. */
+  readonly signals: ReadonlyArray<string | undefined>;
 }
 
-const createMachine = () => {
+/** How a fake child answers a signal. */
+interface KillBehavior {
+  /** The child exits only for SIGKILL, as a process that ignores SIGTERM. */
+  readonly ignoresTerm?: boolean;
+  /** The exit code of a killed child. */
+  readonly exitCode?: number;
+}
+
+const createMachine = (behavior: KillBehavior = {}) => {
   const children: Array<Fake> = [];
   const spawn: LoginSpawn = (command, env) => {
     const out = createPipe();
@@ -101,6 +114,7 @@ const createMachine = () => {
       settle = resolve;
     });
     let killed = false;
+    const signals: Array<string | undefined> = [];
     const endChild = (code: number): void => {
       out.end();
       err.end();
@@ -113,9 +127,10 @@ const createMachine = () => {
       // A killed child's pipes may not close before it exits, so this fake
       // never closes them. That checks the login code does not rely on the
       // pipes closing after a kill.
-      kill: () => {
+      kill: (signal) => {
         killed = true;
-        settle(143);
+        signals.push(signal);
+        if (behavior.ignoresTerm !== true || signal === "SIGKILL") settle(behavior.exitCode ?? 143);
       },
       exited,
     };
@@ -127,7 +142,13 @@ const createMachine = () => {
       says: out.write,
       complains: err.write,
       exit: endChild,
+      exitWithOutputOpen: settle,
+      closeOutput: () => {
+        out.end();
+        err.end();
+      },
       killed: () => killed,
+      signals,
     });
     return child;
   };
@@ -233,6 +254,35 @@ describe("starting a login", () => {
     // only one login per account can be waiting.
     expect(children[0]!.killed()).toBe(true);
     expect(second).toEqual({ _tag: "loginUrl", url: URL_TWO });
+  });
+
+  it("leaves a running login alone when the request asks for a method the harness does not support", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+    const signInOnly: HarnessAdapter = {
+      ...claudeCode,
+      login: { ...claudeCode.login!, methods: ["sign-in"] },
+    };
+
+    const answer = await run(
+      Effect.gen(function* () {
+        const first = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, signInOnly, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(first);
+
+        return yield* driver.start(REQUEST, ACCOUNT_ID, signInOnly, CONTEXT, "create-token");
+      }),
+    );
+
+    expect(answer).toEqual({
+      _tag: "loginFailed",
+      message: "The harness claude-code/claude-code cannot create a token in this runner build",
+    });
+    expect(children).toHaveLength(1);
+    expect(children[0]!.killed()).toBe(false);
   });
 
   it("fails with the child's stderr output when it exits without printing a URL", async () => {
@@ -456,6 +506,126 @@ describe("more than one login at a time", () => {
     );
 
     expect(answer).toEqual({ _tag: "loginResult", ok: true });
+  });
+});
+
+/**
+ * A plain-pipe login whose command sets `endsAtExit`, like Google's
+ * `agy acp --login`: the vendor reads one code and exits. After a wrong code it
+ * prints its refusal on stdout and exits 1; after a good code it exits 0. The
+ * exit alone decides, whatever the streams carried.
+ */
+describe("a plain-pipe login that ends at its exit", () => {
+  const AGY_URL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=agy";
+  const FAILURE_MESSAGE =
+    "The sign-in did not finish: the code may be wrong or expired, or the runner could not reach the vendor. This sign-in cannot take another code; start it again for a new link.";
+
+  const adapterWith = (endsAtExit: boolean): HarnessAdapter => ({
+    ...claudeCode,
+    login: {
+      methods: ["sign-in", "create-token"],
+      build: () => ({
+        command: ["agy", "acp", "--login"],
+        env: {},
+        ...(endsAtExit ? { endsAtExit } : {}),
+      }),
+    },
+  });
+
+  /** Starts the login, which prints its link and instructions before it waits for the code. */
+  const startLogin = (
+    driver: ReturnType<typeof makeLogins>,
+    children: ReadonlyArray<Fake>,
+    adapter: HarnessAdapter,
+  ) =>
+    Effect.gen(function* () {
+      const starting = yield* Effect.forkChild(
+        driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+      );
+      yield* TestClock.adjust(Duration.zero);
+      yield* Effect.sync(() => children[0]!.says(`${AGY_URL}\nEnter the code: `));
+      yield* Fiber.join(starting);
+    });
+
+  const submitCode = (driver: ReturnType<typeof makeLogins>) =>
+    Effect.gen(function* () {
+      const submitting = yield* Effect.forkChild(driver.submit(ACCOUNT_ID, "a-wrong-code"));
+      yield* TestClock.adjust(Duration.zero);
+      return submitting;
+    });
+
+  it("ends the login as failed with fixed text when the child exits non-zero", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(true));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => {
+          children[0]!.says(`couldn't log in: bad request for ${AGY_URL}&code=a-wrong-code\n`);
+          children[0]!.exit(1);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginFailed", message: FAILURE_MESSAGE });
+  });
+
+  it("fails the same way when the child exits non-zero without printing anything", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(true));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.exit(1));
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginFailed", message: FAILURE_MESSAGE });
+  });
+
+  it("does not read stderr as a complaint: a warning, then an exit 0 after the grace, is a success", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(true));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.complains("warning: keychain is locked\n"));
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        yield* Effect.sync(() => {
+          children[0]!.says("Logged in as someone@example.com.\n");
+          children[0]!.exit(0);
+        });
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginResult", ok: true });
+  });
+
+  it("reports a stderr line as an ordinary complaint when the command does not set endsAtExit", async () => {
+    const { spawn, children } = createMachine();
+    const driver = makeLogins(spawn);
+
+    const answer = await run(
+      Effect.gen(function* () {
+        yield* startLogin(driver, children, adapterWith(false));
+        const submitting = yield* submitCode(driver);
+        yield* Effect.sync(() => children[0]!.complains("Invalid code\n"));
+        yield* TestClock.adjust(COMPLAINT_GRACE);
+        return yield* Fiber.join(submitting);
+      }),
+    );
+
+    expect(answer).toEqual({ _tag: "loginResult", ok: false, message: "Invalid code" });
   });
 });
 
@@ -933,5 +1103,138 @@ describe("a device login", () => {
       expect(afterClose).toBe(0);
       expect(nextConnection).toBe(SENTINEL_REQUEST);
     });
+  });
+});
+
+describe("the lease of a login on the Harness Home", () => {
+  const buildLeasedAdapter = () => {
+    const calls: Array<string> = [];
+    const adapter: HarnessAdapter = {
+      ...claudeCode,
+      acquireLoginLease: () => ({
+        acquired: true,
+        release: () => calls.push("release"),
+      }),
+    };
+    return { adapter, calls };
+  };
+
+  /** Starts a login and stops it, advancing the clock by `advance` while the stop waits. */
+  const startThenStop = (
+    behavior: KillBehavior,
+    advance: Duration.Duration,
+  ): Promise<{
+    readonly calls: ReadonlyArray<string>;
+    readonly signals: ReadonlyArray<string | undefined>;
+    readonly callsBeforeGrace: ReadonlyArray<string>;
+  }> => {
+    const { spawn, children } = createMachine(behavior);
+    const { adapter, calls } = buildLeasedAdapter();
+    const driver = makeLogins(spawn);
+    return run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(starting);
+        const stopping = yield* Effect.forkChild(driver.stopAll);
+        yield* TestClock.adjust(Duration.zero);
+        const callsBeforeGrace = [...calls];
+        yield* TestClock.adjust(advance);
+        yield* Fiber.join(stopping);
+        return { calls: [...calls], signals: children[0]!.signals, callsBeforeGrace };
+      }),
+    );
+  };
+
+  it("ends only after a child that ignores SIGTERM has been killed", async () => {
+    const result = await startThenStop({ ignoresTerm: true }, Duration.seconds(3));
+
+    expect(result.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    // Nothing was released while the child still ran.
+    expect(result.callsBeforeGrace).toEqual([]);
+    expect(result.calls).toEqual(["release"]);
+  });
+
+  it("still kills the child and releases the lease when the stop is interrupted", async () => {
+    const { spawn, children } = createMachine({ ignoresTerm: true });
+    const { adapter, calls } = buildLeasedAdapter();
+    const driver = makeLogins(spawn);
+
+    const signals = await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(starting);
+        const stopping = yield* Effect.forkChild(driver.stopAll);
+        yield* TestClock.adjust(Duration.zero);
+        yield* Fiber.interrupt(stopping);
+        yield* TestClock.adjust(Duration.seconds(3));
+        // Shutdown after the interrupted stop finds nothing left to wait for.
+        yield* driver.stopAll;
+        return children[0]!.signals;
+      }),
+    );
+
+    expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(calls).toEqual(["release"]);
+  });
+
+  it("makes shutdown during a stop wait for that stop", async () => {
+    const { spawn, children } = createMachine({ ignoresTerm: true });
+    const { adapter, calls } = buildLeasedAdapter();
+    const driver = makeLogins(spawn);
+
+    const result = await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(starting);
+        const first = yield* Effect.forkChild(driver.stopAll);
+        yield* TestClock.adjust(Duration.zero);
+        const second = yield* Effect.forkChild(driver.stopAll);
+        yield* TestClock.adjust(Duration.seconds(1));
+        const secondDoneEarly = second.pollUnsafe() !== undefined;
+        const callsEarly = [...calls];
+        yield* TestClock.adjust(Duration.seconds(3));
+        yield* Fiber.join(first);
+        yield* Fiber.join(second);
+        return { secondDoneEarly, callsEarly, signals: children[0]!.signals };
+      }),
+    );
+
+    expect(result.secondDoneEarly).toBe(false);
+    expect(result.callsEarly).toEqual([]);
+    expect(result.signals).toEqual(["SIGTERM", "SIGKILL"]);
+    expect(calls).toEqual(["release"]);
+  });
+
+  it("releases the lease when the login exits with 0 on its own", async () => {
+    const { spawn, children } = createMachine();
+    const { adapter, calls } = buildLeasedAdapter();
+    const driver = makeLogins(spawn);
+
+    await run(
+      Effect.gen(function* () {
+        const starting = yield* Effect.forkChild(
+          driver.start(REQUEST, ACCOUNT_ID, adapter, CONTEXT, "sign-in"),
+        );
+        yield* TestClock.adjust(Duration.zero);
+        yield* Effect.sync(() => children[0]!.says(`${URL_ONE}\n`));
+        yield* Fiber.join(starting);
+        yield* Effect.sync(() => children[0]!.exit(0));
+        yield* TestClock.adjust(Duration.zero);
+      }),
+    );
+
+    expect(calls).toEqual(["release"]);
   });
 });

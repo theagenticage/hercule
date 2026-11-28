@@ -466,6 +466,23 @@ describe("a stdin field with no pipe", () => {
     );
   });
 
+  it("asks for a secret from a file, and never shows it piped from echo", async () => {
+    const base = stubIo({ env: { HERCULE_TOKEN: "t", HERCULE_API_URL: "http://controller.test" } });
+    const io = { ...base, isTty: () => true };
+
+    expect(
+      await main(
+        ["--home", home, "mcp-server", "set-token", "1f3a9c2e1d0a3c5b6e8f9a1b2c3d4e5f"],
+        io,
+      ),
+    ).toBe(2);
+    const shown = base.stderr.join("\n");
+    expect(shown).toContain(
+      "hercule mcp-server set-token 1f3a9c2e1d0a3c5b6e8f9a1b2c3d4e5f < token.txt",
+    );
+    expect(shown).not.toContain("echo");
+  });
+
   it("sends the images with empty text when --image is given, without reading stdin", async () => {
     writeFileSync(join(home, "shot.png"), "PNG!");
     const attachmentId = buildId("bbbbbbb2");
@@ -1058,6 +1075,16 @@ describe("failures", () => {
     expect(io.stderr.join("\n")).toContain("run `hercule task create --help`");
   });
 
+  it("names the flag, not the payload path, when a key of an object field does not fit", async () => {
+    const { io, fetch, run } = createStubCli();
+    expect(
+      await run("mcp-server", "create", "--plugin", "sentry", "--connection", buildId("aaaaaaa1")),
+    ).toBe(2);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr.join("\n")).toContain("--plugin: Write a contribution id as <plugin id>/");
+    expect(io.stderr.join("\n")).not.toContain("source");
+  });
+
   it("names a field read from stdin by its name, never by a flag it does not have", async () => {
     // An empty pipe is an invalid value for the field, and there is no
     // `--text` flag to fix, so the message must point at the pipe.
@@ -1140,6 +1167,7 @@ describe("hercule session spawn --agent", () => {
     exitedAt: null,
     lastActivityAt: "2026-09-19T10:01:00.000Z",
     unenforced: [] as Array<string>,
+    mcpServers: [],
   };
 
   const stubSpawn = () => {
@@ -1855,6 +1883,7 @@ describe("hercule skill import", () => {
     availableRevisionHash: null,
     availableApprovalEffects: null,
     proposedCount: 0,
+    proposedBy: null,
     lastCheckedAt: null,
     checkError: null,
     createdAt: "2026-10-18T10:00:00.000Z",
@@ -2050,7 +2079,7 @@ describe("hercule skill import", () => {
     expect(fetch.calls.map((call) => call.query.get("name"))).toEqual(["beta", "gamma"]);
     expect(io.stdout).toHaveLength(2);
     expect(io.stdout[0]).toBe("beta: unchanged");
-    expect(io.stdout[1]).toMatch(/^gamma: failed, so the import stopped: .*cannot reach/);
+    expect(io.stdout[1]).toMatch(/^gamma: failed, so the command stopped: .*cannot reach/);
   });
 
   it("stops at the first skill the token may not import, and exits 1", async () => {
@@ -2063,7 +2092,7 @@ describe("hercule skill import", () => {
     expect(await run("skill", "import", skills)).toBe(1);
     expect(fetch.calls).toHaveLength(1);
     expect(io.stdout).toEqual([
-      `beta: refused, so the import stopped: ${ONLY_THE_USER_IMPORTS_SKILLS}`,
+      `beta: refused, so the command stopped: ${ONLY_THE_USER_IMPORTS_SKILLS}`,
     ]);
   });
 
@@ -2076,7 +2105,7 @@ describe("hercule skill import", () => {
 
     expect(await run("skill", "import", skills)).toBe(1);
     expect(fetch.calls).toHaveLength(1);
-    expect(io.stdout).toEqual(["beta: refused, so the import stopped: The token has expired."]);
+    expect(io.stdout).toEqual(["beta: refused, so the command stopped: The token has expired."]);
   });
 
   it("names the skill that stopped the import under --json", async () => {
@@ -2119,6 +2148,100 @@ describe("hercule skill import", () => {
   });
 });
 
+describe("hercule skill propose", () => {
+  const buildProposedSkill = (name: string) => ({
+    name,
+    source: { kind: "upload" },
+    currentRevisionHash: null,
+    currentApprovalEffects: null,
+    currentFileCount: null,
+    currentSizeBytes: null,
+    availableRevisionHash: null,
+    availableApprovalEffects: null,
+    proposedCount: 1,
+    proposedBy: null,
+    lastCheckedAt: null,
+    checkError: null,
+    createdAt: "2026-10-18T10:00:00.000Z",
+    createdBy: "session:0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b",
+    updatedAt: "2026-10-18T10:00:00.000Z",
+    updatedBy: "session:0190a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b",
+  });
+
+  /** Writes one skill folder holding a `SKILL.md` under `parent`, and returns its path. */
+  const writeSkill = (parent: string, name: string): string => {
+    const folder = join(parent, name);
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, "SKILL.md"), `---\nname: ${name}\ndescription: x\n---\n`);
+    return folder;
+  };
+
+  it("sends one skill folder as one request with only its name, and prints one line", async () => {
+    const folder = writeSkill(join(home, "skills"), "release-checklist");
+    // A lock file that would give the skill a GitHub source on import.
+    writeFileSync(
+      join(home, ".skill-lock.json"),
+      JSON.stringify({
+        version: 3,
+        skills: {
+          "release-checklist": {
+            source: "mattpocock/skills",
+            sourceType: "github",
+            skillPath: "skills/release-checklist/SKILL.md",
+          },
+        },
+      }),
+    );
+    const { io, fetch, run } = createStubCli((request) => ({
+      result: "proposed",
+      skill: buildProposedSkill(request.query.get("name") ?? ""),
+    }));
+
+    expect(await run("skill", "propose", folder)).toBe(0);
+
+    expect(fetch.calls).toHaveLength(1);
+    expect(fetch.calls[0]).toMatchObject({ method: "POST", path: "/api/v1/skills/propose" });
+    expect(Object.fromEntries(fetch.calls[0]!.query)).toEqual({ name: "release-checklist" });
+    expect(String(fetch.calls[0]!.body).startsWith("SKILL.md")).toBe(true);
+    expect(io.stdout).toEqual(["release-checklist: proposed"]);
+  });
+
+  it("prints unchanged when the controller files nothing", async () => {
+    const folder = writeSkill(join(home, "skills"), "beta");
+    const { io, run } = createStubCli(() => ({
+      result: "unchanged",
+      skill: buildProposedSkill("beta"),
+    }));
+
+    expect(await run("skill", "propose", folder)).toBe(0);
+    expect(io.stdout).toEqual(["beta: unchanged"]);
+  });
+
+  it("refuses a folder of skills before sending anything", async () => {
+    const skills = join(home, "skills");
+    for (const name of ["alpha", "beta"]) writeSkill(skills, name);
+    const { io, fetch, run } = createStubCli(() => {
+      throw new Error("nothing should be sent");
+    });
+
+    expect(await run("skill", "propose", skills)).not.toBe(0);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr.join("\n")).toContain("takes one skill folder only");
+  });
+
+  it("refuses a folder of one skill, which is still a folder of skills", async () => {
+    const skills = join(home, "skills");
+    writeSkill(skills, "alpha");
+    const { io, fetch, run } = createStubCli(() => {
+      throw new Error("nothing should be sent");
+    });
+
+    expect(await run("skill", "propose", skills)).not.toBe(0);
+    expect(fetch.calls).toEqual([]);
+    expect(io.stderr.join("\n")).toContain("takes one skill folder only");
+  });
+});
+
 describe("hercule skill apply-updates", () => {
   const CURRENT = "a".repeat(64);
   const UPDATE = "b".repeat(64);
@@ -2134,6 +2257,7 @@ describe("hercule skill apply-updates", () => {
     availableRevisionHash: available,
     availableApprovalEffects: null,
     proposedCount: 0,
+    proposedBy: null,
     lastCheckedAt: "2026-10-18T10:00:00.000Z",
     checkError: null,
     createdAt: "2026-10-18T10:00:00.000Z",

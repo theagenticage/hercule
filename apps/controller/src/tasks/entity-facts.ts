@@ -108,6 +108,17 @@ const make = Effect.gen(function* () {
         UPDATE task_entity_facts SET voided_at = ${at}
         WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref} AND voided_at IS NULL`),
 
+    /** Voids every fact of the Task's pairs with `refs` that is not voided yet, in one statement. */
+    voidFactsOfRefs: (
+      taskId: string,
+      refs: ReadonlyArray<string>,
+      at: string,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.asVoid(sql`
+        UPDATE task_entity_facts SET voided_at = ${at}
+        WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}
+          AND voided_at IS NULL`),
+
     /**
      * Returns the facts with these ids, by id, voided ones included: a voided
      * fact still says why a card is where it is. An id with no fact is left
@@ -145,11 +156,13 @@ const make = Effect.gen(function* () {
         VALUES (${uuidFromString(taskId)}, ${ref}, ${at}, ${actor})
         ON CONFLICT (task_id, ref) DO NOTHING`),
 
-    /** Removes the record of an unlink, because someone asked for the link again. */
-    unsuppress: (taskId: string, ref: string): Effect.Effect<void, SqlError> =>
-      Effect.asVoid(sql`
-        DELETE FROM task_entity_link_suppressions
-        WHERE task_id = ${uuidFromString(taskId)} AND ref = ${ref}`),
+    /** Removes the records of the unlinks of `refs`, in one statement, because someone asked for the links again. */
+    unsuppress: (taskId: string, refs: ReadonlyArray<string>): Effect.Effect<void, SqlError> =>
+      refs.length === 0
+        ? Effect.void
+        : Effect.asVoid(sql`
+            DELETE FROM task_entity_link_suppressions
+            WHERE task_id = ${uuidFromString(taskId)} AND ref IN ${sql.in(refs)}`),
 
     /**
      * Gives the survivor of a merge the facts and the unlink records of the

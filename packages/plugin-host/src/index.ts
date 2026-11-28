@@ -58,7 +58,13 @@ export {
   ENTITY_STATUS_SHAPES,
   ENTITY_STATUS_STAGES,
   ENTITY_STATUS_TONES,
+  CARD_FACE_SLOTS,
+  CARD_FACE_SLOT_FIELD_TYPES,
+  FACET_FIELD_TYPES,
+  type EntityFieldType,
+  CardFaceDeclaration,
   EntityFactDeclaration,
+  EntityFieldDeclaration,
   EntityKindDeclaration,
   EntityObservation,
   EntityObservationRelations,
@@ -80,8 +86,11 @@ export {
   isHttpUrl,
   LinkedUrls,
   ObservationTexts,
+  MAX_ENTITY_KIND_FIELDS,
+  QualifiedEntityFieldDeclaration,
   QualifiedEntityKindDeclaration,
   type EntityInventory,
+  type EntityBlockDraft,
   type EntityLookup,
   type EntityLookupContext,
   type EntityRecognition,
@@ -134,6 +143,43 @@ export {
 } from "./contributions";
 
 export {
+  MAX_MCP_SERVER_DESCRIPTION_LENGTH,
+  MAX_MCP_SERVER_NAME_LENGTH,
+  McpServerDeclaration,
+  McpServerName,
+  McpServerOrigin,
+  type McpServerConnection,
+  type McpServerContribution,
+} from "./mcp-servers";
+
+export {
+  CORE_INBOX_FIELD_KEYS,
+  CORE_INBOX_FIELDS,
+  InboxClause,
+  MAX_INBOX_CLAUSE_KEY_LENGTH,
+  MAX_SAVED_QUERIES_PER_PLUGIN,
+  MAX_SAVED_QUERY_CLAUSES,
+  SavedQuery,
+  type CoreInboxFieldKey,
+} from "./saved-queries";
+
+export {
+  CLAUSE_OPERATORS_BY_TYPE,
+  DURATION_UNIT_SECONDS,
+  findClauseListProblem,
+  interpretClauseValue,
+  listClauseValues,
+  MAX_CLAUSE_VALUES,
+  splitClauseWord,
+  splitSearchValue,
+  type ClauseInterpretation,
+  type ClauseOperand,
+  type ClauseValue,
+  type InboxClauseOperator,
+  type RawClause,
+} from "./clause-grammar";
+
+export {
   AccountKind,
   AccountSetupStep,
   AccountUsageDeclaration,
@@ -182,6 +228,7 @@ export {
   registerConnectionType,
   registerEventSource,
   registerHarness,
+  registerMcpServer,
   registerProvider,
   registerWorkflowAction,
   type ActivationContext,
@@ -191,6 +238,7 @@ export {
   type Plugin,
   type PluginSecrets,
   type HarnessRegistration,
+  type McpServerRegistration,
   type ProviderRegistration,
   type ProviderRegistrationOptions,
   type RegistrationHost,

@@ -1,0 +1,1013 @@
+/**
+ * Finds out how a server added by URL signs a user in, and registers Hercule
+ * with the server's authorization server (spec 21 sections 5.2 and 5.6). It
+ * only talks to the network and keeps no state: `discoverAuthorization` reads
+ * the server's OAuth metadata (RFC 9728 and RFC 8414), and `registerClient`
+ * registers a client with Dynamic Client Registration (RFC 7591).
+ *
+ * Every request follows the same outbound rules, because the addresses come
+ * from servers that the user chose but did not write:
+ *
+ * - the address is http or https, holds no user name or password, and is
+ *   https, except on the same host and port as an http MCP server (a server
+ *   that signs its users in itself, in a private network). A code, a client secret or a
+ *   token must never cross the network in clear text because a server's
+ *   metadata said so;
+ * - a redirect is a failure and is never followed;
+ * - a request has 30 seconds, and an answer is read up to 1 MiB;
+ * - the HTTP client records no trace span, because a span records the address
+ *   and the error text;
+ * - a failure has a fixed message and never quotes what the server sent.
+ *
+ * Two failures are told apart, because the user does something different
+ * about each. `AuthorizationUnsupported` means the server offers no sign-in
+ * through the browser that Hercule can use, so the user pastes a token.
+ * `AuthorizationUnreadable` means the server or its authorization server could
+ * not be reached or answered what OAuth does not allow, so the user tries
+ * again later.
+ */
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
+import * as HttpBody from "effect/http/HttpBody";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import type * as HttpClientResponse from "effect/http/HttpClientResponse";
+import { readBoundedText, type ClientAuthMethod, type OAuthClient } from "../oauth";
+
+/** The most bytes read from one answer of a metadata or registration endpoint. */
+const MAX_METADATA_BYTES = 1024 * 1024;
+
+/** How long one request has to be answered, body included. */
+const REQUEST_TIMEOUT_SECONDS = 30;
+
+/** The MCP revision the unauthenticated probe says it speaks. */
+const PROBE_PROTOCOL_VERSION = "2025-11-25";
+
+/** The client authentication methods Hercule supports, in order of preference. */
+const SUPPORTED_CLIENT_AUTH_METHODS: ReadonlyArray<ClientAuthMethod> = [
+  "none",
+  "client_secret_post",
+  "client_secret_basic",
+];
+
+/** What the longest scope Hercule sends may be. A longer one is not a scope. */
+const MAX_SCOPE_LENGTH = 1024;
+
+/** The characters of an OAuth scope (RFC 6749 section 3.3): tokens separated by single spaces. */
+const SCOPE_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]+( [\x21\x23-\x5B\x5D-\x7E]+)*$/;
+
+/**
+ * The server offers no sign-in through the browser that Hercule can use: it
+ * publishes no OAuth metadata, or its authorization server cannot sign
+ * Hercule in (no registration endpoint, no PKCE with S256, or incompatible
+ * grant, response or client authentication types). The message is fixed and
+ * safe to show.
+ */
+export class AuthorizationUnsupported extends Schema.TaggedError<AuthorizationUnsupported>()(
+  "AuthorizationUnsupported",
+  { message: Schema.String },
+) {}
+
+/**
+ * The server or its authorization server could not be reached, or answered
+ * what OAuth does not allow (a redirect, a metadata document that breaks the
+ * rules, an address that downgrades to http). Trying again later may work.
+ * The message is fixed and safe to show: it never quotes the server.
+ */
+export class AuthorizationUnreadable extends Schema.TaggedError<AuthorizationUnreadable>()(
+  "AuthorizationUnreadable",
+  { message: Schema.String },
+) {}
+
+const failUnsupported = (message: string): Effect.Effect<never, AuthorizationUnsupported> =>
+  Effect.fail(new AuthorizationUnsupported({ message }));
+
+const failUnreadable = (message: string): Effect.Effect<never, AuthorizationUnreadable> =>
+  Effect.fail(new AuthorizationUnreadable({ message }));
+
+/** What an authorization server offers, as its metadata says (RFC 8414). */
+export interface AuthorizationServer {
+  /** The issuer identifier, exactly as the protected resource metadata names it. */
+  readonly issuer: string;
+  readonly authorizationEndpoint: string;
+  readonly tokenEndpoint: string;
+  /** The Dynamic Client Registration endpoint, or `undefined` when the server offers none. */
+  readonly registrationEndpoint: string | undefined;
+  /** Whether the server promises to send `iss` on every authorization response (RFC 9207). */
+  readonly sendsIssuer: boolean;
+  /** The grant types the authorization server lists, or `undefined` when it omits `grant_types_supported`. */
+  readonly grantTypesSupported: ReadonlyArray<string> | undefined;
+  /** The client authentication methods the token endpoint lists, or `undefined` when omitted. */
+  readonly tokenEndpointAuthMethods: ReadonlyArray<string> | undefined;
+}
+
+/** What discovery found for one MCP server: its authorization server, its resource and the scope to ask for. */
+export interface DiscoveredAuthorization extends AuthorizationServer {
+  /** The resource identifier (RFC 8707) that the server's metadata gave, which every token request names. */
+  readonly resource: string;
+  /** The scope to ask for, or `undefined` to ask for none. */
+  readonly scope: string | undefined;
+}
+
+/** A client registered with an authorization server. `authMethod` is how it signs its token requests. */
+export interface RegisteredClient extends OAuthClient {
+  readonly authMethod: ClientAuthMethod;
+}
+
+/** What a `WWW-Authenticate` header's `Bearer` challenge says about OAuth. */
+interface BearerChallenge {
+  /** The address of the protected resource metadata (RFC 9728), when the challenge names one. */
+  readonly resourceMetadata: string | undefined;
+  /** The scope the challenge asks for, when it names one. */
+  readonly scope: string | undefined;
+}
+
+/**
+ * The longest `WWW-Authenticate` header that is read. A real challenge is a
+ * few hundred bytes, and the header comes from a server the user did not
+ * write, so a longer one counts as having no challenge.
+ */
+const MAX_CHALLENGE_LENGTH = 8 * 1024;
+
+/** Checks whether `character` ends a token in a `WWW-Authenticate` header: a space, a tab, a comma, an equals sign or a quote. */
+const endsChallengeToken = (character: string): boolean =>
+  character === " " ||
+  character === "\t" ||
+  character === "," ||
+  character === "=" ||
+  character === '"';
+
+/**
+ * Reads the `resource_metadata` and `scope` parameters of the `Bearer`
+ * challenge in a `WWW-Authenticate` header (RFC 9728 section 5.1, RFC 6750
+ * section 3). A header may hold several challenges (`Basic realm="x", Bearer
+ * scope="y"`), and a parameter counts only inside the `Bearer` one. Parameter
+ * names are case-insensitive, and the first of a name wins. A quoted value is
+ * read whole, so a comma or an `=` inside it is never read as structure.
+ * Returns `undefined` for each that is absent, and for both when the header
+ * itself is, or is longer than `MAX_CHALLENGE_LENGTH`.
+ *
+ * It reads the header in one pass from left to right, so its time is linear
+ * in the length of the header, whatever the header holds.
+ */
+export const parseBearerChallenge = (header: string | undefined): BearerChallenge => {
+  let resourceMetadata: string | undefined;
+  let scope: string | undefined;
+  if (header === undefined || header.length > MAX_CHALLENGE_LENGTH) {
+    return { resourceMetadata, scope };
+  }
+  const skipBlanks = (from: number): number => {
+    let at = from;
+    while (header[at] === " " || header[at] === "\t") at += 1;
+    return at;
+  };
+  let inBearerChallenge = false;
+  let at = 0;
+  while (at < header.length) {
+    if (header[at] === " " || header[at] === "\t" || header[at] === ",") {
+      at += 1;
+      continue;
+    }
+    const nameStart = at;
+    while (at < header.length && !endsChallengeToken(header[at]!)) at += 1;
+    const name = header.slice(nameStart, at);
+    if (name === "") {
+      // A stray `=` or quote that no name leads: skip it.
+      at += 1;
+      continue;
+    }
+    const afterName = skipBlanks(at);
+    if (header[afterName] !== "=") {
+      // A bare word starts a challenge.
+      inBearerChallenge = name.toLowerCase() === "bearer";
+      continue;
+    }
+    at = skipBlanks(afterName + 1);
+    let value = "";
+    if (header[at] === '"') {
+      at += 1;
+      while (at < header.length && header[at] !== '"') {
+        if (header[at] === "\\" && at + 1 < header.length) at += 1;
+        value += header[at];
+        at += 1;
+      }
+      at += 1;
+    } else {
+      const valueStart = at;
+      // An unquoted value may hold `=`, as in an address with a query.
+      while (at < header.length && !/[ \t,"]/.test(header[at]!)) at += 1;
+      value = header.slice(valueStart, at);
+    }
+    if (inBearerChallenge) {
+      const parameter = name.toLowerCase();
+      if (parameter === "resource_metadata") resourceMetadata ??= value;
+      if (parameter === "scope") scope ??= value;
+    }
+  }
+  return { resourceMetadata, scope };
+};
+
+/** Returns the address as text without its fragment, which is never sent to a server. */
+const withoutFragment = (address: URL): string => {
+  const copy = new URL(address);
+  copy.hash = "";
+  return copy.href;
+};
+
+/**
+ * Lists the addresses where a server's protected resource metadata may be, in
+ * the order to try them (RFC 9728 section 3.1): the well-known address with
+ * the server's path and query after it, then the well-known address of its
+ * origin. A server whose path is only `/` has the first address with no path,
+ * and when it has a query, the second is tried too, because the metadata of
+ * such a server may be published for its origin.
+ */
+const buildResourceMetadataUrls = (server: URL): ReadonlyArray<string> => {
+  const wellKnown = `${server.origin}/.well-known/oauth-protected-resource`;
+  const path = server.pathname === "/" ? "" : server.pathname;
+  const first = `${wellKnown}${path}${server.search}`;
+  if (path === "" && server.search === "") return [first];
+  return [first, wellKnown];
+};
+
+/**
+ * Lists the addresses where an authorization server's metadata may be, in the
+ * order to try them: RFC 8414 with the issuer's path after the well-known
+ * name, then OpenID Connect discovery in its two spellings (the same
+ * insertion, and the path before the well-known name).
+ */
+const buildAuthorizationServerMetadataUrls = (issuer: URL): ReadonlyArray<string> => {
+  const path = issuer.pathname.replace(/\/$/, "");
+  if (path === "") {
+    return [
+      `${issuer.origin}/.well-known/oauth-authorization-server`,
+      `${issuer.origin}/.well-known/openid-configuration`,
+    ];
+  }
+  return [
+    `${issuer.origin}/.well-known/oauth-authorization-server${path}`,
+    `${issuer.origin}/.well-known/openid-configuration${path}`,
+    `${issuer.origin}${path}/.well-known/openid-configuration`,
+  ];
+};
+
+/**
+ * Parses an address that an OAuth server named, and checks the outbound rules
+ * on it. Fails with `AuthorizationUnreadable` when it is not an address, is not
+ * http or https, holds a user name or a password, or is http while it is not on
+ * the same host and port as an http MCP server. `what` names the address in the
+ * message, which never quotes the address.
+ */
+const checkOutboundUrl = (
+  raw: string,
+  server: URL,
+  what: string,
+): Effect.Effect<URL, AuthorizationUnreadable> => {
+  const url = URL.parse(raw);
+  if (url === null || (url.protocol !== "http:" && url.protocol !== "https:")) {
+    return failUnreadable(`the ${what} is not an http or https address`);
+  }
+  if (url.username !== "" || url.password !== "") {
+    return failUnreadable(`the ${what} holds a user name or a password`);
+  }
+  if (url.protocol === "http:" && !(server.protocol === "http:" && url.host === server.host)) {
+    return failUnreadable(`the ${what} is http, and only the MCP server's own origin may be`);
+  }
+  return Effect.succeed(url);
+};
+
+/** Protected resource metadata (RFC 9728): the fields discovery reads. */
+const ProtectedResourceMetadata = Schema.Struct({
+  resource: Schema.String,
+  authorization_servers: Schema.Array(Schema.Unknown),
+  scopes_supported: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+});
+
+const decodeProtectedResourceMetadata = Schema.decodeUnknownOption(ProtectedResourceMetadata);
+
+/** Returns the path with one `/` at its end, so that a prefix of it ends at a whole segment. */
+const withTrailingSlash = (path: string): string => (path.endsWith("/") ? path : `${path}/`);
+
+/**
+ * Checks that a resource identifier covers the server's address: a token
+ * issued for the resource is then meant for the server. It covers the address
+ * when it has no fragment, is on the same origin, and either:
+ *
+ * - has no query, and its path is the server's path or a parent of it,
+ *   compared by whole segments (`/a` covers `/a/mcp`, but not `/ab`);
+ * - has a query, and is exactly the server's address.
+ *
+ * RFC 9728 section 3.3 asks for the exact address. Real servers name their
+ * origin instead (Slack's `https://mcp.slack.com/mcp` names
+ * `https://mcp.slack.com`), and the MCP SDKs accept that. A resource at a
+ * sibling path is still refused: on a host that serves several servers by
+ * path, a server at `/alice/mcp` could otherwise name `/bob/mcp`, and the
+ * token the user gets for Bob's server would be sent to Alice's.
+ */
+const coversServer = (resource: string, server: URL): boolean => {
+  const parsed = URL.parse(resource);
+  if (parsed === null || parsed.hash !== "" || parsed.origin !== server.origin) return false;
+  if (parsed.search !== "") return parsed.href === withoutFragment(server);
+  return withTrailingSlash(server.pathname).startsWith(withTrailingSlash(parsed.pathname));
+};
+
+/**
+ * Checks a scope that a server named. Returns it when it is a list of scope
+ * tokens (RFC 6749 section 3.3) of at most 1024 characters, and fails with
+ * `AuthorizationUnreadable` otherwise.
+ */
+const checkScope = (scope: string): Effect.Effect<string, AuthorizationUnreadable> =>
+  scope.length <= MAX_SCOPE_LENGTH && SCOPE_PATTERN.test(scope)
+    ? Effect.succeed(scope)
+    : failUnreadable("the scope the server asks for is not a list of scope names");
+
+/**
+ * Validates protected resource metadata and returns what discovery needs of
+ * it: the resource identifier, the first authorization server's issuer, and
+ * the scopes the metadata lists. Fails with `AuthorizationUnreadable` when
+ * the body is not metadata, when its `resource` does not cover `server` (see
+ * `coversServer`: the document may be about another resource, and then it must
+ * not be used), or when it names no authorization server. A later
+ * authorization server is never used.
+ */
+const readProtectedResourceMetadata = (
+  body: unknown,
+  server: URL,
+): Effect.Effect<
+  {
+    readonly resource: string;
+    readonly issuer: string;
+    readonly scopesSupported: ReadonlyArray<string>;
+  },
+  AuthorizationUnreadable
+> =>
+  Effect.gen(function* () {
+    const decoded = decodeProtectedResourceMetadata(body);
+    if (Option.isNone(decoded)) {
+      return yield* failUnreadable("the protected resource metadata is not valid");
+    }
+    const { resource, authorization_servers, scopes_supported } = decoded.value;
+    if (!coversServer(resource, server)) {
+      return yield* failUnreadable(
+        "the protected resource metadata is for an address that does not cover the server's",
+      );
+    }
+    const issuer = authorization_servers[0];
+    if (typeof issuer !== "string") {
+      return yield* failUnreadable("the protected resource metadata names no authorization server");
+    }
+    return {
+      resource,
+      issuer,
+      scopesSupported: (scopes_supported ?? []).filter(
+        (scope): scope is string => typeof scope === "string",
+      ),
+    };
+  });
+
+/** Authorization server metadata (RFC 8414): the fields discovery reads. */
+const AuthorizationServerMetadata = Schema.Struct({
+  issuer: Schema.String,
+  authorization_endpoint: Schema.String,
+  token_endpoint: Schema.String,
+  registration_endpoint: Schema.optional(Schema.NullOr(Schema.String)),
+  code_challenge_methods_supported: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  response_types_supported: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  grant_types_supported: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  token_endpoint_auth_methods_supported: Schema.optional(
+    Schema.NullOr(Schema.Array(Schema.Unknown)),
+  ),
+  authorization_response_iss_parameter_supported: Schema.optional(Schema.Unknown),
+});
+
+const decodeAuthorizationServerMetadata = Schema.decodeUnknownOption(AuthorizationServerMetadata);
+
+/**
+ * Validates authorization server metadata and returns what the sign-in needs.
+ * Fails with:
+ *
+ * - `AuthorizationUnreadable` when the body is not metadata, when its `issuer`
+ *   is not `expectedIssuer` (RFC 8414 section 3.3: otherwise a server could
+ *   serve the metadata of another server), when the issuer has a query or a
+ *   fragment, when an address in it breaks the outbound rules, or when an
+ *   endpoint is http while the issuer is https;
+ * - `AuthorizationUnsupported` when it does not list `S256` among its PKCE
+ *   methods, when `response_types_supported` is listed without `code`, when
+ *   `grant_types_supported` is listed without `authorization_code`, or when
+ *   `token_endpoint_auth_methods_supported` is listed with no method Hercule
+ *   speaks (`none`, `client_secret_post`, `client_secret_basic`).
+ */
+const readAuthorizationServerMetadata = (
+  body: unknown,
+  expectedIssuer: string,
+  server: URL,
+): Effect.Effect<AuthorizationServer, AuthorizationUnreadable | AuthorizationUnsupported> =>
+  Effect.gen(function* () {
+    const decoded = decodeAuthorizationServerMetadata(body);
+    if (Option.isNone(decoded) || decoded.value.issuer !== expectedIssuer) {
+      return yield* failUnreadable(
+        "the authorization server metadata is not valid, or is for another issuer",
+      );
+    }
+    const metadata = decoded.value;
+    const issuer = yield* checkOutboundUrl(metadata.issuer, server, "authorization server");
+    if (issuer.search !== "" || issuer.hash !== "") {
+      return yield* failUnreadable("the authorization server's issuer holds a query or a fragment");
+    }
+    // An https issuer never sends the client to a plaintext endpoint: the
+    // same-host exception for http is for an http issuer (a server run on the
+    // user's own machine), and does not let a secure issuer downgrade.
+    const checkEndpoint = (raw: string, what: string) =>
+      Effect.flatMap(checkOutboundUrl(raw, server, what), (url) =>
+        issuer.protocol === "https:" && url.protocol === "http:"
+          ? failUnreadable(`the ${what} is http, but its authorization server is https`)
+          : Effect.succeed(url),
+      );
+    const authorizationEndpoint = yield* checkEndpoint(
+      metadata.authorization_endpoint,
+      "authorization endpoint",
+    );
+    const tokenEndpoint = yield* checkEndpoint(metadata.token_endpoint, "token endpoint");
+    const registrationEndpoint =
+      metadata.registration_endpoint == null
+        ? undefined
+        : yield* checkEndpoint(metadata.registration_endpoint, "registration endpoint");
+    if (!(metadata.code_challenge_methods_supported ?? []).includes("S256")) {
+      return yield* failUnsupported(
+        "its authorization server does not offer PKCE with S256, which Hercule requires",
+      );
+    }
+    if (
+      metadata.response_types_supported != null &&
+      !metadata.response_types_supported.includes("code")
+    ) {
+      return yield* failUnsupported(
+        "its authorization server does not offer the authorization code flow",
+      );
+    }
+    const grantTypesSupported =
+      metadata.grant_types_supported == null
+        ? undefined
+        : metadata.grant_types_supported.filter(
+            (grant): grant is string => typeof grant === "string",
+          );
+    if (grantTypesSupported !== undefined && !grantTypesSupported.includes("authorization_code")) {
+      return yield* failUnsupported(
+        "its authorization server does not offer the authorization code grant",
+      );
+    }
+    const tokenEndpointAuthMethods =
+      metadata.token_endpoint_auth_methods_supported == null
+        ? undefined
+        : metadata.token_endpoint_auth_methods_supported.filter(
+            (method): method is string => typeof method === "string",
+          );
+    if (
+      tokenEndpointAuthMethods !== undefined &&
+      !SUPPORTED_CLIENT_AUTH_METHODS.some((method) => tokenEndpointAuthMethods.includes(method))
+    ) {
+      return yield* failUnsupported(
+        "its authorization server requires a client authentication method Hercule does not support",
+      );
+    }
+    return {
+      issuer: metadata.issuer,
+      authorizationEndpoint: authorizationEndpoint.href,
+      tokenEndpoint: tokenEndpoint.href,
+      registrationEndpoint: registrationEndpoint?.href,
+      sendsIssuer: metadata.authorization_response_iss_parameter_supported === true,
+      grantTypesSupported,
+      tokenEndpointAuthMethods,
+    };
+  });
+
+/** One client registration payload variant to try in order. */
+interface RegistrationAttempt {
+  readonly authMethod: ClientAuthMethod;
+  readonly grantTypes: ReadonlyArray<string>;
+}
+
+/**
+ * Lists the registration payloads to try for one authorization server.
+ * Starts with a public PKCE client requesting `refresh_token`, because
+ * servers such as Keycloak and Auth0 omit `none` from
+ * `token_endpoint_auth_methods_supported` or omit `refresh_token` from
+ * `grant_types_supported` while still accepting them. On HTTP 400 fallback,
+ * tries a bounded sequence across supported confidential methods
+ * (`client_secret_post`, `client_secret_basic`, or RFC 8414 default
+ * `client_secret_basic` when metadata omits the list) and `authorization_code`-only
+ * grants.
+ */
+const buildRegistrationAttempts = (
+  authorization: Pick<AuthorizationServer, "grantTypesSupported" | "tokenEndpointAuthMethods">,
+): ReadonlyArray<RegistrationAttempt> => {
+  const withRefresh = ["authorization_code", "refresh_token"] as const;
+  const withoutRefresh = ["authorization_code"] as const;
+  const { tokenEndpointAuthMethods, grantTypesSupported } = authorization;
+  const confidentialMethods: ReadonlyArray<ClientAuthMethod> =
+    tokenEndpointAuthMethods === undefined
+      ? ["client_secret_basic"]
+      : (["client_secret_post", "client_secret_basic"] as const).filter((method) =>
+          tokenEndpointAuthMethods.includes(method),
+        );
+  const advertisesNone = tokenEndpointAuthMethods?.includes("none") === true;
+  const advertisesRefresh = grantTypesSupported?.includes("refresh_token") === true;
+
+  const attempts: Array<RegistrationAttempt> = [{ authMethod: "none", grantTypes: withRefresh }];
+  if (advertisesNone && !advertisesRefresh) {
+    // The server lists `none` but not `refresh_token`: drop refresh first so we stay public.
+    attempts.push({ authMethod: "none", grantTypes: withoutRefresh });
+    for (const authMethod of confidentialMethods) {
+      attempts.push({ authMethod, grantTypes: withRefresh });
+    }
+    for (const authMethod of confidentialMethods) {
+      attempts.push({ authMethod, grantTypes: withoutRefresh });
+    }
+    return attempts;
+  }
+  for (const authMethod of confidentialMethods) {
+    attempts.push({ authMethod, grantTypes: withRefresh });
+  }
+  attempts.push({ authMethod: "none", grantTypes: withoutRefresh });
+  for (const authMethod of confidentialMethods) {
+    attempts.push({ authMethod, grantTypes: withoutRefresh });
+  }
+  return attempts;
+};
+
+/** Loopback callback shape that may normalize to portless `http://127.0.0.1/callback`. */
+const LOOPBACK_CALLBACK_PATTERN = /^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}\/callback$/;
+const PORTLESS_LOOPBACK_CALLBACK = "http://127.0.0.1/callback";
+
+/**
+ * Checks whether an echoed `redirect_uris` entry matches `requested`. Accepts
+ * exact equality, or the literal `http://127.0.0.1/callback` when `requested`
+ * is `http://127.0.0.1:<port>/callback` (RFC 8252 section 7.3).
+ */
+const matchesRegisteredRedirectUri = (registered: unknown, requested: string): boolean => {
+  if (typeof registered !== "string") return false;
+  if (registered === requested) return true;
+  return LOOPBACK_CALLBACK_PATTERN.test(requested) && registered === PORTLESS_LOOPBACK_CALLBACK;
+};
+
+/**
+ * Checks whether an HTTP registration refusal warrants trying a fallback
+ * registration payload. Retries only HTTP 400 when the body is not JSON, omits
+ * an `error` field, or reports `invalid_client_metadata`.
+ */
+const isRetryableRegistrationRefusal = (answer: Answer): boolean => {
+  if (answer.status !== 400) return false;
+  const body = parseJsonObject(answer.body);
+  return (
+    body === undefined || typeof body.error !== "string" || body.error === "invalid_client_metadata"
+  );
+};
+
+/** The answer to a client registration (RFC 7591 section 3.2.1): the fields registration reads. */
+const RegistrationAnswer = Schema.Struct({
+  client_id: Schema.NonEmptyString,
+  client_secret: Schema.optional(Schema.NullOr(Schema.String)),
+  token_endpoint_auth_method: Schema.optional(Schema.NullOr(Schema.String)),
+  redirect_uris: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  grant_types: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+  response_types: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
+});
+
+const decodeRegistrationAnswer = Schema.decodeUnknownOption(RegistrationAnswer);
+
+/**
+ * Validates the answer to a client registration and returns the client.
+ * Fails with `AuthorizationUnreadable` when the answer is not a registration,
+ * when it lists redirect addresses that do not cover `redirectUri` (exact or
+ * literal `http://127.0.0.1/callback`), when it lists grant or response types
+ * without `authorization_code` or `code`, when the effective client
+ * authentication method is excluded by discovery metadata (except `none` when
+ * `none` was requested), when it gives a client authentication method Hercule
+ * does not speak, or when the effective method requires a secret and none is
+ * given.
+ *
+ * A client signs its token requests with the method the answer names. When the
+ * answer names none, it uses the non-public method Hercule requested, or when
+ * Hercule requested `none` and got a secret, `client_secret_post` if listed
+ * and `client_secret_basic` otherwise (RFC 7591 section 2 default). A client
+ * with no secret, or with method `none`, is public.
+ */
+const readRegisteredClient = (
+  body: unknown,
+  redirectUri: string,
+  requestedAuthMethod: ClientAuthMethod,
+  tokenEndpointAuthMethods: ReadonlyArray<string> | undefined,
+): Effect.Effect<RegisteredClient, AuthorizationUnreadable> =>
+  Effect.gen(function* () {
+    const decoded = decodeRegistrationAnswer(body);
+    if (Option.isNone(decoded)) {
+      return yield* failUnreadable("the client registration answer is not valid");
+    }
+    const answer = decoded.value;
+    // A field that is null counts as absent.
+    const redirectUris = answer.redirect_uris ?? undefined;
+    if (
+      redirectUris !== undefined &&
+      !redirectUris.some((uri) => matchesRegisteredRedirectUri(uri, redirectUri))
+    ) {
+      return yield* failUnreadable(
+        "the client registration answer does not keep the redirect address that was registered",
+      );
+    }
+    const grantTypes = answer.grant_types ?? undefined;
+    if (grantTypes !== undefined && !grantTypes.includes("authorization_code")) {
+      return yield* failUnreadable(
+        "the client registration answer does not allow the authorization code grant",
+      );
+    }
+    const responseTypes = answer.response_types ?? undefined;
+    if (responseTypes !== undefined && !responseTypes.includes("code")) {
+      return yield* failUnreadable(
+        "the client registration answer does not allow the authorization code flow",
+      );
+    }
+    const clientId = answer.client_id;
+    const clientSecret = answer.client_secret ?? undefined;
+    const answered = answer.token_endpoint_auth_method ?? undefined;
+    const authMethod =
+      answered ??
+      (requestedAuthMethod !== "none"
+        ? requestedAuthMethod
+        : clientSecret === undefined
+          ? "none"
+          : (tokenEndpointAuthMethods ?? []).includes("client_secret_post")
+            ? "client_secret_post"
+            : "client_secret_basic");
+    if (
+      authMethod !== "none" &&
+      authMethod !== "client_secret_post" &&
+      authMethod !== "client_secret_basic"
+    ) {
+      return yield* failUnreadable(
+        "the client registration answer uses an unsupported client authentication method",
+      );
+    }
+    if (
+      tokenEndpointAuthMethods !== undefined &&
+      !tokenEndpointAuthMethods.includes(authMethod) &&
+      !(authMethod === "none" && requestedAuthMethod === "none")
+    ) {
+      return yield* failUnreadable(
+        "the client registration answer uses a client authentication method the token endpoint does not list",
+      );
+    }
+    if (authMethod === "none") {
+      return { clientId, authMethod: "none" };
+    }
+    if (clientSecret === undefined || clientSecret === "") {
+      return yield* failUnreadable("the client registration answer has no client secret");
+    }
+    return {
+      clientId,
+      clientSecret,
+      authMethod,
+    };
+  });
+
+/**
+ * Builds the address that the user opens to sign in (RFC 6749 section 4.1.1
+ * with PKCE and RFC 8707). Parameters the endpoint already has in its query
+ * stay, except the ones this sets.
+ */
+export const buildAuthorizationUrl = (request: {
+  readonly authorizationEndpoint: string;
+  readonly clientId: string;
+  readonly redirectUri: string;
+  readonly codeChallenge: string;
+  readonly state: string;
+  readonly resource: string;
+  readonly scope: string | undefined;
+}): string => {
+  const url = new URL(request.authorizationEndpoint);
+  url.searchParams.set("response_type", "code");
+  url.searchParams.set("client_id", request.clientId);
+  url.searchParams.set("redirect_uri", request.redirectUri);
+  url.searchParams.set("code_challenge", request.codeChallenge);
+  url.searchParams.set("code_challenge_method", "S256");
+  url.searchParams.set("state", request.state);
+  url.searchParams.set("resource", request.resource);
+  if (request.scope !== undefined) url.searchParams.set("scope", request.scope);
+  return url.href;
+};
+
+/** What a request got: the status, the `WWW-Authenticate` header, and the body when it was read. */
+interface Answer {
+  readonly status: number;
+  readonly wwwAuthenticate: string | undefined;
+  readonly body: string;
+}
+
+/**
+ * Sends one request under the outbound rules and returns the answer. With
+ * `readsBody` false the body is dropped unread, for an answer only its status
+ * and headers matter. A redirect, an answer over 1 MiB, a transport failure
+ * and a request that takes over 30 seconds fail with `AuthorizationUnreadable`.
+ * `what` names the request in the message.
+ *
+ * The request lives in a scope that ends with this call. Closing the scope
+ * aborts the request, which cancels a body that was not read to its end, so a
+ * redirect, an error status, a refused size or a dropped probe body never
+ * leaves a connection open.
+ */
+const send = (
+  request: HttpClientRequest.HttpClientRequest,
+  what: string,
+  readsBody: boolean,
+): Effect.Effect<Answer, AuthorizationUnreadable, HttpClient.HttpClient> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const client = (yield* HttpClient.HttpClient).pipe(
+        HttpClient.transform((execute) =>
+          execute.pipe(
+            // A redirect would send the request to an address the server picked.
+            Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+            // No span at all: a client span records the address, and a failed
+            // one records the error text.
+            Effect.provideService(HttpClient.TracerDisabledWhen, () => true),
+          ),
+        ),
+        HttpClient.withScope,
+      );
+      const response: HttpClientResponse.HttpClientResponse = yield* client.execute(request);
+      const { status } = response;
+      const wwwAuthenticate = response.headers["www-authenticate"];
+      if (status >= 300 && status < 400) {
+        return yield* failUnreadable(`the ${what} answered with a redirect, which is not followed`);
+      }
+      if (!readsBody) return { status, wwwAuthenticate, body: "" };
+      const body = yield* readBoundedText(response, what, MAX_METADATA_BYTES);
+      return { status, wwwAuthenticate, body };
+    }),
+  ).pipe(
+    Effect.timeoutOrElse({
+      duration: Duration.seconds(REQUEST_TIMEOUT_SECONDS),
+      orElse: () =>
+        failUnreadable(
+          `the ${what} did not answer within ${String(REQUEST_TIMEOUT_SECONDS)} seconds`,
+        ),
+    }),
+    Effect.catchTag("HttpClientError", () => failUnreadable(`the ${what} could not be reached`)),
+    Effect.catchTag("ProviderUnreachable", (error) => failUnreadable(error.message)),
+  );
+
+/** Parses a body as a JSON object, or returns `undefined` when it is anything else. */
+const parseJsonObject = (text: string): Record<string, unknown> | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Reads one metadata document. Returns the JSON object when the address
+ * answers 200 with one, and `none` when it answers anything else that is not
+ * a server failure, such as an unknown address. Fails with
+ * `AuthorizationUnreadable` for a redirect, a 5xx, a 429, an answer over 1 MiB
+ * and a transport failure, because those say nothing about whether the
+ * document exists, and for a 200 answer that is not a JSON object, because
+ * the document exists and is broken.
+ */
+const readMetadata = (
+  url: URL,
+  what: string,
+): Effect.Effect<
+  Option.Option<Record<string, unknown>>,
+  AuthorizationUnreadable,
+  HttpClient.HttpClient
+> =>
+  Effect.gen(function* () {
+    const answer = yield* send(HttpClientRequest.get(url, { acceptJson: true }), what, true);
+    if (answer.status >= 500 || answer.status === 429) {
+      return yield* failUnreadable(`the ${what} answered HTTP ${String(answer.status)}`);
+    }
+    if (answer.status !== 200) return Option.none();
+    const document = parseJsonObject(answer.body);
+    return document === undefined
+      ? yield* failUnreadable(`the ${what} is not a JSON object`)
+      : Option.some(document);
+  });
+
+/**
+ * Reads the first of the addresses that answers with metadata, and returns its
+ * document, or `none` when no address does.
+ */
+const readFirstMetadata = (
+  urls: ReadonlyArray<string>,
+  what: string,
+): Effect.Effect<
+  Option.Option<Record<string, unknown>>,
+  AuthorizationUnreadable,
+  HttpClient.HttpClient
+> =>
+  Effect.gen(function* () {
+    for (const url of urls) {
+      const found = yield* readMetadata(new URL(url), what);
+      if (Option.isSome(found)) return found;
+    }
+    return Option.none();
+  });
+
+/**
+ * Sends the request that starts an MCP exchange with no credentials, and
+ * returns the `Bearer` challenge of its answer. A server that needs a sign-in
+ * answers HTTP 401 and says where its OAuth metadata is. Any other answer has
+ * no challenge. Fails with `AuthorizationUnreadable` as `send` does, and for a
+ * 5xx or a 429.
+ */
+const probeServer = (
+  server: URL,
+): Effect.Effect<BearerChallenge, AuthorizationUnreadable, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const request = HttpClientRequest.post(server, {
+      headers: {
+        accept: "application/json, text/event-stream",
+        "mcp-protocol-version": PROBE_PROTOCOL_VERSION,
+      },
+      body: HttpBody.jsonUnsafe({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: PROBE_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: { name: "hercule", version: "0" },
+        },
+      }),
+    });
+    const answer = yield* send(request, "MCP server", false);
+    if (answer.status >= 500 || answer.status === 429) {
+      return yield* failUnreadable(`the MCP server answered HTTP ${String(answer.status)}`);
+    }
+    return answer.status === 401
+      ? parseBearerChallenge(answer.wwwAuthenticate)
+      : { resourceMetadata: undefined, scope: undefined };
+  });
+
+/**
+ * Finds how a server added by URL signs a user in, from the server's address
+ * (RFC 9728 and RFC 8414), and returns its authorization server's metadata with
+ * the resource and the scope to ask for.
+ *
+ * 1. It asks the server to start an MCP exchange with no credentials. The
+ *    `Bearer` challenge of an HTTP 401 may name the protected resource
+ *    metadata and a scope.
+ * 2. It reads the protected resource metadata: the address the challenge
+ *    names, or else the well-known address with the server's path, or else the
+ *    well-known address of its origin.
+ * 3. It reads the metadata of the first authorization server that the
+ *    resource metadata lists, trying the RFC 8414 address and then both
+ *    OpenID Connect addresses.
+ *
+ * The scope is the challenge's, else the resource metadata's `scopes_supported`
+ * joined by spaces, else none. Fails with:
+ *
+ * - `AuthorizationUnsupported` when the server publishes no protected
+ *   resource metadata at all, or its authorization server does not offer PKCE
+ *   with S256;
+ * - `AuthorizationUnreadable` for everything else that goes wrong, by the
+ *   rules at the top of this file.
+ */
+export const discoverAuthorization = (
+  serverUrl: string,
+): Effect.Effect<
+  DiscoveredAuthorization,
+  AuthorizationUnsupported | AuthorizationUnreadable,
+  HttpClient.HttpClient
+> =>
+  Effect.gen(function* () {
+    const server = new URL(serverUrl);
+    const challenge = yield* probeServer(server);
+
+    // A challenge that names its metadata is the one place to look: a server
+    // that names an address that answers nothing breaks the rules.
+    const named =
+      challenge.resourceMetadata === undefined
+        ? undefined
+        : yield* checkOutboundUrl(
+            challenge.resourceMetadata,
+            server,
+            "protected resource metadata address",
+          );
+    // Wherever the metadata was found, it must be about a resource that covers
+    // the address that was probed.
+    const resourceMetadata = yield* readFirstMetadata(
+      named === undefined ? buildResourceMetadataUrls(server) : [named.href],
+      "protected resource metadata",
+    );
+    if (Option.isNone(resourceMetadata)) {
+      return yield* named === undefined
+        ? failUnsupported("it publishes no OAuth metadata")
+        : failUnreadable("the protected resource metadata that the server names is not there");
+    }
+    const resource = yield* readProtectedResourceMetadata(resourceMetadata.value, server);
+
+    const issuer = yield* checkOutboundUrl(resource.issuer, server, "authorization server");
+    const serverMetadata = yield* readFirstMetadata(
+      buildAuthorizationServerMetadataUrls(issuer),
+      "authorization server metadata",
+    );
+    if (Option.isNone(serverMetadata)) {
+      return yield* failUnreadable("the authorization server's metadata is not there");
+    }
+    const authorizationServer = yield* readAuthorizationServerMetadata(
+      serverMetadata.value,
+      resource.issuer,
+      server,
+    );
+
+    const askedScope =
+      challenge.scope ??
+      (resource.scopesSupported.length > 0 ? resource.scopesSupported.join(" ") : undefined);
+    return {
+      ...authorizationServer,
+      resource: resource.resource,
+      scope: askedScope === undefined ? undefined : yield* checkScope(askedScope),
+    };
+  });
+
+/**
+ * Registers Hercule as a client of the authorization server with Dynamic
+ * Client Registration (RFC 7591) for one sign-in attempt and returns the
+ * client. It registers the attempt's exact `redirectUri` and
+ * `application_type: "native"`. It tries a public PKCE client (`none`) with
+ * `refresh_token` first, and falls back on an HTTP 400 registration error
+ * (`invalid_client_metadata` or unspecified error) using the authorization
+ * server's metadata (or RFC 8414 defaults when omitted). The answer is checked
+ * by `readRegisteredClient`.
+ *
+ * Fails with `AuthorizationUnsupported` when the authorization server offers
+ * no registration endpoint, advertises no client authentication method Hercule
+ * supports, or refuses to register Hercule, and with `AuthorizationUnreadable`
+ * for everything else that goes wrong.
+ */
+export const registerClient = (
+  authorization: DiscoveredAuthorization,
+  redirectUri: string,
+): Effect.Effect<
+  RegisteredClient,
+  AuthorizationUnsupported | AuthorizationUnreadable,
+  HttpClient.HttpClient
+> =>
+  Effect.gen(function* () {
+    if (authorization.registrationEndpoint === undefined) {
+      return yield* failUnsupported(
+        "its authorization server offers no client registration, which Hercule needs",
+      );
+    }
+    if (
+      authorization.tokenEndpointAuthMethods !== undefined &&
+      !SUPPORTED_CLIENT_AUTH_METHODS.some((method) =>
+        authorization.tokenEndpointAuthMethods!.includes(method),
+      )
+    ) {
+      return yield* failUnsupported(
+        "its authorization server requires a client authentication method Hercule does not support",
+      );
+    }
+    for (const attempt of buildRegistrationAttempts(authorization)) {
+      // The endpoint was checked against the outbound rules when the metadata
+      // that names it was read.
+      const answer = yield* send(
+        HttpClientRequest.post(authorization.registrationEndpoint, {
+          acceptJson: true,
+          body: HttpBody.jsonUnsafe({
+            client_name: "Hercule",
+            redirect_uris: [redirectUri],
+            grant_types: attempt.grantTypes,
+            response_types: ["code"],
+            token_endpoint_auth_method: attempt.authMethod,
+            application_type: "native",
+          }),
+        }),
+        "client registration",
+        true,
+      );
+      if (answer.status >= 500 || answer.status === 429) {
+        return yield* failUnreadable(
+          `the client registration answered HTTP ${String(answer.status)}`,
+        );
+      }
+      if (answer.status === 200 || answer.status === 201) {
+        return yield* readRegisteredClient(
+          parseJsonObject(answer.body),
+          redirectUri,
+          attempt.authMethod,
+          authorization.tokenEndpointAuthMethods,
+        );
+      }
+      if (!isRetryableRegistrationRefusal(answer)) break;
+    }
+    return yield* failUnsupported("its authorization server refused to register Hercule");
+  });

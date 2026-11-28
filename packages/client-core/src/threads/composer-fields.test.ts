@@ -166,7 +166,10 @@ describe("buildComposerFields", () => {
         [{ runnerId: LOCAL.id, state: "harness-missing" }],
       );
 
-      const fields = draftOn(LOCAL, missing);
+      // The build can drive pi; the machine has no pi binary.
+      const withAdapter = { ...LOCAL, facts: { ...LOCAL.facts!, adapters: ["pi/pi"] } };
+
+      const fields = draftOn(withAdapter, missing);
 
       expect(fields.blocked).toEqual({
         reason: "Z.ai is not on moss",
@@ -419,6 +422,20 @@ describe("buildComposerFields", () => {
 
     expect(fields.blocked).toEqual({
       reason: "Anthropic is not on moss",
+      signIn: null,
+      addAccount: false,
+    });
+  });
+
+  it("blocks a draft whose runner has a Hercule build with no adapter for the harness, and says to update", () => {
+    const oldBuild = { ...LOCAL, facts: { ...LOCAL.facts!, adapters: [] } };
+    const fields = composeDraft(
+      { ...buildCatalogs([NOT_HERE]), runners: [oldBuild] },
+      buildConfig({ providerAccountId: NOT_HERE.id, model: null, runnerId: null }),
+    );
+
+    expect(fields.blocked).toEqual({
+      reason: "Hercule on moss cannot run the harness; update Hercule there",
       signIn: null,
       addAccount: false,
     });
@@ -777,14 +794,27 @@ const at = "2026-09-10T09:00:00.000Z";
 const WEBSHOP_PROJECT: Project = {
   id: "p-webshop",
   name: "webshop",
+  mcpServerIds: [],
   createdAt: at,
   updatedAt: at,
 };
 
-const OPS_PROJECT: Project = { id: "p-ops", name: "ops", createdAt: at, updatedAt: at };
+const OPS_PROJECT: Project = {
+  id: "p-ops",
+  name: "ops",
+  mcpServerIds: [],
+  createdAt: at,
+  updatedAt: at,
+};
 
 /** A project with no repos. */
-const EMPTY_PROJECT: Project = { id: "p-empty", name: "sandbox", createdAt: at, updatedAt: at };
+const EMPTY_PROJECT: Project = {
+  id: "p-empty",
+  name: "sandbox",
+  mcpServerIds: [],
+  createdAt: at,
+  updatedAt: at,
+};
 
 /**
  * Returns a repo resource, with both the remote and the canonical remote given
@@ -924,6 +954,7 @@ const buildThread = (id: string, title: string): Session => ({
   exitedAt: null,
   lastActivityAt: at,
   unenforced: [],
+  mcpServers: [],
 });
 
 const SESSIONS = [

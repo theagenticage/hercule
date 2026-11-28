@@ -188,29 +188,27 @@
   color: var(--fail-ink);
 }
 /* The drawings are the cards', made as big as the prototype's instruments:
-   a 6px meter and 7 by 14px blocks. Both take 22px with their margins and
-   centre on the same line, so the notes under the three tiles line up (the
-   prototype's meter takes 16px and its ladder 22px). */
+   a 6px meter, and the sessions' bar 14px tall across the tile. Both take
+   22px with their margins and centre on the same line, so the notes under
+   the three tiles line up (the prototype's meter takes 16px and its ladder
+   22px). */
 .machine-page-instrument .fleet-meter {
   height: 6px;
   margin: 8px 0;
 }
 .machine-page-instrument .fleet-sessions {
-  /* Square blocks: a 1.5px corner would add a radius to the page. */
-  --r-block: 0;
+  height: 14px;
   margin: 4px 0;
 }
-.machine-page-instrument .fleet-sessions--blocks i {
-  width: 7px;
-  height: 14px;
-}
-.machine-page-instrument .fleet-sessions--bar {
-  flex: none;
+/* The cells follow the card's rule with the tile's width as the budget in place of 120px: the
+   widest whole width that, with the 2px gaps and the cap's rule, keeps every cell within the tile.
+   The budget counts the waiting cells too, so the marigold that says sessions wait is never cut
+   off here, where the tile has no room beyond the bar. */
+.machine-page-instrument .fleet-sessions.is-cells {
   width: 100%;
-  height: 14px;
 }
-.machine-page-instrument .fleet-sessions-mark {
-  height: 20px;
+.machine-page-instrument .fleet-sessions.is-cells > i {
+  width: calc(round(down, (100% + 2px - var(--fleet-rule)) / var(--fleet-cells), 1px) - 2px);
 }
 .machine-page-instrument-note {
   color: var(--faint);

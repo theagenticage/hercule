@@ -9,7 +9,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { claudeCode } from "./claude-code";
@@ -59,11 +59,11 @@ vi.mock("@anthropic-ai/claude-agent-sdk", async (importOriginal) => {
 
 const folders: Array<string> = [];
 
-afterAll(() => {
+afterEach(() => {
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
 
-/** Creates a temporary folder that `afterAll` removes, and returns its path. */
+/** Creates a temporary folder that `afterEach` removes, and returns its path. */
 const makeFolder = (prefix: string): string => {
   const folder = mkdtempSync(join(tmpdir(), prefix));
   folders.push(folder);

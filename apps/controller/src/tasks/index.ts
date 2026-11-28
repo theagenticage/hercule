@@ -1,9 +1,11 @@
 /** Tasks: the units of human intent the API reads and writes. */
 export {
+  NEW_THREAD_TASK_STAGE,
   ONLY_THE_USER_TAKES_ON_WORK,
   TaskService,
   TaskServiceLayer,
   type CreatedTaskUndo,
+  type TakeOnUndo,
   type EntityHandoffReversal,
   type EntityHandoffUndoState,
   type FailureRestoration,
@@ -13,11 +15,13 @@ export {
   type TaskUndoRefusal,
   type UpdateInput,
 } from "./service";
+export type { TakeOnRecord } from "./take-on-records";
 export { groupByTask } from "./lists";
 export type { LeadMove } from "./lead";
 export type { EntityLinkPair } from "./entity-facts";
 export {
   LIVE_TASK_LINKS_SQL,
+  buildLiveTaskLinksSql,
   JOINABLE_TASK_SQL,
   taskRepository,
   type BoardTask,
@@ -51,12 +55,4 @@ export {
   type BoardSessionFact,
 } from "./board";
 export { TaskDetailFacts, TaskDetails, TaskDetailsLayer } from "./detail";
-export {
-  TaskTracking,
-  TaskTrackingLayer,
-  TaskTrackingRuns,
-  type HandoffRun,
-  type LegRuns,
-  type TrackedRunHistory,
-  type TrackedRuns,
-} from "./tracking";
+export { TaskRuns } from "./task-runs";

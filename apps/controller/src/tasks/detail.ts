@@ -7,7 +7,7 @@
  * the controller daemon implements (ADR 0033):
  *
  * - `TaskBoardFacts` for the facts of the card, the same port the board uses;
- * - `TaskTrackingRuns` for the runs, the same port Tracking uses;
+ * - `TaskRuns` for the runs, the same port the Task's summary uses;
  * - `TaskDetailFacts` for the sessions and the number of runs.
  *
  * The outside things the Task links come from the card's facts, so the card
@@ -37,7 +37,7 @@ import { requireGrant } from "../actor";
 import { buildWorkCard, TaskBoardFacts, type BoardEntityContext } from "./board";
 import { blockerRepository } from "./blockers";
 import { taskRepository } from "./repository";
-import { TaskTrackingRuns } from "./tracking";
+import { TaskRuns } from "./task-runs";
 
 export class TaskDetailFacts extends Context.Service<
   TaskDetailFacts,
@@ -95,7 +95,7 @@ const make = Effect.gen(function* () {
   const tasks = yield* taskRepository;
   const blockers = yield* blockerRepository;
   const cardFacts = yield* TaskBoardFacts;
-  const runs = yield* TaskTrackingRuns;
+  const runs = yield* TaskRuns;
   const detailFacts = yield* TaskDetailFacts;
 
   return {
@@ -104,8 +104,8 @@ const make = Effect.gen(function* () {
      * shows for it, up to `MAX_DETAIL_SESSIONS` of its sessions (the
      * unfinished first, then newest, and always the Thread that asks the
      * card's open question) with how many it has, up to
-     * `MAX_TRACKING_DETAIL_RUNS` of its runs (oldest first, as Tracking lists
-     * them) with how many it has, and the outside things it links with the
+     * `MAX_DETAIL_RUNS` of its runs (the newest, oldest first) with how many
+     * it has, and the outside things it links with the
      * places above them. It lists the Tasks the Task waits on (`blockers`) and
      * the Tasks that wait on it (`blocks`), every edge whatever the stage of
      * the other end, where the card lists only the blockers that still block.
@@ -158,7 +158,7 @@ const make = Effect.gen(function* () {
           MAX_DETAIL_SESSIONS,
           card.openQuestion?.sessionId,
         );
-        const history = yield* runs.readRunHistory(id);
+        const taskRuns = yield* runs.readRunHistory(id);
         const runCount = yield* detailFacts.countRuns(id);
         const blocking = yield* blockers.readDetailBlocking(id);
         return {
@@ -166,7 +166,7 @@ const make = Effect.gen(function* () {
           card,
           sessions,
           sessionCount,
-          runs: history.runs,
+          runs: taskRuns,
           runCount,
           ...blocking,
           ...buildLinkedEntities(facts!.linkedRefs, card, context),
@@ -183,5 +183,5 @@ export class TaskDetails extends Context.Service<TaskDetails, Effect.Success<typ
 export const TaskDetailsLayer: Layer.Layer<
   TaskDetails,
   never,
-  SqlClient.SqlClient | TaskBoardFacts | TaskTrackingRuns | TaskDetailFacts
+  SqlClient.SqlClient | TaskBoardFacts | TaskRuns | TaskDetailFacts
 > = Layer.effect(TaskDetails)(make);

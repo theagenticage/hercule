@@ -5,6 +5,7 @@ import type {
   HarnessDefinition,
   WorkflowActionContribution,
 } from "./contributions";
+import type { McpServerContribution } from "./mcp-servers";
 import type { ParseCatalogBody, ParseUsageBody, ProviderDefinition } from "./providers";
 import type {
   ConnectionRegistration,
@@ -58,6 +59,10 @@ export interface WorkflowActionRegistration {
   readonly register: (contribution: WorkflowActionContribution) => Effect.Effect<void, PluginError>;
 }
 
+export interface McpServerRegistration {
+  readonly register: (contribution: McpServerContribution) => Effect.Effect<void, PluginError>;
+}
+
 /**
  * The services `register` may call. A service is present only when the
  * manifest requested its capability, so a plugin that did not request one has
@@ -70,6 +75,7 @@ export interface RegistrationHost {
   readonly connections?: ConnectionRegistration;
   readonly eventSources?: EventSourceRegistration;
   readonly workflowActions?: WorkflowActionRegistration;
+  readonly mcpServers?: McpServerRegistration;
 }
 
 /** The plugin's durable state, namespaced by plugin id. Values are JSON. */
@@ -161,3 +167,11 @@ export const registerWorkflowAction = (
   host.workflowActions === undefined
     ? Effect.fail(new PluginError({ message: "the workflow-actions capability was not granted" }))
     : host.workflowActions.register(contribution);
+
+export const registerMcpServer = (
+  host: RegistrationHost,
+  contribution: McpServerContribution,
+): Effect.Effect<void, PluginError> =>
+  host.mcpServers === undefined
+    ? Effect.fail(new PluginError({ message: "the mcp-servers capability was not granted" }))
+    : host.mcpServers.register(contribution);

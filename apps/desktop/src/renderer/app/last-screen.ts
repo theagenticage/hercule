@@ -70,11 +70,16 @@ const buildLegacyThreadKey = (controllerUrl: string): string => `last-thread:${c
 
 /**
  * Returns the path of the last screen for `controllerUrl`, or `null` when
- * none is stored. A thread id stored by an older build reads as that
- * thread's path, so the first launch after an update still reopens it.
+ * none is stored. Two kinds of path stored by an older build are read as the
+ * screen that replaced them, so the first launch after an update still opens
+ * where the user was:
+ *
+ * - a thread id reads as that thread's path;
+ * - Intake, which the Inbox replaced (#1243), reads as the Inbox.
  */
 const readLastScreen = (controllerUrl: string): string | null => {
   const path = localStorage.getItem(buildStorageKey(controllerUrl));
+  if (path === "/intake" || path?.startsWith("/intake?") === true) return "/inbox";
   if (path !== null) return path;
   const sessionId = localStorage.getItem(buildLegacyThreadKey(controllerUrl));
   return isId(sessionId) ? `/threads/${sessionId}` : null;

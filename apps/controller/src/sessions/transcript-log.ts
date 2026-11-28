@@ -168,18 +168,20 @@ export const hasOtherTurn = (
   );
 
 /**
- * Returns the id of a subagent's open turn: the turn of its newest
+ * Returns the id of an agent's open turn: the turn of its newest
  * `turn.started` row, when no `turn.completed` row comes after it. Returns
- * `undefined` when the subagent has no turn, or its last turn ended.
+ * `undefined` when the agent has no turn, or its last turn ended. Without
+ * `subagentId` it is the session's own agent.
  *
  * Used when the session ends while the subagent is still running, to find
- * the turn whose last message becomes its result. Only rows already written
- * are read, like `readAssistantTexts`.
+ * the turn whose last message becomes its result, and to tell whether the
+ * session is inside a turn. Only rows already written are read, like
+ * `readAssistantTexts`.
  */
 export const readOpenTurnId = (
   sql: SqlClient.SqlClient,
   sessionId: string,
-  subagentId: SubagentId,
+  subagentId: SubagentId | undefined,
 ): Effect.Effect<string | undefined, SqlError> =>
   Effect.map(
     sql<{ readonly tag: string; readonly turnId: string }>`

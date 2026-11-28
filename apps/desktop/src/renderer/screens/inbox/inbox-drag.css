@@ -1,0 +1,92 @@
+/* Carrying a row onto another to link them, and the copies of rows that fly into a group. From the
+   drawing's `css/list.css` ("Carrying and dropping") and `css/frame.css` (".flights").
+
+   A copy is a wrapper (`.ib-copy`) around a clone of the row. The wrapper carries the motion kernel's
+   transform and, once it has a width, the `ib-rows` container the row's own rules read. The row in the
+   page stays mounted, and its marks are data attributes, which React never rewrites. */
+
+/* The row in the page waits at a third of its weight while its copy is in the hand. */
+.ib-row[data-lifted] {
+  opacity: 0.32;
+}
+/* The row under the copy lights: a ring and a wash. */
+.ib-rows .ib-row[data-drop] {
+  --ib-fill: color-mix(in oklab, var(--focus) 10%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+
+/* While a row is in the hand the pointer is a grabbing hand everywhere, and nothing under it shows
+   its hover. */
+html[data-ib-carrying],
+html[data-ib-carrying] * {
+  cursor: grabbing !important;
+}
+html[data-ib-carrying] .ib-row-acts {
+  display: none;
+}
+html[data-ib-carrying] .ib-rows .ib-row:hover:not([data-drop]) {
+  --ib-fill: transparent;
+}
+
+/* The layer the copy in the hand moves in: the whole window, so the copy can go anywhere. */
+.ib-carry {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* The layer copies fly in: over the rows, scrolling with them, so a flight stays on its row while
+   the list scrolls. It is one box wide and no tall, like the layer of rows that left. */
+.ib-flights {
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 0;
+  pointer-events: none;
+}
+
+.ib-copy {
+  position: absolute;
+  container: ib-rows / inline-size;
+  isolation: isolate;
+  pointer-events: none;
+}
+.ib-copy > .ib-row {
+  /* On the list's ground, so nothing reads through the copy. */
+  background: var(--list-ground);
+  box-shadow: none;
+  cursor: grabbing;
+}
+.ib-copy.is-solid > .ib-row {
+  background: var(--stock-carry);
+}
+/* A copy in the hand over a row it would link to wears the same ring as the row. */
+.ib-copy.is-over > .ib-row {
+  box-shadow: inset 0 0 0 1.5px var(--focus);
+}
+/* The shadow is a layer of its own under the row, so it fades in and sinks on opacity alone. */
+.ib-copy-shadow {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: var(--row-r);
+  box-shadow: var(--h-carry);
+  opacity: 0;
+}
+/* A copy is the thing alone: it leaves the group's hairline behind, and has no moves or tick. */
+.ib-copy .ib-row--member::before,
+.ib-copy .ib-row--member::after,
+.ib-copy .ib-row--group::after {
+  content: none;
+}
+.ib-copy .ib-row-acts {
+  display: none;
+}
+
+/* A current row that is still coming in stays under the rows moving over it. */
+.ib-row.is-moving.is-current.is-under {
+  z-index: 0;
+}

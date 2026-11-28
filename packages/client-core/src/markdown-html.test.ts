@@ -809,9 +809,27 @@ describe("parseMarkdown angle brackets that are not HTML", () => {
     expect(parseMarkdown("Map<string, Array<T")).toEqual(
       blocks(paragraph(text("Map<string, Array<T"))),
     );
-    const started = performance.now();
-    parseMarkdown("<Foo ".repeat(50_000));
-    expect(performance.now() - started).toBeLessThan(2000);
+
+    // A fixed time limit fails on a busy machine, so this compares two runs on
+    // the same machine instead. Four times the tags must take clearly under 16
+    // times as long: a parser that rescans the rest of the text at every
+    // unclosed tag takes about 16 times, a linear one about 4 times. Each size
+    // runs a few times and keeps its fastest run, which load rarely slows
+    // every time. The first call warms up the code before anything is timed.
+    const timeParse = (tags: number): number => {
+      const input = "<Foo ".repeat(tags);
+      let fastest = Infinity;
+      for (let run = 0; run < 3; run++) {
+        const started = performance.now();
+        parseMarkdown(input);
+        fastest = Math.min(fastest, performance.now() - started);
+      }
+      return fastest;
+    };
+    parseMarkdown("<Foo ".repeat(5_000));
+    const small = timeParse(25_000);
+    const large = timeParse(100_000);
+    expect(large / small).toBeLessThan(6);
   });
 
   it("still reads a standard element written in capitals", () => {

@@ -16,6 +16,7 @@ import { Paragraph } from "@tiptap/extension-paragraph";
 import { Text } from "@tiptap/extension-text";
 import { Placeholder } from "@tiptap/extensions/placeholder";
 import { UndoRedo } from "@tiptap/extensions/undo-redo";
+import { closeHistory } from "@tiptap/pm/history";
 import { Fragment, Slice, type Node as ProseMirrorNode, type Schema } from "@tiptap/pm/model";
 import { EditorState, TextSelection } from "@tiptap/pm/state";
 import type { SessionSkill } from "@hercule/contract";
@@ -148,6 +149,16 @@ const findHoveredChip = (
  *   called with `true` when an IME composition starts and with `false` when it
  *   ends.
  * - `ref` receives the field's editable element, so a caller can focus it.
+ * - `replaceMessageRef` receives a function that replaces the whole message
+ *   with the text it is given, as one edit the user can undo: ⌘Z in the field
+ *   brings the previous words back, and the next undo goes on to the typing
+ *   before them. It focuses the field, puts the caret at the end, and reports
+ *   the new text through `onTextChange` like typing does. That is why it is
+ *   a function and not a change of `text`: a changed `text` is not the user's
+ *   edit and stays out of the undo history. It is a function in a ref, and
+ *   not a method on the element `ref` gives, because the element is the
+ *   browser's and a request needs a typed call. The function does nothing
+ *   while the field is `readOnly`.
  *
  * `skills` says whether the field handles Skill References, which are
  * `$name` in the text. Left out, the field takes none, such as one that holds
@@ -187,6 +198,7 @@ export function MessageField({
   historyKey,
   onBlur,
   onComposingChange,
+  replaceMessageRef,
   ref,
 }: {
   readonly text: string;
@@ -206,6 +218,8 @@ export function MessageField({
   readonly onBlur?: (() => void) | undefined;
   /** Called with `true` when an IME composition starts in the field, and with `false` when it ends. */
   readonly onComposingChange?: ((composing: boolean) => void) | undefined;
+  /** Receives the function that replaces the message as one undoable edit, see above. */
+  readonly replaceMessageRef?: Ref<(text: string) => void> | undefined;
   readonly ref: Ref<HTMLElement>;
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -470,6 +484,27 @@ export function MessageField({
   }, []);
 
   useImperativeHandle(ref, () => editorRef.current!.view.dom, []);
+
+  useImperativeHandle(
+    replaceMessageRef,
+    () => (replacement: string) => {
+      const { state, view } = editorRef.current!;
+      if (!view.editable) return;
+      const document = buildDocument(state.schema, replacement);
+      // The history joins an edit to the one before it when they come close
+      // in time. Closing it before and after keeps this replacement a step
+      // of its own, so one undo reverts exactly it.
+      view.dispatch(closeHistory(state.tr));
+      const replaced = view.state.tr.replaceWith(0, view.state.doc.content.size, document.content);
+      replaced
+        .setSelection(TextSelection.atEnd(replaced.doc))
+        .setMeta(CONVERT_ALL_REFERENCES, true)
+        .scrollIntoView();
+      view.dispatch(closeHistory(replaced));
+      view.focus();
+    },
+    [],
+  );
 
   // Takes `text` when it differs from the field's: the first text, and then
   // any text the user did not type. Typing reports its text through

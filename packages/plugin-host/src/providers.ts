@@ -6,6 +6,7 @@
  */
 import { Schema } from "effect";
 import {
+  Fact,
   LoginMethod,
   type CatalogModel,
   type Timestamp,
@@ -182,7 +183,8 @@ export type CatalogSource = Schema.Schema.Type<typeof CatalogSource>;
  * account is first added to it (spec 06 section 17).
  *
  * - `current-models`: every model the catalog read returned that is not marked
- *   legacy, in the catalog's order.
+ *   legacy, in the catalog's order. A provider's `defaultSelectionMaker` keeps
+ *   only the models of one maker.
  * - `none`: nothing. The user picks each model.
  */
 export const DefaultSelection = Schema.Literals(["current-models", "none"]);
@@ -213,6 +215,14 @@ export const ProviderDefinition = Schema.Struct({
   catalogSource: CatalogSource,
   /** Which models of the catalog an account brings into a Model Profile when it is first added. */
   defaultSelection: DefaultSelection,
+  /**
+   * The one maker whose models the default selection holds, such as `Google`
+   * for an account that also lists models other makers made. It is compared
+   * exactly with the model's `maker`, case included, and a model with no
+   * maker is not selected. Absent means the models of every maker. A provider
+   * whose `defaultSelection` is `none` must not declare it.
+   */
+  defaultSelectionMaker: Schema.optionalKey(Fact),
   /**
    * The model slug this provider suggests for text generation: a small, cheap
    * model from its catalog, written as the provider's own model id. Absent

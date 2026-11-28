@@ -7,7 +7,7 @@ import { CpuIcon } from "../../icons/cpu";
 import { CrewIcon } from "../../icons/crew";
 import { FleetIcon } from "../../icons/fleet";
 import { IdIcon } from "../../icons/id";
-import { IntakeIcon } from "../../icons/intake";
+import { InboxIcon } from "../../icons/inbox";
 import { KeyIcon } from "../../icons/key";
 import { PaletteIcon } from "../../icons/palette";
 import { PuzzleIcon } from "../../icons/puzzle";
@@ -15,6 +15,7 @@ import { ShieldIcon } from "../../icons/shield";
 import { SkillIcon } from "../../icons/skill";
 import { SystemIcon } from "../../icons/system";
 import { ThreadsIcon } from "../../icons/threads";
+import { ToolsIcon } from "../../icons/tools";
 import { UserIcon } from "../../icons/user";
 import { CONNECTIONS_SECTION, MACHINES_SECTION, SettingsNavRow } from "./settings-nav-row";
 
@@ -42,7 +43,7 @@ const SETTINGS_GROUPS: ReadonlyArray<{
       { label: "Profile", Icon: UserIcon, to: "/settings/profile" },
       { label: "Appearance", Icon: PaletteIcon, to: "/settings/appearance" },
       { label: "Threads", Icon: ThreadsIcon, to: null },
-      { label: "Intake", Icon: IntakeIcon, to: "/settings/intake" },
+      { label: "Signals", Icon: InboxIcon, to: "/settings/signals" },
     ],
   },
   {
@@ -50,6 +51,7 @@ const SETTINGS_GROUPS: ReadonlyArray<{
     rows: [
       { label: "Assistants", Icon: CrewIcon, to: "/settings/assistants" },
       { label: "Skills", Icon: SkillIcon, to: "/settings/skills" },
+      { label: "MCP servers", Icon: ToolsIcon, to: "/settings/mcp-servers" },
       {
         label: "Connections",
         Icon: ConnectionsIcon,

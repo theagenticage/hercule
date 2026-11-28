@@ -8,8 +8,8 @@
  * current revision, which sessions get, and at an available one when an update
  * check found an update that waits.
  *
- * `skill.import` carries one skill as one uncompressed tar archive in the
- * request body, as raw bytes, for the reason `attachment.create` gives: base64
+ * `skill.import` and `skill.propose` carry one skill as one uncompressed tar
+ * archive in the request body, as raw bytes, for the reason `attachment.create` gives: base64
  * in JSON would make a 10 MiB skill a third larger. The other inputs of an
  * import travel in the query string beside it.
  */
@@ -58,13 +58,28 @@ export const MAX_SKILL_FILES = 1000;
 
 /**
  * The refusal of `skill.import` for a session. A session that could import
- * would change what every future Thread loads without the user seeing it.
- * There is no `skill.propose` yet, so the refusal asks the user to import.
- * The controller fails with it, and the CLI's `skill import` row prints it as
- * the meaning of `forbidden`.
+ * would change what every future Thread loads without the user seeing it, so
+ * it proposes the skill instead. The controller fails with it, and the CLI's
+ * `skill import` row prints it as the meaning of `forbidden`.
  */
 export const ONLY_THE_USER_IMPORTS_SKILLS =
-  "Only the user imports skills, so a session token is refused whatever grants its profile holds. Ask the user to import the skill.";
+  "Only the user imports skills, so a session token is refused whatever grants its profile holds. Propose the skill instead with `hercule skill propose <folder>`; the user applies it on the Skills screen.";
+
+/**
+ * The refusal of `skill.propose` for a caller that is not a session. A
+ * proposal waits for the user to apply it, so one the user files for
+ * themselves would only be a detour around an import. The controller fails
+ * with it, and the CLI's `skill propose` row prints it as part of the meaning
+ * of `forbidden`.
+ */
+export const ONLY_A_SESSION_PROPOSES_SKILLS =
+  "Only a session proposes a skill revision. Import your own skills instead, with `hercule skill import <folder>` or Import from a folder in Settings > Skills; an import applies at once.";
+
+/**
+ * The most proposed Skill Revisions that wait in the library at once, over all
+ * Skills. `skill.propose` past it fails with `cap_exceeded`.
+ */
+export const MAX_PROPOSED_SKILL_REVISIONS = 20;
 
 /**
  * The longest `sourceRepo`, `sourcePath` or `sourceBranch` an import takes.
@@ -135,6 +150,13 @@ export const Skill = Schema.Struct({
   availableApprovalEffects: Schema.NullOr(SkillApprovalEffects),
   /** How many proposed revisions wait for review. */
   proposedCount: Schema.Int,
+  /**
+   * Who proposed the newest revision that waits for review (by when it was
+   * proposed), or null when none waits. A Skill with no current revision shows
+   * this, not `createdBy`, because `createdBy` names the first proposer even
+   * after that proposal is rejected and another session's remains.
+   */
+  proposedBy: Schema.NullOr(Actor),
   /** When the last update check ended. Always null for an `upload` source. */
   lastCheckedAt: Schema.NullOr(Timestamp),
   /** The last update check's error message, or null when it succeeded. */
@@ -220,6 +242,21 @@ export const SkillImportResult = Schema.Struct({
 export type SkillImportResult = Schema.Schema.Type<typeof SkillImportResult>;
 
 /**
+ * What `skill.propose` did:
+ *
+ * - `proposed`: the content is stored as a proposed revision of the Skill,
+ *   which waits for the user.
+ * - `unchanged`: the content equals a revision the Skill already has, so
+ *   nothing was stored.
+ */
+export const SkillProposeResult = Schema.Struct({
+  result: Schema.Literals(["proposed", "unchanged"]),
+  skill: Skill,
+});
+
+export type SkillProposeResult = Schema.Schema.Type<typeof SkillProposeResult>;
+
+/**
  * Refuses `..`, `?`, `#` and control characters in a source path or branch.
  * The update check puts both into GitHub URLs, where each of those would
  * change which URL is read.
@@ -274,6 +311,17 @@ export const SkillImportInput = Schema.Struct({
 );
 
 export type SkillImportInput = Schema.Schema.Type<typeof SkillImportInput>;
+
+/**
+ * The input of `skill.propose` other than the archive, carried in the query
+ * string. A proposal never sets a source: a new Skill is an `upload` Skill.
+ *
+ * `name` is any text here: the controller checks it with the content rules,
+ * so a bad name is listed beside every other issue the content has.
+ */
+export const SkillProposeInput = Schema.Struct({ name: Schema.String });
+
+export type SkillProposeInput = Schema.Schema.Type<typeof SkillProposeInput>;
 
 /**
  * What `skill.check` checks: one Skill, or every Skill with a GitHub source
@@ -391,6 +439,20 @@ export const skill = HttpApiGroup.make("skill")
       success: SkillImportResult,
       error: [Unauthenticated, Forbidden, Validation, Conflict, CapExceeded, Internal],
     }),
+    // A body over `MAX_SKILL_BYTES` gets a bare `413` from the transport.
+    //
+    // - `forbidden`: the caller is not a session, or its profile lacks
+    //   `skill.write`.
+    // - `validation`: the query is invalid, or the archive breaks a content
+    //   rule, with every broken rule listed at once.
+    // - `cap_exceeded`: `MAX_PROPOSED_SKILL_REVISIONS` proposed revisions
+    //   already wait, or the name is new and the library holds `MAX_SKILLS`.
+    HttpApiEndpoint.post("propose", "/skills/propose", {
+      query: SkillProposeInput,
+      payload: SkillArchiveBytes,
+      success: SkillProposeResult,
+      error: [Unauthenticated, Forbidden, Validation, CapExceeded, Internal],
+    }),
     // Deletes the Skill and every revision it has. A running session keeps
     // the copy its runner gave it.
     HttpApiEndpoint.delete("delete", "/skills/:name", {
@@ -420,6 +482,15 @@ export const skill = HttpApiGroup.make("skill")
     HttpApiEndpoint.post("apply", "/skills/:name/revisions/:revisionHash/apply", {
       params: revisionParams,
       success: Skill,
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+    }),
+    // Deletes a proposed revision.
+    //
+    // - `not_found`: no Skill has the name, or no revision of it has the hash.
+    // - `invalid_state`: the revision is not a proposed one.
+    HttpApiEndpoint.post("reject", "/skills/:name/revisions/:revisionHash/reject", {
+      params: revisionParams,
+      success: Schema.Struct({}),
       error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
     }),
     // All or nothing, in one transaction.

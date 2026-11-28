@@ -811,7 +811,7 @@ describe("a profile that holds a grant only the user gives", () => {
    * `skill.write`, could pass on a grant only the user gives.
    */
   const REFUSAL =
-    /^Only the user puts an Agent or an assistant on a profile that holds `skill\.write` or `skill\.apply`/;
+    /^Only the user puts an Agent or an assistant on a profile that holds `skill\.write`, `skill\.apply` or `mcp\.manage`/;
 
   const createAssistantAs = (
     arranged: Arranged,

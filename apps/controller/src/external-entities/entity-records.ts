@@ -16,7 +16,11 @@ import type {
   TaskStage,
 } from "@hercule/contract";
 import { ENTITY_CONCERNS } from "@hercule/contract";
-import type { ConnectionStatus } from "@hercule/plugin-host";
+import type {
+  CardFaceDeclaration,
+  ConnectionStatus,
+  QualifiedEntityFieldDeclaration,
+} from "@hercule/plugin-host";
 import { canConnectionPoll } from "../connections";
 import { uuidToString } from "../db";
 import type { EntityKindSource } from "./workflow-offers";
@@ -137,6 +141,12 @@ export interface ActiveEntityKind {
   /** The singular noun, such as "Pull request". */
   readonly noun: string;
   readonly refPrefix: string;
+  /** How long a thing of this kind lasts, from 0 to 3. Left out means 0. A group of linked things is named after its most lasting member. */
+  readonly lasting?: number;
+  /** The fields the kind declares, in display order. Left out when it declares none. */
+  readonly fields?: ReadonlyArray<QualifiedEntityFieldDeclaration>;
+  /** What the kind's card shows beyond the generic card. Left out for the generic card. */
+  readonly face?: CardFaceDeclaration;
 }
 
 /** Builds the active kind of a plugin's declaration of an entity kind. */
@@ -144,10 +154,16 @@ export const buildActiveEntityKind = (declaration: {
   readonly word: string;
   readonly noun: string;
   readonly refPrefix: string;
+  readonly lasting?: number;
+  readonly fields?: ReadonlyArray<QualifiedEntityFieldDeclaration>;
+  readonly face?: CardFaceDeclaration;
 }): ActiveEntityKind => ({
   kind: declaration.word,
   noun: declaration.noun,
   refPrefix: declaration.refPrefix,
+  ...(declaration.lasting === undefined ? {} : { lasting: declaration.lasting }),
+  ...(declaration.fields === undefined ? {} : { fields: declaration.fields }),
+  ...(declaration.face === undefined ? {} : { face: declaration.face }),
 });
 
 /** Returns the active kind that owns `ref`, or undefined when no active kind's `refPrefix` starts it. */
@@ -190,6 +206,35 @@ export const deriveAccess = (
   if (observations.some((observation) => observation.access === "ok")) return "ok";
   if (observations.some((observation) => observation.access === "deleted")) return "deleted";
   return "inaccessible";
+};
+
+/**
+ * Checks that a record is a restricted place (spec 20 section 1.3): not a
+ * full work record, and no Connection can read it now. Such a record shows no
+ * title, identifier or URL anywhere, only its kind and noun. A full work
+ * record that lost access is not restricted: it keeps its last known facts and
+ * shows its `access`.
+ *
+ * Three places use this rule when they draw a thing outside the Inbox's own
+ * queries: the context block of a prompt (`buildPromptContextThing`), the
+ * cards (`buildEntityCard`) and the label of a linked group
+ * (`buildPromptContextOrigin`).
+ */
+export const isRestrictedPlace = (record: {
+  readonly isWorkRecord: boolean;
+  readonly access: EntityAccess;
+}): boolean => !record.isWorkRecord && record.access !== "ok";
+
+/**
+ * Builds the label of a restricted place: it names the kind of record and
+ * never the ref or the title. The wording matches the locked rows the apps
+ * draw, such as "A pull request you cannot open". `noun` is empty or null
+ * for a record that has no noun stored.
+ */
+export const buildLockedLabel = (noun: string | null): string => {
+  const kind =
+    noun === null || noun === "" ? "record" : noun.charAt(0).toLowerCase() + noun.slice(1);
+  return `${/^[aeiou]/i.test(kind) ? "An" : "A"} ${kind} you cannot open`;
 };
 
 /** Checks that any Connection reports the thing as the user's own. */

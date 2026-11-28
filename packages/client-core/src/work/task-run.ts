@@ -3,7 +3,7 @@
  * workflow, a mark for how it went, a quiet word for where it is, and whether
  * the row offers Stop.
  */
-import type { TrackingDetailRun } from "@hercule/contract";
+import type { TaskDetailRun } from "@hercule/contract";
 import { isRunLive } from "../run-display";
 import { dropClosingFullStops } from "../text";
 import { shortenTitle } from "./card-title";
@@ -35,7 +35,7 @@ export interface TaskRunRow {
  * Returns the mark and the word for a run's status. A running run that waits
  * for a signal (it has no step to run) reads "Waiting", not "Running".
  */
-const describeRunState = (run: TrackingDetailRun): Pick<TaskRunRow, "mark" | "state"> => {
+const describeRunState = (run: TaskDetailRun): Pick<TaskRunRow, "mark" | "state"> => {
   switch (run.status) {
     case "pending":
       return { mark: { shape: "dashed", tone: "quiet" }, state: "Starting" };
@@ -54,7 +54,7 @@ const describeRunState = (run: TrackingDetailRun): Pick<TaskRunRow, "mark" | "st
 };
 
 /** Returns the row of one run of the details pane. */
-export const buildTaskRunRow = (run: TrackingDetailRun): TaskRunRow => ({
+export const buildTaskRunRow = (run: TaskDetailRun): TaskRunRow => ({
   id: run.id,
   label: run.workflowName,
   canStop: isRunLive(run.status),

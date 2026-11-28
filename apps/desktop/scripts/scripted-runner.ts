@@ -56,6 +56,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { Schema } from "effect";
 import {
+  ANTIGRAVITY_VERSION,
   CLAUDE_CODE_VERSION,
   CODEX_VERSION,
   PI_VERSION,
@@ -174,6 +175,7 @@ const HARNESS_VERSIONS: ReadonlyMap<string, string> = new Map([
   ["claude-code/claude-code", CLAUDE_CODE_VERSION],
   ["codex/codex", CODEX_VERSION],
   ["pi/pi", PI_VERSION],
+  ["antigravity/antigravity", ANTIGRAVITY_VERSION],
 ]);
 
 /** The sign-in page a login start reports. Nothing serves it, and no test opens it. */

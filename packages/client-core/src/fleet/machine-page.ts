@@ -387,8 +387,9 @@ export interface MachineAccountRow {
  * machine `runner`. A key or token account is left out: it works on every
  * machine. Returns the rows in the order of `accounts`.
  *
- * Install is not offered here, so a machine that lacks the harness (or whose
- * build cannot run it) says so in the row's text instead.
+ * Install and update are not offered here, so a machine that lacks the
+ * harness, has one too old, or whose build cannot run it says so in the
+ * row's text instead.
  */
 export const listMachineAccounts = (
   runner: Runner,
@@ -419,6 +420,15 @@ export const listMachineAccounts = (
       case "install":
         return [
           { ...row, text: `Needs ${harnessName} on this machine`, tone: "faint", canSignIn: false },
+        ];
+      case "update":
+        return [
+          {
+            ...row,
+            text: machine.problem ?? `${harnessName} is too old`,
+            tone: "faint",
+            canSignIn: false,
+          },
         ];
       case "unavailable":
         return [{ ...row, text: action.reason, tone: "faint", canSignIn: false }];

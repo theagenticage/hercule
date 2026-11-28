@@ -15,13 +15,14 @@
 import { Effect, Schema } from "effect";
 import type * as HttpClient from "effect/http/HttpClient";
 import {
+  MAX_ENTITY_OBSERVATIONS,
   MAX_ENTITY_RELATIONS,
   MAX_ENTITY_TEXT_LENGTH,
   MAX_EVENT_TITLE_LENGTH,
   isHttpUrl,
   type EntityObservation,
 } from "@hercule/plugin-host";
-import { callLinear, type LinearFailure } from "../api";
+import { callLinear, readSmallestPages, type LinearFailure } from "../api";
 import {
   INITIATIVE_KIND,
   ISSUE_KIND,
@@ -229,18 +230,6 @@ const buildReportedProgress = (progress: number): { readonly progress: { fractio
   progress: { fraction: Math.min(1, Math.max(0, progress)) },
 });
 
-const ApiProject = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  url: Schema.String,
-  health: Schema.NullOr(Schema.String),
-  progress: Schema.Number,
-  targetDate: Schema.NullOr(Schema.String),
-  updatedAt: Schema.String,
-  initiatives: IdNodes,
-  teams: IdNodes,
-});
-
 const ApiInitiative = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
@@ -340,39 +329,105 @@ const buildPlaceRelations = (
   };
 };
 
+const ApiProject = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  url: Schema.String,
+  health: Schema.NullOr(Schema.String),
+  progress: Schema.Number,
+  targetDate: Schema.NullOr(Schema.String),
+  updatedAt: Schema.String,
+  initiatives: IdNodes,
+  teams: IdNodes,
+});
+
+/** The fields of a project and the first page of its initiatives and teams. The by-id read and the workspace listing select the same, so both build the same observation. */
+const PROJECT_SELECTION = `id name url health progress targetDate updatedAt
+      initiatives(first: ${String(RELATION_PAGE_SIZE)}) { nodes { id } pageInfo { hasNextPage } }
+      teams(first: ${String(RELATION_PAGE_SIZE)}) { nodes { id } pageInfo { hasNextPage } }`;
+
+/** Builds the observation of a project, with the initiatives and teams it is part of. */
+const buildProjectObservation = (
+  project: Schema.Schema.Type<typeof ApiProject>,
+  workspace: WorkspaceBlock,
+): EntityObservation => ({
+  kind: PROJECT_KIND,
+  ref: buildProjectRef(workspace, project.id),
+  title: cutText(project.name, MAX_EVENT_TITLE_LENGTH),
+  url: project.url,
+  fields: { name: cutName(project.name) },
+  concerns: [],
+  ...buildHealthStatus(project.health),
+  ...buildReportedProgress(project.progress),
+  ...buildTargetDate(project.targetDate),
+  // A project is part of its initiatives and its teams: two more paths to an issue, not rungs.
+  relations: buildPlaceRelations([
+    {
+      refs: project.initiatives.nodes.map((initiative) =>
+        buildInitiativeRef(workspace, initiative.id),
+      ),
+      hasMore: project.initiatives.pageInfo.hasNextPage,
+    },
+    {
+      refs: project.teams.nodes.map((team) => buildTeamRef(workspace, team.id)),
+      hasMore: project.teams.pageInfo.hasNextPage,
+    },
+  ]),
+  sourceUpdatedAt: project.updatedAt,
+});
+
 const PROJECT_READ = definePlaceRead({
   kind: PROJECT_KIND,
   queryName: "LinearProjectContext",
   filterType: "ProjectFilter",
   rootField: "projects",
-  selection: `id name url health progress targetDate updatedAt
-      initiatives(first: ${String(RELATION_PAGE_SIZE)}) { nodes { id } pageInfo { hasNextPage } }
-      teams(first: ${String(RELATION_PAGE_SIZE)}) { nodes { id } pageInfo { hasNextPage } }`,
+  selection: PROJECT_SELECTION,
   node: ApiProject,
-  buildObservation: (project, workspace) => ({
-    kind: PROJECT_KIND,
-    ref: buildProjectRef(workspace, project.id),
-    title: cutText(project.name, MAX_EVENT_TITLE_LENGTH),
-    url: project.url,
-    fields: { name: cutName(project.name) },
-    concerns: [],
-    ...buildHealthStatus(project.health),
-    ...buildReportedProgress(project.progress),
-    ...buildTargetDate(project.targetDate),
-    // A project is part of its initiatives and its teams: two more paths to an issue, not rungs.
-    relations: buildPlaceRelations([
-      {
-        refs: project.initiatives.nodes.map((node) => buildInitiativeRef(workspace, node.id)),
-        hasMore: project.initiatives.pageInfo.hasNextPage,
-      },
-      {
-        refs: project.teams.nodes.map((node) => buildTeamRef(workspace, node.id)),
-        hasMore: project.teams.pageInfo.hasNextPage,
-      },
-    ]),
-    sourceUpdatedAt: project.updatedAt,
-  }),
+  buildObservation: buildProjectObservation,
 });
+
+const PROJECT_LISTING_QUERY = `query LinearProjects($first: Int, $after: String) {
+  projects(first: $first, after: $after) {
+    nodes { ${PROJECT_SELECTION} }
+    pageInfo { hasNextPage endCursor }
+  }
+}`;
+
+/**
+ * Projects per page of the workspace listing. Linear multiplies nested `first`
+ * values, so a page costs about 50 projects x (1 + 50 initiatives + 50 teams)
+ * = 5,050 points, well under its limit of 10,000. A page of 250 would cost
+ * 25,250.
+ */
+const PROJECT_LISTING_PAGE_SIZE = 50;
+
+/**
+ * Reads every project of the workspace, however many pages it has, and returns
+ * the observations of the `MAX_ENTITY_OBSERVATIONS` smallest refs, sorted by
+ * ref. The caller reports them in the one complete `reconcile` of the project
+ * kind, so Browse can list every project with its health, including those no
+ * issue sits in. The listing builds the same observation as the by-id read,
+ * relations included, because the host never reads a listed project by id. The
+ * cut keeps the same projects every poll, so none moves in and out of the
+ * listing. A project left out is not listed, and the host reads it by id when
+ * an issue sits in it. Fails as `callLinear` does, on any page.
+ */
+export const readProjectListing = (
+  authorization: string,
+  workspace: WorkspaceBlock,
+): Effect.Effect<ReadonlyArray<EntityObservation>, LinearFailure, HttpClient.HttpClient> =>
+  Effect.map(
+    readSmallestPages(
+      authorization,
+      { name: "LinearProjects", text: PROJECT_LISTING_QUERY },
+      "projects",
+      ApiProject,
+      MAX_ENTITY_OBSERVATIONS,
+      (project) => buildProjectRef(workspace, project.id),
+      PROJECT_LISTING_PAGE_SIZE,
+    ),
+    ({ items }) => items.map((project) => buildProjectObservation(project, workspace)),
+  );
 
 const INITIATIVE_READ = definePlaceRead({
   kind: INITIATIVE_KIND,

@@ -1,510 +1,495 @@
 /**
- * Taking on, handing off and dismissing the Inbox's cards, and the undo line at
- * the foot of the screen. It follows the Work board's moves (`-card-moves.ts`):
+ * The moves of the Inbox's things (Dismiss, Take on, hand-off, View task,
+ * Open at its source) and the undo line at the foot of the list. Start a
+ * thread is made by `-inbox-thread.tsx`, which asks this file which things it
+ * may start from and says its line here. It follows
+ * the Work board's moves (`-card-moves.ts`):
  *
- * - Moves are sent one at a time, in the order the user made them. The
- *   reversal of a move takes its place in the same line when the user presses
- *   Undo, and waits there for the move's own answer. A move the user makes
- *   after Undo therefore reaches the controller after the reversal.
- * - A dismissal shows at once: the card leaves the page and the cards after it
- *   close up, before the controller answers. The screen shows the Inbox in the
- *   query cache with every edit not yet answered applied over it
- *   (`reapplyInboxEdits`), so a read that lands meanwhile cannot put the card
- *   back. A Take shows when the controller answers, with the Task it made.
- * - When the controller answers, the edit is written into the cached Inbox and
- *   leaves the pending list in the same draw. A move it refuses leaves the
- *   pending list alone, so the card goes back, and the undo line says why.
- * - Each move the user makes is one gesture on the shared undo stack. The
- *   gesture takes its place when the user acts, before the controller answers,
- *   and its undo waits for the answer itself. The undo of a Link or Unlink is
- *   a Link or Unlink in the other direction, made when Undo is pressed: it
- *   shows at once and is reconciled with the controller's answer like any
- *   other, so it never replays what rode on what when the first move was
- *   planned. What rides on what is held by the visit, not here: this file
- *   starts, settles and refuses the gestures in it (`advanceLinkGesture`) and
- *   plans an Unlink over the place the visit holds. A move that fails, or a Take that
- *   makes no Task, takes its gesture off again. A gesture outlives the screen
- *   that made it, so it is undone through the screen that is open when Undo is
- *   pressed (`CardMover`).
- * - A hand-off shows at once too: a `hand-off` edit puts the workflow first in
- *   the card's live workflows, so the colleague takes the card's place in the
- *   wait slot and the chain plays, before the controller answers. The answer
- *   brings the Task's id, which goes into the Inbox as a `set-task` edit. A
- *   refusal takes the edit off again, backwards, and says why. Undo asks the
- *   controller whether the hand-off can be taken back, and plays it backwards
- *   (a `take-back-hand-off` edit) only when it was. A thing the Inbox does not
- *   list (a linked peer in the open sheet) is handed the same way, with
- *   nothing to draw: the undo line reports.
- * - A move waits in the line, and the user may sign out while it waits. The
- *   client sends the token it holds when a call is made, so a move or a
- *   reversal that started after sign-out would go out as the next account, and
- *   its late answer would be written into the next account's cache. So each
- *   one asks `isCurrent()` of the account scope when it starts and after every
- *   wait, before it calls the controller, writes the cache or says anything.
+ * - A move shows at once on the visit (`visit.move`) and is sent after
+ *   the moves before it, one at a time, in the order the user made them. The
+ *   reversal of a move joins the same line when the user presses Undo, so a
+ *   move made after Undo reaches the controller after the reversal.
+ * - Dismiss takes the rows off the list at once, and a refusal puts them back
+ *   and says why. Take on and the hand-off keep the row: the next read of the
+ *   list updates it in place, or drops it when it no longer belongs.
+ * - Each move is one gesture on the shared undo stack. It takes its place when
+ *   the user acts, before the controller answers, and its undo waits for the
+ *   answer itself. A move that fails takes its gesture off again. A gesture
+ *   outlives the screen, so it is undone through the screen that is open when
+ *   Undo is pressed.
+ * - Every request first asks the account scope that the user who made the move
+ *   is still signed in, because the client sends the token it holds when it is
+ *   called.
+ * - A refused move says why on the undo line, and nothing is sent: the choice
+ *   of what may be moved is `planInboxMove`.
+ * - A move acts on what `visit.targets` names: one thing, a whole group of
+ *   linked things, or the selection. A group is dismissed in one call with
+ *   one Undo, and taken on (like a selection of several things) as one Task.
+ *   Link and Unlink are not moves of the list: the rows stay where they are
+ *   and the visit is told to read again, which is what draws the new group.
  */
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { flushSync } from "react-dom";
+import { useLayoutEffect, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { invalidateWithoutCancelling, queryKeys, type HerculeClient } from "@hercule/client-core";
+import type { HerculeClient } from "@hercule/client-core";
 import {
-  reverseLinkDirection,
-  type EntityLinkMove,
-  type LinkDirection,
-} from "@hercule/client-core/desk";
-import {
-  describeDismissal,
-  describeHandOffRefusal,
+  DISMISSAL_UNDONE,
+  LINK_UNDONE,
+  NO_SOURCE_ADDRESS,
+  TAKE_ON_UNDONE,
+  UNLINK_UNDONE,
+  buildHandedThing,
+  decideHandMove,
   describeHandOffUndo,
-  describeLinkRemaining,
-  describeLinkRemoved,
+  describeInboxDismissalFailure,
+  describeInboxHandOff,
+  describeInboxHandOffFailure,
+  describeInboxLink,
+  describeInboxLinkFailure,
+  describeInboxThreadStart,
+  describeInboxTakeOn,
+  describeInboxTakeOnFailure,
+  describeInboxTakeOnTogether,
+  describeInboxTakeOnTogetherUndone,
+  describeInboxUnlink,
+  describeInboxUnlinkFailure,
+  didTakeOnTogetherChange,
   isHandOffTakenBack,
-  nameCard,
-  planLink,
-  planUnlink,
-  reapplyInboxEdits,
-  type InboxEdit,
-  type RidingMove,
+  listThreadStartThings,
+  REFUSED_OFFLINE,
+  planInboxMove,
+  type InboxLineWords,
+  type InboxLinkEnd,
+  type InboxLinkPick,
+  type InboxMoveKind,
+  type InboxMovePlans,
+  type MoveReceipt,
 } from "@hercule/client-core/inbox";
-import type {
-  EntityUnlinkResult,
-  Inbox,
-  InboxCard,
-  LiveWorkflow,
-  WorkflowOffer,
-} from "@hercule/contract";
+import type { EntityLinkInput, WorkflowOffer } from "@hercule/contract";
 import { requireSignedIn, type AccountScope } from "../../../app/account-scope";
-import { readReason } from "../../../app/read-reason";
 import {
   buildCachedCardMover,
   buildCachedEndedCardMover,
-  buildCachedInboxWriter,
   type CardMover,
 } from "../../../app/card-mover";
-import type { SpringName } from "../../../app/motion";
+import type { AnswerLine } from "../../../app/held-signal-answers";
+import { readReason } from "../../../app/read-reason";
 import type { Gesture, UndoAnswer } from "../../../app/undo-stack";
 import { undoAddedTask } from "../../../app/undo-added-task";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
-import { createHandOffChains } from "../../../screens/inbox/hand-off-motion";
-import { findCardElement } from "../../../screens/inbox/inbox-page-dom";
-import type { HandOffTarget } from "../../../screens/inbox/use-hand-off";
-import type { VisitHistoryHandle } from "../../../screens/inbox/use-inbox-visit";
-import {
-  comeBackFromAside,
-  copyCardToStepAside,
-  flipInboxPage,
-  riseMonogram,
-  stepAside,
-} from "../../../screens/inbox/inbox-motion";
+import type { SidebarFlight } from "../../../app/motion/sidebar-flight";
+import { flyHandedMarkToWork, rollHandedRow } from "../../../screens/inbox/inbox-hand-off-motion";
+import type { InboxListRow, InboxListSnapshot, InboxListVisit } from "./-inbox-visit";
 
 /** The key every Inbox move runs under, so one move waits for the one before it. */
 const INBOX_MOVES_KEY = ["inbox-moves"];
 
-/** A change to the Inbox that the controller has not answered yet. */
-interface PendingEdit {
-  readonly id: number;
-  readonly edit: InboxEdit;
+/**
+ * Returns a mutation that sends one move (or one reversal) with `send`, in the
+ * line every Inbox move waits in. It fails before sending when the account in
+ * `scope` is no longer signed in.
+ */
+const useMoveRequest = <Variables, Result>(
+  scope: AccountScope,
+  send: (variables: Variables) => Promise<Result>,
+) =>
+  useMutation({
+    mutationKey: INBOX_MOVES_KEY,
+    scope: { id: "inbox-moves" },
+    mutationFn: (variables: Variables) => {
+      requireSignedIn(scope);
+      return send(variables);
+    },
+  });
+
+const NOT_SAVED = "That move did not save, so there is nothing to put back.";
+
+/** What a thread starts from: its things, and the default name of its Task. */
+export interface InboxThreadStart {
+  readonly things: readonly InboxListRow[];
+  readonly title: string;
 }
 
-const NO_EDITS: readonly PendingEdit[] = [];
-
-const NOTHING_TO_PUT_BACK = "That move changed nothing, so there is nothing to put back.";
-
-/** Whether `move` may be sent: it resolves to false when the move it reverses changed nothing. */
-type MoveIsWanted = Promise<boolean>;
-
-/** What the controller answered to a Link or Unlink, in one shape. */
-interface LinkAnswer {
-  /** False when a Link failed, or an Unlink removed nothing because the user had made no link. */
-  readonly didChange: boolean;
-  /** The firmest claim that still joins the two after an Unlink. */
-  readonly remaining: EntityUnlinkResult["remaining"];
-}
-
-/** What the undo line says about a Link or Unlink: the gesture, and what a refusal says. */
-const LINK_WORDS = {
-  link: {
-    gesture: (words: string) => `Linked ${words}`,
-    done: (words: string) => `Linked ${words}.`,
-    failed: (words: string, reason: string) => `${words} were not linked: ${reason}. Try again.`,
-  },
-  unlink: {
-    gesture: (words: string) => `Removed the link between ${words}`,
-    failed: (words: string, reason: string) =>
-      `The link between ${words} was not removed: ${reason}. Try again.`,
-  },
-} as const;
-
-/** What `useInboxMoves` returns. */
+/**
+ * What `useInboxMoves` returns. A move that takes `hoveredKey` acts on the
+ * list line whose own button was pressed (a thing's ref or a group's key), or
+ * on the selection when that line is in it. Without it the move acts on the
+ * selection, else the current line.
+ */
 export interface InboxMoves {
-  /** The Inbox with the pending edits applied, or `undefined` until the first read ends. */
-  readonly inbox: Inbox | undefined;
-  /** Whether a move the user made is applied over the read and not yet answered by the controller. */
-  readonly hasPendingEdits: boolean;
   /**
-   * Takes the card on as a Task. When the controller answers, the card shows
-   * the user's monogram where its wait was, and the undo line offers Undo. A
-   * failure says why.
+   * Dismisses what the move is for. A thing, every member of a group or the
+   * selection leave the list at once, in one call, with one Undo. A refusal
+   * says why on the undo line.
    */
-  readonly take: (card: InboxCard) => void;
+  readonly dismiss: (hoveredKey?: string) => void;
   /**
-   * Hands `target` to the workflow of `offer`. `connectionId` is the account
-   * the user chose, or `undefined` to leave the choice to the controller,
-   * which refuses an account that can no longer act. The colleague has the
-   * card at once and the chain plays. When the controller answers, the card
-   * holds the Task it made or continued, and the undo line offers Undo. A
-   * refusal takes the colleague away again and says why. A thing whose
-   * hand-off has not been answered yet is not handed again.
+   * Takes what the move is for on as a Task. For one thing the current row
+   * moves on at once and the row stays until the list is read again. A group
+   * or a selection of several things become one Task.
+   */
+  readonly takeOn: (hoveredKey?: string) => void;
+  /**
+   * Starts a hand-off of the one thing the move is for. With one workflow
+   * that fits, hands it at once and returns `null`. With several, returns the
+   * thing, for the screen to open the menu of workflows over. A refusal says
+   * why on the undo line and returns `null`.
+   */
+  readonly startHandOff: (hoveredKey?: string) => InboxListRow | null;
+  /**
+   * Hands the one thing the move is for to `offer`, as `connectionId` (or the
+   * account the controller picks), after the same check the H key makes:
+   * offline, a group, a selection of several things and a thing no workflow
+   * takes are refused with their reason on the undo line. The current row
+   * moves on at once and the mark flies to Work.
    */
   readonly handOff: (
-    target: HandOffTarget,
+    hoveredKey: string | undefined,
     offer: WorkflowOffer,
     connectionId: string | undefined,
   ) => void;
+  /** Goes to the Task of the one thing the move is for, or says it has none. */
+  readonly viewTask: (hoveredKey?: string) => void;
   /**
-   * Dismisses the card. It leaves the page at once: a copy steps aside (unless
-   * `stepsAside` is false, as for a card dropped on the rail, which leaves from
-   * the rail), and the cards after it close up on `hand`. A failure puts it
-   * back on `travel` and says why. `riders` are the cards drawn riding on it:
-   * they stand alone from then on, and the undo line says so.
+   * Starts a link of what the move is for. A selection of two or more things
+   * is linked at once (a star from the first) and `null` comes back. One
+   * thing, one selected thing or a group returns what "Link to..." opens with,
+   * for the screen to let the user pick the other end. A refusal says why on
+   * the undo line and returns `null`.
    */
-  readonly dismiss: (card: InboxCard, riders: readonly InboxCard[], stepsAside?: boolean) => void;
+  readonly startLink: (hoveredKey?: string) => InboxLinkPick | null;
   /**
-   * Links two things as the user's own claim. The undo line says what was
-   * linked and offers Undo, which removes the link again. A failure says why.
+   * Links `from` to `to`, the thing the user picked in "Link to..." or dropped a
+   * row on. Returns whether a link was written: `false` when the two were linked
+   * already, the call was refused or it failed, and the line says why.
    */
-  readonly link: (move: EntityLinkMove) => void;
+  readonly linkTo: (from: InboxLinkEnd, to: InboxLinkEnd) => Promise<boolean>;
   /**
-   * Removes the user's own link between two things. The undo line offers Undo,
-   * which links them again, and says when a link of a source stays. A failure
-   * says why.
+   * Removes the user's own link between `first` and `second`, with an Undo
+   * that links them again. The line says so when a source still links them.
    */
-  readonly unlink: (move: EntityLinkMove) => void;
-  /** Reverses the newest gesture on the undo stack, and says what happened. */
-  readonly undoLastMove: () => void;
+  readonly unlink: (first: InboxLinkEnd, second: InboxLinkEnd) => void;
+  /** Opens the current thing at its source, or says it has no address. */
+  readonly openAtSource: () => void;
+  /**
+   * Returns the things a thread may start from and the default name of its
+   * Task (see `dismiss` for which things: a thing, a group or the selection),
+   * or says why not on the undo line and returns `null`. The caller opens the
+   * start-thread dialog on them.
+   *
+   * When `isResumable` says the things already have a send that was attempted,
+   * they are returned without any refusal: a thing that shows as on a
+   * Task may be on the Task that very send made, and the dialog must open to retry it.
+   */
+  readonly readThreadStart: (
+    hoveredKey?: string,
+    isResumable?: (things: readonly InboxListRow[]) => boolean,
+  ) => InboxThreadStart | null;
+  /**
+   * Says that a thread started on the Task `title`, with an "Open it" button
+   * that calls `open`. A thread that started is not undone, so the line has no
+   * Undo and nothing goes on the undo stack.
+   */
+  readonly sayThreadStarted: (title: string, open: () => void) => void;
+  /** Says `text` on the undo line, with no Undo. */
+  readonly say: (text: string) => void;
+  /**
+   * Puts `gesture` on the undo stack and says `text` on the undo line with
+   * Undo. Returns a function that takes the gesture off the stack again.
+   */
+  readonly sayWithUndo: (text: string, gesture: Gesture<CardMover>) => () => void;
+  /** Changes the undo line while it shows `gesture`. See `UndoLineControls.restate`. */
+  readonly restate: AnswerLine["restate"];
+  /** Tells the screen what is current after the caller changed the list with `visit`, so the focus follows. */
+  readonly tellMoved: () => void;
   /** What the undo line shows. */
   readonly line: UndoLineState;
-  /** Shows `text` on the undo line with no Undo. */
-  readonly sayWithoutUndo: (text: string) => void;
+  /** Tells the line whether the pointer or the focus is on it, which keeps it from hiding. */
+  readonly holdLine: (isHeld: boolean) => void;
+  /** Reverses the newest gesture on the undo stack, and says what happened. */
+  readonly undoLastMove: () => void;
 }
 
-/** Sends a Link or Unlink of the pair in `move` to the controller and returns its answer. */
-const sendLinkChange = async (
-  client: HerculeClient,
-  move: EntityLinkMove,
-  direction: LinkDirection,
-): Promise<LinkAnswer> => {
-  const payload = { fromRef: move.fromRef, toRef: move.toRef };
-  if (direction === "link") {
-    await client.externalEntity.link({ payload });
-    return { didChange: true, remaining: undefined };
-  }
-  const { removed, remaining } = await client.externalEntity.unlink({ payload });
-  return { didChange: removed, remaining };
-};
+/** Joins the words of a gesture the way Undo reports them: the title after a colon, in quotes. */
+const joinGestureWords = ({ text, title }: InboxLineWords): string =>
+  title === null ? text : `${text}: “${title}”`;
 
 /**
- * Moves cards of the Inbox for `client` and returns the Inbox to draw.
- * `serverInbox` is the Inbox as the last read gave it, and `scrollRef` is the
- * element that scrolls the page, which the motion of a move measures. `visit`
- * is the history of the visit, where the Links and Unlinks the user makes are
- * followed. Undo waits while `isCarrying()` is true. `scope` is the signed-in
- * user's: it holds the undo stack, and says whether that user is still the one
- * signed in.
+ * Makes the moves of the Inbox for `client`, for the user of `scope`, over
+ * the list `visit` holds. `isOffline` makes every move but View task
+ * refuse. `openTask` opens a Task on Work. `onMoved` is called with the
+ * snapshot a move or an undo left, so the screen can move the focus to the
+ * row that is current now, or to the empty state when none is.
  */
 export const useInboxMoves = ({
   client,
   scope,
-  serverInbox,
   visit,
-  scrollRef,
-  isCarrying,
+  isOffline,
   openTask,
+  onMoved,
 }: {
   readonly client: HerculeClient;
   readonly scope: AccountScope;
-  readonly serverInbox: Inbox | undefined;
-  readonly visit: VisitHistoryHandle;
-  readonly scrollRef: RefObject<HTMLElement | null>;
-  /** Returns whether a card is in the hand of a carry: Undo waits while one is. */
-  readonly isCarrying: () => boolean;
-  /** Opens the Task `taskId` on Work. */
+  readonly visit: InboxListVisit;
+  readonly isOffline: boolean;
   readonly openTask: (taskId: string) => void;
+  readonly onMoved: (snapshot: InboxListSnapshot) => void;
 }): InboxMoves => {
   const queryClient = useQueryClient();
   const { undoStack, isCurrent } = scope;
-  const pendingRef = useRef<readonly PendingEdit[]>(NO_EDITS);
-  const [pendingEdits, setPendingEdits] = useState(NO_EDITS);
-  const changePending = (change: (edits: readonly PendingEdit[]) => readonly PendingEdit[]) => {
-    pendingRef.current = change(pendingRef.current);
-    setPendingEdits(pendingRef.current);
-  };
-  const nextId = useRef(1);
-  // The cards whose hand-off the controller has not answered, so a second click waits for the first.
-  const handingOff = useRef(new Set<string>());
-  // The hand-off chains playing on this screen: they stop with it.
-  const [handOffChains] = useState(createHandOffChains);
-  useEffect(() => handOffChains.stopAll, [handOffChains]);
-  const writeCachedInbox = buildCachedInboxWriter(queryClient);
 
-  // The same Inbox object until a read or an edit changes it, because the screen compares it with the last.
-  const inbox = useMemo(
-    () =>
-      serverInbox === undefined
-        ? undefined
-        : reapplyInboxEdits(
-            serverInbox,
-            pendingEdits.map((each) => each.edit),
-          ),
-    [serverInbox, pendingEdits],
-  );
-  // What a Link or Unlink is planned over. It is read when the move is made, which for an Undo is long after
-  // the render that made the gesture.
-  const newestInbox = useRef(inbox);
-
-  /**
-   * Makes `change` and glides every part of the page that moves because of it
-   * on `spring`. The change is committed at once, because the page is
-   * measured again right after it. With no page on screen, only makes it.
-   * Returns the parts that are new.
-   */
-  const playPageChange = (spring: SpringName, change: () => void): readonly HTMLElement[] => {
-    const scroller = scrollRef.current;
-    if (scroller === null) {
-      change();
-      return [];
-    }
-    return flipInboxPage(scroller, spring, () => {
-      flushSync(change);
-    }).born;
-  };
-
-  /**
-   * Shows `edit` on the page at once, gliding on `spring`, and lists it as
-   * pending. `ridingMove` is what a Link or Unlink does to what rides on what:
-   * the visit starts a gesture for it, which waits for the controller's answer
-   * with the edit. Returns the edit and the parts that are new.
-   */
-  const showEdit = (edit: InboxEdit, spring: SpringName, ridingMove?: RidingMove) => {
-    const shown: PendingEdit = { id: nextId.current++, edit };
-    const born = playPageChange(spring, () => {
-      changePending((edits) => [...edits, shown]);
-      if (ridingMove !== undefined) {
-        visit.advanceLinkGesture({ _tag: "start", gesture: shown.id, move: ridingMove });
-      }
-    });
-    return { shown, born };
-  };
-
-  /**
-   * Shows `edit`, a hand-off or the taking back of one, on the page at once,
-   * with the hand-off chain playing on the card forwards or backwards
-   * (`direction`), and lists it as pending. Returns the pending edit. The
-   * card's neighbours do not move, so the page does not glide.
-   */
-  const showHandOffEdit = (
-    edit: Extract<InboxEdit, { readonly kind: "hand-off" | "take-back-hand-off" }>,
-    direction: "forwards" | "backwards",
-  ): PendingEdit => {
-    const shown: PendingEdit = { id: nextId.current++, edit };
-    handOffChains.play(scrollRef.current, edit.id, direction, () => {
-      changePending((edits) => [...edits, shown]);
-    });
-    return shown;
-  };
-
-  /**
-   * Takes `shown`, a hand-off edit on the card `cardId` that the controller
-   * refused, off the page again, with the hand-off chain playing backwards.
-   */
-  const takeHandOffEditBack = (shown: PendingEdit, cardId: string): void => {
-    handOffChains.play(scrollRef.current, cardId, "backwards", () => {
-      changePending((edits) => edits.filter((each) => each.id !== shown.id));
-    });
-  };
-
-  /**
-   * Takes `shown` off the page again because the controller refused it, or
-   * because it changed nothing. The cards it moved are put back where they
-   * stood, and a move made after it stays.
-   */
-  const takeEditBack = (shown: PendingEdit): void => {
-    playPageChange("hand", () => {
-      changePending((edits) => edits.filter((each) => each.id !== shown.id));
-      visit.advanceLinkGesture({ _tag: "refuse", gesture: shown.id });
-    });
-  };
-
-  /**
-   * Writes an edit the controller answered into the cached Inbox, and drops it
-   * from the pending list in the same draw. `remaining` is an Unlink's answer.
-   */
-  const settleEdit = async (
-    shown: PendingEdit,
-    remaining?: EntityUnlinkResult["remaining"],
-  ): Promise<void> => {
-    await writeCachedInbox(shown.edit);
-    changePending((edits) => edits.filter((each) => each.id !== shown.id));
-    visit.advanceLinkGesture({ _tag: "settle", gesture: shown.id, remaining });
-  };
-
-  /**
-   * Shows an edit made by Undo on the page that is open, and writes it into
-   * the cached Inbox. A card put back parts the page on `hand` and comes from
-   * 14px aside on `travel`. A hand-off taken back plays the hand-off chain
-   * backwards.
-   */
-  const writeInboxEdit = async (edit: InboxEdit): Promise<void> => {
-    if (edit.kind === "take-back-hand-off") {
-      await settleEdit(showHandOffEdit(edit, "backwards"));
-      return;
-    }
-    const { shown, born } = showEdit(edit, "hand");
-    if (edit.kind === "put-back") {
-      for (const card of born) {
-        if (card.dataset["cardId"] === edit.card.id) comeBackFromAside(card);
-      }
-    }
-    await settleEdit(shown);
-  };
-
-  const { line, say, undo } = useUndoLine(
-    undoStack,
-    () => ({
-      putCardBack: buildCachedCardMover(client, queryClient),
-      putEndedCardBack: buildCachedEndedCardMover(client, queryClient),
-      writeInboxEdit,
-    }),
-    isCarrying,
-  );
-
-  const takeOn = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: (card: InboxCard) => {
-      requireSignedIn(scope);
-      return client.externalEntity.takeOn({ params: { id: card.id } });
-    },
+  // A gesture outlives the render that made it, so it reads the newest of these.
+  const latest = useRef({ isOffline, openTask, onMoved });
+  useLayoutEffect(() => {
+    latest.current = { isOffline, openTask, onMoved };
   });
-  const handOffCard = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: ({
-      entityId,
+  // The things whose hand-off the controller has not answered, so a second H waits for the first.
+  const handing = useRef(new Set<string>());
+
+  const { line, say, withdraw, restate, hold, undo } = useUndoLine(undoStack, () => ({
+    putCardBack: buildCachedCardMover(client, queryClient),
+    putEndedCardBack: buildCachedEndedCardMover(client, queryClient),
+  }));
+
+  const dismissRequest = useMoveRequest(scope, (ids: readonly string[]) =>
+    client.externalEntity.dismiss({ payload: { ids: [...ids] } }),
+  );
+  const handOffRequest = useMoveRequest(
+    scope,
+    ({
+      id,
       workflowId,
       connectionId,
     }: {
-      readonly entityId: string;
+      readonly id: string;
       readonly workflowId: string;
       readonly connectionId: string | undefined;
-    }) => {
-      requireSignedIn(scope);
-      return client.externalEntity.handOff({
-        params: { id: entityId },
+    }) =>
+      client.externalEntity.handOff({
+        params: { id },
         payload: connectionId === undefined ? { workflowId } : { workflowId, connectionId },
-      });
-    },
-  });
-  const dismissCard = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: (card: InboxCard) => {
-      requireSignedIn(scope);
-      return client.externalEntity.dismiss({ params: { id: card.id } });
-    },
-  });
+      }),
+  );
+  const linkRequest = useMoveRequest(scope, (input: EntityLinkInput) =>
+    client.externalEntity.link({ payload: input }),
+  );
+  const unlinkRequest = useMoveRequest(scope, (input: EntityLinkInput) =>
+    client.externalEntity.unlink({ payload: input }),
+  );
+  // Take on has no request of its own: `takeOnExecutor` is given what to send, and sends it in this line.
+  const sendInLine = useMoveRequest(scope, (send: () => Promise<unknown>) => send());
+  // The reversals wait in the same line as the moves, so none overtakes another.
+  const reverseMove = useMoveRequest(scope, (reverse: () => Promise<UndoAnswer | undefined>) =>
+    reverse(),
+  );
 
-  const changeLinkRequest = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: async ({
-      move,
-      direction,
-      isWanted,
-    }: {
-      readonly move: EntityLinkMove;
-      readonly direction: LinkDirection;
-      readonly isWanted: MoveIsWanted | undefined;
-    }): Promise<LinkAnswer> => {
-      // Checked when the move reaches the front of the line, so a move that changed nothing is never reversed.
-      requireSignedIn(scope);
-      if (isWanted !== undefined && !(await isWanted)) throw new Error(NOTHING_TO_PUT_BACK);
-      requireSignedIn(scope);
-      return sendLinkChange(client, move, direction);
-    },
-  });
+  /**
+   * Returns the plan of `move` for what it is for (see `InboxVisit.targets`),
+   * or says why not on the undo line and returns `null`. The caller sends
+   * exactly what the plan says.
+   */
+  const planMove = <Move extends InboxMoveKind>(
+    move: Move,
+    hoveredKey: string | undefined,
+  ): InboxMovePlans<InboxListRow>[Move] | null => {
+    const target = visit.targets(hoveredKey);
+    if (target === null) return null;
+    const plan = planInboxMove({ move, target, isOffline: latest.current.isOffline });
+    if (plan.kind === "refuse") {
+      say(plan.reason);
+      return null;
+    }
+    return plan;
+  };
 
-  // The reversals wait in the same line as the moves, so none overtakes another. A reversal that
-  // has its own words for the undo line (a hand-off's) resolves to them.
-  const reverseMove = useMutation({
-    mutationKey: INBOX_MOVES_KEY,
-    scope: { id: "inbox-moves" },
-    mutationFn: (reverse: () => Promise<UndoAnswer | undefined>) => {
-      requireSignedIn(scope);
-      return reverse();
-    },
-  });
+  /** Tells the screen what is current once a move or an undo has changed the list. */
+  const tellMoved = (): void => {
+    latest.current.onMoved(visit.getSnapshot());
+  };
 
-  const take = (card: InboxCard): void => {
-    const name = nameCard(card);
-    const request = takeOn.mutateAsync(card);
-    // A Take that made no Task (it failed, or the card already had one) has nothing to put back.
-    const wasCreated = request.then(
-      ({ created }) => created,
+  const dismiss = (hoveredKey?: string): void => {
+    const plan = planMove("dismiss", hoveredKey);
+    if (plan === null) return;
+    const { ids, words } = plan;
+    const receipt = visit.move("dismissed", plan.refs);
+    tellMoved();
+    const request = dismissRequest.mutateAsync(ids);
+    const wasSaved = request.then(
+      () => {
+        visit.confirmMove(receipt);
+        return true;
+      },
       () => false,
     );
     const gesture: Gesture<CardMover> = {
-      words: `Took on ${name}`,
-      undo: async (page) => {
-        return reverseMove.mutateAsync(async () => {
-          if (!(await wasCreated)) throw new Error(NOTHING_TO_PUT_BACK);
-          const { taskId } = await request;
+      words: joinGestureWords(words),
+      undo: () =>
+        reverseMove.mutateAsync(async () => {
+          if (!(await wasSaved)) throw new Error(NOT_SAVED);
           requireSignedIn(scope);
-          // The Task was touched since, so it stays and the line says why.
-          await undoAddedTask(client, card.id, taskId);
+          await client.externalEntity.restore({ payload: { ids } });
           if (!isCurrent()) return undefined;
-          await page.writeInboxEdit({ kind: "set-task", id: card.id, taskId: undefined });
-          return undefined;
-        });
-      },
+          visit.undo(receipt);
+          tellMoved();
+          return { text: DISMISSAL_UNDONE };
+        }),
     };
-    undoStack.reserve(gesture, wasCreated);
+    undoStack.reserve(gesture, wasSaved);
+    say(words.text, gesture, undefined, words.title ?? undefined);
+    request.catch((error: unknown) => {
+      if (!isCurrent()) return;
+      visit.failMove(receipt);
+      tellMoved();
+      say(describeInboxDismissalFailure(plan.named, readReason(error)));
+    });
+  };
+
+  /**
+   * Runs one Take on, for a single thing or for several as one Task. The
+   * caller has decided what to send and what to say; this does the part both
+   * share: the rows move at once, the request goes out in the line, the gesture
+   * takes its place on the undo stack, and a failure puts the rows back.
+   *
+   * - `send` makes the request and `reverse` takes it back; `reverse` returns
+   *   the words of the undo line and fails when the Task was touched since.
+   * - `didChange` tells whether the call wrote anything an undo can take back.
+   * - `words` and `failureText` build the lines; `taskId` is the Task the line
+   *   offers to open.
+   */
+  const runTakeOn = <Result extends { readonly taskId: string }>({
+    refs,
+    send,
+    didChange,
+    reverse,
+    gestureWords,
+    words,
+    failureText,
+  }: {
+    readonly refs: readonly string[];
+    readonly send: () => Promise<Result>;
+    readonly didChange: (result: Result) => boolean;
+    readonly reverse: (result: Result) => Promise<string>;
+    readonly gestureWords: InboxLineWords;
+    readonly words: (result: Result) => InboxLineWords;
+    readonly failureText: (reason: string) => string;
+  }): void => {
+    const receipt = visit.move("taken", refs);
+    tellMoved();
+    // Sound because sendInLine's mutation returns exactly `send()`'s value unchanged, so the
+    // result type is the caller's. Revisit if sendInLine ever transforms its output.
+    const request = sendInLine.mutateAsync(send) as Promise<Result>;
+    // A call that wrote nothing (it failed, or the things already had their Task) has nothing to put back.
+    const wasChanged = request.then(
+      (result) => {
+        visit.confirmMove(receipt);
+        return didChange(result);
+      },
+      () => false,
+    );
+    const gesture: Gesture<CardMover> = {
+      words: joinGestureWords(gestureWords),
+      undo: () =>
+        reverseMove.mutateAsync(async () => {
+          if (!(await wasChanged)) throw new Error(NOT_SAVED);
+          const result = await request;
+          requireSignedIn(scope);
+          const text = await reverse(result);
+          if (!isCurrent()) return undefined;
+          visit.undo(receipt);
+          tellMoved();
+          return { text };
+        }),
+    };
+    undoStack.reserve(gesture, wasChanged);
     request.then(
-      async ({ taskId, created }) => {
+      async (result) => {
         if (!isCurrent()) return;
-        const { shown } = showEdit({ kind: "set-task", id: card.id, taskId }, "hand");
-        const scroller = scrollRef.current;
-        const element = scroller === null ? null : findCardElement(scroller, card.id);
-        if (element !== null) riseMonogram(element);
-        await settleEdit(shown);
-        if (!isCurrent()) return;
-        if (!created) {
-          say(`${name} already had a Task, so no new one was made.`);
-          return;
-        }
-        say(`Took on ${name}. A Task is on Work.`, gesture);
+        const line = words(result);
+        say(
+          line.text,
+          (await wasChanged) ? gesture : undefined,
+          { label: "View task", act: () => latest.current.openTask(result.taskId) },
+          line.title ?? undefined,
+        );
       },
       (error: unknown) => {
         if (!isCurrent()) return;
-        say(`${name} was not taken on: ${readReason(error)}. Try again.`);
+        visit.failMove(receipt);
+        tellMoved();
+        say(failureText(readReason(error)));
       },
     );
   };
 
-  const handOff = (
-    target: HandOffTarget,
+  const takeOn = (hoveredKey?: string): void => {
+    const plan = planMove("takeOn", hoveredKey);
+    if (plan === null) return;
+    if (plan.kind === "takeOnTogether") {
+      const { title } = plan;
+      runTakeOn({
+        refs: plan.refs,
+        send: () =>
+          client.externalEntity.takeOnTogether({ payload: { ids: [...plan.ids], title } }),
+        didChange: didTakeOnTogetherChange,
+        reverse: async (result) => {
+          const outcome = await client.externalEntity.undoTakeOnTogether({
+            payload: { recordId: result.recordId },
+          });
+          // The Task was touched since, so it stays and the line says why.
+          if (!outcome.undone) {
+            throw new Error(outcome.reason ?? "The Task has changed since you made it.");
+          }
+          return describeInboxTakeOnTogetherUndone(result.created);
+        },
+        gestureWords: describeInboxTakeOnTogether(title, { created: true, added: 0, taken: 0 }),
+        words: (result) => describeInboxTakeOnTogether(title, result),
+        failureText: (reason) => describeInboxTakeOnFailure({ title }, reason),
+      });
+      return;
+    }
+    const { thing } = plan;
+    runTakeOn({
+      refs: [thing.ref],
+      send: () => client.externalEntity.takeOn({ params: { id: thing.id } }),
+      didChange: ({ created }) => created,
+      reverse: async ({ taskId }) => {
+        // The Task was touched since, so it stays and the line says why.
+        await undoAddedTask(client, thing.id, taskId);
+        return TAKE_ON_UNDONE;
+      },
+      gestureWords: describeInboxTakeOn(thing, true),
+      words: ({ created }) => describeInboxTakeOn(thing, created),
+      failureText: (reason) => describeInboxTakeOnFailure(thing, reason),
+    });
+  };
+
+  /** Hands `thing`, which the caller has checked may be handed, to `offer`. */
+  const sendHandOff = (
+    thing: InboxListRow,
     offer: WorkflowOffer,
     connectionId: string | undefined,
   ): void => {
-    if (handingOff.current.has(target.id)) return;
-    handingOff.current.add(target.id);
-    const name = nameCard(target);
-    const workflow: LiveWorkflow = { workflowId: offer.workflowId, name: offer.name };
+    const { ref } = thing;
+    if (handing.current.has(ref)) {
+      say("That hand-off is still on its way.");
+      return;
+    }
+    handing.current.add(ref);
+    const flight: SidebarFlight = flyHandedMarkToWork(ref);
+    // The row draws the workflow having the thing as the chain starts, and keeps it until the list is read.
+    const moved: { receipt?: MoveReceipt<InboxListRow> } = {};
+    const roll = rollHandedRow(ref, () => {
+      moved.receipt = visit.move("taken", [ref], (row) => ({
+        ...buildHandedThing(row, offer),
+        offers: row.offers,
+      }));
+    });
+    const receipt = moved.receipt!;
+    tellMoved();
     // What the hand-off ends stays ended, whatever Undo does.
-    const endedKinds = target.openKinds.filter((kind) => offer.answers.includes(kind));
-    const handShown = showHandOffEdit({ kind: "hand-off", id: target.id, workflow }, "forwards");
-
-    const request = handOffCard.mutateAsync({
-      entityId: target.id,
+    const endedKinds = thing.openKinds.filter((kind) => offer.answers.includes(kind));
+    const request = handOffRequest.mutateAsync({
+      id: thing.id,
       workflowId: offer.workflowId,
       connectionId,
     });
@@ -512,214 +497,233 @@ export const useInboxMoves = ({
       () => true,
       () => false,
     );
+    const words = describeInboxHandOff(thing, offer.name);
     const gesture: Gesture<CardMover> = {
-      words: `Handed ${name} to ${offer.name}`,
-      undo: (page) =>
-        reverseMove.mutateAsync(async () => {
-          if (!(await wasHanded)) throw new Error(NOTHING_TO_PUT_BACK);
+      words: joinGestureWords(words),
+      undo: () => {
+        // Undo during the chain stops the roll and the mark where they are: Work receives nothing.
+        roll.cancel();
+        flight.cancel();
+        return reverseMove.mutateAsync(async () => {
+          if (!(await wasHanded)) throw new Error(NOT_SAVED);
           const { runId, taskId } = await request;
           requireSignedIn(scope);
           const result = await client.externalEntity.undoHandOff({ params: { runId } });
-          // The answer belongs to the user who signed out: the caches and the line are the next one's.
           if (!isCurrent()) return undefined;
           const text = describeHandOffUndo(result, offer.name, endedKinds);
           // Stopped and too-late are the controller's final answers, not failures: the line says
-          // them in its own words, and the card stays as it is, because a reversal that did not
-          // happen would be a lie. Only a hand-off that was taken back plays backwards.
-          if (!isHandOffTakenBack(result)) {
-            return result.outcome === "stopped"
-              ? { text, action: { label: "See its Task", act: () => openTask(taskId) } }
-              : { text };
+          // them in its own words, and the row stays as it is.
+          if (isHandOffTakenBack(result)) {
+            visit.undo(receipt);
+            tellMoved();
           }
-          // A Task the hand-off made is gone. A Task it continued stays, and so does the card's hold on it.
-          await page.writeInboxEdit({
-            kind: "take-back-hand-off",
-            id: target.id,
-            workflowId: offer.workflowId,
-            taskId: result.taskRemoved ? undefined : taskId,
-          });
-          return { text };
-        }),
+          return result.outcome === "stopped"
+            ? {
+                text,
+                action: { label: "See its Task", act: () => latest.current.openTask(taskId) },
+              }
+            : { text };
+        });
+      },
     };
     undoStack.reserve(gesture, wasHanded);
     request.then(
-      async ({ taskId }) => {
-        handingOff.current.delete(target.id);
+      () => {
+        handing.current.delete(ref);
         if (!isCurrent()) return;
-        const { shown: taskShown } = showEdit({ kind: "set-task", id: target.id, taskId }, "hand");
-        // The hand-off edit is written first, so the colleague stays when it leaves the pending list.
-        await settleEdit(handShown);
-        await settleEdit(taskShown);
-        if (!isCurrent()) return;
-        say(`Handed ${name} to ${offer.name}. Its Task is on Work.`, gesture);
+        say(words.text, gesture, undefined, words.title ?? undefined);
       },
       (error: unknown) => {
-        handingOff.current.delete(target.id);
+        handing.current.delete(ref);
+        roll.cancel();
+        flight.cancel();
+        visit.failMove(receipt);
+        tellMoved();
         if (!isCurrent()) return;
-        takeHandOffEditBack(handShown, target.id);
-        say(describeHandOffRefusal(target, offer.name, readReason(error)));
+        say(describeInboxHandOffFailure(thing, offer.name, readReason(error)));
       },
     );
   };
 
-  const dismiss = (card: InboxCard, riders: readonly InboxCard[], stepsAside = true): void => {
-    const name = nameCard(card);
-    const scroller = scrollRef.current;
-    const element = scroller === null ? null : findCardElement(scroller, card.id);
-    // The copy is made while the card is still on the page, and steps aside once it has left.
-    const copy =
-      !stepsAside || scroller === null || element === null
-        ? null
-        : copyCardToStepAside(scroller, element);
-    const { shown } = showEdit({ kind: "drop", id: card.id }, "hand");
-    if (copy !== null) stepAside(copy);
-
-    const wasSaved = dismissCard.mutateAsync(card).then(
-      async () => {
-        if (isCurrent()) await settleEdit(shown);
-        return true;
-      },
-      (error: unknown) => {
-        if (!isCurrent()) return false;
-        playPageChange("travel", () => {
-          changePending((edits) => edits.filter((each) => each.id !== shown.id));
-        });
-        say(`${name} was not dismissed, so it is back: ${readReason(error)}. Try again.`);
-        return false;
-      },
-    );
-    const gesture: Gesture<CardMover> = {
-      words: `Dismissed ${name}`,
-      undo: async (page) => {
-        return reverseMove.mutateAsync(async () => {
-          if (!(await wasSaved)) throw new Error(NOTHING_TO_PUT_BACK);
-          requireSignedIn(scope);
-          await client.externalEntity.restore({ params: { id: card.id } });
-          if (!isCurrent()) return undefined;
-          await page.writeInboxEdit({ kind: "put-back", card });
-          return undefined;
-        });
-      },
-    };
-    undoStack.reserve(gesture, wasSaved);
-    say(describeDismissal(card, riders), gesture);
+  const handOff = (
+    hoveredKey: string | undefined,
+    offer: WorkflowOffer,
+    connectionId: string | undefined,
+  ): void => {
+    const plan = planMove("handOff", hoveredKey);
+    if (plan !== null) sendHandOff(plan.thing, offer, connectionId);
   };
 
-  /** Reads again what a link decides: what rides on what, the count, and every open entity's links. */
-  const readLinksAgain = (): void => {
-    for (const key of [queryKeys.inbox(), queryKeys.inboxCount(), queryKeys.externalEntity()]) {
-      invalidateWithoutCancelling(queryClient, key);
+  const startHandOff = (hoveredKey?: string): InboxListRow | null => {
+    const plan = planMove("handOff", hoveredKey);
+    if (plan === null) return null;
+    const { thing } = plan;
+    const move = decideHandMove(thing.offers);
+    if (move.kind === "one") {
+      sendHandOff(thing, move.offer, undefined);
+      return null;
     }
+    return move.kind === "several" ? thing : null;
+  };
+
+  const viewTask = (hoveredKey?: string): void => {
+    const plan = planMove("viewTask", hoveredKey);
+    if (plan !== null) latest.current.openTask(plan.taskId);
   };
 
   /**
-   * Links the two things, or removes the user's link between them, and shows
-   * it at once. A request that is linked to a ticket flies from Requests into
-   * the ticket's tucked sheet and everything between closes up, in one
-   * movement on `hand`; a card that rode on the other end stands alone. The
-   * controller's answer decides what rides on what: a link a source still
-   * reports keeps its card riding. A failure takes it back and rejects.
-   * It is planned over the newest Inbox and the place the visit holds, wherever
-   * it is called from, because Undo calls it long after the gesture it reverses.
-   * `isWanted` is for Undo: the move is sent only if it resolves to true.
-   * Returns the controller's answer, once it is settled on the page.
+   * Links `fromRef` to `toRefs` in one call, in the line of the moves, and says
+   * what happened, with an Undo that unlinks exactly what the call created.
+   * `named` are the things the line names. A failure saves nothing. Afterwards
+   * the visit reads again, which is what draws the group. Returns whether a
+   * link was written.
    */
-  const changeLink = (
-    move: EntityLinkMove,
-    direction: LinkDirection,
-    isWanted?: MoveIsWanted,
-  ): Promise<LinkAnswer> => {
-    const shownInbox = newestInbox.current;
-    const plan =
-      shownInbox === undefined
-        ? undefined
-        : direction === "link"
-          ? planLink(shownInbox, move.fromRef, move.toRef)
-          : planUnlink(shownInbox, move.fromRef, move.toRef, visit.readLatest().placement);
-    const shown =
-      plan === undefined ? undefined : showEdit(plan.edit, "hand", plan.ridingMove).shown;
-    return changeLinkRequest.mutateAsync({ move, direction, isWanted }).then(
-      async (answer) => {
-        if (!isCurrent()) return answer;
-        if (shown !== undefined) {
-          if (answer.didChange) await settleEdit(shown, answer.remaining);
-          else takeEditBack(shown);
-        }
-        readLinksAgain();
-        return answer;
-      },
-      (error: unknown) => {
-        if (shown !== undefined && isCurrent()) takeEditBack(shown);
-        throw error;
-      },
-    );
-  };
-  // A gesture outlives the render that made it, so its undo calls the newest `changeLink`.
-  const changeLinkRef = useRef(changeLink);
-  useLayoutEffect(() => {
-    changeLinkRef.current = changeLink;
-    newestInbox.current = inbox;
-  });
-
-  /**
-   * Makes a Link or Unlink the user asked for and puts it on the undo stack.
-   * The undo line says what was done and offers Undo, which makes the move in
-   * the other direction (see `changeLink`).
-   */
-  const makeLinkChange = (move: EntityLinkMove, direction: LinkDirection): void => {
-    const words = `${move.fromName} and ${move.toName}`;
-    const answered = changeLink(move, direction);
-    const wasChanged = answered.then(
-      ({ didChange }) => didChange,
+  const linkSet = (
+    fromRef: string,
+    toRefs: readonly string[],
+    named: readonly InboxLinkEnd[],
+  ): Promise<boolean> => {
+    const request = linkRequest.mutateAsync({ fromRef, toRefs: [...toRefs] });
+    const wasLinked = request.then(
+      ({ created }) => created.length > 0,
       () => false,
     );
     const gesture: Gesture<CardMover> = {
-      words: LINK_WORDS[direction].gesture(words),
-      undo: async () => {
-        const { remaining } = await changeLinkRef.current(
-          move,
-          reverseLinkDirection(direction),
-          wasChanged,
-        );
-        return describeLinkRemaining(remaining);
-      },
+      words: joinGestureWords(describeInboxLink(named, true)),
+      undo: () =>
+        reverseMove.mutateAsync(async () => {
+          if (!(await wasLinked)) throw new Error(NOT_SAVED);
+          const { created } = await request;
+          requireSignedIn(scope);
+          await client.externalEntity.unlink({ payload: { fromRef, toRefs: created } });
+          visit.pushArrived();
+          return { text: LINK_UNDONE };
+        }),
     };
-    undoStack.reserve(gesture, wasChanged);
-    answered.then(
-      ({ didChange, remaining }) => {
+    undoStack.reserve(gesture, wasLinked);
+    request.then(
+      ({ created }) => {
         if (!isCurrent()) return;
-        if (!didChange) {
-          say(`You had made no link between ${words}, so none was removed.`);
-          return;
-        }
+        if (created.length > 0) visit.linkMade([fromRef, ...created]);
+        const words = describeInboxLink(named, created.length > 0);
         say(
-          direction === "link" ? LINK_WORDS.link.done(words) : describeLinkRemoved(remaining),
-          gesture,
+          words.text,
+          created.length > 0 ? gesture : undefined,
+          undefined,
+          words.title ?? undefined,
         );
       },
       (error: unknown) => {
         if (!isCurrent()) return;
-        say(LINK_WORDS[direction].failed(words, readReason(error)));
+        say(describeInboxLinkFailure(readReason(error)));
+      },
+    );
+    return wasLinked;
+  };
+
+  const startLink = (hoveredKey?: string): InboxLinkPick | null => {
+    const plan = planMove("link", hoveredKey);
+    if (plan === null) return null;
+    if (plan.kind === "pickLink") return plan;
+    void linkSet(plan.fromRef, plan.toRefs, plan.named);
+    return null;
+  };
+
+  const linkTo = (from: InboxLinkEnd, to: InboxLinkEnd): Promise<boolean> => {
+    if (latest.current.isOffline) {
+      say(REFUSED_OFFLINE);
+      return Promise.resolve(false);
+    }
+    return linkSet(from.ref, [to.ref], [from, to]);
+  };
+
+  const unlink = (first: InboxLinkEnd, second: InboxLinkEnd): void => {
+    if (latest.current.isOffline) {
+      say(REFUSED_OFFLINE);
+      return;
+    }
+    const input = { fromRef: first.ref, toRefs: [second.ref] };
+    const request = unlinkRequest.mutateAsync(input);
+    const wasRemoved = request.then(
+      ({ results }) => results[0]!.removed,
+      () => false,
+    );
+    const gesture: Gesture<CardMover> = {
+      words: "Unlinked",
+      undo: () =>
+        reverseMove.mutateAsync(async () => {
+          if (!(await wasRemoved)) throw new Error(NOT_SAVED);
+          requireSignedIn(scope);
+          await client.externalEntity.link({ payload: input });
+          visit.pushArrived();
+          return { text: UNLINK_UNDONE };
+        }),
+    };
+    undoStack.reserve(gesture, wasRemoved);
+    request.then(
+      ({ results }) => {
+        if (!isCurrent()) return;
+        visit.pushArrived();
+        const result = results[0]!;
+        const words = describeInboxUnlink(first, second, result);
+        say(words.text, result.removed ? gesture : undefined, undefined, words.title ?? undefined);
+      },
+      (error: unknown) => {
+        if (!isCurrent()) return;
+        say(describeInboxUnlinkFailure(readReason(error)));
       },
     );
   };
 
+  const openAtSource = (): void => {
+    const { rows, current } = visit.getSnapshot();
+    const thing = rows.find((row) => row.ref === current);
+    if (thing === undefined) return;
+    if (thing.url === "") {
+      say(NO_SOURCE_ADDRESS);
+      return;
+    }
+    window.open(thing.url, "_blank", "noreferrer");
+  };
+
   return {
-    inbox,
-    hasPendingEdits: pendingEdits.length > 0,
-    take,
-    handOff,
     dismiss,
-    link: (move) => {
-      makeLinkChange(move, "link");
+    takeOn,
+    startHandOff,
+    handOff,
+    viewTask,
+    startLink,
+    linkTo,
+    unlink,
+    openAtSource,
+    readThreadStart: (hoveredKey, isResumable) => {
+      const target = visit.targets(hoveredKey);
+      if (target === null) return null;
+      const things = listThreadStartThings(target);
+      if (things !== undefined && things.length > 0 && isResumable?.(things) === true) {
+        return { things, title: things[0]!.title };
+      }
+      const plan = planMove("startThread", hoveredKey);
+      return plan === null ? null : { things: plan.things, title: plan.title };
     },
-    unlink: (move) => {
-      makeLinkChange(move, "unlink");
+    sayThreadStarted: (title, open) => {
+      const words = describeInboxThreadStart(title);
+      say(words.text, undefined, { label: "Open it", act: open }, words.title ?? undefined);
     },
-    undoLastMove: undo,
-    line,
-    sayWithoutUndo: (text) => {
+    say: (text) => {
       say(text);
     },
+    sayWithUndo: (text, gesture) => {
+      undoStack.reserve(gesture, Promise.resolve(true));
+      say(text, gesture);
+      return () => {
+        withdraw(gesture);
+      };
+    },
+    restate,
+    tellMoved,
+    line,
+    holdLine: hold,
+    undoLastMove: undo,
   };
 };

@@ -55,6 +55,7 @@ describe("the shipped permission profiles", () => {
         "wiki.write",
         "skill.read",
         "skill.write",
+        "mcp.read",
         "event.read",
         "event.emit",
         "memory.read",
@@ -92,6 +93,8 @@ describe("the shipped permission profiles", () => {
         "discussion.write",
         "wiki.read",
         "wiki.write",
+        "mcp.read",
+        "mcp.use",
         "subscription.read",
         "subscription.write",
         "run.read",
@@ -107,12 +110,16 @@ describe("the shipped permission profiles", () => {
     expect(profile.grants).not.toContain("event.audit");
   });
 
-  it("seeds unrestricted with every grant but skill.write and skill.apply", async () => {
+  it("seeds unrestricted with every grant but skill.write, skill.apply and mcp.manage", async () => {
     const unrestricted = await run(Effect.flatMap(seed, () => readProfileByName("unrestricted")));
     expect([...unrestricted.grants].sort()).toEqual(
-      ALL_GRANTS.filter((grant) => grant !== "skill.write" && grant !== "skill.apply").sort(),
+      ALL_GRANTS.filter(
+        (grant) => grant !== "skill.write" && grant !== "skill.apply" && grant !== "mcp.manage",
+      ).sort(),
     );
     expect(unrestricted.grants).toContain("skill.read");
+    expect(unrestricted.grants).toContain("mcp.read");
+    expect(unrestricted.grants).toContain("mcp.use");
     expect(unrestricted.grants).toContain("secret.write");
     expect(unrestricted.grants).toContain("credential.write");
     expect(unrestricted.grants).toContain("infra.write");

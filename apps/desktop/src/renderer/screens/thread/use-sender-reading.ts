@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useRouteContext } from "@tanstack/react-router";
-import { describeSender, type SenderReading } from "@hercule/client-core";
+import { describeSender, readActorSessionId, type SenderReading } from "@hercule/client-core";
 import type { Session } from "@hercule/contract";
 import {
   assistantsQuery,
@@ -88,4 +88,18 @@ export function useSenderReadings(
   return senderSessionIds.map((id, index) =>
     describeSender(id, listed.get(id) ?? reads[index]!.data ?? null, assistants.data ?? []),
   );
+}
+
+/**
+ * Returns how to show the agent behind `actor`, an actor stamp, or `undefined`
+ * when the actor is not a session (the user, a run, the system) or while the
+ * session's agent is still being read. A caller words the actor with its
+ * plain label until then, so a line is never held back and never carries a
+ * name that later turns out to be wrong. The reads are `useSenderReading`'s.
+ */
+export function useActorSenderReading(actor: string): SenderReading | undefined {
+  const sessionId = readActorSessionId(actor);
+  const senderSessionIds = useMemo(() => (sessionId === undefined ? [] : [sessionId]), [sessionId]);
+  const readings = useSenderReadings(senderSessionIds);
+  return readings === "loading" ? undefined : readings[0];
 }

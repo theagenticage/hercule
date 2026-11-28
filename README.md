@@ -130,3 +130,7 @@ Start with [the overview](docs/spec/01-overview-and-scope.md): what ships, what 
 TypeScript throughout, one repository. The controller and runner are written on [Effect 4](https://effect.website) with Effect Schema as the contract language ([ADR 0031](docs/adr/0031-the-backend-is-written-on-effect.md)); state lives in one SQLite database ([ADR 0004](docs/adr/0004-controller-state-lives-in-one-sqlite-database.md)); everything ships as one self-contained Bun binary ([ADR 0018](docs/adr/0018-hercule-ships-as-one-self-contained-binary.md)). The web app is a static SPA and a pure client of the public API ([ADR 0017](docs/adr/0017-the-web-app-is-a-static-pure-client-of-the-public-api.md)).
 
 Research findings land on `research/*` branches under `research/`; prototype code on `prototype/*` branches.
+
+## Third-party code
+
+Hercule copies third-party code, icons and fonts; [ATTRIBUTION.md](ATTRIBUTION.md) lists what, from where, and under which licence.

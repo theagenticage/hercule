@@ -29,9 +29,10 @@ export {
   type SkillReference,
 } from "@hercule/protocol";
 
+export { API_PREFIX } from "./api-prefix";
+
 export {
   ALL_OPERATIONS,
-  API_PREFIX,
   OPERATIONS,
   canCarrySecrets,
   isOperationId,
@@ -67,7 +68,14 @@ export {
 // The describe line's parts belong to the plugin API, because a plugin action
 // declares its own describe line. The contract passes them on under the same
 // name.
-export { DescribeLinePart } from "@hercule/plugin-host";
+export {
+  DescribeLinePart,
+  DURATION_UNIT_SECONDS,
+  interpretClauseValue,
+  splitClauseWord,
+  splitSearchValue,
+  type ClauseInterpretation,
+} from "@hercule/plugin-host";
 
 export {
   CLI,
@@ -76,6 +84,8 @@ export {
   type CliRow,
   type FieldRow,
   type NounRow,
+  type ObjectFlagsRow,
+  type ObjectKeyRow,
   type ResolvingQuery,
 } from "./cli";
 
@@ -114,6 +124,7 @@ export {
   type CapDetails,
   ShrinkDetails,
   InvalidStateDetails,
+  ConflictDetails,
   type ErrorCode,
 } from "./errors";
 
@@ -156,6 +167,22 @@ export {
   removeTerminalControls,
 } from "./agent-text";
 
+export { appendPromptContext, splitPromptContext } from "./prompt-context";
+
+export {
+  parseCallbackQuery,
+  readApprovalHost,
+  readAuthorizationState,
+  type ParsedCallback,
+  type RefusedCallback,
+} from "./sign-in-callback";
+export type {
+  PromptContextBlock,
+  PromptContextInput,
+  PromptContextOrigin,
+  PromptContextThing,
+} from "./prompt-context";
+
 export { LoginForm, SetupForm, TaskCreateForm } from "./forms";
 
 /** The form-validation interface that the form schemas above implement. */
@@ -166,6 +193,7 @@ export {
   ExternalRef,
   Id,
   IdOrMe,
+  isExternalRef,
   isId,
   isQualifiedId,
   MAX_EXTERNAL_REF_LENGTH,
@@ -370,6 +398,8 @@ export {
   UsageReport,
   EMPTY_PROMPT_MESSAGE,
   MAX_INPUT_ANSWER_WAIT,
+  MAX_THREAD_THINGS,
+  ContextReference,
   refuseEmptyPrompt,
 } from "./groups/session";
 export {
@@ -418,11 +448,17 @@ export {
   requiresShrinkConfirmation,
 } from "./groups/memory";
 export {
+  MAX_WIKI_ARCHIVE_REASON_LENGTH,
   MAX_WIKI_PAGES,
   MAX_WIKI_REVISIONS_LISTED,
+  WIKI_PAGE_ARCHIVE_FIELDS,
   WIKI_PAGE_SORT_FIELDS,
   WIKI_PAGE_UPDATE_FIELDS,
+  WIKI_WRITING_RULES,
   WikiPage,
+  WikiPageArchived,
+  WikiPageArchivedFilter,
+  WikiPageArchiveInput,
   WikiPageCreateInput,
   WikiPageFilter,
   WikiPageSummary,
@@ -442,8 +478,10 @@ export {
   computeSkillArchiveByteLength,
   convertToSkillFileMode,
   MAX_SKILL_BYTES,
+  MAX_PROPOSED_SKILL_REVISIONS,
   MAX_SKILL_FILES,
   MAX_SKILLS,
+  ONLY_A_SESSION_PROPOSES_SKILLS,
   ONLY_THE_USER_IMPORTS_SKILLS,
   Skill,
   SkillApplyUpdatesInput,
@@ -457,6 +495,8 @@ export {
   SkillImportResult,
   SkillName,
   SkillPathTooLong,
+  SkillProposeInput,
+  SkillProposeResult,
   SkillRevision,
   SkillRevisionDiff,
   SkillRevisionHash,
@@ -465,6 +505,25 @@ export {
   SkillUpdate,
   type SkillFile,
 } from "./groups/skill";
+export {
+  MAX_MCP_SERVER_NAME_LENGTH,
+  McpServer,
+  McpServerCreateInput,
+  McpServerFinishSignInInput,
+  McpServerIds,
+  McpServerLeftOutReason,
+  McpServerName,
+  McpServerSetTokenInput,
+  McpServerSignInRedirectUri,
+  McpServerSignInStart,
+  McpServerSource,
+  McpServerStartSignInInput,
+  McpServerStatus,
+  McpServerTool,
+  McpServerToken,
+  McpServerUpdateInput,
+  SessionMcpServer,
+} from "./groups/mcp-server";
 export { OwnerKind, SECRET_SORT_FIELDS, SecretFilter, SecretRef } from "./groups/secret";
 export {
   CONNECTION_SORT_FIELDS,
@@ -530,16 +589,12 @@ export {
 export {
   BOARD_STAGES,
   BoardStage,
-  HandoffLeg,
-  HandoffLegs,
   Label,
   MAX_BOARD_CARDS,
   MAX_BOARD_STACK_CANDIDATES,
   MAX_CARD_QUESTION,
   MAX_DETAIL_SESSIONS,
   MAX_FILTER_VALUES,
-  MAX_LEG_LIVE_RUNS,
-  MAX_LEG_QUERY_RUNS,
   MAX_LABEL_LENGTH,
   MAX_PROVENANCE_APPEND,
   MAX_SUMMARY_LEFT,
@@ -561,6 +616,7 @@ export {
   TaskCreateInput,
   TaskCreatedEventPayload,
   TaskDetail,
+  TaskDetailRun,
   TaskDetailSession,
   TaskEntityChangedEventPayload,
   TaskEntityLinkInput,
@@ -583,25 +639,9 @@ export {
   TaskUpdateInput,
   TaskUpdatedEventPayload,
   MAX_STAGE_CAUSE_TEXT,
-  MAX_TRACKING_DETAIL_RUNS,
-  MAX_TRACKING_FAILURE_CAUSE,
-  MAX_TRACKING_HANDOFFS,
-  MAX_TRACKING_OUTPUT_FIELDS,
-  MAX_TRACKING_OUTPUT_LABEL,
-  MAX_TRACKING_OUTPUT_TEXT,
-  MAX_TRACKING_OUTPUT_VALUE,
-  MAX_TRACKING_STEP_NAME,
+  MAX_DETAIL_RUNS,
+  MAX_FAILURE_CAUSE,
   TaskAttention,
-  TaskTracking,
-  TrackingDetail,
-  TrackingDetailRun,
-  TrackingHandoff,
-  TrackingHandoffWithWorkflow,
-  TrackingOutput,
-  TrackingOutputField,
-  TrackingOutputValue,
-  TrackingRun,
-  TrackingTask,
   TryAgainUndo,
   WorkBoard,
   WorkCard,
@@ -657,6 +697,12 @@ export {
   ChangeBlock,
   CheckRow,
   ChecksBlock,
+  CodeBlock,
+  FieldsBlock,
+  TrendBlock,
+  MAX_CODE_LINES,
+  MAX_FIELD_ROWS,
+  MAX_TREND_POINTS,
   ACCEPT_ACTION_ID,
   CORE_SIGNAL_KINDS,
   DISMISS_ACTION_ID,
@@ -701,7 +747,6 @@ export {
   SignalHandOffInput,
   SignalIdsInput,
   SignalKind,
-  SignalLowerPriorityResult,
   SignalMarkDoneResult,
   SignalMatch,
   SignalOrigin,
@@ -709,19 +754,13 @@ export {
   SignalRaiseResult,
   SignalResolution,
   SignalPage,
-  SignalSnooze,
-  SignalSnoozeInput,
-  SignalSnoozeResult,
   SignalStatus,
-  SignalUnsnoozeResult,
   SignalView,
   SignalWithdrawInput,
-  SignalYourWork,
   SkippedSignal,
   TextBlock,
   ThreadMessage,
   UnknownBlock,
-  YourWorkTask,
   type CoreSignalKind,
 } from "./groups/signal";
 export {
@@ -746,6 +785,8 @@ export {
 } from "./groups/entity-context";
 export {
   ActingConnection,
+  CardFace,
+  EntityFieldValue,
   ENTITY_CONCERNS,
   ENTITY_SEARCH_OUTCOMES,
   EntityAddToWorkInput,
@@ -758,6 +799,7 @@ export {
   EntityHint,
   EntityLink,
   EntityLinkInput,
+  EntityLinkResult,
   EntityPeer,
   EntityPerson,
   EntityRepository,
@@ -770,17 +812,51 @@ export {
   EntitySuggestions,
   EntitySuggestionsQuery,
   EntityTakeOnResult,
+  EntityTakeOnTogetherInput,
+  EntityTakeOnTogetherResult,
   EntityRecord,
   EntityUndoTakeOnInput,
   EntityUndoTakeOnResult,
+  EntityUndoTakeOnTogetherInput,
+  EntityUnlinkedPair,
   EntityUnlinkResult,
+  EvidenceEntity,
+  EntityProjectMatchInput,
+  ProjectMatch,
+  type CoreSavedQueryId,
+  EntityBlocks,
+  EntityCard,
+  EntityCards,
+  EntityCardsQuery,
   ExternalEntityDetail,
+  MAX_ENTITY_BLOCKS,
+  MAX_SAVED_QUERY_SIGNAL_KINDS,
   HandOffUndo,
-  INBOX_SIDES,
-  Inbox,
-  InboxCard,
+  CORE_SAVED_QUERY_IDS,
+  InboxAsk,
+  InboxBrowseValue,
+  InboxClause,
   InboxCounts,
-  InboxSide,
+  InboxFacet,
+  InboxFacetValue,
+  InboxList,
+  InboxMove,
+  InboxOrder,
+  InboxOutline,
+  InboxFirstPage,
+  InboxGroup,
+  InboxGroupDetail,
+  InboxGroupMember,
+  InboxGroupQuery,
+  InboxNextPage,
+  InboxQuery,
+  InboxRefresh,
+  InboxReply,
+  InboxRows,
+  InboxActiveTask,
+  InboxThing,
+  InboxValueQuery,
+  InboxValues,
   LiveWorkflow,
   MAX_CONTEXT_DEPTH,
   MAX_ACTING_CONNECTIONS,
@@ -794,11 +870,16 @@ export {
   MAX_ENTITY_SIGNALS,
   MAX_ENTITY_SUGGESTIONS,
   MAX_ENTITY_TIMELINE,
-  MAX_INBOX_CARDS,
-  MAX_INBOX_HINTS,
-  MAX_INBOX_LINKS,
-  MAX_INBOX_PEERS,
-  MAX_INBOX_PLACES,
+  MAX_INBOX_ASKS,
+  MAX_INBOX_ACCOUNTS,
+  MAX_INBOX_MOVED_THINGS,
+  MAX_INBOX_HELD_REFS,
+  MAX_INBOX_PAGE,
+  MAX_INBOX_PAGE_FACET_VALUES,
+  MAX_INBOX_QUERY_CLAUSES,
+  MAX_INBOX_RAIL_FACET_VALUES,
+  MAX_INBOX_SUGGESTIONS,
+  MAX_INBOX_TEXT_LENGTH,
   MAX_LIVE_WORKFLOWS,
   MAX_OFFER_MESSAGE_LENGTH,
   MAX_OFFER_SET_ID_LENGTH,
@@ -915,16 +996,10 @@ export {
 export {
   ConnectionEventCounts,
   EVENT_COUNT_HOURS,
-  EVENT_HANDLINGS,
   EventCountsByConnection,
-  EventFacts,
-  EventResolvedSignalFact,
-  EventIgnoredByFact,
-  EventHandling,
   EventKnownByFact,
   EventSignalFact,
-  EventTaskFact,
-  EventWithFacts,
+  ListedEvent,
   MAX_EVENT_SOURCE_LENGTH,
   RUNNER_ACTIVITY_KINDS,
   type RunnerActivityKind,
@@ -1007,7 +1082,13 @@ export {
   TriggerEvent,
 } from "./groups/run";
 export { summarizeCause, truncateMessage } from "./plugin-messages";
-export { truncateText, shortenLibraryMessage, joinNames, quoteAuthorText } from "./excerpts";
+export {
+  truncateText,
+  shortenLibraryMessage,
+  joinNames,
+  joinAllNames,
+  quoteAuthorText,
+} from "./excerpts";
 export { APPROVAL_ANSWER_LABELS, describeApprovalAnswer } from "./approval-answers";
 export { PERMISSION_ANSWER_LABELS, describePermissionAnswer } from "./permission-answers";
 export { WorkflowAction, WorkflowActionRunsIn } from "./groups/workflow-action";

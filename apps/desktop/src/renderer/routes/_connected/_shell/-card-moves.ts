@@ -56,11 +56,7 @@ import {
 import type { WorkBoard, WorkCard } from "@hercule/contract";
 import type { SpringName } from "../../../app/motion";
 import type { AccountScope } from "../../../app/account-scope";
-import {
-  buildCachedInboxWriter,
-  type CardMover,
-  type PutBackRequest,
-} from "../../../app/card-mover";
+import type { CardMover, PutBackRequest } from "../../../app/card-mover";
 import type { PendingMove } from "../../../app/pending-card-moves";
 import type { Gesture } from "../../../app/undo-stack";
 import { useUndoLine, type UndoLineState } from "../../../app/use-undo-line";
@@ -460,7 +456,6 @@ export const useCardMoves = ({
     () => ({
       putCardBack,
       putEndedCardBack,
-      writeInboxEdit: buildCachedInboxWriter(queryClient),
     }),
     () => isCarrying,
   );

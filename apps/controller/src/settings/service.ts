@@ -31,7 +31,8 @@ import { requireUserActor, USER_ACTOR } from "../actor";
 import { connectionRepository, isGithubConnection } from "../connections";
 import { afterCommit, withTransaction } from "../db";
 import { AuditLog } from "../events";
-import { decideProviderAccountHarness, PluginHost } from "../plugins";
+import { mcpServerListRule, requireMcpManage } from "../mcp-servers";
+import { decideProviderAccountHarness, decideTextGenerationHarness, PluginHost } from "../plugins";
 import { Settings, type SettingError, type TypedScope } from "./repository";
 import { validateTimezone } from "./timezone";
 
@@ -54,12 +55,15 @@ const THREAD_HARNESS = "thread.harnessId";
 
 const NO_SUCH_ACCOUNT = "that provider account does not exist";
 
+const THREAD_MCP_SERVERS = "thread.mcpServerIds";
+
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const settings = yield* Settings;
   const connections = yield* connectionRepository;
   const audit = yield* AuditLog;
   const host = yield* PluginHost;
+  const mcpServerLists = yield* mcpServerListRule;
   // A wake needs no payload, and one unread change already says that the
   // setting changed, so the PubSub keeps only the latest.
   const textGenerationModelWrites = yield* PubSub.sliding<void>(1);
@@ -92,9 +96,13 @@ const make = Effect.gen(function* () {
    * `harnessId` is absent or null). Fails with a validation error otherwise,
    * because a setting pointing at such a pair could never run. The error names
    * the part that is wrong and says why. `pathOf` gives the path of the
-   * account or of the harness within the patch.
+   * account or of the harness within the patch. `decideHarness` is the rule for
+   * whether the pair can run: `decideProviderAccountHarness` for a setting
+   * that starts sessions, `decideTextGenerationHarness` for one that makes
+   * text generations.
    */
   const validateProviderAccountHarness = (
+    decideHarness: typeof decideProviderAccountHarness,
     providerAccountId: string,
     harnessId: string | null | undefined,
     pathOf: (field: "providerAccountId" | "harnessId") => ReadonlyArray<string>,
@@ -106,7 +114,7 @@ const make = Effect.gen(function* () {
           createValidationError([{ path: pathOf("providerAccountId"), message: NO_SUCH_ACCOUNT }]),
         );
       }
-      const choice = decideProviderAccountHarness(
+      const choice = decideHarness(
         yield* host.providers(),
         yield* host.harnesses(),
         account.value,
@@ -119,17 +127,22 @@ const make = Effect.gen(function* () {
       }
     });
 
-  /** Checks the account and harness of `textGeneration.model`, when the patch chooses a model. */
+  /**
+   * Checks the account and harness of `textGeneration.model`, when the patch
+   * chooses a model. Besides the checks of any account and harness, it
+   * refuses a harness that cannot make text generations.
+   */
   const validateTextGenerationProviderAccount = (
     patch: SettingsPatch,
   ): Effect.Effect<void, Validation | SqlError | Schema.SchemaError> => {
     const chosen = patch.controller?.[TEXT_GENERATION_MODEL];
     if (chosen === undefined || typeof chosen === "string") return Effect.void;
-    return validateProviderAccountHarness(chosen.providerAccountId, chosen.harnessId, (field) => [
-      "controller",
-      TEXT_GENERATION_MODEL,
-      field,
-    ]);
+    return validateProviderAccountHarness(
+      decideTextGenerationHarness,
+      chosen.providerAccountId,
+      chosen.harnessId,
+      (field) => ["controller", TEXT_GENERATION_MODEL, field],
+    );
   };
 
   /**
@@ -154,16 +167,31 @@ const make = Effect.gen(function* () {
       const providerAccountId = patched[THREAD_PROVIDER_ACCOUNT] ?? stored[THREAD_PROVIDER_ACCOUNT];
       if (providerAccountId === undefined) return;
       yield* validateProviderAccountHarness(
+        decideProviderAccountHarness,
         providerAccountId,
         patched[THREAD_HARNESS] === undefined ? stored[THREAD_HARNESS] : patched[THREAD_HARNESS],
         (field) => ["user", field === "harnessId" ? THREAD_HARNESS : THREAD_PROVIDER_ACCOUNT],
       );
     });
 
+  /**
+   * Returns every setting that is set. The thread default list of MCP Servers
+   * comes back without the ids of servers that were deleted: deleting a
+   * server never rewrites the stored list.
+   */
   const readSettingsState = (
     userId: string,
   ): Effect.Effect<SettingsState, SettingError | SqlError> =>
-    Effect.all({ controller: settings.all(), user: settings.allForUser(userId) });
+    Effect.gen(function* () {
+      const state = yield* Effect.all({
+        controller: settings.all(),
+        user: settings.allForUser(userId),
+      });
+      const stored = state.user[THREAD_MCP_SERVERS];
+      if (stored === undefined) return state;
+      const existing = yield* mcpServerLists.keepExisting(stored);
+      return { ...state, user: { ...state.user, [THREAD_MCP_SERVERS]: existing } };
+    });
 
   /**
    * `settings.set` and `settings.setForUser`, with the key typed as a plain
@@ -207,6 +235,19 @@ const make = Effect.gen(function* () {
      */
     textGenerationModelChanges: Stream.fromPubSub(textGenerationModelWrites),
 
+    /**
+     * Returns the MCP Servers a Thread with no project starts with: the user's
+     * `thread.mcpServerIds` in order, without the ids of servers that were
+     * deleted. Empty when the setting is unset. It is not an operation and
+     * checks no grant: the caller has checked its own.
+     */
+    readThreadMcpServerIds: (
+      userId: string,
+    ): Effect.Effect<ReadonlyArray<string>, SettingError | SqlError> =>
+      Effect.flatMap(settings.allForUser(userId), (user) =>
+        mcpServerLists.keepExisting(user[THREAD_MCP_SERVERS] ?? []),
+      ),
+
     /** Returns every setting that is set: the controller's settings and the caller's own. */
     read: (): Effect.Effect<SettingsState, Unauthenticated | Forbidden | SettingError | SqlError> =>
       Effect.flatMap(requireUserActor("settings.read"), (actor) => readSettingsState(actor.userId)),
@@ -224,6 +265,11 @@ const make = Effect.gen(function* () {
      * succeed and write an audit entry for a change that did not happen. To
      * read the settings without writing, use `settings.read`. A timezone that
      * is not an IANA zone name fails with a validation error too.
+     *
+     * A patch that sets `thread.mcpServerIds` also needs the `mcp.manage`
+     * grant, and fails with a validation error when the list names a server
+     * that does not exist, names one twice, or names two servers with the
+     * same name.
      */
     update: (
       patch: SettingsPatch,
@@ -244,6 +290,8 @@ const make = Effect.gen(function* () {
         if (patch.user?.timezone !== undefined) {
           yield* validateTimezone(patch.user.timezone, ["user", "timezone"]);
         }
+        const mcpServerIds = patch.user?.[THREAD_MCP_SERVERS];
+        if (mcpServerIds !== undefined) yield* requireMcpManage;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -253,6 +301,9 @@ const make = Effect.gen(function* () {
             yield* validateGithubConnection(patch);
             yield* validateTextGenerationProviderAccount(patch);
             yield* validateThreadProviderAccount(patch, actor.userId);
+            if (mcpServerIds !== undefined) {
+              yield* mcpServerLists.checkList(mcpServerIds, ["user", THREAD_MCP_SERVERS]);
+            }
             const written = [
               ...(patch.controller === undefined
                 ? []

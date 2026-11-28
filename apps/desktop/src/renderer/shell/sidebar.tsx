@@ -34,7 +34,7 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *
  * - the top strip, where macOS draws the window's traffic lights, with the
  *   Hide the sidebar button;
- * - the face switch, Threads | Hercule;
+ * - the face switch, Threads | Work;
  * - one row of actions: New thread, which calls `onNewThread`, then Search
  *   and the Office as square icon buttons, where the book draws New thread
  *   and Search as two rows and has no Office button;
@@ -58,7 +58,7 @@ import { SELECTED_LINK_PROPS } from "../screens/selected-link-props";
  *   signed-in user and the Settings button.
  *
  * The face follows the screen (`decideScreenFace`). The switch, and View ›
- * Threads and View › Hercule in the menu, change it without leaving the
+ * Threads and View › Work in the menu, change it without leaving the
  * screen.
  *
  * Search is drawn but does nothing yet, and carries `aria-disabled` to say
@@ -317,7 +317,7 @@ export const Sidebar = memo(function Sidebar({
           a Waiting on you row, keeps its focus when the face changes. */}
       <SidebarList
         id={listId}
-        label={face === "threads" ? "Threads" : "Hercule"}
+        label={face === "threads" ? "Threads" : "Work"}
         items={face === "threads" ? items : items.filter((item) => item.section === "waiting")}
         officeOpen={officeOpen}
         actions={listActions}

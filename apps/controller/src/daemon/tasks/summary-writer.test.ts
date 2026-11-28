@@ -50,7 +50,7 @@ import {
   type RunnerTraits,
 } from "../../text-generation/testing";
 import { AccountUsageLayer } from "../../usage";
-import { TaskTrackingRunsLayer } from "../runs";
+import { TaskRunsLayer } from "../runs";
 import { TaskServicePortsLayer } from "./task-service";
 import { runTaskSummaryLoop } from "./summary-writer";
 
@@ -96,7 +96,7 @@ const layerOf = (model: StandInModel) =>
   Layer.mergeAll(
     TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer)),
     TaskSummariesLayer.pipe(Layer.provide(ServingPromotionStateLayer)),
-    TaskTrackingRunsLayer,
+    TaskRunsLayer,
     TextGenerationModelsLayer,
     Layer.succeed(TextGeneration)({
       generate: (call) =>

@@ -1,6 +1,6 @@
 /**
  * Tests the output-schema subset: what a schema may contain if it is to mean
- * the same thing on all three harnesses.
+ * the same thing on every harness that gives structured results.
  *
  * The lint returns issues, never a boolean: each case below has exactly one
  * thing wrong with an otherwise valid schema, and checks that the issue gives

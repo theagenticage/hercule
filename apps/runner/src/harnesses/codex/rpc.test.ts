@@ -126,9 +126,9 @@ describe("what the codec writes", () => {
         // Codex leaves out `jsonrpc` in both directions, and accepts frames without it.
         expect(Object.keys(frame)).not.toContain("jsonrpc");
 
-        peer.answer(JSON.stringify({ id: frame["id"], result: { userAgent: "hercule/0.154.0" } }));
+        peer.answer(JSON.stringify({ id: frame["id"], result: { userAgent: "hercule/0.171.0" } }));
         const answered = yield* Fiber.join(asked);
-        expect(answered).toEqual({ userAgent: "hercule/0.154.0" });
+        expect(answered).toEqual({ userAgent: "hercule/0.171.0" });
         yield* Fiber.interrupt(pumping);
       }),
     );

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { ProbeRect } from "./ui-probe-types";
-import { computeLostShare, type ClippingAncestor, type OverflowAxes } from "./ui-probe-clipping";
+import {
+  computeLostShare,
+  isOnSpacingGrid,
+  type ClippingAncestor,
+  type OverflowAxes,
+} from "./ui-probe-clipping";
 
 const WINDOW: ProbeRect = { left: 0, top: 0, right: 1440, bottom: 900 };
 
@@ -66,5 +71,14 @@ describe("computeLostShare", () => {
     },
   ])("$name", ({ box, ancestors, lost }) => {
     expect(computeLostShare(box, ancestors, WINDOW)).toBeCloseTo(lost);
+  });
+});
+
+describe("isOnSpacingGrid", () => {
+  it("accepts multiples of 4 within a hundredth of a pixel and refuses other values", () => {
+    expect(isOnSpacingGrid(12)).toBe(true);
+    expect(isOnSpacingGrid(12.004)).toBe(true);
+    expect(isOnSpacingGrid(6)).toBe(false);
+    expect(isOnSpacingGrid(12.02)).toBe(false);
   });
 });

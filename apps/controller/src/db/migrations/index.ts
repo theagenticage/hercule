@@ -126,7 +126,21 @@ import signalThreadIndex from "./0115-signal-thread-index";
 import entityHandoffs from "./0116-entity-handoffs";
 import stageFacts from "./0117-stage-facts";
 import initiativesAndBlockers from "./0118-initiatives-and-blockers";
-import stageReports from "./0119-stage-reports";
+import entityFields from "./0120-entity-fields";
+import linkTakenAt from "./0121-link-taken-at";
+import entityTakeOns from "./0122-entity-take-ons";
+import sessionTaint from "./0123-session-taint";
+import connectionCredentialsGeneration from "./0124-connection-credentials-generation";
+import mcpServers from "./0125-mcp-servers";
+import mcpGrants from "./0126-mcp-grants";
+import mcpServerLists from "./0127-mcp-server-lists";
+import sessionMcpGateway from "./0129-session-mcp-gateway";
+import mcpServerUrlSource from "./0130-mcp-server-url-source";
+import dropIntakeIndexes from "./0131-drop-intake-indexes";
+import dropSignalSnoozes from "./0132-drop-signal-snoozes";
+import mcpServerSignInGeneration from "./0133-mcp-server-sign-in-generation";
+import wikiPageArchive from "./0134-wiki-page-archive";
+import stageReports from "./0136-stage-reports";
 
 export const migrations: ReadonlyArray<ResolvedMigration> = [
   [1, "initial", Effect.succeed(initial)],
@@ -247,7 +261,21 @@ export const migrations: ReadonlyArray<ResolvedMigration> = [
   [116, "entity-handoffs", Effect.succeed(entityHandoffs)],
   [117, "stage-facts", Effect.succeed(stageFacts)],
   [118, "initiatives-and-blockers", Effect.succeed(initiativesAndBlockers)],
-  [119, "stage-reports", Effect.succeed(stageReports)],
+  [120, "entity-fields", Effect.succeed(entityFields)],
+  [121, "link-taken-at", Effect.succeed(linkTakenAt)],
+  [122, "entity-take-ons", Effect.succeed(entityTakeOns)],
+  [123, "session-taint", Effect.succeed(sessionTaint)],
+  [124, "connection-credentials-generation", Effect.succeed(connectionCredentialsGeneration)],
+  [125, "mcp-servers", Effect.succeed(mcpServers)],
+  [126, "mcp-grants", Effect.succeed(mcpGrants)],
+  [127, "mcp-server-lists", Effect.succeed(mcpServerLists)],
+  [129, "session-mcp-gateway", Effect.succeed(sessionMcpGateway)],
+  [130, "mcp-server-url-source", Effect.succeed(mcpServerUrlSource)],
+  [131, "drop-intake-indexes", Effect.succeed(dropIntakeIndexes)],
+  [132, "drop-signal-snoozes", Effect.succeed(dropSignalSnoozes)],
+  [133, "mcp-server-sign-in-generation", Effect.succeed(mcpServerSignInGeneration)],
+  [134, "wiki-page-archive", Effect.succeed(wikiPageArchive)],
+  [136, "stage-reports", Effect.succeed(stageReports)],
 ];
 
 /** The schema version of this binary: the highest embedded migration id. */

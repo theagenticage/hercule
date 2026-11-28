@@ -18,6 +18,7 @@
  *
  * The schema itself rejects unknown keys; `closedStruct` explains why.
  */
+import { PluginId } from "@hercule/plugin-host";
 import { Schema } from "effect";
 import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
@@ -27,6 +28,8 @@ import { Forbidden, Internal, Unauthenticated, Validation } from "../errors";
 import { Id, Timestamp } from "../ids";
 import { atMost, Timezone } from "../strings";
 import { Authenticated } from "../security";
+import { InboxBrowseValue } from "./external-entity";
+import { McpServerIds } from "./mcp-server";
 import { MuteKey } from "./notification";
 import { SpawnBound } from "./workflow-definition";
 
@@ -43,6 +46,15 @@ export { AccessMode };
  * whole on every write, so one generous bound covers them.
  */
 export const MAX_SETTING_LIST = 256;
+
+/** The most pins or folded sources the Inbox's rail keeps. */
+const MAX_INBOX_RAIL_ENTRIES = 50;
+
+/** One source, or one account of it, as the Inbox's rail names it. */
+const InboxRailSource = {
+  source: PluginId,
+  connectionId: Schema.optionalKey(Id),
+};
 
 /** A retention window or a snapshot count, in whole days or whole snapshots. */
 const PositiveDays = Schema.Int.check(Schema.isGreaterThan(0));
@@ -204,6 +216,12 @@ export const SETTING_VALUES = {
     "thread.accessMode": AccessMode,
     "thread.profileId": Id,
     /**
+     * The MCP Servers a Thread with no project starts with. Unset or empty
+     * means none. Writing it needs `mcp.manage`. It is never rewritten when a
+     * server is deleted: a read drops the ids that no longer exist.
+     */
+    "thread.mcpServerIds": McpServerIds,
+    /**
      * What a thread opens in: the repo's main workspace or a worktree of its
      * own. When unset, the project decides: a project with one repo uses the
      * main workspace, and one with several uses a worktree. A project with no
@@ -217,6 +235,18 @@ export const SETTING_VALUES = {
     "github.defaultConnectionId": Schema.NullOr(Id),
     /** The density of a thread row in the sidebar: `meta` unless set otherwise. */
     "ui.threadRows": ThreadRows,
+    /**
+     * The facet values the user pinned on the Inbox's rail, in the order
+     * pinned: the value of the field `key` in `source`, optionally in one
+     * account. The label is not stored, because the rail reads it live.
+     */
+    "inbox.pins": atMost(InboxBrowseValue, MAX_INBOX_RAIL_ENTRIES),
+    /**
+     * The sources, or accounts of a source, whose Browse section the user
+     * folded on the Inbox's rail. Empty, or unset, means every source is
+     * open.
+     */
+    "inbox.browseFolded": atMost(Schema.Struct(InboxRailSource), MAX_INBOX_RAIL_ENTRIES),
   },
 } as const;
 

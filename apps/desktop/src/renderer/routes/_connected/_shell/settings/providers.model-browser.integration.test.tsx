@@ -35,6 +35,7 @@ import {
   holdAnswer,
   renderApp,
   SIDEBAR_FIXTURE,
+  stopRequestTimeLimit,
   stubApi,
   stubElementSize,
   type Answer,
@@ -304,6 +305,7 @@ describe("The model browser", () => {
   });
 
   it("keeps the focus on the Add button and closes nothing while the save runs", async () => {
+    stopRequestTimeLimit();
     const update = holdAnswer();
     await openProviders({ updateAnswer: update.handler });
     const dialog = await openBrowser();
@@ -324,6 +326,7 @@ describe("The model browser", () => {
   });
 
   it("lets the picks change only when no save runs: a held save saves exactly what was picked at the press", async () => {
+    stopRequestTimeLimit();
     const update = holdAnswer();
     const calls = await openProviders({ updateAnswer: update.handler });
     const dialog = await openBrowser();
@@ -355,6 +358,7 @@ describe("The model browser", () => {
   });
 
   it("lets the picks change again after the save is refused", async () => {
+    stopRequestTimeLimit();
     const update = holdAnswer();
     await openProviders({ updateAnswer: update.handler });
     const dialog = await openBrowser();

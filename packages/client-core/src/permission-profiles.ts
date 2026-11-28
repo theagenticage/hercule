@@ -57,6 +57,10 @@ export const GRANT_FAMILY_TEXT: Readonly<
     label: "Skills",
     hint: "Your skills. Write proposes a new version. Apply puts one in place or deletes a skill.",
   },
+  mcp: {
+    label: "MCP servers",
+    hint: "Manage adds, switches off and removes them. Use calls their tools.",
+  },
   permission: {
     label: "Permissions",
     hint: "These profiles, and deciding a permission request.",
@@ -212,8 +216,8 @@ export const sortProfiles = <P extends Pick<Profile, "id" | "name" | "shipped">>
   profiles.toSorted((a, b) => Number(b.shipped) - Number(a.shipped) || compareByNameThenId(a, b));
 
 /**
- * The name of the shipped profile that holds every grant except `skill.write`
- * and `skill.apply`, which only the user gives a profile.
+ * The name of the shipped profile that holds every grant except
+ * `GRANTS_ONLY_THE_USER_GIVES`, which only the user gives a profile.
  */
 const UNRESTRICTED_PROFILE_NAME = "unrestricted";
 

@@ -81,6 +81,7 @@ const FULL: Printed = {
   claude: "1.0.0",
   codex: "1.0.0",
   pi: "1.0.0",
+  agy: "1.0.0",
 };
 
 /** Returns `printed` without the binary `name`. */
@@ -374,6 +375,7 @@ describe("harness binaries", () => {
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: true, path: "/usr/local/bin/pi" },
+      { name: "agy", present: true, path: "/usr/local/bin/agy" },
     ]);
   });
 
@@ -383,6 +385,7 @@ describe("harness binaries", () => {
       { name: "claude", present: false },
       { name: "codex", present: false },
       { name: "pi", present: false },
+      { name: "agy", present: false },
     ]);
   });
 });
@@ -416,7 +419,7 @@ describe("buildThisMachine", () => {
     expect(facts.os).toBe(platform());
     expect(facts.arch).toBe(arch());
     expect(facts.totalMemoryBytes).toBe(totalmem());
-    expect(facts.harnesses.map((one) => one.name)).toEqual(["claude", "codex", "pi"]);
+    expect(facts.harnesses.map((one) => one.name)).toEqual(["claude", "codex", "pi", "agy"]);
   });
 
   describe("running a version command", () => {
@@ -554,7 +557,7 @@ describe("refreshFacts", () => {
         expect(sent[0]?.toolchains.map((one) => one.name)).not.toContain("gh");
         // A report holds all the facts, not only the ones that changed.
         expect(sent[0]?.os).toBe(platform());
-        expect(sent[0]?.harnesses).toHaveLength(3);
+        expect(sent[0]?.harnesses).toHaveLength(4);
 
         // Once the machine stops changing, nothing more is sent. So the probe is
         // compared with the last report sent, not with the hello.
@@ -608,11 +611,13 @@ describe("adapters", () => {
       "claude-code/claude-code",
       "codex/codex",
       "pi/pi",
+      "antigravity/antigravity",
     ]);
     expect((await probePrinted({ git: GIT })).adapters).toEqual([
       "claude-code/claude-code",
       "codex/codex",
       "pi/pi",
+      "antigravity/antigravity",
     ]);
   });
 
@@ -621,13 +626,19 @@ describe("adapters", () => {
     expect(codex).toBeDefined();
 
     const facts = await probePrinted(withoutCodex);
-    expect(facts.adapters).toEqual(["claude-code/claude-code", "codex/codex", "pi/pi"]);
+    expect(facts.adapters).toEqual([
+      "claude-code/claude-code",
+      "codex/codex",
+      "pi/pi",
+      "antigravity/antigravity",
+    ]);
     // Adapters do not replace the binaries: the fleet has to show both that
     // this build can drive Codex and that the machine has no `codex` binary.
     expect(facts.harnesses).toEqual([
       { name: "claude", present: true, path: "/usr/local/bin/claude" },
       { name: "codex", present: false },
       { name: "pi", present: true, path: "/usr/local/bin/pi" },
+      { name: "agy", present: true, path: "/usr/local/bin/agy" },
     ]);
   });
 });

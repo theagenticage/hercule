@@ -191,10 +191,12 @@ export const useAgentLive = (
         skipOpenItems();
       } else {
         for (const tap of delivery.taps) tail.appendTap(tap);
-        frame ??= requestAnimationFrame(() => {
-          frame = null;
-          if (!rowsLandingRef.current) paintTail();
-        });
+        if (frame === null) {
+          frame = requestAnimationFrame(() => {
+            frame = null;
+            if (!rowsLandingRef.current) paintTail();
+          });
+        }
       }
     });
     return () => {

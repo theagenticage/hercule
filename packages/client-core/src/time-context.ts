@@ -321,54 +321,11 @@ export const countCalendarDaysBetween = (
 };
 
 /**
- * Names the date of `instant` as a sentence does, counted in calendar days
- * from `now` in `timezone`:
- *
- * - "today", "tomorrow" and "yesterday", in lower case because the word sits
- *   inside a sentence: "Back today";
- * - the weekday for the other dates up to 7 days ahead or 6 days back:
- *   "Monday";
- * - the date for any other day: "4 Nov".
- *
- * Returns `undefined` in the same cases as `formatTimeContext`.
- */
-export const formatRelativeDay = (
-  instant: Date,
-  now: Date,
-  timezone: string,
-): string | undefined => {
-  const days = countCalendarDaysBetween(now, instant, timezone);
-  if (days === undefined) return undefined;
-  if (days === 0) return "today";
-  if (days === 1) return "tomorrow";
-  if (days === -1) return "yesterday";
-  return isWithinAWeek(days)
-    ? buildPartReader("weekday", instant, timezone)?.("weekday")
-    : formatDay(instant, timezone);
-};
-
-/**
  * Checks whether a date `days` from today is named by its weekday: up to 7
- * days ahead, so a snooze to next Monday picked on a Monday reads "Monday",
- * and up to 6 days back, so no weekday names two dates.
+ * days ahead, so next Monday seen on a Monday reads "Mon", and up to 6 days
+ * back, so no weekday names two dates.
  */
 const isWithinAWeek = (days: number): boolean => days >= -6 && days <= 7;
-
-/**
- * Formats an instant as a sentence names it, relative to `now` in
- * `timezone`: "today 14:00", "Monday 09:00", "4 Nov 09:00". The day is named
- * as `formatRelativeDay` names it. Returns `undefined` in the same cases as
- * `formatTimeContext`.
- */
-export const formatRelativeMoment = (
-  instant: Date,
-  now: Date,
-  timezone: string,
-): string | undefined => {
-  const day = formatRelativeDay(instant, now, timezone);
-  const clock = formatClock(instant, timezone);
-  return day === undefined || clock === undefined ? undefined : `${day} ${clock}`;
-};
 
 /**
  * Formats an instant as short as the end of a row or a menu item allows,
@@ -461,8 +418,8 @@ const readUtcOffset = (instant: number, timezone: string): number | undefined =>
  *   skipped when daylight saving time starts, or the day Samoa skipped in
  *   2011, it returns `undefined`.
  * - When the clock reads it twice, as in the hour repeated when daylight
- *   saving time ends, it returns the later instant: a snooze until 01:30 on
- *   that night then never comes back before the user expects it.
+ *   saving time ends, it returns the later instant, so a time picked for
+ *   01:30 that night never arrives before the user expects it.
  * - It also returns `undefined` when the zone cannot be read.
  */
 export const computeZonedInstant = (

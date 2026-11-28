@@ -476,9 +476,12 @@ describe("a poll that repeats what is stored", () => {
 
 describe("a person's link", () => {
   const link = (claims: Claims, fromRef: string, toRef: string) =>
-    claims.changePersonLink({ change: "link", fromRef, toRef, actor: "user", now: AT });
+    claims.changePersonLink({ change: "link", fromRef, toRefs: [toRef], actor: "user", now: AT });
   const unlink = (claims: Claims, fromRef: string, toRef: string) =>
-    claims.changePersonLink({ change: "unlink", fromRef, toRef });
+    Effect.map(
+      claims.changePersonLink({ change: "unlink", fromRef, toRefs: [toRef] }),
+      (changes) => ({ ...changes, remaining: changes.pairs[0]?.remaining }),
+    );
 
   it("is one claim for a pair in either direction, and unlink removes only the person's claim", async () => {
     const result = await run((claims, sql) =>

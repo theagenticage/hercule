@@ -1,79 +1,70 @@
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it } from "vitest";
-import { createAgentFolder, makeModelFilesWriter } from "./agent-folder";
+import { createAgentFolder, makeModelFilesBuilder, removeAgentFolder } from "./agent-folder";
 import { cleanupHomes, createPiHome } from "./testing";
 
 describe("a private agent folder", () => {
+  const NO_FILES = { store: undefined, modelsText: undefined, toolsFolder: undefined };
+
   it("is readable by this user only", () => {
-    const folder = createAgentFolder();
+    const folder = createAgentFolder(NO_FILES);
     try {
-      expect(statSync(folder.path).mode & 0o777).toBe(0o700);
+      expect(statSync(folder).mode & 0o777).toBe(0o700);
     } finally {
-      folder.discard();
+      removeAgentFolder(folder);
     }
   });
 
-  it("stays until every process that borrowed it has released it", () => {
-    const folder = createAgentFolder();
-    const releaseRoot = folder.borrow();
-    const releaseSubagent = folder.borrow();
+  it("is a new folder each time", () => {
+    const first = createAgentFolder(NO_FILES);
+    const second = createAgentFolder(NO_FILES);
 
-    releaseRoot();
-    expect(existsSync(folder.path)).toBe(true);
-    releaseSubagent();
-    expect(existsSync(folder.path)).toBe(false);
+    expect(second).not.toBe(first);
+    removeAgentFolder(first);
+    expect(existsSync(second)).toBe(true);
+    removeAgentFolder(second);
   });
 
-  it("refuses a borrow once it is removed", () => {
-    const folder = createAgentFolder();
-    folder.borrow()();
+  it("is removed with what is in it", () => {
+    const folder = createAgentFolder({ ...NO_FILES, modelsText: "{}" });
 
-    expect(() => folder.borrow()).toThrow("already removed");
-  });
+    removeAgentFolder(folder);
 
-  it("is removed at once when a launch discards it before any process borrowed it", () => {
-    const folder = createAgentFolder();
-
-    folder.discard();
-
-    expect(existsSync(folder.path)).toBe(false);
+    expect(existsSync(folder)).toBe(false);
   });
 });
 
-describe("the model files writer", () => {
-  // No catalog models, so the writer never starts pi.
-  const write = makeModelFilesWriter(() => {
+describe("the model files", () => {
+  // No catalog models, so the builder never starts pi.
+  const build = makeModelFilesBuilder(() => {
     throw new Error("pi must not start");
   });
 
-  const writeInto = (home: string): { folder: string; discard: () => void } => {
-    const folder = createAgentFolder();
-    Effect.runSync(write(folder.path, "pi", { home, modelArgument: "openrouter/x" }, {}));
-    return { folder: folder.path, discard: folder.discard };
-  };
+  const createFolderFor = (home: string): string =>
+    createAgentFolder(Effect.runSync(build("pi", { home, modelArgument: "openrouter/x" }, {})));
 
   it("makes the tools the home holds visible in the folder", () => {
     const home = createPiHome();
     mkdirSync(join(home, "bin"));
     writeFileSync(join(home, "bin", "fd"), "#!/bin/sh\n");
-    const { folder, discard } = writeInto(home);
+    const folder = createFolderFor(home);
     try {
       expect(existsSync(join(folder, "bin", "fd"))).toBe(true);
     } finally {
-      discard();
+      removeAgentFolder(folder);
       cleanupHomes();
     }
   });
 
   it("leaves the tools folder out when the home has none", () => {
     const home = createPiHome();
-    const { folder, discard } = writeInto(home);
+    const folder = createFolderFor(home);
     try {
       expect(existsSync(join(folder, "bin"))).toBe(false);
     } finally {
-      discard();
+      removeAgentFolder(folder);
       cleanupHomes();
     }
   });
@@ -82,11 +73,27 @@ describe("the model files writer", () => {
     const home = createPiHome();
     mkdirSync(join(home, "bin"));
     writeFileSync(join(home, "bin", "fd"), "#!/bin/sh\n");
-    const { discard } = writeInto(home);
-    discard();
+    removeAgentFolder(createFolderFor(home));
     try {
       expect(existsSync(join(home, "bin", "fd"))).toBe(true);
     } finally {
+      cleanupHomes();
+    }
+  });
+
+  it("writes the same files into every folder, whatever happened to the home since", () => {
+    const home = createPiHome();
+    writeFileSync(join(home, "models.json"), '{"providers":{}}');
+    const files = Effect.runSync(build("pi", { home, modelArgument: "openrouter/x" }, {}));
+    const first = createAgentFolder(files);
+    writeFileSync(join(home, "models.json"), "CHANGED");
+    const second = createAgentFolder(files);
+    try {
+      expect(readFileSync(join(first, "models.json"), "utf8")).toBe('{"providers":{}}');
+      expect(readFileSync(join(second, "models.json"), "utf8")).toBe('{"providers":{}}');
+    } finally {
+      removeAgentFolder(first);
+      removeAgentFolder(second);
       cleanupHomes();
     }
   });

@@ -3,7 +3,11 @@ import type { HarnessDefinition, ProviderDefinition } from "@hercule/plugin-host
 import type { RegisteredHarness } from "./harnesses";
 import type { RegisteredProvider } from "./providers";
 import { buildHarnessDefinition } from "./testing";
-import { decideProviderAccountHarness, listCredentialVariables } from "./harness-support";
+import {
+  decideProviderAccountHarness,
+  decideTextGenerationHarness,
+  listCredentialVariables,
+} from "./harness-support";
 
 const PROVIDER: RegisteredProvider = {
   id: "vendor/vendor",
@@ -179,6 +183,16 @@ describe("decideProviderAccountHarness", () => {
       _tag: "refused",
       field: "providerAccountId",
       reason: expect.stringContaining("no account kind token") as unknown,
+    });
+  });
+});
+
+describe("decideTextGenerationHarness", () => {
+  it("returns a refusal of decideProviderAccountHarness unchanged", () => {
+    expect(decideTextGenerationHarness(PROVIDERS, HARNESSES, ACCOUNT, "delta/delta")).toEqual({
+      _tag: "refused",
+      field: "harnessId",
+      reason: "this build carries no delta/delta harness",
     });
   });
 });

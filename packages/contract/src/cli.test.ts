@@ -14,9 +14,16 @@ interface FieldRow {
   readonly hidden?: true;
   readonly stdin?: true;
   readonly skillFolder?: true;
+  readonly oneSkillOnly?: true;
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
+  readonly oneOf?: ReadonlyArray<ObjectRow & { readonly help?: string }>;
+}
+
+interface ObjectRow {
+  readonly fixed: Record<string, string>;
+  readonly flags: Record<string, FieldRow>;
 }
 
 interface Row {
@@ -40,13 +47,25 @@ const visible = rows.filter(([, row]) => row.hidden !== true);
 /**
  * Returns every field that a visible row puts on the command line, as
  * `[operation id, field name, row]`, so the name of a failing test includes the
- * field. Hidden fields are left out, like hidden rows.
+ * field. Hidden fields are left out, like hidden rows. A field filled from
+ * several flags is listed once per flag, named `<field>.<key>`, and so is a
+ * field of several shapes, once per flag of each entry.
  */
 const listVisibleFields = (): ReadonlyArray<[string, string, FieldRow]> =>
   visible.flatMap(([id, row]) =>
     Object.entries(row.fields ?? {})
       .filter(([, field]) => field.hidden !== true)
-      .map(([name, field]) => [id, name, field] as [string, string, FieldRow]),
+      .flatMap(([name, field]): Array<[string, string, FieldRow]> => {
+        return field.oneOf === undefined
+          ? [[id, name, field]]
+          : field.oneOf.flatMap((object) =>
+              Object.entries(object.flags).map(([key, keyRow]): [string, string, FieldRow] => [
+                id,
+                `${name}.${key}`,
+                keyRow,
+              ]),
+            );
+      }),
   );
 
 /** Returns the `resolves` value of every visible field, keyed `<operation> <field>`. */
@@ -66,7 +85,12 @@ const HIDDEN = [
   "task.undoTryAgain",
   "task.readAttention",
   "externalEntity.countInbox",
+  "externalEntity.readInboxOutline",
+  "externalEntity.suggestInboxValues",
+  "externalEntity.readCards",
   "externalEntity.undoTakeOn",
+  "externalEntity.undoTakeOnTogether",
+  "mcpServer.finishSignIn",
 ];
 
 /** The command spelling of every visible operation, as the spec's command table lists it. */
@@ -96,11 +120,8 @@ const COMMANDS: Record<string, string> = {
 
   "task.query": "task list",
   "task.queryBoard": "task board",
-  "task.queryTracking": "task tracking",
-  "task.queryLegs": "task legs",
   "task.read": "task read",
   "task.readDetail": "task details",
-  "task.readTracking": "task read-tracking",
   "task.create": "task create",
   "task.update": "task update",
   "task.reportStage": "task report",
@@ -121,19 +142,19 @@ const COMMANDS: Record<string, string> = {
   "permission.request": "permission request",
   "notification.act": "notification act",
   "signal.query": "signal list",
-  "signal.queryYourWork": "signal your-work",
   "signal.read": "signal read",
   "signal.raise": "signal raise",
   "signal.act": "signal act",
   "signal.handOff": "signal hand-off",
   "signal.withdraw": "signal withdraw",
   "signal.markDone": "signal done",
-  "signal.snooze": "signal snooze",
-  "signal.unsnooze": "signal unsnooze",
-  "signal.lowerPriority": "signal lower-priority",
   "externalEntity.queryInbox": "entity list",
   "externalEntity.read": "entity read",
+  "externalEntity.readInboxGroup": "entity group",
+  "externalEntity.readBlocks": "entity blocks",
   "externalEntity.takeOn": "entity take-on",
+  "externalEntity.matchProject": "entity match-project",
+  "externalEntity.takeOnTogether": "entity take-on-together",
   "externalEntity.handOff": "entity hand-off",
   "externalEntity.undoHandOff": "entity undo-hand-off",
   "externalEntity.dismiss": "entity dismiss",
@@ -282,15 +303,28 @@ const COMMANDS: Record<string, string> = {
   "wikiPage.read": "wiki-page read",
   "wikiPage.create": "wiki-page create",
   "wikiPage.update": "wiki-page update",
+  "wikiPage.archive": "wiki-page archive",
+  "wikiPage.restore": "wiki-page restore",
 
   "skill.query": "skill list",
   "skill.read": "skill read",
   "skill.import": "skill import",
+  "skill.propose": "skill propose",
   "skill.delete": "skill delete",
   "skill.check": "skill check",
   "skill.diff": "skill diff",
   "skill.apply": "skill apply",
+  "skill.reject": "skill reject",
   "skill.applyUpdates": "skill apply-updates",
+
+  "mcpServer.query": "mcp-server list",
+  "mcpServer.read": "mcp-server read",
+  "mcpServer.create": "mcp-server create",
+  "mcpServer.update": "mcp-server update",
+  "mcpServer.delete": "mcp-server delete",
+  "mcpServer.check": "mcp-server check",
+  "mcpServer.setToken": "mcp-server set-token",
+  "mcpServer.startSignIn": "mcp-server sign-in",
 
   "conversation.query": "conversation list",
   "conversation.read": "conversation read",
@@ -357,6 +391,8 @@ const STDIN_FIELDS = [
   "session.continue prompt",
   "session.input text",
   "input.update text",
+  "mcpServer.create source.token",
+  "mcpServer.setToken token",
   "plugin.configure config",
   "providerAccount.create credentials",
   "providerAccount.update credentials",
@@ -379,7 +415,6 @@ const RESOLVES: Record<string, string> = {
   "profile.delete id": "profile.query",
 
   "task.read id": "task.query",
-  "task.readTracking id": "task.query",
   "task.update id": "task.query",
   "task.readDetail id": "task.query",
   "task.linkEntity id": "task.query",
@@ -390,6 +425,9 @@ const RESOLVES: Record<string, string> = {
   "task.move projectId": "project.query",
   "task.move afterTaskId": "task.query",
   "task.move initiativeId": "initiative.query",
+  "task.query projectId": "project.query",
+  "task.create projectId": "project.query",
+  "task.update projectId": "project.query",
   "task.query initiativeId": "initiative.query",
   "task.create initiativeId": "initiative.query",
   "task.update initiativeId": "initiative.query",
@@ -400,7 +438,6 @@ const RESOLVES: Record<string, string> = {
   "task.checkMerge id": "task.query",
   "task.checkMerge intoTaskId": "task.query",
   "task.delete id": "task.query",
-  "task.queryLegs runIds": "run.query",
 
   "notification.read id": "notification.query",
   "notification.withdraw id": "notification.query",
@@ -411,9 +448,6 @@ const RESOLVES: Record<string, string> = {
   "signal.handOff workflowId": "workflow.query",
   "signal.withdraw id": "signal.query",
   "signal.markDone signalIds": "signal.query",
-  "signal.snooze signalIds": "signal.query",
-  "signal.unsnooze signalIds": "signal.query",
-  "signal.lowerPriority signalIds": "signal.query",
   "externalEntity.handOff workflowId": "workflow.query",
   "externalEntity.handOff connectionId": "connection.query",
   "externalEntity.undoHandOff runId": "run.query",
@@ -427,6 +461,7 @@ const RESOLVES: Record<string, string> = {
   "initiative.close id": "initiative.query",
   "initiative.reopen id": "initiative.query",
   "initiative.delete id": "initiative.query",
+  "initiative.query projectId": "project.query",
   "initiative.create projectId": "project.query",
   "initiative.update projectId": "project.query",
 
@@ -435,11 +470,15 @@ const RESOLVES: Record<string, string> = {
   "project.delete id": "project.query",
   "project.create modelProfileId": "modelProfile.query",
   "project.update modelProfileId": "modelProfile.query",
+  "project.create mcpServerIds": "mcpServer.query",
+  "project.update mcpServerIds": "mcpServer.query",
 
+  "resource.query projectId": "project.query",
   "resource.read id": "resource.query",
   "resource.update id": "resource.query",
   "resource.delete id": "resource.query",
 
+  "workspace.query projectId": "project.query",
   "workspace.read id": "workspace.query",
   "workspace.inspect id": "workspace.query",
   "workspace.provision resourceId": "resource.query",
@@ -525,6 +564,17 @@ const RESOLVES: Record<string, string> = {
   "memory.delete id": "assistant.query",
   "wikiPage.read id": "wikiPage.query",
   "wikiPage.update id": "wikiPage.query",
+  "wikiPage.archive id": "wikiPage.query",
+  "wikiPage.restore id": "wikiPage.query",
+
+  "mcpServer.create source.connectionId": "connection.query",
+  "mcpServer.read id": "mcpServer.query",
+  "mcpServer.update id": "mcpServer.query",
+  "mcpServer.update source.connectionId": "connection.query",
+  "mcpServer.delete id": "mcpServer.query",
+  "mcpServer.check id": "mcpServer.query",
+  "mcpServer.setToken id": "mcpServer.query",
+  "mcpServer.startSignIn id": "mcpServer.query",
 
   "conversation.query assistantId": "assistant.query",
   "conversation.read id": "conversation.query",
@@ -543,6 +593,8 @@ const RESOLVES: Record<string, string> = {
   "session.spawn projectId": "project.query",
   "session.spawn runnerId": "runner.query",
   "session.spawn taskId": "task.query",
+  "session.spawn mcpServerIds": "mcpServer.query",
+  "session.update mcpServerIds": "mcpServer.query",
   "session.read id": "session.query",
   "session.querySubagents id": "session.query",
   "session.querySkills id": "session.query",
@@ -798,7 +850,6 @@ const USER_ONLY = [
   "signal.act",
   "signal.handOff",
   "signal.markDone",
-  "signal.lowerPriority",
   "task.merge",
   "initiative.create",
   "initiative.update",
@@ -860,7 +911,23 @@ describe("the skill import row", () => {
 
   it("tells a session to ask the user, because only the user imports", () => {
     expect(row?.errors?.["forbidden"]).toBe(
-      "Only the user imports skills, so a session token is refused whatever grants its profile holds. Ask the user to import the skill.",
+      "Only the user imports skills, so a session token is refused whatever grants its profile holds. Propose the skill instead with `hercule skill propose <folder>`; the user applies it on the Skills screen.",
+    );
+  });
+});
+
+/** `hercule skill propose <folder>` takes one skill folder, and a session is the only caller. */
+describe("the skill propose row", () => {
+  const row = table["skill.propose"];
+
+  it("takes one skill folder in place of the name", () => {
+    expect(row?.fields?.["name"]?.skillFolder).toBe(true);
+    expect(row?.fields?.["name"]?.oneSkillOnly).toBe(true);
+  });
+
+  it("tells the user to import instead, because only a session proposes", () => {
+    expect(row?.errors?.["forbidden"]).toContain(
+      "Only a session proposes a skill revision. Import your own skills instead",
     );
   });
 });

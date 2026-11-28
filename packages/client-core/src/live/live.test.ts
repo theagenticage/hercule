@@ -466,6 +466,35 @@ describe("createLive", () => {
     ]);
   });
 
+  it("invalidates the projects and the settings only for an MCP server push that reports a delete", async () => {
+    const { fetch } = stubTicketServer();
+    const started = createSupervisor(fetch);
+
+    const invalidations: Array<ReadonlyArray<LiveQueryKey>> = [];
+    started.subscribe("mcpServer", (keys) => invalidations.push(keys));
+    started.start();
+    await settleTimers();
+
+    const socket = readLastSocket();
+    const call = socket.calls("subscribe")[0];
+    assert.isDefined(call);
+    socket.chunk(call?.id, [
+      { _tag: "invalidate", ids: ["s-1"], kind: "updated" },
+      { _tag: "invalidate", ids: ["s-1"], kind: "deleted" },
+    ]);
+    await settleTimers();
+
+    // invalidations[0] is the first push, which reads every key of the topic.
+    assert.deepStrictEqual(invalidations[0], [queryKeys.mcpServers(), queryKeys.mcpServer()]);
+    assert.deepStrictEqual(invalidations[1], [queryKeys.mcpServers(), queryKeys.mcpServer("s-1")]);
+    assert.deepStrictEqual(invalidations[2], [
+      queryKeys.mcpServers(),
+      queryKeys.mcpServer("s-1"),
+      queryKeys.projects(),
+      queryKeys.settings(),
+    ]);
+  });
+
   it("invalidates the current session of each conversation a session push names", async () => {
     const { fetch } = stubTicketServer();
     const started = createSupervisor(fetch);
@@ -1000,15 +1029,11 @@ describe("createLive", () => {
 });
 
 describe("buildQueryKeys", () => {
-  it("maps a task push to the list prefix, one detail key per id, Tracking's snapshot, each Tracking pane's read, Your work and the Inbox", () => {
+  it("maps a task push to the list prefix, one detail key per id and the Inbox", () => {
     assert.deepStrictEqual(buildQueryKeys("task", ["a", "b"]), [
       ["tasks"],
       ["task", "a"],
       ["task", "b"],
-      ["tracking"],
-      ["trackingDetail", "a"],
-      ["trackingDetail", "b"],
-      ["your-work"],
       ["inbox"],
       ["inbox-count"],
       ["external-entity"],
@@ -1020,9 +1045,6 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("task", ["a"]), [
       queryKeys.tasks(),
       queryKeys.task("a"),
-      queryKeys.tracking(),
-      queryKeys.trackingDetail("a"),
-      queryKeys.yourWork(),
       queryKeys.inbox(),
       queryKeys.inboxCount(),
       queryKeys.externalEntity(),
@@ -1035,9 +1057,6 @@ describe("buildQueryKeys", () => {
     assert.deepStrictEqual(buildQueryKeys("task", []), [
       ["tasks"],
       ["task"],
-      ["tracking"],
-      ["trackingDetail"],
-      ["your-work"],
       ["inbox"],
       ["inbox-count"],
       ["external-entity"],

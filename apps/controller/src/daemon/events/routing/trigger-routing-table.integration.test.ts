@@ -17,7 +17,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Struct from "effect/Struct";
-import type { EventWithFacts, Notification, Run, SpawnBound } from "@hercule/contract";
+import type { ListedEvent, Notification, Run, SpawnBound } from "@hercule/contract";
 import { uuidFromString, withTransaction } from "../../../db";
 import { del, get, post } from "../../../http/testing";
 import { queryRuns, waitForRunToFinish } from "../../../runs/testing";
@@ -640,7 +640,7 @@ describe("a start trigger's spawn bound", () => {
       token,
     );
     expect(response.status, await response.clone().text()).toBe(200);
-    const { items } = (await response.json()) as { readonly items: ReadonlyArray<EventWithFacts> };
+    const { items } = (await response.json()) as { readonly items: ReadonlyArray<ListedEvent> };
     return items.map((event) => event.id);
   };
 

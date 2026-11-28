@@ -18,6 +18,7 @@ const pushTask = (queryClient: QueryClient, derived: true | undefined): void => 
   invalidateForPush(queryClient, "task", buildQueryKeys("task", ["t1"], undefined, derived), {
     ids: ["t1"],
     kind: "updated",
+    derived: derived === true,
   });
 };
 

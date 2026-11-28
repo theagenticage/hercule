@@ -17,14 +17,18 @@ import {
   type EntityLookup,
   type EntityLookupContext,
   type EntityObservation,
+  type EntityBlockDraft,
   type EntityRecognition,
   type EntityResolution,
 } from "@hercule/plugin-host";
 import { buildAuthorization, callLinear, MAX_PAGE_SIZE, type LinearFailure } from "./api";
 import { INITIATIVE_KIND, ISSUE_KIND, PROJECT_KIND, TEAM_KIND } from "./entity-kinds";
 import { buildIssueObservation, parseRef } from "./entity-reads";
+import { buildDescriptionTextBlocks } from "./signal-kinds";
+import { cutName, cutText, MAX_BODY_LENGTH } from "./text";
 import {
   ApiIssue,
+  buildDescription,
   ISSUE_FRAGMENT,
   ISSUE_SEARCH_FRAGMENT,
   VIEWER_FIELDS,
@@ -217,6 +221,82 @@ export const resolveIssue = (
       : { found: buildIssueObservation(issue, organization, viewer.id, []) };
   });
 
+/** The longest value a `fields` block row takes. */
+const MAX_FIELD_VALUE_LENGTH = 200;
+
+/** Appended to a description that was cut, so the pane says it is not the whole text. */
+const DESCRIPTION_CUT_NOTE =
+  "\n\n*The description is cut here. Open the issue in Linear for the rest.*";
+
+/**
+ * Builds the `fields` block of the facts about an issue that its kind does
+ * not declare as fields: labels, due date, estimate and creator. Returns no
+ * block when the issue has none of them.
+ */
+const buildExtraFieldsBlocks = (issue: ApiIssue): ReadonlyArray<EntityBlockDraft> => {
+  const rows = [
+    ["Labels", issue.labels.nodes.map((label) => cutName(label.name)).join(", ")],
+    ["Due", issue.dueDate ?? ""],
+    ["Estimate", issue.estimate === null ? "" : String(issue.estimate)],
+    ["Creator", issue.creator === null ? "" : cutName(issue.creator.name)],
+  ]
+    .filter(([, value]) => value !== "")
+    .map(([label, value]) => ({ label, value: cutText(value!, MAX_FIELD_VALUE_LENGTH) }));
+  return rows.length === 0 ? [] : [{ type: "fields", rows }];
+};
+
+/**
+ * Reads the issue a ref names in one request and returns the blocks the
+ * Inbox pane draws for it: a `fields` block with the facts its kind does not
+ * declare, then its description as a `text` block. A description past the
+ * plugin's limit is cut and says so.
+ *
+ * Fails as `callLinear` does, with a `PluginError` for a ref that is not an
+ * issue's, and with a `PluginError` when Linear returns no issue, because
+ * Linear answers the same for a missing issue and one the user may not see.
+ */
+export const readIssueBlocks = (
+  authorization: string,
+  ref: string,
+): Effect.Effect<ReadonlyArray<EntityBlockDraft>, LinearFailure, HttpClient.HttpClient> =>
+  Effect.gen(function* () {
+    const parsed = parseRef(ref);
+    if (parsed?.kind !== ISSUE_KIND) {
+      return yield* new PluginError({
+        message: `Linear reads blocks for issues, and ${ref} is not an issue's ref.`,
+      });
+    }
+    const answer = yield* callLinear(
+      authorization,
+      {
+        name: "LinearReadIssue",
+        text: READ_QUERY,
+        variables: { filter: { id: { in: [parsed.id] } } },
+      },
+      ReadAnswer,
+    );
+    const issue = answer.issues.nodes[0];
+    if (issue === undefined || parsed.workspaceId !== answer.organization.id) {
+      return yield* new PluginError({
+        message: `Linear returned no issue for ${ref}. It may be deleted, or you may no longer see it.`,
+      });
+    }
+    const cut = issue.description !== null && issue.description.length > MAX_BODY_LENGTH;
+    const [description] = buildDescriptionTextBlocks(buildDescription(issue));
+    return [
+      ...buildExtraFieldsBlocks(issue),
+      ...(description === undefined
+        ? []
+        : [
+            {
+              ...description,
+              title: "Description",
+              markdown: cut ? description.markdown + DESCRIPTION_CUT_NOTE : description.markdown,
+            },
+          ]),
+    ];
+  });
+
 /**
  * Runs `use` with the Connection's `Authorization` header and a fetch client.
  * A rate limit is a `PluginError` here, because a lookup has no way to wait.
@@ -254,4 +334,6 @@ export const linearEntityLookup: EntityLookup = {
     withAuthorization(context, (authorization) => searchIssues(authorization, query)),
   resolve: (_connection, context, target) =>
     withAuthorization(context, (authorization) => resolveIssue(authorization, target)),
+  readBlocks: (_connection, context, ref) =>
+    withAuthorization(context, (authorization) => readIssueBlocks(authorization, ref)),
 };

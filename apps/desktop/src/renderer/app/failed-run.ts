@@ -15,7 +15,7 @@ export interface FailedRun {
 
 /**
  * Returns whether a run failed on a Task, and a function that opens Work on
- * what failed. The Overview row and the Hercule segment of the face switch
+ * what failed. The Overview row and the Work segment of the face switch
  * both draw the dot from it, so a failure reaches the user from any screen.
  * The read is shell data, so it is cached before the sidebar draws.
  */

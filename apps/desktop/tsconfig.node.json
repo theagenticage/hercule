@@ -16,9 +16,12 @@
     "vite.*.config.ts",
     "vitest.*.config.ts",
     // The motion, font features and tokens tests read every stylesheet of the
-    // renderer with `node:fs`, and each route folder's React Compiler test compiles the pages' sources
-    // it reads the same way, so both belong to the Node program, although each
-    // sits beside the files it checks. tsconfig.renderer.json leaves them out.
+    // renderer with `node:fs`, the first-screen import test reads the
+    // renderer's sources the same way, and each route folder's React Compiler
+    // test compiles the pages' sources it reads, so all of them belong to the
+    // Node program, although each sits beside the files it checks.
+    // tsconfig.renderer.json leaves them out.
+    "src/renderer/first-screen-mcp-imports.test.ts",
     "src/renderer/styles/motion.test.ts",
     "src/renderer/styles/fonts.test.ts",
     "src/renderer/styles/tokens.test.ts",

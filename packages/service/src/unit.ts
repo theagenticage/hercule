@@ -74,7 +74,7 @@ const isDirectory = (path: string): boolean => {
  *
  * A supervisor starts a process with only the system folders on its PATH, so
  * the caller's PATH is passed on, and the controller and the runner find the
- * same harnesses (claude, codex, pi), git and gh as the user does. Relative
+ * same harnesses (claude, codex, pi, agy), git and gh as the user does. Relative
  * entries are dropped, and so are folders that do not exist: the runner starts
  * programs inside workspace checkouts, where `.` on the PATH would let a
  * repository supply its own `git`.

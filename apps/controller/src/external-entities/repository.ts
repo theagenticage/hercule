@@ -27,12 +27,6 @@ import {
   MAX_ENTITY_HINTS,
   MAX_ENTITY_LINKS,
   MAX_ENTITY_SIGNALS,
-  MAX_INBOX_CARDS,
-  MAX_INBOX_HINTS,
-  MAX_INBOX_LINKS,
-  MAX_INBOX_PEERS,
-  MAX_INBOX_PLACES,
-  MAX_LIVE_WORKFLOWS,
   type EntityChange,
   type EntityConflict,
   type EntityLifecycle,
@@ -40,16 +34,12 @@ import {
   type EntityPlace,
   type EntityStatus,
   type ExternalEntityDetail,
-  type Inbox,
-  type InboxCard,
-  type InboxCounts,
   type SignalEntity,
   type TaskStage,
 } from "@hercule/contract";
 import type { EntityObservation } from "@hercule/plugin-host";
 import { INGESTING_STATUSES } from "../connections";
 import { mintUuid, uuidFromString, uuidToString } from "../db";
-import { runRepository } from "../runs";
 import { OPEN_THREAD_REFS_SQL, signalRepository } from "../signals";
 import {
   LIVE_TASK_LINKS_SQL,
@@ -82,20 +72,51 @@ import {
 } from "./entity-records";
 import { announceEntityChanges } from "./announce";
 import { makeEntityLinkReads, readFarEnd } from "./entity-links";
-import { selectInboxPage } from "./riding";
 import { WALK_DOWN_SQL, WALK_UP_SQL } from "./claim-graph";
-import { makeWorkflowOfferReads, type WorkflowOfferTarget } from "./workflow-offer-reads";
+import { buildWorkflowOfferTarget, makeEntityRowReads, readTargetRemote } from "./entity-reads";
+import { makeWorkflowOfferReads } from "./workflow-offer-reads";
 import { makeInboxPopulation, RETAINED_ROOT_REFS_SQL, WANTED_REFS_SQL } from "./inbox-population";
+import { buildEligibleEntities } from "./inbox-relation";
 import { claimRepository, type ClaimChanges, type RecognizedEvidence } from "./claims";
 import { computeRetryDelaySeconds } from "./retry-backoff";
-import { buildCardSignalFields, buildDetailSignalFields } from "./signal-lines";
-import type { EntitySlots, StoredEntityStatus } from "./slots";
+import { buildDetailSignalFields } from "./signal-lines";
+import type { EntitySlots, FullEntityObservation, StoredEntityStatus } from "./slots";
+import {
+  deleteOrphanedFields,
+  readFieldValues,
+  replaceFieldRows,
+  type FieldSet,
+} from "./entity-fields";
+import type { EncodedField } from "./field-values";
 import { detectSourceChanges, timelineRepository, type EntityChangeRecord } from "./timeline";
 
 export type { EntityEnvironment } from "./entity-records";
 
 /** How long a record nothing needs is kept before the sweep deletes it. */
 const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+interface ObservedEntityBase {
+  readonly kind: string;
+  readonly slots: EntitySlots;
+  /** What the plugins recognized in the observation's web addresses and texts, when anything was. */
+  readonly recognized?: RecognizedEvidence;
+}
+
+/**
+ * A full observation with the encoded values of the kind's declared fields
+ * (`encodeObservedFields`), empty when no field has a value. Storing it
+ * replaces the stored fields with them.
+ */
+export interface FullObservedEntity extends ObservedEntityBase {
+  readonly observation: FullEntityObservation;
+  readonly fieldRows: ReadonlyArray<EncodedField>;
+}
+
+/** A partial observation. It never touches the stored fields, so it carries none. */
+export interface PartialObservedEntity extends ObservedEntityBase {
+  readonly observation: Extract<EntityObservation, { readonly partial: true }>;
+  readonly fieldRows?: undefined;
+}
 
 /**
  * One thing a Connection read, ready to store. `kind` is the qualified kind.
@@ -105,13 +126,7 @@ const PRUNE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
  * known): only the noun, caption, home, section and status are stored from
  * them.
  */
-export interface ObservedEntity {
-  readonly kind: string;
-  readonly observation: EntityObservation;
-  readonly slots: EntitySlots;
-  /** What the plugins recognized in the observation's web addresses and texts, when anything was. */
-  readonly recognized?: RecognizedEvidence;
-}
+export type ObservedEntity = FullObservedEntity | PartialObservedEntity;
 
 /** What a write changed, so it can be announced once the transaction commits. Both lists are sorted by ref, each once. */
 export interface EntityWriteChanges {
@@ -162,6 +177,12 @@ export interface TaskableEntity {
   readonly completeness: "full" | "partial";
   /** True when the record is a full record of a work kind (fast or slow), the only kind of record a card is made from. */
   readonly isWorkRecord: boolean;
+  /** The kind's noun, such as "Pull request". Empty for a record that has none stored. */
+  readonly noun: string;
+  /** Whether the kind draws a rich or a compact card. Undefined for a record that has none stored. */
+  readonly card: "rich" | "compact" | undefined;
+  /** How the source names it, such as `SHOP-123`. Empty for a record that has none yet. */
+  readonly identifier: string;
   /** Empty for a record that has no title yet. */
   readonly title: string;
   readonly status: EntityStatus | undefined;
@@ -206,6 +227,8 @@ export interface SuggestionRow {
 export interface EntityReadEnvironment extends EntityEnvironment {
   /** The qualified kinds that are declared by a plugin that is active now. */
   readonly activeKinds: ReadonlySet<string>;
+  /** The qualified signal kinds that ask the user for a move (`listAskingKinds`). Empty means none ask. */
+  readonly askingKinds: ReadonlyArray<string>;
 }
 
 /** What `readContext` returns: the context above a list of start refs, cut by one rule. */
@@ -315,9 +338,17 @@ const compareSourceTimes = (
   return left < stored ? -1 : left > stored ? 1 : 0;
 };
 
-/** What to do with the shared columns of one entity row. */
+/**
+ * What to do with the shared columns of one entity row.
+ *
+ * - `rejected`: the observation lost, so nothing it reports is stored.
+ * - `unchanged`: the observation was accepted and the shared columns already
+ *   hold what it reports. Its field values are still compared and stored.
+ * - `insert` and `update`: the observation was accepted and changes the row.
+ */
 type SharedWrite =
-  | { readonly action: "none" }
+  | { readonly action: "rejected" }
+  | { readonly action: "unchanged" }
   | { readonly action: "insert"; readonly values: SharedValues }
   | {
       readonly action: "update";
@@ -327,17 +358,25 @@ type SharedWrite =
     };
 
 /**
+ * Returns whether the observation was accepted, so that the values it
+ * reports (shared columns and field rows) may be stored. Only `rejected`
+ * is not.
+ */
+const isAccepted = (write: SharedWrite): boolean => write.action !== "rejected";
+
+/**
  * Decides how one observation changes the shared columns of its entity.
  *
  * - No row yet: insert it.
- * - A full row and a partial observation: change nothing.
+ * - A full row and a partial observation: rejected.
  * - A partial row and a full observation: the full one replaces everything.
- * - Otherwise the newer `sourceUpdatedAt` wins and the older loses. On an
- *   equal time, the reporter wins when it is the presenter, or the presenter
- *   is gone or cannot keep the row fresh. Then the reporter becomes the
- *   presenter, even if every fact is the same.
- * - An equal time from the presenter with the same, known `sourceRevision`
- *   changes nothing: the facts are covered.
+ * - Otherwise the newer `sourceUpdatedAt` wins and the older is rejected. On
+ *   an equal time, the reporter wins when it is the presenter, or the
+ *   presenter is gone or cannot keep the row fresh. Then the reporter becomes
+ *   the presenter, even if every fact is the same. An equal time from another
+ *   presenter is rejected.
+ * - An equal time from the presenter with the same, known `sourceRevision` is
+ *   accepted and `unchanged`: the facts are covered.
  */
 const decideSharedWrite = (input: {
   readonly existing: PresentedEntityRow | undefined;
@@ -356,20 +395,20 @@ const decideSharedWrite = (input: {
       },
     };
   }
-  if (existing.completeness === "full" && incomingIsPartial) return { action: "none" };
+  if (existing.completeness === "full" && incomingIsPartial) return { action: "rejected" };
   const isPresenter =
     existing.presented_by !== null && uuidToString(existing.presented_by) === reporterId;
   const promotes = existing.completeness === "partial" && !incomingIsPartial;
   if (!promotes) {
     const order = compareSourceTimes(incoming.source_updated_at, existing.source_updated_at);
-    if (order < 0) return { action: "none" };
+    if (order < 0) return { action: "rejected" };
     if (order === 0) {
       const mayWrite =
         isPresenter || existing.presented_by === null || existing.presenter_usable === 0;
-      if (!mayWrite) return { action: "none" };
+      if (!mayWrite) return { action: "rejected" };
       const revision = incoming.source_revision;
       if (isPresenter && revision != null && revision === existing.source_revision) {
-        return { action: "none" };
+        return { action: "unchanged" };
       }
     }
   }
@@ -380,7 +419,7 @@ const decideSharedWrite = (input: {
   ) as Partial<SharedValues>;
   const takesOver = !isPresenter;
   return Object.keys(changes).length === 0 && !takesOver
-    ? { action: "none" }
+    ? { action: "unchanged" }
     : { action: "update", changes, takesOver };
 };
 
@@ -465,16 +504,6 @@ interface RefStates {
   readonly observations: ReadonlyMap<string, ReadonlyArray<ObservationRow>>;
 }
 
-const groupBy = <Row extends { readonly ref: string }>(rows: ReadonlyArray<Row>) => {
-  const groups = new Map<string, Array<Row>>();
-  for (const row of rows) {
-    const group = groups.get(row.ref);
-    if (group === undefined) groups.set(row.ref, [row]);
-    else group.push(row);
-  }
-  return groups;
-};
-
 /**
  * Returns a function that builds a string, equal for two states of a ref
  * exactly when a card, a place, or a card below it would show the same. It
@@ -506,32 +535,21 @@ const MAX_REFS_PER_STATEMENT = 1000;
 /** Returns the refs sorted, each once. */
 const sortUnique = (refs: Iterable<string>): Array<string> => [...new Set(refs)].sort();
 
-/** Returns the canonical remote of the repository an entity's work lands in, or none when its kind has no repository. */
-const readTargetRemote = (row: EntityRow): string | undefined =>
-  row.repository === null
-    ? undefined
-    : (JSON.parse(String(row.repository)) as { target: { remote: string } }).target.remote;
-
-/** Builds what the offers read needs of a full record of a work kind. */
-const buildWorkflowOfferTarget = (row: EntityRow): WorkflowOfferTarget => ({
-  ref: row.ref,
-  kind: row.kind as string,
-  targetRemote: readTargetRemote(row),
-});
-
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const claims = yield* claimRepository;
   const tasks = yield* taskRepository;
   const signals = yield* signalRepository;
-  const runs = yield* runRepository;
   const timeline = yield* timelineRepository;
   const markSummaryDirty = yield* makeSummaryDirtyMarker;
   const linkReads = makeEntityLinkReads(sql, timeline.readLatestChanges);
-  const inbox = makeInboxPopulation(sql, linkReads);
+  const inbox = makeInboxPopulation(sql);
   const workflowOfferReads = yield* makeWorkflowOfferReads;
 
   const refsJson = (refs: ReadonlyArray<string>): string => JSON.stringify(refs);
+
+  /** Runs an effect of the field table with this repository's database client. */
+  const withSql = Effect.provideService(SqlClient.SqlClient, sql);
 
   // -------------------------------------------------------------------------
   // Reading rows in batches
@@ -558,41 +576,7 @@ const make = Effect.gen(function* () {
           (rows) => new Map(rows.map((row) => [row.ref, row])),
         );
 
-  /** Reads the entity rows of `refs` in one statement. */
-  const readEntities = (
-    refs: ReadonlyArray<string>,
-  ): Effect.Effect<ReadonlyMap<string, EntityRow>, SqlError> =>
-    refs.length === 0
-      ? Effect.succeed(new Map())
-      : Effect.map(
-          sql<EntityRow>`
-            SELECT * FROM external_entities
-            WHERE ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
-          (rows) => new Map(rows.map((row) => [row.ref, row])),
-        );
-
-  /**
-   * Reads the observation rows of `refs`, every Connection's, in one
-   * statement. Each row carries its Connection's status and plugin, and the
-   * time that Connection last scanned the entity's kind completely.
-   */
-  const readObservations = (
-    refs: ReadonlyArray<string>,
-  ): Effect.Effect<ReadonlyMap<string, ReadonlyArray<ObservationRow>>, SqlError> =>
-    refs.length === 0
-      ? Effect.succeed(new Map())
-      : Effect.map(
-          sql<ObservationRow>`
-            SELECT o.ref, o.connection_id, o.concerns, o.listed, o.owned_by_you, o.access,
-                   o.last_refreshed_at, o.next_attempt_at, o.attempt_count,
-                   c.status AS connection_status, c.plugin_id, s.last_complete_at
-            FROM external_entity_observations o
-            JOIN connections c ON c.id = o.connection_id
-            LEFT JOIN external_entities e ON e.ref = o.ref
-            LEFT JOIN external_entity_scans s ON s.connection_id = o.connection_id AND s.kind = e.kind
-            WHERE o.ref IN (SELECT value FROM json_each(${refsJson(refs)}))`,
-          groupBy,
-        );
+  const { readEntities, readObservations } = makeEntityRowReads(sql);
 
   const readRefStates = (
     refs: ReadonlyArray<string>,
@@ -746,7 +730,11 @@ const make = Effect.gen(function* () {
       ...observed.map((entry) => entry.observation.ref),
       ...input.leaving,
     ]);
-    return inbox.recordArrivalsAfter(touched, now, writeObservations(input, observed, touched));
+    return inbox.recordArrivalsAfterObservations(
+      touched,
+      now,
+      writeObservations(input, observed, touched),
+    );
   };
 
   /**
@@ -789,6 +777,7 @@ const make = Effect.gen(function* () {
       // of an existing entity can be news: a first sight is a baseline, and a
       // rejected observation writes nothing.
       const sourceChanges: Array<EntityChangeRecord> = [];
+      const acceptedFieldSets: Array<FieldSet> = [];
       for (const entry of observed) {
         const ref = entry.observation.ref;
         const existing = before.entities.get(ref);
@@ -799,6 +788,11 @@ const make = Effect.gen(function* () {
           incomingIsPartial,
           reporterId: input.connectionId,
         });
+        // The field rows are shared fields too: only an accepted full
+        // observation replaces them, whether or not its columns changed.
+        if (isAccepted(write) && entry.fieldRows !== undefined) {
+          acceptedFieldSets.push({ ref, fields: entry.fieldRows });
+        }
         if (write.action === "insert") yield* insertEntity(ref, write.values, connection, now);
         else if (write.action === "update") {
           yield* updateEntity(ref, write, connection, now);
@@ -814,6 +808,15 @@ const make = Effect.gen(function* () {
       }
 
       yield* timeline.recordEntityChanges(sourceChanges, now);
+
+      // A change to the field rows alone is a change of the entity: it is
+      // dated and announced like a changed fact.
+      const fieldChangedRefs = yield* withSql(replaceFieldRows(acceptedFieldSets));
+      if (fieldChangedRefs.length > 0) {
+        yield* sql`
+          UPDATE external_entities SET updated_at = ${now}
+          WHERE ref IN (SELECT value FROM json_each(${refsJson(fieldChangedRefs)}))`;
+      }
 
       // What a thing reports while it is not yet a full record is part of what
       // it arrived with, so the links it joins then are not news.
@@ -879,6 +882,7 @@ const make = Effect.gen(function* () {
               afterWrite.observations.get(ref) ?? [],
             ),
         ),
+        ...fieldChangedRefs,
         ...claimChanges.changedRefs,
       ]);
       // The Tasks below a ref whose claims changed are found with the walk
@@ -952,9 +956,6 @@ const make = Effect.gen(function* () {
   // -------------------------------------------------------------------------
   // The Inbox
   // -------------------------------------------------------------------------
-
-  /** Returns the `ridesOn` field of a card that rides on `lead`, else nothing. */
-  const buildRidesOn = (lead: string | undefined) => (lead === undefined ? {} : { ridesOn: lead });
 
   /**
    * Reads what lies above each of `starts`: their ancestors, the places those
@@ -1054,35 +1055,98 @@ const make = Effect.gen(function* () {
     });
 
   /**
-   * Sets an entity aside or brings it back, and stamps `actor` as the one who
-   * did. Returns none when there is no such entity, else its ref and whether
-   * the call changed it (asking for the state it already has changes nothing).
+   * Sets entities aside or brings them back, and stamps `actor` as the one who
+   * did. Returns the ids that name no entity when there are any, and then
+   * changes nothing. Otherwise returns, for each id, its ref and whether the
+   * call changed it. Restoring a thing that is not dismissed changes nothing.
+   * Dismissing always counts as a change and moves the dismissal to `now`,
+   * also for a thing that is dismissed already: a thing that came back on a
+   * new ask is dismissed again, and only asks raised after this moment bring
+   * it back. Two statements however many ids there are.
    */
-  const setDismissal = (
-    id: string,
+  const setDismissals = (
+    ids: ReadonlyArray<string>,
     change: { readonly dismissed: boolean; readonly actor: string; readonly now: string },
-  ): Effect.Effect<Option.Option<{ readonly ref: string; readonly changed: boolean }>, SqlError> =>
+  ): Effect.Effect<
+    | { readonly missing: ReadonlyArray<string> }
+    | {
+        readonly moved: ReadonlyArray<{
+          readonly id: string;
+          readonly ref: string;
+          readonly changed: boolean;
+        }>;
+      },
+    SqlError
+  > =>
     Effect.gen(function* () {
-      const key = uuidFromString(id);
-      const found = yield* sql<{ readonly ref: string; readonly dismissed_at: string | null }>`
-        SELECT ref, dismissed_at FROM external_entities WHERE id = ${key}`;
-      const row = found[0];
-      if (row === undefined) return Option.none();
-      if ((row.dismissed_at !== null) === change.dismissed) {
-        return Option.some({ ref: row.ref, changed: false });
+      const found = yield* sql<{
+        readonly id: Uint8Array;
+        readonly ref: string;
+        readonly dismissed_at: string | null;
+      }>`
+        SELECT id, ref, dismissed_at FROM external_entities
+        WHERE id IN (SELECT unhex(replace(value, '-', '')) FROM json_each(${JSON.stringify(ids)}))`;
+      const known = new Map(found.map((row) => [uuidToString(row.id), row]));
+      const missing = ids.filter((id) => !known.has(id));
+      if (missing.length > 0) return { missing };
+      const moved = ids.map((id) => {
+        const row = known.get(id)!;
+        return { id, ref: row.ref, changed: change.dismissed || row.dismissed_at !== null };
+      });
+      const changed = moved.filter((entry) => entry.changed).map((entry) => entry.id);
+      if (changed.length > 0) {
+        const { actor, now } = change;
+        const changedJson = JSON.stringify(changed);
+        yield* change.dismissed
+          ? sql`
+              UPDATE external_entities
+              SET dismissed_at = ${now}, dismissed_by = ${actor}, updated_at = ${now}
+              WHERE id IN (SELECT unhex(replace(value, '-', '')) FROM json_each(${changedJson}))`
+          : sql`
+              UPDATE external_entities
+              SET dismissed_at = NULL, dismissed_by = NULL, restored_at = ${now},
+                  restored_by = ${actor}, updated_at = ${now}
+              WHERE id IN (SELECT unhex(replace(value, '-', '')) FROM json_each(${changedJson}))`;
       }
-      const { actor, now } = change;
-      yield* change.dismissed
-        ? sql`
-            UPDATE external_entities
-            SET dismissed_at = ${now}, dismissed_by = ${actor}, updated_at = ${now}
-            WHERE id = ${key}`
-        : sql`
-            UPDATE external_entities
-            SET dismissed_at = NULL, dismissed_by = NULL, restored_at = ${now},
-                restored_by = ${actor}, updated_at = ${now}
-            WHERE id = ${key}`;
-      return Option.some({ ref: row.ref, changed: true });
+      return { moved };
+    });
+
+  /** Reads the records of `key`'s ids or refs: see `readTaskableEntities` of the repository. */
+  const readTaskableEntities = (
+    key: { readonly ids: ReadonlyArray<string> } | { readonly refs: ReadonlyArray<string> },
+  ): Effect.Effect<ReadonlyArray<TaskableEntity>, SqlError> =>
+    Effect.gen(function* () {
+      const found =
+        "ids" in key
+          ? key.ids.length === 0
+            ? []
+            : yield* sql<EntityRow>`
+                SELECT * FROM external_entities WHERE id IN ${sql.in(key.ids.map(uuidFromString))}`
+          : key.refs.length === 0
+            ? []
+            : yield* sql<EntityRow>`
+                SELECT * FROM external_entities WHERE ref IN ${sql.in(key.refs)}`;
+      const observations = yield* readObservations(found.map((row) => row.ref));
+      return found.map((row): TaskableEntity => {
+        const own = observations.get(row.ref) ?? [];
+        const { status, stage } = parseStoredStatus(row.status as string | null);
+        return {
+          id: uuidToString(row.id),
+          ref: row.ref,
+          kind: (row.kind as string | null) ?? "",
+          completeness: row.completeness as "full" | "partial",
+          isWorkRecord: isWorkRecord(row),
+          noun: (row.noun as string | null) ?? "",
+          card: (row.card as "rich" | "compact" | null) ?? undefined,
+          identifier: (row.identifier as string | null) ?? "",
+          title: (row.title as string | null) ?? "",
+          status,
+          stage,
+          targetRemote: readTargetRemote(row),
+          access: deriveAccess(own),
+          hasConcern: unionConcerns(own).length > 0,
+        };
+      });
     });
 
   return {
@@ -1223,8 +1287,8 @@ const make = Effect.gen(function* () {
      * Wanted refs are what is described by `WANTED_REFS_SQL`, without the
      * ones this Connection's inventory already lists, places included (its
      * next scan reads those). With `includesSignalRefs`, the refs of the open
-     * signals that came through this Connection are wanted as well, snoozed
-     * ones too, even when no entity exists yet: a mention of a thing no
+     * signals that came through this Connection are wanted as well, even
+     * when no entity exists yet: a mention of a thing no
      * inventory lists then gets a card. A ref backing off after a failure waits. Order: refs
      * never tried first, then the oldest attempt, then the ref, so every
      * wanted ref gets its turn however many there are.
@@ -1277,136 +1341,6 @@ const make = Effect.gen(function* () {
       }),
 
     /**
-     * Returns the Inbox: every card up to `MAX_INBOX_CARDS`, oldest first by
-     * `(firstObservedAt, id)`, the places above them, the edges between those
-     * places, and the counts over all eligible cards.
-     *
-     * Riding is decided once over every eligible card, before the page limit
-     * (`decideRiding`), and the Requests count follows the same decision. The
-     * page is chosen in bundles (`selectInboxPage`): a lead comes with its
-     * riders and a rider never comes alone, so the page never draws a
-     * Requests card that the count left out, and it is never empty while
-     * cards exist. `links` are the direct links of the cards on the page and
-     * `peers` the records at their far end that have no card. If the page, the
-     * links or the peers hit their bound, `truncated` is set.
-     *
-     * Each card carries the id of its offer set and the Connections that can
-     * act on it. Cards that share a kind, a target repository and an
-     * acting-account state share one set in `offerSets`, evaluated once (see
-     * `readWorkflowOffers`).
-     *
-     * A constant number of statements however many cards there are: the
-     * eligible cards and their links (evaluating the membership once), the
-     * entity rows of the page, one walk up for every card, the records above
-     * them, the observations of cards and places together, the live signals
-     * and the open signal kinds, the offers (acting Connections, workflows,
-     * Resources), the links of the page, and the three reads of the peers.
-     */
-    queryInbox: (environment: EntityEnvironment): Effect.Effect<Inbox, SqlError> =>
-      Effect.gen(function* () {
-        const {
-          cards: eligibleCards,
-          riding,
-          counts,
-        } = yield* inbox.readInboxStanding(environment.now);
-        const page = selectInboxPage(
-          eligibleCards.map((card) => card.ref),
-          riding,
-          MAX_INBOX_CARDS,
-        );
-        const pageCards = eligibleCards.filter((card) => page.refs.has(card.ref));
-        const entityRows = yield* readEntities(pageCards.map((card) => card.ref));
-        const rows = pageCards.map((card) => ({ card, row: entityRows.get(card.ref)! }));
-        const cardsTruncated = page.truncated;
-        const pageRefs = page.refs;
-
-        // Cards come oldest first, so the older cards keep their context and
-        // a later one loses its farthest ancestors when the places run out.
-        const context = yield* readContext({
-          starts: rows.map(({ row }) => row.ref),
-          maxAncestors: MAX_ENTITY_ANCESTORS,
-          maxPlaces: MAX_INBOX_PLACES,
-          environment,
-        });
-        const activePluginIds = new Set(environment.activePluginIds);
-        const cardSignals = yield* signals.readLatestLiveSignals(
-          rows.map(({ row }) => row.ref),
-          environment.now,
-        );
-        const openKinds = yield* signals.listOpenKindsByThread(
-          rows.map(({ row }) => row.ref),
-          MAX_ENTITY_SIGNALS,
-        );
-        const offers = yield* workflowOfferReads.readWorkflowOffers(
-          rows.map(({ row }) => buildWorkflowOfferTarget(row)),
-          environment.kindSources ?? [],
-        );
-        const liveWorkflows = yield* runs.listLiveWorkflowsOfTasks(
-          pageCards.flatMap((card) => (card.taskId === null ? [] : [uuidToString(card.taskId)])),
-          MAX_LIVE_WORKFLOWS,
-        );
-
-        const cards = rows.map(({ card, row }): InboxCard => ({
-          ...buildEntityFields({
-            row,
-            observations: context.observations.get(row.ref) ?? [],
-            activePluginIds,
-            taskId: card.taskId === null ? undefined : uuidToString(card.taskId),
-            following: card.following,
-            ancestors: context.ancestors.get(row.ref)!,
-            contextComplete: context.contextComplete.get(row.ref)!,
-            latestChange: context.latestChanges.get(row.ref),
-          }),
-          side: card.side,
-          ...buildCardSignalFields(
-            cardSignals.get(row.ref),
-            openKinds.get(row.ref) ?? [],
-            row.reason_templates as string | null,
-          ),
-          ...buildRidesOn(riding.get(row.ref)),
-          offerSetId: offers.offerSetIds.get(row.ref)!,
-          actingConnections: offers.actingConnections.get(row.ref) ?? [],
-          liveWorkflows:
-            card.taskId === null ? [] : (liveWorkflows.get(uuidToString(card.taskId)) ?? []),
-        }));
-        const { places, edges } = context;
-
-        // Links and hints have one bound (`MAX_INBOX_HINTS` equals `MAX_INBOX_LINKS`).
-        const found = yield* linkReads.readLinksAndHintsOf([...pageRefs], MAX_INBOX_LINKS);
-        const links = found.links.slice(0, MAX_INBOX_LINKS);
-        const hints = found.hints.slice(0, MAX_INBOX_HINTS);
-        const farRefs = [
-          ...new Set(
-            [...links, ...hints].flatMap((pair) =>
-              [pair.fromRef, pair.toRef].filter((ref) => !pageRefs.has(ref)),
-            ),
-          ),
-        ];
-        const foundPeers = yield* linkReads.listPeers(
-          new Set(eligibleCards.map((card) => card.ref)),
-          farRefs,
-          environment.activeEntityKinds,
-        );
-        const peers = foundPeers.slice(0, MAX_INBOX_PEERS);
-        const truncated =
-          cardsTruncated ||
-          found.links.length > MAX_INBOX_LINKS ||
-          found.hints.length > MAX_INBOX_HINTS ||
-          foundPeers.length > MAX_INBOX_PEERS;
-        return {
-          cards,
-          places,
-          edges,
-          counts,
-          links,
-          hints,
-          peers,
-          offerSets: offers.offerSets,
-          truncated,
-        };
-      }),
-
-    /**
      * Returns the offers and acting Connections of things, as the Inbox and
      * the detail show them, with their lists cut to the contract's bounds
      * (see `makeWorkflowOfferReads`). They are for display only.
@@ -1432,10 +1366,6 @@ const make = Effect.gen(function* () {
      * draw as a stack (see `makeEntityLinkReads`).
      */
     listStackCandidates: linkReads.listStackCandidates,
-
-    /** Returns the counts of the Inbox from the same definition as `queryInbox`, for the sidebar. */
-    countInbox: (now: string): Effect.Effect<InboxCounts, SqlError> =>
-      Effect.map(inbox.readInboxStanding(now), (standing) => standing.counts),
 
     /**
      * Returns one entity with the records above it and what it is linked to,
@@ -1477,6 +1407,9 @@ const make = Effect.gen(function* () {
           [buildWorkflowOfferTarget(row)],
           environment.kindSources ?? [],
         );
+        const fieldValues = (yield* withSql(
+          readFieldValues([row.ref], environment.activeEntityKinds),
+        )).get(row.ref)!;
         return Option.some({
           ...buildEntityFields({
             row,
@@ -1489,18 +1422,20 @@ const make = Effect.gen(function* () {
             latestChange: context.latestChanges.get(row.ref),
           }),
           kindAvailable: environment.activeKinds.has(row.kind as string),
+          ...fieldValues,
           places: context.places,
           edges: context.edges,
           links: entityLinks,
           hints: entityHints,
           conflicts: related.conflicts.slice(0, MAX_ENTITY_LINKS),
           ...buildDetailSignalFields(
-            yield* signals.readThreadSignals(row.ref, MAX_ENTITY_SIGNALS, environment.now),
+            yield* signals.readThreadSignals(row.ref, MAX_ENTITY_SIGNALS),
             row.reason_templates as string | null,
+            environment.askingKinds,
           ),
           timeline: yield* timeline.readTimeline(row.ref, environment.activeEntityKinds),
           peers: (yield* linkReads.listPeers(
-            yield* inbox.listEligibleRefs(linkedRefs, environment.now),
+            yield* inbox.listEligibleRefs(linkedRefs, environment),
             linkedRefs,
             environment.activeEntityKinds,
           )).slice(0, MAX_ENTITY_LINKS + MAX_ENTITY_HINTS),
@@ -1508,6 +1443,20 @@ const make = Effect.gen(function* () {
           actingConnections: offers.actingConnections.get(row.ref) ?? [],
         });
       }),
+
+    /**
+     * Returns the ids of the Connections that observed `ref`, the ones that
+     * could read it first. Used to ask the likeliest account first when a
+     * thing is read at its source.
+     */
+    listObservingConnectionIds: (ref: string): Effect.Effect<ReadonlyArray<string>, SqlError> =>
+      Effect.map(
+        sql<{ readonly connection_id: Uint8Array }>`
+          SELECT connection_id FROM external_entity_observations
+          WHERE ref = ${ref}
+          ORDER BY (access = 'ok') DESC, connection_id`,
+        (rows) => rows.map((row) => uuidToString(row.connection_id)),
+      ),
 
     /**
      * Returns the facts a Task's summary reads (`LinkedEntityFacts`) for each
@@ -1654,35 +1603,22 @@ const make = Effect.gen(function* () {
     readTaskableEntity: (
       key: { readonly id: string } | { readonly ref: string },
     ): Effect.Effect<Option.Option<TaskableEntity>, SqlError> =>
-      Effect.gen(function* () {
-        const found =
-          "id" in key
-            ? yield* sql<EntityRow>`
-                SELECT * FROM external_entities WHERE id = ${uuidFromString(key.id)}`
-            : yield* sql<EntityRow>`
-                SELECT * FROM external_entities WHERE ref = ${key.ref}`;
-        const row = found[0];
-        if (row === undefined) return Option.none();
-        const observations = (yield* readObservations([row.ref])).get(row.ref) ?? [];
-        const { status, stage } = parseStoredStatus(row.status as string | null);
-        return Option.some({
-          id: uuidToString(row.id),
-          ref: row.ref,
-          kind: (row.kind as string | null) ?? "",
-          completeness: row.completeness as "full" | "partial",
-          isWorkRecord: isWorkRecord(row),
-          title: (row.title as string | null) ?? "",
-          status,
-          stage,
-          targetRemote: readTargetRemote(row),
-          access: deriveAccess(observations),
-          hasConcern: unionConcerns(observations).length > 0,
-        });
-      }),
+      Effect.map(
+        readTaskableEntities("id" in key ? { ids: [key.id] } : { refs: [key.ref] }),
+        (records) => Option.fromNullishOr(records[0]),
+      ),
+
+    /**
+     * Returns the records of the entities found by their ids or by their
+     * refs, as `readTaskableEntity` reads one, in two statements however many
+     * there are. An id or a ref that has no record is left out, so the caller
+     * compares what it asked for with what came back.
+     */
+    readTaskableEntities: readTaskableEntities,
 
     /**
      * Returns the things on the Inbox that have no live Task, for the sheet
-     * that lists suggestions: the eligible entities of `ELIGIBLE_ENTITIES_SQL`
+     * that lists suggestions: the eligible entities of `buildEligibleEntities`
      * that no live Task links. Oldest first by
      * `(firstObservedAt, id)`, at most `limit`. When `contextRef` is given,
      * only the things below it are considered, at any depth of current
@@ -1694,9 +1630,11 @@ const make = Effect.gen(function* () {
       readonly contextRef: string | undefined;
       readonly limit: number;
       readonly now: string;
-    }): Effect.Effect<ReadonlyArray<SuggestionRow>, SqlError> =>
-      Effect.map(
-        sql<{
+      readonly askingKinds: ReadonlyArray<string>;
+    }): Effect.Effect<ReadonlyArray<SuggestionRow>, SqlError> => {
+      const eligible = buildEligibleEntities(input);
+      return Effect.map(
+        sql.unsafe<{
           readonly ref: string;
           readonly kind: string;
           readonly noun: string;
@@ -1704,19 +1642,23 @@ const make = Effect.gen(function* () {
           readonly title: string;
           readonly url: string;
           readonly status: string | null;
-        }>`
-          WITH RECURSIVE ${inbox.buildEligibleEntities(input.now)},
-          walk_start(ref) AS (
-            SELECT value FROM json_each(${refsJson(input.contextRef === undefined ? [] : [input.contextRef])})
-          ),
-          ${sql.literal(WALK_DOWN_SQL)}
+        }>(
+          `WITH RECURSIVE ${eligible.sql},
+          walk_start(ref) AS (SELECT value FROM json_each(?)),
+          ${WALK_DOWN_SQL}
           SELECT e.ref, e.kind, e.noun, e.identifier, e.title, e.url, e.status
           FROM eligible e
           WHERE e.task_id IS NULL
-            AND (${input.contextRef === undefined ? 1 : 0} = 1
-                 OR e.ref IN (SELECT ref FROM walk_down))
+            AND (? = 1 OR e.ref IN (SELECT ref FROM walk_down))
           ORDER BY e.first_observed_at, e.id
-          LIMIT ${input.limit}`,
+          LIMIT ?`,
+          [
+            ...eligible.params,
+            refsJson(input.contextRef === undefined ? [] : [input.contextRef]),
+            input.contextRef === undefined ? 1 : 0,
+            input.limit,
+          ],
+        ),
         (rows) =>
           rows.map((row) => ({
             ref: row.ref,
@@ -1727,7 +1669,8 @@ const make = Effect.gen(function* () {
             url: row.url,
             status: parseStoredStatus(row.status).status,
           })),
-      ),
+      );
+    },
 
     /**
      * Returns what Hercule holds of each ref, for the marks of a search:
@@ -1789,43 +1732,29 @@ const make = Effect.gen(function* () {
     recordArrivalAfter: <A, E, R>(
       ref: string,
       now: string,
+      askingKinds: ReadonlyArray<string>,
       write: Effect.Effect<A, E, R>,
-    ): Effect.Effect<A, E | SqlError, R> => inbox.recordArrivalsAfter([ref], now, write),
+    ): Effect.Effect<A, E | SqlError, R> =>
+      inbox.recordArrivalAfterSignal(ref, { askingKinds }, now, write),
 
     /**
-     * Dismisses an entity: it leaves the Inbox and stays out, whatever a new
-     * concern or signal says, until `restore`. Returns none when there is no
-     * such entity, else its ref and whether this call changed it (dismissing a
-     * dismissed entity changes nothing).
+     * Dismisses entities: they leave the Inbox until `restore`, or until an
+     * ask is raised on one of them after this call. See `setDismissals` for
+     * what it returns.
      */
-    dismiss: (
-      id: string,
-      actor: string,
-      now: string,
-    ): Effect.Effect<
-      Option.Option<{ readonly ref: string; readonly changed: boolean }>,
-      SqlError
-    > => setDismissal(id, { dismissed: true, actor, now }),
+    dismiss: (ids: ReadonlyArray<string>, actor: string, now: string) =>
+      setDismissals(ids, { dismissed: true, actor, now }),
 
-    /**
-     * Undoes `dismiss`, and records who did. Returns none when there is no such
-     * entity, else its ref and whether this call changed it.
-     */
-    restore: (
-      id: string,
-      actor: string,
-      now: string,
-    ): Effect.Effect<
-      Option.Option<{ readonly ref: string; readonly changed: boolean }>,
-      SqlError
-    > => setDismissal(id, { dismissed: false, actor, now }),
+    /** Undoes `dismiss`, and records who did. See `setDismissals` for what it returns. */
+    restore: (ids: ReadonlyArray<string>, actor: string, now: string) =>
+      setDismissals(ids, { dismissed: false, actor, now }),
 
     /**
      * Deletes the records nothing needs, and returns how many it deleted. The
      * daily sweep calls it.
      *
      * - An entity goes when it has no concern from any Connection, no link to
-     *   any Task (finished ones count), no open signal (snoozed or not),
+     *   any Task (finished ones count), no open signal,
      *   is not dismissed, is not above
      *   anything concerned or linked (any number of levels up), and has not
      *   changed for 30 days. Its claims stay: they are small and they are
@@ -1878,6 +1807,7 @@ const make = Effect.gen(function* () {
             AND ref NOT IN (${sql.literal(OPEN_THREAD_REFS_SQL)})
           RETURNING ref`;
         yield* timeline.deleteOrphanedChanges();
+        yield* withSql(deleteOrphanedFields());
         return { entities: entities.length, observations: observations.length };
       }),
   };

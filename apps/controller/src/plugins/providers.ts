@@ -209,7 +209,9 @@ const decodeProvider = Schema.decodeUnknownEffect(ProviderDefinition, {
  * kind with two credential sources (see `findCredentialSourceProblem`), that has
  * an `oauth`, `device` or `pairing` setup step (see `findUnsupportedStepProblem`), that has
  * a key kind without a valid `keyCheck` (one that sends the key), a kind whose `usage` is invalid (see `findUsageProblem`), an `endpoint` kind with no parser or a parser for any other kind, one of whose account kinds does not list the provider's `defaultHarnessId`
- * or its `catalogSource.harnessId`, or that the plugin registered twice.
+ * or its `catalogSource.harnessId`, that declares a `defaultSelectionMaker` beside
+ * `defaultSelection: "none"` (no models are selected then, so a maker has nothing to
+ * filter), or that the plugin registered twice.
  * A `provider-api` catalog source is refused without a `parseCatalogBody`, with
  * a kind that has no `credentials` step, or with a request that breaks the key
  * request rules (see `findKeyRequestProblem`). A `parseCatalogBody` is refused
@@ -372,6 +374,13 @@ export const registerProviderContribution = (
           }),
         );
       }
+    }
+    if (decoded.defaultSelectionMaker !== undefined && decoded.defaultSelection === "none") {
+      return yield* Effect.fail(
+        new PluginError({
+          message: `the provider ${id} declares the defaultSelectionMaker ${decoded.defaultSelectionMaker} but its defaultSelection is none, which selects no models, so the maker would never be used; remove the maker, or declare defaultSelection current-models`,
+        }),
+      );
     }
     if (declared.some((row) => row.extensionPoint === PROVIDER && row.id === id)) {
       return yield* Effect.fail(

@@ -111,6 +111,17 @@ export const read = () => protocol;`,
   "renderer-ui-import.tsx": `import "./ui-import.css";`,
   "ui-import.css": `@import "@hercule/ui/styles.css";`,
   "renderer-ui-font.tsx": `import "./ui-font.css";`,
+
+  // The ACP client's folder. The vendored copy sits beside the client's own
+  // source, as in packages/acp, and links effect and a Node built-in.
+  "acp/vendor/effect-acp/src/client.ts": `import * as Schema from "effect/Schema";
+import { basename } from "node:path";
+export const make = (path: string) => Schema.decodeUnknownSync(Schema.String)(basename(path));`,
+  "acp/src/clean.ts": `import { Effect } from "effect";
+import { make } from "../vendor/effect-acp/src/client.ts";
+export const open = Effect.sync(() => make("/a/b"));`,
+  "acp/src/other-package.ts": `import globals from "globals";
+export const open = (): unknown => globals;`,
   "ui-font.css": `@font-face {
   font-family: "Onest";
   src: url(${UI_FONT}) format("woff2");
@@ -132,6 +143,7 @@ beforeAll(async () => {
   await mkdir(join(dir, "node_modules/@hercule"), { recursive: true });
   await symlink(join(root, "apps/web/node_modules/react"), join(dir, "node_modules/react"));
   await symlink(join(root, "node_modules/effect"), join(dir, "node_modules/effect"));
+  await symlink(join(root, "node_modules/globals"), join(dir, "node_modules/globals"));
   for (const name of ["contract", "protocol", "home", "ui"]) {
     await symlink(join(root, "packages", name), join(dir, "node_modules/@hercule", name));
   }
@@ -319,6 +331,26 @@ describe("dep-lint on the desktop app's layers", () => {
       expect(error.stderr).toContain("  a Node or Bun built-in:\n");
     },
   );
+});
+
+describe("dep-lint on the ACP client", () => {
+  it("passes a client that links its vendored copy, effect and a Node built-in", async () => {
+    const { stdout } = await runDepLint("ACP client", "acp/src/clean.ts");
+    expect(stdout).toContain("is clean");
+  });
+
+  it("fails when the client links an npm package other than effect", async () => {
+    const error = await readDepLintFailure("ACP client", "acp/src/other-package.ts");
+    expect(error.stderr).toContain("  an npm package other than effect:\n");
+    expect(error.stderr).toContain(
+      'acp/src/other-package.ts imports "globals" (node_modules/.pnpm/globals@',
+    );
+  });
+
+  it("fails on what the runner must not link, such as the DB engine", async () => {
+    const error = await readDepLintFailure("ACP client", "db-static.ts");
+    expect(error.stderr).toContain("  the DB engine:\n");
+  });
 });
 
 /**

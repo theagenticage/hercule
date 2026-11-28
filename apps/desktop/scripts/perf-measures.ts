@@ -1,7 +1,6 @@
 /**
  * The measurements the desktop perf script takes of a running app, shared by
- * `perf.ts` and the scenarios it runs (see `perf-subagents.ts` and
- * `perf-intake.ts`): the budgets one launch can check, the moments a launch
+ * `perf.ts` and the scenarios it runs (see `perf-subagents.ts`): the budgets one launch can check, the moments a launch
  * is read at, each process's memory, CPU and wakeups, the page's DevTools
  * connection, and a Chromium trace of the renderer's tasks.
  *
@@ -78,9 +77,6 @@ const MEASURED_ON_MAC = process.platform === "darwin";
 
 /** What the memory reading is called in the tables: the Mac's footprint, or Linux's PSS. */
 export const MEMORY_NAME = MEASURED_ON_MAC ? "Footprint" : "PSS";
-
-/** `MEMORY_NAME` as it reads in the middle of a sentence. */
-export const MEMORY_NAME_IN_SENTENCE = MEASURED_ON_MAC ? "footprint" : "PSS";
 
 /**
  * Whether the start time of a process, from `app.getAppMetrics()`, can be
@@ -838,41 +834,4 @@ export function drivePage(page: Inspector): PageDriver {
       await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point });
     },
   };
-}
-
-/**
- * Waits until the page has been quiet for `quietMs`: no request of the
- * page's finished and no long task ended in that time. Fails after
- * `timeoutMs`.
- *
- * It connects for each reading and closes the connection again at once, and
- * it returns with no connection open, so a memory or idle reading that
- * follows is taken with nothing attached. The first reading leaves a
- * `PerformanceObserver` for long tasks in the page, a few bytes.
- */
-export async function waitForQuietPage(
-  pageSocketUrl: string,
-  quietMs = 2_000,
-  timeoutMs = 30_000,
-): Promise<void> {
-  const readQuietMs = `(() => {
-    globalThis.longTaskEnd ??= (() => {
-      const state = { at: 0 };
-      new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) state.at = Math.max(state.at, entry.startTime + entry.duration);
-      }).observe({ type: "longtask", buffered: true });
-      return state;
-    })();
-    const lastResourceEnd = Math.max(0, ...performance.getEntriesByType("resource").map((entry) => entry.responseEnd));
-    return performance.now() - Math.max(lastResourceEnd, globalThis.longTaskEnd.at);
-  })()`;
-  await pollUntil(
-    async () =>
-      ((await evaluateInPage(pageSocketUrl, readQuietMs)) as number) >= quietMs ? true : undefined,
-    {
-      timeoutMs,
-      intervalMs: 500,
-      timeoutMessage: `the page was not quiet for ${String(quietMs)} ms within ${String(timeoutMs)} ms`,
-    },
-  );
 }

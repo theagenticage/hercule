@@ -136,6 +136,7 @@ describe("goldens on disk", () => {
       screenshotsDir: join(root, "screenshots"),
       diffDir: join(root, "diff"),
       unmeasuredThemes: [],
+      unmeasuredScreens: [],
       names,
     };
   });
@@ -192,6 +193,7 @@ describe("goldens on disk", () => {
     const shard: GoldensLocation = {
       ...location,
       unmeasuredThemes: ["dark"],
+      unmeasuredScreens: [],
       names: ["light/a.png"],
     };
     await put("screenshots", "light/a.png", withPixel(image, 0, 0, [1, 2, 3, 255]));
@@ -216,11 +218,31 @@ describe("goldens on disk", () => {
     await expect(checkGoldens(shard, PROVENANCE)).rejects.toThrow("provenance.json");
   });
 
+  it("leaves the goldens of unmeasured screens alone, in every theme", async () => {
+    const image = buildImage(2, 2);
+    const partial: GoldensLocation = {
+      ...location,
+      unmeasuredScreens: ["b"],
+      names: ["light/a.png"],
+    };
+    await put("screenshots", "light/a.png", image);
+    await put("goldens", "light/a.png", image);
+    await put("goldens", "light/b.png", image);
+    await put("goldens", "dark/b.png", image);
+    await put("goldens", "dark/old.png", image);
+    await writeFile(join(partial.goldensDir, "provenance.json"), formatProvenance(PROVENANCE));
+
+    expect((await checkGoldens(partial, PROVENANCE)).problems).toEqual([
+      { name: "dark/old.png", kind: "extra" },
+    ]);
+  });
+
   it("still reports a file outside every theme folder as extra in a shard", async () => {
     const image = buildImage(2, 2);
     const shard: GoldensLocation = {
       ...location,
       unmeasuredThemes: ["dark"],
+      unmeasuredScreens: [],
       names: ["light/a.png"],
     };
     await put("screenshots", "light/a.png", image);

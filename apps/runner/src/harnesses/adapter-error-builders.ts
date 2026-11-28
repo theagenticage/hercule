@@ -5,13 +5,14 @@
  * runs the session.
  *
  * `harnessName` is the name the user knows the harness by: "Claude Code",
- * "Codex" or "pi". A `reason` is text from the harness or the operating
+ * "Codex", "pi" or "Antigravity". A `reason` is text from the harness or the operating
  * system. It ends the message, after a lead-in that describes what happened,
  * and the builders cut the message to the protocol's limit because a longer
  * one cannot be put in an error.
  */
 import {
   AnswerNotDelivered,
+  HarnessLoginMissing,
   HarnessNotInstalled,
   HarnessProtocolError,
   InputNotDelivered,
@@ -55,6 +56,10 @@ export const buildAnswerNotDelivered = (text: string): AnswerNotDelivered =>
 export const buildHarnessNotInstalled = (harnessName: string): HarnessNotInstalled =>
   new HarnessNotInstalled({ message: `${harnessName} is not installed on this runner.` });
 
+/** Builds the failure of `startSession` for a harness that needs an account and has none on this runner. */
+export const buildHarnessLoginMissing = (harnessName: string): HarnessLoginMissing =>
+  new HarnessLoginMissing({ message: `${harnessName} is not signed in on this runner.` });
+
 /**
  * Returns the sentence for a harness that could not be started. Used by
  * `buildStartFailure` and by the Codex adapter, whose handshake failure is a
@@ -93,6 +98,17 @@ export const buildSessionAlreadyRunning = (): SessionAlreadyRunning =>
 /** Builds the failure of `sendInput` for an input that was stopped before the harness took it. */
 export const buildInputStopped = (): InputNotDelivered =>
   new InputNotDelivered({ message: "The session stopped before the input was delivered." });
+
+/**
+ * Builds the failure of `sendInput` for an input that was proven not to have
+ * reached the harness, because writing it failed or the connection had ended.
+ */
+export const buildInputNotWritten = (harnessName: string, reason: string): InputNotDelivered =>
+  new InputNotDelivered({
+    message: finishMessage(
+      `The input did not reach ${harnessName}, so nothing was sent: ${reason}`,
+    ),
+  });
 
 /** Builds the failure of `sendInput` for an input that the harness refused. */
 export const buildInputRefused = (harnessName: string, reason: string): InputNotDelivered =>

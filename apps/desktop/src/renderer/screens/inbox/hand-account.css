@@ -7,8 +7,10 @@
   color: var(--muted);
   font-size: var(--t-12);
 }
+/* No border: the picker takes the browser's own one otherwise, which no other control in the app has. */
 .hand-account select {
   min-width: 0;
+  border: 0;
   padding: 2px 4px;
   border-radius: var(--r-xs);
   background: transparent;

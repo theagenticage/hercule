@@ -43,6 +43,9 @@ export interface RegisteredSignalKind extends SignalKindDeclaration {
   readonly pluginDisplayName: string;
 }
 
+/** The longest a signal kind's `noun` may be. */
+const MAX_SIGNAL_NOUN_LENGTH = 40;
+
 /**
  * The data fields of a declaration that are shown to the user or stored. A
  * signal written without the plugin's `build` takes the label as its title,
@@ -56,6 +59,12 @@ const SignalKindHeader = Schema.Struct({
     Schema.isMinLength(1),
     Schema.isMaxLength(MAX_PLUGIN_MESSAGE_LENGTH),
   ),
+  noun: Schema.String.check(Schema.isBetweenLength(1, MAX_SIGNAL_NOUN_LENGTH)).check(
+    Schema.isPattern(/^[^A-Z]+$/, {
+      message: "A noun is written in lower case, such as review request.",
+    }),
+  ),
+  asks: Schema.Boolean,
   priority: TaskPriority,
   matchFields: Schema.Array(
     Schema.Struct({
@@ -77,7 +86,8 @@ const decodeSignalKind = Schema.decodeUnknownEffect(SignalKind, { errors: "all" 
  * qualified signal kinds the plugin's other sources already registered.
  * Fails with a `PluginError` naming the kind when:
  *
- * - its word, label, description or priority is invalid, it declares more
+ * - its word, label, description, noun, asks or priority is invalid, or its
+ *   noun has a capital letter, it declares more
  *   than `MAX_SIGNAL_MATCH_FIELDS` match fields or a field name that is empty
  *   or longer than `MAX_SIGNAL_MATCH_FIELD_NAME_LENGTH`, or the qualified
  *   kind is not a valid signal kind;
@@ -165,3 +175,21 @@ export const decodeSignalKinds = (
     }
     return registered;
   });
+
+/**
+ * Returns the qualified kinds, sorted, whose open signals ask the user for a
+ * move. `registry` is the signal kinds of the active plugins, so a kind whose
+ * plugin is inactive does not ask. The core's own kinds (proposal, offer,
+ * unsure, fyi) are in no plugin's registry and never ask: Triage shows them.
+ *
+ * This is the one place that decides which kinds ask. Today a kind asks when
+ * its plugin declared `asks: true`; a later per-user setting that overrides a
+ * kind's answer slots in here and nowhere else.
+ */
+export const listAskingKinds = (
+  registry: ReadonlyArray<Pick<RegisteredSignalKind, "kind" | "asks">>,
+): ReadonlyArray<string> =>
+  registry
+    .filter((entry) => entry.asks)
+    .map((entry) => entry.kind)
+    .sort();

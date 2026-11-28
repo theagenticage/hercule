@@ -11,7 +11,7 @@ import type { DoneToast, DoneToastStore, DoneUndo } from "../app/done-toast-stor
 import { Mark } from "../marks";
 import { useSidebarLayout } from "./use-sidebar-layout";
 
-/** How long the toast shows before it fades, in milliseconds. Intake's toast shows as long. */
+/** How long the toast shows before it fades, in milliseconds. */
 const TOAST_SHOWN_MS = 5_000;
 
 /**

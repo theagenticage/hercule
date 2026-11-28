@@ -303,9 +303,9 @@ export const makeRunEngine = Effect.gen(function* () {
   const transactWhenServing = <A, E, R>(
     effect: Effect.Effect<A, E, R>,
   ): Effect.Effect<A, E | SqlError, R> => promotion.whenServing(withTransaction(sql, effect));
-  // The listener that publishes a committed change on the live topics. A
-  // run's execution is carried out apart from the request that started it,
-  // so the listener is provided to the execution here.
+  // The listener that publishes a committed change to the live topics and the
+  // in-process followers. A run's execution is carried out apart from the
+  // request that started it, so the listener is provided to the execution here.
   const afterCommitListener = yield* AfterCommit;
   // A new run is handed to the Run Executor through a function the engine
   // defines below, which itself calls `start` for the `run.start` action, so

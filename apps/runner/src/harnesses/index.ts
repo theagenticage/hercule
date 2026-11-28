@@ -28,11 +28,23 @@ import type {
 } from "@hercule/protocol";
 import type { AttachmentUploader } from "../attachments";
 import type { ResolvedSkillReference } from "../skills";
+import { ANTIGRAVITY, antigravity } from "./antigravity";
 import { CLAUDE_CODE, claudeCode } from "./claude-code";
 import { CODEX, codex } from "./codex";
 import { PI, pi } from "./pi";
-import { makeLogins, type LoginCommand } from "./login";
+import { makeLogins, type LoginCommand, type LoginLeaseResult } from "./login";
 import { spawnLogin } from "./process";
+
+/**
+ * An MCP server entry the runner has resolved for one session: an absolute URL.
+ * The harness authenticates with the session's own token, which it finds in the
+ * `HERCULE_TOKEN` variable of `HarnessRunnerContext.env`.
+ */
+export interface ResolvedMcpServer {
+  /** The name the harness knows the server by; it prefixes the server's tool names. */
+  readonly name: string;
+  readonly url: string;
+}
 
 export interface HarnessRunnerContext {
   /**
@@ -90,7 +102,7 @@ export interface HarnessRunnerContext {
     readonly claudePluginDir: string;
   };
   /**
-   * The paths of the user's own material this session's harness is given.
+   * The user's own material this session's harness is given.
    * The field being present is what marks the session as one that sees User
    * Material: a Thread on the controller's local runner, whose start frame
    * has the `userMaterial` flag set (spec 06 section 9.1). The field is
@@ -204,6 +216,19 @@ export interface EditMarks {
 }
 
 /**
+ * The context of a session start: the runner's context plus the MCP servers
+ * the harness is given, with the controller's address and the session's token
+ * already filled in (spec 06 section 4). Today the one entry is the MCP
+ * Gateway. The runner builds the list from the start frame's
+ * `SessionSpec.mcpServers`, so the adapter never reads the token from
+ * anywhere else. Empty when the frame has none. A probe, an install, a login
+ * and a text generation run no session and carry no list.
+ */
+export type SessionStartContext = HarnessRunnerContext & {
+  readonly mcpServers: ReadonlyArray<ResolvedMcpServer>;
+};
+
+/**
  * The context of a text generation. The runner has already found the harness
  * binary and made the call's scratch directory, so both are present here.
  */
@@ -236,9 +261,9 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
 };
 
 /**
- * The paths of the user's own material that an adapter passes to its harness
- * for one process. Each path existed on this machine when the runner looked
- * for it; a source that does not exist is left out.
+ * The user's own material that an adapter gives its harness for one process.
+ * A path existed on this machine when the runner looked for it; a source that
+ * does not exist is left out.
  *
  * Every field is empty for a harness that reads the material through links
  * in its Harness Home instead. Claude Code is that harness: it reads the
@@ -251,8 +276,27 @@ export type AdapterTurnInput = Omit<TurnInput, "attachments"> & {
 export interface UserMaterial {
   /** Directories of prompt templates the harness loads explicitly. */
   readonly promptTemplateDirs: ReadonlyArray<string>;
-  /** The user's personal instructions file, or undefined when the user has none. */
+  /**
+   * The text of the user's instruction files, joined by a blank line, for the
+   * harnesses that take their instructions as text (Codex and Antigravity).
+   * Read when the runner provisions the material, so it is as current as the
+   * files at each start, resume and fork. Undefined when the user has none.
+   */
+  readonly instructions: string | undefined;
+  /**
+   * The path of the user's instructions file, for the harness that reads the
+   * file itself (pi). Undefined when the user has none.
+   */
   readonly instructionsFile: string | undefined;
+  /**
+   * A warning for each part of the user's material the runner found but could
+   * not use in full: a file cut at its size limit, a file left out because
+   * the total limit was reached, a file that could not be read. The adapter
+   * of a harness that takes instructions as text or as a file reports each
+   * as a `runtime.warning` after `session.started`, so the user learns what
+   * the agent does not see. Empty when nothing was left out.
+   */
+  readonly warnings: ReadonlyArray<string>;
 }
 
 /**
@@ -284,10 +328,19 @@ export interface InstallOutcome {
 
 export interface HarnessAdapter {
   readonly harnessId: string;
-  /** The name the user knows the harness by: "Claude Code", "Codex" or "pi". */
+  /** The name the user knows the harness by: "Claude Code", "Codex", "pi" or "Antigravity". */
   readonly harnessName: string;
   /** The harness binary's name on `PATH`, used to resolve `binary`. */
   readonly binaryName: string;
+  /**
+   * Whether `startSession` hands `SessionStartContext.mcpServers` to the
+   * harness. The runner lists the MCP Servers capability of this harness at
+   * hello only when it is `true`, and the controller then adds the MCP
+   * Gateway entry to this harness's start frames. An adapter that ignores the
+   * list leaves it out, so the controller never records servers as callable
+   * that the harness cannot reach.
+   */
+  readonly mapsMcpServers?: true;
   /**
    * Side-effect free: writes nothing outside `ctx.home`, and makes no API call
    * except the usage read that `options.readUsage` asks for.
@@ -301,17 +354,30 @@ export interface HarnessAdapter {
     env: Readonly<Record<string, string | undefined>>,
   ) => Effect.Effect<InstallOutcome>;
   /**
-   * Returns the command that makes the login `method` for the account in `ctx`,
-   * or `undefined` when this harness has no such login. Takes the binary
-   * separately, because a login needs a machine that already has the harness.
-   * The command may name a scratch folder it made; the caller must then
-   * start the command, which removes the folder when the login ends.
+   * The login of this harness, if it has one. `methods` lists the login
+   * methods it supports: a request for another method is refused before
+   * anything else happens, so it cannot stop a login that is running.
+   * `build` returns the command that makes the login `method` for the account
+   * in `ctx`, and is only called with a method in `methods`. It takes the
+   * binary separately, because a login needs a machine that already has the
+   * harness. The command may name a scratch folder it made; the caller must
+   * then start the command, which removes the folder when the login ends.
    */
-  readonly login?: (
-    ctx: HarnessRunnerContext,
-    binary: string,
-    method: LoginMethod,
-  ) => LoginCommand | undefined;
+  readonly login?: {
+    readonly methods: ReadonlyArray<LoginMethod>;
+    readonly build: (
+      ctx: HarnessRunnerContext,
+      binary: string,
+      method: LoginMethod,
+    ) => LoginCommand;
+  };
+  /**
+   * Set by a harness whose sign-in must not run beside its other processes on
+   * the same Harness Home (see `antigravity/harness-home-leases.ts`). Takes the exclusive
+   * lease on the account's home, or returns why it is refused. The login
+   * releases it once its process has exited, on every path.
+   */
+  readonly acquireLoginLease?: (ctx: HarnessRunnerContext) => LoginLeaseResult;
 
   /**
    * Makes one text generation: a single model call with the spec's
@@ -375,7 +441,7 @@ export interface HarnessAdapter {
   readonly startSession: (
     sessionId: string,
     spec: SessionSpec,
-    ctx: HarnessRunnerContext,
+    ctx: SessionStartContext,
   ) => Effect.Effect<SessionBinding, AdapterError>;
 
   /**
@@ -482,6 +548,7 @@ const ADAPTERS: ReadonlyMap<string, HarnessAdapter> = new Map([
   [CLAUDE_CODE, claudeCode],
   [CODEX, codex],
   [PI, pi],
+  [ANTIGRAVITY, antigravity],
 ]);
 
 /** Every adapter in this build. The session supervisor listens to the events of each. */
@@ -502,7 +569,7 @@ export { PROBE_DEADLINE, buildFailedProbe, limitProbeModels } from "./probe";
 
 export { removeStaleSetupTokenFolders } from "./setup-token-folder";
 
-export { CLAUDE_CODE, CODEX, PI };
+export { ANTIGRAVITY, CLAUDE_CODE, CODEX, PI };
 
 /**
  * Returns the message for a harness that this runner has no adapter for,

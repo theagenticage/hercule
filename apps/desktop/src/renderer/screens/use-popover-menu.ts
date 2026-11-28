@@ -52,7 +52,7 @@ export interface PopoverMenu {
 
 /**
  * Returns the props that make a button and an element a popover menu, as
- * Intake's pane menu and the Connections menus draw it.
+ * the Inbox's pane menu and the Connections menus draw it.
  *
  * The menu is the browser's own popover (`popover="auto"`): the browser
  * closes it on Esc and on a click outside it, and CSS places it beside its

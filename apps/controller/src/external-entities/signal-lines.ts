@@ -4,34 +4,32 @@
  *
  * A signal and an entity meet by exact equality of `signals.thread_ref` and
  * `external_entities.ref`, on read. Nothing is stored on either side. The
- * signals domain owns every read of the signals by thread ref, and decides
- * which signal is live (open and not snoozed now). This module only turns what
- * it returns into the contract's lines, using the entity's reason templates.
+ * signals domain owns every read of the signals by thread ref. This module
+ * only turns what it returns into the contract's lines, using the entity's
+ * reason templates.
  */
-import type {
-  EntityReason,
-  EntitySignalLine,
-  ExternalEntityDetail,
-  InboxCard,
-} from "@hercule/contract";
-import type { LiveThreadSignals, ThreadSignal, ThreadSignalLines } from "../signals";
+import type { EntityReason, EntitySignalLine, ExternalEntityDetail } from "@hercule/contract";
+import type { ThreadSignal, ThreadSignalLines } from "../signals";
 import { parseReasonTemplates, renderSentence } from "./sentences";
 
 /**
- * Builds the line of one signal: its fields, and the sentence it says
- * (`buildSignalSay`).
+ * Builds the line of one signal: its fields, the sentence it says
+ * (`buildSignalSay`), and whether its kind asks the user (`askingKinds` is
+ * the result of `listAskingKinds`).
  */
 const buildSignalLine = (
   signal: ThreadSignal,
   reasonTemplates: string | null,
+  askingKinds: ReadonlyArray<string>,
 ): EntitySignalLine => ({
   ...signal,
   say: buildSignalSay(signal, reasonTemplates),
+  asks: askingKinds.includes(signal.kind),
 });
 
 /**
- * Builds the sentence a card says for one signal. The Inbox card's `reason`
- * and every line of a card's detail use this one function.
+ * Builds the sentence a card says for one signal. An Inbox row's asks and every
+ * line of a card's detail use this one function.
  *
  * The kind's own words come from `reasonTemplates`, the JSON copy of the
  * kind's `reasons` table that the entity stores, under the signal kind's word
@@ -47,7 +45,7 @@ const buildSignalLine = (
  * Filling, cutting and falling back are done by `renderSentence`, as for the
  * words of a timeline.
  */
-const buildSignalSay = (
+export const buildSignalSay = (
   signal: Pick<ThreadSignal, "kind" | "title" | "asker">,
   reasonTemplates: string | null,
 ): EntityReason => {
@@ -57,33 +55,13 @@ const buildSignalSay = (
   return renderSentence(template, { person: signal.asker }, signal.title);
 };
 
-/**
- * Builds the two fields of an Inbox card that come from its signals: the
- * `signals` summary, and, when the card has a live signal, the `reason` that
- * replaces the observation's own: the sentence of its latest signal. A card
- * with no live signal gets no `reason` here, so it keeps the one its
- * observation gave. `openKinds` are the kinds of all the card's open signals,
- * snoozed ones included.
- */
-export const buildCardSignalFields = (
-  found: LiveThreadSignals | undefined,
-  openKinds: ReadonlyArray<string>,
-  reasonTemplates: string | null,
-): Pick<InboxCard, "signals"> & { readonly reason?: EntityReason } => {
-  if (found === undefined) return { signals: { openCount: 0, kinds: openKinds } };
-  const latest = buildSignalLine(found.latest, reasonTemplates);
-  return {
-    signals: { latest, openCount: found.liveCount, kinds: openKinds },
-    reason: latest.say,
-  };
-};
-
 /** Builds the fields of an entity's detail that come from its signals. */
 export const buildDetailSignalFields = (
   found: ThreadSignalLines,
   reasonTemplates: string | null,
+  askingKinds: ReadonlyArray<string>,
 ): Pick<ExternalEntityDetail, "signals" | "openCount" | "signalCount"> => ({
-  signals: found.signals.map((signal) => buildSignalLine(signal, reasonTemplates)),
+  signals: found.signals.map((signal) => buildSignalLine(signal, reasonTemplates, askingKinds)),
   openCount: found.openCount,
   signalCount: found.signalCount,
 });

@@ -56,6 +56,7 @@ const buildSession = (status: SessionStatus): Session => {
     exitedAt: null,
     lastActivityAt: "2026-09-05T09:00:00.000Z",
     unenforced: [],
+    mcpServers: [],
   };
 };
 

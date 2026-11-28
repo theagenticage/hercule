@@ -10,9 +10,10 @@
  * anyone else they are left out of the page rather than rejected, and `read`
  * of one fails with not_found, so the log does not reveal what it withholds.
  *
- * Each event `query` returns carries the facts its handlings are worked out
- * from: the signals, Tasks and Subscriptions it reached. A client turns them
- * into "What came of it" with no request per row (spec 10 section 9.10).
+ * Each event `query` returns carries the signals that name it and the live
+ * Subscriptions that received it, read for the whole page at once, so triage
+ * can tell what is already known or in flight with no request per event
+ * (spec 10 section 2.2).
  *
  * The `runId` filter from spec 11 is missing here: events are not linked to
  * runs yet, and a filter that always returns an empty page would mislead the
@@ -25,7 +26,7 @@ import { Forbidden, Internal, NotFound, Unauthenticated, Validation } from "../e
 import { Id, Timestamp } from "../ids";
 import { page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
-import { atMost, bounded } from "../strings";
+import { bounded } from "../strings";
 import {
   EVENT_SORT_FIELDS,
   Event,
@@ -38,37 +39,6 @@ import {
 import { SignalKind, SignalStatus } from "./signal";
 import { SubscriptionHolder } from "./subscription";
 import { MAX_SEARCH_TEXT_LENGTH } from "./task";
-
-/**
- * The handlings `event.query` can filter on: what came of an event in Intake,
- * in the order "What came of it" shows them (spec 10 section 9.10).
- *
- * - `raised-signal`: the event raised a plugin's signal.
- * - `ended-signal`: the event ended a signal on its source.
- * - `ignored`: an Ignore Rule stopped the signal the event would have raised.
- * - `evidence`: a core signal, such as triage's proposal, lists the event.
- * - `on-task`: a Task's provenance carries the event.
- * - `known-work`: a live Subscription received the event.
- * - `no-action`: none of the above.
- *
- * Three more join later, each with what it is worked out from: the
- * Screener's two with Screening, and `pending-triage` with the setting that
- * names the triage workflow. Until then nothing could produce them, so they
- * are not values a caller can send.
- */
-export const EVENT_HANDLINGS = [
-  "raised-signal",
-  "ended-signal",
-  "ignored",
-  "evidence",
-  "on-task",
-  "known-work",
-  "no-action",
-] as const;
-
-export const EventHandling = Schema.Literals(EVENT_HANDLINGS);
-
-export type EventHandling = Schema.Schema.Type<typeof EventHandling>;
 
 /**
  * The audit kinds a machine's activity shows: the changes to a runner, to a
@@ -118,97 +88,53 @@ export type RunnerActivityKind = (typeof RUNNER_ACTIVITY_KINDS)[number];
 export const MAX_EVENT_SOURCE_LENGTH = 128;
 
 /**
- * A signal the event raised (`origin.eventId`), or a core signal that lists
- * the event among its evidence (`origin.eventIds`). A plugin's kind is raised
- * only from its event, and a core kind only lists events, so `kind` tells the
- * two apart.
+ * A signal that names the event: one a plugin raised from it
+ * (`origin.eventId`), or a core signal that lists it among its evidence
+ * (`origin.eventIds`). A plugin's kind is raised only from its event, and a
+ * core kind only lists events, so `kind` tells the two apart.
+ *
+ * Triage reads these so it never raises a core signal that repeats a plugin
+ * signal, and never raises again over events whose signal the user resolved.
  */
 export const EventSignalFact = Schema.Struct({
   signalId: Id,
   kind: SignalKind,
   status: SignalStatus,
   title: Schema.String,
-  /** When the signal comes back to To do. Set only while it is open and snoozed. */
-  snoozedUntil: Schema.optionalKey(Timestamp),
   /** The signal's one-line outcome, such as "Replied in Gmail". Set only once it is resolved. */
   outcome: Schema.optionalKey(Schema.String),
 });
 
 export type EventSignalFact = Schema.Schema.Type<typeof EventSignalFact>;
 
-/** A signal the event ended on its source (`resolution.eventId`). */
-export const EventResolvedSignalFact = Schema.Struct({
-  signalId: Id,
-  title: Schema.String,
-  outcome: Schema.String,
-});
-
-export type EventResolvedSignalFact = Schema.Schema.Type<typeof EventResolvedSignalFact>;
-
-/** A Task whose provenance carries the event. A deleted Task is not listed. */
-export const EventTaskFact = Schema.Struct({
-  taskId: Id,
-  title: Schema.String,
-});
-
-export type EventTaskFact = Schema.Schema.Type<typeof EventTaskFact>;
-
-/** A live Subscription that received the event, and who holds it. */
+/**
+ * A live Subscription that received the event, and who holds it. Triage reads
+ * these to set aside an event that work in flight already consumed.
+ */
 export const EventKnownByFact = Schema.Struct({
   subscriptionId: Id,
   holder: SubscriptionHolder,
-  /** The holding session's title, or the name of the holding run's workflow. Null when it has none. */
-  title: Schema.NullOr(Schema.String),
 });
 
 export type EventKnownByFact = Schema.Schema.Type<typeof EventKnownByFact>;
 
 /**
- * The Ignore Rule that caught the event: the signal the event would have
- * raised was never created. `text` is the rule's text as it was when it
- * caught the event, so the fact still names a rule the user has since
- * deleted. `ruleDeleted` is true once the rule is gone.
- */
-export const EventIgnoredByFact = Schema.Struct({
-  ruleId: Id,
-  kind: SignalKind,
-  text: Schema.String,
-  ruleDeleted: Schema.Boolean,
-});
-
-export type EventIgnoredByFact = Schema.Schema.Type<typeof EventIgnoredByFact>;
-
-/**
- * What came of one event: the signals it raised or is evidence for, the
- * signals it ended, the first Ignore Rule that caught it, the Tasks it is on, and
- * the live Subscriptions that received it. Each list is empty when the event
- * reached nothing of its kind, and `ignoredBy` is null when no rule caught it.
- */
-export const EventFacts = Schema.Struct({
-  signals: Schema.Array(EventSignalFact),
-  resolvedSignals: Schema.Array(EventResolvedSignalFact),
-  ignoredBy: Schema.NullOr(EventIgnoredByFact),
-  tasks: Schema.Array(EventTaskFact),
-  knownBy: Schema.Array(EventKnownByFact),
-});
-
-export type EventFacts = Schema.Schema.Type<typeof EventFacts>;
-
-/**
- * An event as `event.query` lists it: the event and its facts. The facts are
- * read after the page of events, one query for each kind of fact.
+ * An event as `event.query` lists it: the event without its `raw`, with the
+ * signals that name it and the live Subscriptions that received it. Each list
+ * is oldest first, and empty when there is none.
  *
- * A listed event carries no `raw`. The vendor payload is kept for debugging,
- * no filter or mapping reads it, and it can be large, so a page of events
- * would pay for it on every row. `event.read` still returns it. The `payload`
- * stays, because triage agents read it from `event list --intake`.
+ * The vendor payload is kept for debugging, no filter or mapping reads it,
+ * and it can be large, so a page of events would pay for it on every row.
+ * `event.read` still returns it. The `payload` stays, because triage agents
+ * read it from `event list --intake`.
  */
-export const EventWithFacts = Event.mapFields((fields) => ({
+export const ListedEvent = Event.mapFields((fields) => ({
   ...Struct.omit(fields, ["raw"]),
-  ...EventFacts.fields,
+  signals: Schema.Array(EventSignalFact),
+  knownBy: Schema.Array(EventKnownByFact),
 }));
 
-export type EventWithFacts = Schema.Schema.Type<typeof EventWithFacts>;
+export type ListedEvent = Schema.Schema.Type<typeof ListedEvent>;
 
 /** How many hours `event.countByConnection` counts back from now, one count per hour. */
 export const EVENT_COUNT_HOURS = 24;
@@ -269,8 +195,6 @@ export const event = HttpApiGroup.make("event")
         text: Schema.optionalKey(bounded(1, MAX_SEARCH_TEXT_LENGTH)),
         /** Only events from this source: a plugin's id, or a core emitter such as `manual`. */
         source: Schema.optionalKey(bounded(1, MAX_EVENT_SOURCE_LENGTH)),
-        /** Only events with at least one of these handlings. */
-        handling: Schema.optionalKey(atMost(EventHandling, EVENT_HANDLINGS.length)),
         /**
          * Only the events a start trigger holds: matched while its spawn
          * bound was spent, and waiting to start a run. Set both or neither,
@@ -286,7 +210,7 @@ export const event = HttpApiGroup.make("event")
         runnerId: Schema.optionalKey(Id),
         ...pageParams(EVENT_SORT_FIELDS).fields,
       }),
-      success: page(EventWithFacts),
+      success: page(ListedEvent),
       error: [Unauthenticated, Forbidden, Validation, Internal],
     }),
     // A summary of the log, so the Connections screen can show what each

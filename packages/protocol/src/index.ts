@@ -311,8 +311,8 @@ export const RunnerFacts = Schema.Struct({
   /**
    * The qualified harness ids (such as `claude-code/claude-code`) this runner
    * build has an adapter for. A fact about the binary rather than the machine,
-   * so the fleet view can show "no adapter in this runner build" instead of
-   * finding out by trying and failing.
+   * so the fleet view can say that this machine's Hercule cannot run a harness,
+   * instead of finding out by trying and failing.
    */
   adapters: Schema.Array(Fact).check(Schema.isMaxLength(MAX_FACT_ITEMS)),
   /**

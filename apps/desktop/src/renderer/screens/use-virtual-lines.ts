@@ -1,6 +1,6 @@
 /**
- * The virtual list that Intake's list, opened Tracking and the model browser
- * draw their lines in: only the lines in view and a few past each edge are
+ * The virtual list that the Inbox's list, a machine's activity and the model
+ * browser draw their lines in: only the lines in view and a few past each edge are
  * drawn, each at its estimated place, with an empty spacer before each run of
  * lines that are not drawn (spec 17 §Rules, rule 1).
  */
@@ -22,6 +22,12 @@ export interface VirtualLines<Item> {
   readonly lines: ReadonlyArray<VirtualLine<Item>>;
   /** The height of all the lines, drawn or not, in pixels. The lines' container is at least this tall. */
   readonly totalSize: number;
+  /**
+   * The index in `items` of the first item drawn in or near the view, or
+   * `undefined` when none is. Like `lastDrawnIndex`, an item drawn only
+   * because it is selected or holds the focus does not count.
+   */
+  readonly firstDrawnIndex: number | undefined;
   /**
    * The index in `items` of the last item drawn in or near the view, or
    * `undefined` when none is. An item drawn only because it is selected or
@@ -139,6 +145,7 @@ export const useVirtualLines = <Item extends { readonly key: string }>({
   const lines: VirtualLine<Item>[] = [];
   const visible = virtualizer.range;
   let end = scrollMargin;
+  let firstDrawnIndex: number | undefined;
   let lastDrawnIndex: number | undefined;
   for (const { index, key, start, size } of virtualizer.getVirtualItems()) {
     if (start > end) lines.push({ kind: "gap", key: `gap:${key}`, height: start - end });
@@ -147,11 +154,20 @@ export const useVirtualLines = <Item extends { readonly key: string }>({
     end = start + size;
     // An item kept only for the selection or the focus can lie far past the view. It must not
     // count as the end of what has scrolled by.
-    if (visible === null || index <= visible.endIndex + VIRTUAL_OVERSCAN) lastDrawnIndex = index;
+    if (visible === null || index <= visible.endIndex + VIRTUAL_OVERSCAN) {
+      lastDrawnIndex = index;
+      if (
+        firstDrawnIndex === undefined &&
+        (visible === null || index >= visible.startIndex - VIRTUAL_OVERSCAN)
+      ) {
+        firstDrawnIndex = index;
+      }
+    }
   }
   return {
     lines,
     totalSize: virtualizer.getTotalSize(),
+    firstDrawnIndex,
     lastDrawnIndex,
     selectedIndex,
     scrollToSelected,

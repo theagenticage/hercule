@@ -67,4 +67,48 @@ describe("applyThreadChoice", () => {
       accessMode: "full-access",
     });
   });
+
+  it("records the MCP Servers list with the project it was made under, replacing an earlier one", () => {
+    const first = applyThreadChoice(
+      { runnerId: "r-remote" },
+      { kind: "mcpServers", projectId: "p-shop", decideMcpServerIds: () => ["s-work"] },
+    );
+    expect(first).toEqual({
+      runnerId: "r-remote",
+      mcpServers: { projectId: "p-shop", mcpServerIds: ["s-work"] },
+    });
+    expect(
+      applyThreadChoice(first, {
+        kind: "mcpServers",
+        projectId: null,
+        decideMcpServerIds: () => [],
+      }),
+    ).toEqual({ runnerId: "r-remote", mcpServers: { projectId: null, mcpServerIds: [] } });
+  });
+
+  it("decides the MCP Servers list from the pick held for the same project only", () => {
+    const held: ThreadPicks = { mcpServers: { projectId: "p-shop", mcpServerIds: ["s-work"] } };
+    const seen: (readonly string[] | undefined)[] = [];
+    const choose = (projectId: string | null) => ({
+      kind: "mcpServers" as const,
+      projectId,
+      decideMcpServerIds: (picked: readonly string[] | undefined) => {
+        seen.push(picked);
+        return undefined;
+      },
+    });
+
+    expect(applyThreadChoice(held, choose("p-shop"))).toBe(held);
+    expect(applyThreadChoice(held, choose(null))).toBe(held);
+    expect(seen).toEqual([["s-work"], undefined]);
+  });
+
+  it("forgets the MCP Servers pick and keeps the others", () => {
+    expect(
+      applyThreadChoice(
+        { runnerId: "r-remote", mcpServers: { projectId: null, mcpServerIds: ["s-work"] } },
+        { kind: "mcpServersReset" },
+      ),
+    ).toEqual({ runnerId: "r-remote" });
+  });
 });

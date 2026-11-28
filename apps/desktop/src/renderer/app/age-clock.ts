@@ -233,10 +233,10 @@ export const NEVER = new Date(8.64e15);
  *
  * The label registers with the clock only while `counting` is true. Otherwise
  * it keeps the value it had, and reads a fresh one as soon as it counts again.
- * The value is a string or a number, so that an unchanged value compares equal
- * and draws nothing.
+ * The value is a string, a number or a boolean, so that an unchanged value
+ * compares equal and draws nothing.
  */
-export const useClockValue = <Value extends string | number | null>(
+export const useClockValue = <Value extends string | number | boolean | null>(
   moment: string,
   counting: boolean,
   findNextChange: (moment: string, now: Date) => Date,

@@ -55,6 +55,7 @@ import {
   EventRoutingInterval,
   IngestExecutorLayer,
   IngestReconcileInterval,
+  McpServerCheckInterval,
   Live,
   LostRunnerSweepInterval,
   EntityObservationsLayer,
@@ -106,7 +107,7 @@ import {
 } from "../secrets";
 import { ModelProfileLookupLayer, ModelProfileMembershipLayer } from "../model-profiles";
 import { HarnessReleasesLayer } from "../harnesses";
-import { PermissionProfilesLayer, SessionTokensLayer } from "../permissions";
+import { PermissionProfilesLayer, SessionTokens, SessionTokensLayer } from "../permissions";
 import {
   findCredentialSecretName,
   PluginConfigsLayer,
@@ -145,6 +146,8 @@ import {
   runnerRepository,
   type RunnerPings,
 } from "../runners";
+import { McpGateway } from "../mcp-gateway";
+import { McpServerCalls, McpServerCheckDeadline } from "../mcp-servers";
 import { PromotionState, PromotionStateLayer, PromotionTokensLayer } from "../promotion";
 import { resumeUnfinishedRuns } from "../runs";
 import { PasswordCost, TEST_PASSWORD_PARAMS, UsersLayer } from "../users";
@@ -203,16 +206,13 @@ const buildServices = (
         Layer.provideMerge(RunWorkspaceStepActivityLayer),
         Layer.provideMerge(RunServiceReferenceLayer),
         Layer.provideMerge(DiscussionInputsReferenceLayer),
-        // As in the real boot: a plugin's lifecycle change and a Connection's
-        // or an agent's delete validate the stored workflows again.
-        Layer.provideMerge(WorkflowValidityObserversLayer),
         // As in the real boot: the step that installs the shipped workflows
         // uses the workflow service and the task service.
         Layer.provideMerge(WorkflowServiceWithPortsLayer),
         Layer.provideMerge(TaskServiceWithPortsLayer),
         Layer.provideMerge(
           HarnessReleasesLayer.pipe(
-            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableRegistryClient)),
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, unreachableReleaseClient)),
           ),
         ),
       ),
@@ -226,6 +226,11 @@ const buildServices = (
         // Probing reads the catalogs that the provider's own API lists, which
         // the provider account service does.
         Layer.provideMerge(ProviderAccountServiceLayer),
+        // As in the real boot: provides the observer ports that validate the
+        // stored workflows again, and `WorkflowValidity` itself. It sits here
+        // because the provider account service above needs its port, and the
+        // services built on this stack need the others.
+        Layer.provideMerge(WorkflowValidityObserversLayer),
         Layer.provideMerge(ProviderAccountProbesLayer),
         Layer.provideMerge(ModelCatalogsLayer),
         Layer.provideMerge(ProviderAccountRunnersLayer),
@@ -359,13 +364,16 @@ const acceptingProviderKeyClient = HttpClient.make((request) =>
 );
 
 /**
- * The npm registry a test controller reads: no
- * request gets an answer, so no test reaches the real registry by accident.
+ * The release publishers a test controller reads: no request gets an answer,
+ * so no test reaches npm or GitHub by accident.
  */
-const unreachableRegistryClient = HttpClient.make((request) =>
+const unreachableReleaseClient = HttpClient.make((request) =>
   Effect.fail(
     new HttpClientError.HttpClientError({
-      reason: new HttpClientError.TransportError({ request, cause: "no registry in this test" }),
+      reason: new HttpClientError.TransportError({
+        request,
+        cause: "no release publisher in this test",
+      }),
     }),
   ),
 );
@@ -516,6 +524,18 @@ export interface ServerHarness {
    */
   readonly promotion: PromotionState["Service"];
   /**
+   * The controller's calls to outside MCP servers, which only the gateway's
+   * route uses. A test calls its methods directly.
+   */
+  readonly mcpServerCalls: McpServerCalls["Service"];
+  /**
+   * The MCP Gateway, and the Session Tokens it resolves a caller with. A test
+   * that needs a response before its body is read, which the HTTP listener
+   * never allows, calls `handle` directly.
+   */
+  readonly mcpGateway: McpGateway["Service"];
+  readonly sessionTokens: SessionTokens["Service"];
+  /**
    * Checks whether a fiber is still executing the run. A cancelled run's
    * fiber lives on until its steps have stopped, so a test that checks what a
    * step does after the cancel waits for this to turn false first.
@@ -568,6 +588,10 @@ export interface ServerOptions {
   readonly lostRunnerSweepInterval?: Duration.Duration;
   /** How often the scheduler looks for cron triggers that are due. The default is a second. */
   readonly schedulerInterval?: Duration.Duration;
+  /** How often the scheduler looks for MCP Server checks that are due. The default is a minute. */
+  readonly mcpServerCheckInterval?: Duration.Duration;
+  /** How long a whole MCP Server check may take. The default is under a freeze's wait for running work. */
+  readonly mcpServerCheckDeadline?: Duration.Duration;
   /** How often the Ingest Reconciler opens and closes ingest handles. The default is two seconds. */
   readonly ingestReconcileInterval?: Duration.Duration;
   /** How long a text generation may wait for a slot and an answer. The default is over a minute. */
@@ -716,6 +740,9 @@ export const withServer = (
           Effect.runPromiseExit(Effect.provideContext(effect, shippedWorkflowServices));
         const secrets = yield* Secrets;
         const promotion = yield* PromotionState;
+        const mcpServerCalls = yield* McpServerCalls;
+        const mcpGateway = yield* McpGateway;
+        const sessionTokens = yield* SessionTokens;
         const tokens = yield* JoinTokens;
         const joinToken: JoinTokenArranger = () =>
           Effect.runPromise(
@@ -740,6 +767,9 @@ export const withServer = (
             runWithShippedWorkflowServices,
             secrets,
             promotion,
+            mcpServerCalls,
+            mcpGateway,
+            sessionTokens,
             isRunExecuting: (runId) => FiberMap.hasUnsafe(runFibers, runId),
           }),
         );
@@ -794,6 +824,8 @@ const provideTimings =
     provideIfSet(LostRunnerSweepInterval, options.lostRunnerSweepInterval);
     provideIfSet(SchedulerInterval, options.schedulerInterval);
     provideIfSet(IngestReconcileInterval, options.ingestReconcileInterval);
+    provideIfSet(McpServerCheckInterval, options.mcpServerCheckInterval);
+    provideIfSet(McpServerCheckDeadline, options.mcpServerCheckDeadline);
     provideIfSet(TextGenerationDeadline, options.textGenerationDeadline);
     provideIfSet(ExpressionBudget, options.expressionBudget ?? Duration.infinity);
     return provided;

@@ -1,6 +1,6 @@
 /**
  * The records the Settings > Connections specimen (settings-connections.tsx)
- * seeds its query cache with, as the controller would return them: the
+ * draws from, as the controller would return them: the
  * event sources the Bureau book's desktop/settings-connections.html lists,
  * each a Connection of a plugin that declares its Connection type and its
  * mark.
@@ -20,6 +20,11 @@
  * - Each Connection received the book's count of events in the last 24
  *   hours, spread over the hours unevenly, with Sentry's and GitHub's rising
  *   in the later hours, as the book draws them.
+ * - Seven of the Connections' plugins offer an MCP server (spec 21), so those
+ *   rows carry an "agent tools" note: GitHub, Grafana, Linear, PostHog,
+ *   Sentry (two accounts, `webshop-prod` and `hobby`) and Stripe. Linear's
+ *   Connection and the hobby Sentry account are not in the book, which has
+ *   no MCP servers. mcp-fixture.ts holds the servers on them.
  */
 import type {
   Connection,
@@ -29,7 +34,7 @@ import type {
 } from "@hercule/contract";
 import type { ConnectionsSettingsRecords, SidebarRecords } from "./shell-page";
 import { SETTINGS_ASSISTANTS_RECORDS } from "./settings-assistants-fixture";
-import { buildPlugin, GITHUB_PLUGIN, SENTRY_MARK } from "./plugins-fixture";
+import { buildPlugin, GITHUB_PLUGIN, LINEAR_PLUGIN, SENTRY_MARK } from "./plugins-fixture";
 
 /** The moment every Connection was created, as the API spells a time. */
 const CREATED_AT = "2026-09-10T09:00:00.000Z";
@@ -62,32 +67,70 @@ const GRAFANA_MARK: PluginMark = {
 
 /**
  * Returns `plugin` declaring one Connection type, `<plugin id>/<word>`, named
- * `displayName`.
+ * `displayName`. With `mcpOrigin`, the plugin also offers the MCP server
+ * `<plugin id>/<word>`, reached with a Connection of that type at `mcpOrigin`.
  */
 const declareConnectionType = (
   plugin: PluginDetail,
   word: string,
   displayName: string,
+  mcpOrigin?: string,
 ): PluginDetail => ({
   ...plugin,
+  ...(mcpOrigin !== undefined && { capabilities: ["connections", "mcp-servers"] }),
   contributions: [
     {
       extensionPoint: "connection-type",
       id: `${plugin.id}/${word}`,
       definition: { type: `${plugin.id}/${word}`, displayName },
     },
+    ...(mcpOrigin === undefined
+      ? []
+      : [
+          {
+            extensionPoint: "mcp-server",
+            id: `${plugin.id}/${word}`,
+            definition: {
+              displayName,
+              description: `The ${displayName} MCP server.`,
+              connectionType: `${plugin.id}/${word}`,
+              origin: mcpOrigin,
+            },
+          },
+        ]),
   ],
 });
 
 /** The plugins the Connections belong to, each declaring its Connection type. */
-const CONNECTIONS_PLUGINS: ReadonlyArray<PluginDetail> = [
-  declareConnectionType(buildPlugin("sentry", "Sentry", SENTRY_MARK), "sentry", "Sentry"),
-  declareConnectionType(GITHUB_PLUGIN, "github", "GitHub"),
-  declareConnectionType(buildPlugin("stripe", "Stripe", STRIPE_MARK), "stripe", "Stripe"),
+export const CONNECTIONS_PLUGINS: ReadonlyArray<PluginDetail> = [
+  declareConnectionType(
+    buildPlugin("sentry", "Sentry", SENTRY_MARK),
+    "sentry",
+    "Sentry",
+    "https://mcp.sentry.dev",
+  ),
+  declareConnectionType(GITHUB_PLUGIN, "github", "GitHub", "https://api.githubcopilot.com"),
+  declareConnectionType(LINEAR_PLUGIN, "linear", "Linear", "https://mcp.linear.app"),
+  declareConnectionType(
+    buildPlugin("stripe", "Stripe", STRIPE_MARK),
+    "stripe",
+    "Stripe",
+    "https://mcp.stripe.com",
+  ),
   declareConnectionType(buildPlugin("gmail", "Gmail", GMAIL_MARK), "gmail", "Gmail"),
-  declareConnectionType(buildPlugin("posthog", "PostHog", POSTHOG_MARK), "posthog", "PostHog"),
+  declareConnectionType(
+    buildPlugin("posthog", "PostHog", POSTHOG_MARK),
+    "posthog",
+    "PostHog",
+    "https://mcp.posthog.com",
+  ),
   declareConnectionType(buildPlugin("intercom", "Intercom", INTERCOM_MARK), "intercom", "Intercom"),
-  declareConnectionType(buildPlugin("grafana", "Grafana", GRAFANA_MARK), "grafana", "Grafana"),
+  declareConnectionType(
+    buildPlugin("grafana", "Grafana", GRAFANA_MARK),
+    "grafana",
+    "Grafana",
+    "https://mcp.grafana.example",
+  ),
 ];
 
 /** Builds a connected Connection of `type` named `label`, signed in as `displayName`. */
@@ -117,10 +160,12 @@ const FAILED_INTERCOM: Connection = {
   statusDetail: "reconnecting since 09:12",
 };
 
-/** The Connections, in the order the book lists its event sources. */
-const CONNECTIONS: ReadonlyArray<Connection> = [
+/** The Connections, in the order the book lists its event sources, with Sentry's second account and Linear after their kin. */
+export const CONNECTIONS: ReadonlyArray<Connection> = [
   buildConnection("c-sentry", "sentry/sentry", "webshop-prod", "Acme · rogier"),
+  buildConnection("c-sentry-hobby", "sentry/sentry", "hobby", "birdhouse · rogier"),
   buildConnection("c-github", "github/github", "rogier", "rogier-acme"),
+  buildConnection("c-linear", "linear/linear", "acme", "Acme · rogier@acme.example"),
   buildConnection("c-stripe", "stripe/stripe", "live", "Acme Inc."),
   buildConnection("c-gmail", "gmail/gmail", "rogier@personal", "rogier@gmail.com"),
   buildConnection("c-posthog", "posthog/posthog", "webshop", "Acme"),
@@ -143,10 +188,18 @@ const EVENT_COUNTS: EventCountsByConnection = {
       ],
     },
     {
+      connectionId: "c-sentry-hobby",
+      hourly: [1, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1],
+    },
+    {
       connectionId: "c-github",
       hourly: [
         7, 5, 10, 8, 4, 12, 8, 6, 11, 10, 5, 7, 8, 10, 12, 4, 16, 20, 25, 29, 27, 23, 13, 32,
       ],
+    },
+    {
+      connectionId: "c-linear",
+      hourly: [4, 6, 5, 7, 6, 4, 5, 8, 7, 6, 5, 6, 8, 7, 6, 5, 7, 6, 5, 6, 7, 6, 5, 7],
     },
     {
       connectionId: "c-stripe",

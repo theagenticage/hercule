@@ -225,7 +225,10 @@ describe("Settings > Providers", () => {
     expect(sheet.textContent).toContain("rogier@example.com · Claude Max");
     const machines = [...sheet.querySelectorAll(".pa-machine")].map((row) => row.textContent);
     // The retired machine is not listed. moss is signed in; atlas has no harness.
-    expect(machines).toEqual(["mossrogier@example.com", "atlasNot signed inInstall"]);
+    expect(machines).toEqual([
+      "mossrogier@example.com",
+      "atlasClaude Code is not installedInstall",
+    ]);
     expect(view.getByRole("button", { name: "Install" })).toBeTruthy();
     expect(view.queryByRole("button", { name: "Sign in" })).toBeNull();
     expect(view.getByRole("heading", { name: "Delete Anthropic · personal" })).toBeTruthy();

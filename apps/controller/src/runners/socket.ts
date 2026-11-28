@@ -37,6 +37,7 @@ import {
   DISK_USAGE_CAPABILITY,
   FILES_EDITED_CAPABILITY,
   GITHUB_TOKEN_CAPABILITY,
+  MCP_SERVERS_CAPABILITY,
   REPOSITORY_SKILLS_CAPABILITY,
   SKILLS_CAPABILITY,
   TEXT_GENERATION_CAPABILITY,
@@ -48,6 +49,7 @@ import {
   RunnerFactsRequest,
   RunnerToController,
   LOGIN_ENDED_CAPABILITY,
+  buildMcpServersCapability,
   buildWorkspaceActionCapability,
   encodeChallengeBytes,
   type ControllerHello,
@@ -56,7 +58,7 @@ import {
 import { readBearerToken } from "../http/bearer";
 import { buildErrorResponse } from "../http/envelope";
 import { ControllerIdentity } from "../identity";
-import { WORKSPACE_ACTION_IDS } from "../plugins";
+import { PluginHost, WORKSPACE_ACTION_IDS } from "../plugins";
 import { buildForwardingPointer, PromotionState } from "../promotion";
 import { mintConnection, RunnerConnections, type Connection, type Departure } from "./connections";
 
@@ -130,8 +132,17 @@ const RETIRED = "this runner was retired; run `hercule runner join` to join the 
  *   removal without the list, and the workspace gets a warning saying so.
  * - `DISK_USAGE_CAPABILITY`: this controller reads the `diskUsageReport` frame.
  *   A runner sends it only to a controller that lists this.
+ * - one MCP Servers capability for each harness a plugin registered
+ *   (`buildMcpServersCapability`): this controller adds the MCP Gateway entry
+ *   to the start frame's `SessionSpec.mcpServers` of a session of that
+ *   harness, and only for a runner that negotiated it. A runner that did not
+ *   gets the start without the entry, and every MCP Server in the session's
+ *   list is left out with the reason `runner-too-old`. These are built per
+ *   connection, from the harnesses registered at that time.
+ * - `MCP_SERVERS_CAPABILITY`, the retired plain form, which a runner of the
+ *   first MCP Gateway build negotiates (see `readMcpServersHarnessIds`).
  */
-const CAPABILITIES: ReadonlyArray<string> = [
+const FIXED_CAPABILITIES: ReadonlyArray<string> = [
   ...[...WORKSPACE_ACTION_IDS].map(buildWorkspaceActionCapability),
   LOGIN_ENDED_CAPABILITY,
   AGENT_STEPS_CAPABILITY,
@@ -185,13 +196,36 @@ const RUNNER_ENDED_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1005, 1006]
  */
 const QUEUED_FRAMES_DEADLINE = Duration.seconds(5);
 
+/**
+ * The close codes of a connection that ended on purpose, so it is not an
+ * error: 1000 (normal), 1001 (going away) and 1005 (closed with no status
+ * code). A runner that stops sends 1000. A client that closes without naming a
+ * code, as a browser's `close()` does, arrives as 1005. 1001 is what an end
+ * sends when it is leaving, and the controller itself sends it when it closes
+ * a connection that a newer one displaced or that went silent. Every other code
+ * is a fault: 1006 means the connection dropped with no close frame, and the
+ * rest are refusals.
+ */
+const NORMAL_CLOSE_CODES: ReadonlySet<number> = new Set([1000, 1001, 1005]);
+
+/**
+ * Checks whether the connection ended with a close that is not an error. Takes
+ * any error, because the receive loop can also fail with a database error.
+ */
+const endedNormally = (error: unknown): boolean =>
+  Socket.isSocketError(error) &&
+  error.reason._tag === "SocketCloseError" &&
+  NORMAL_CLOSE_CODES.has(error.reason.code);
+
 /** Checks whether the runner or the network ended the connection, as opposed to the controller. */
 const endedByRunnerOrNetwork = (error: Socket.SocketError): boolean =>
   error.reason._tag === "SocketCloseError" && RUNNER_ENDED_CLOSE_CODES.has(error.reason.code);
 
 /** Returns the capabilities both sides offer, which are the only ones either may use. */
-const negotiateCapabilities = (theirs: ReadonlyArray<string>): ReadonlyArray<string> =>
-  CAPABILITIES.filter((capability) => theirs.includes(capability));
+const negotiateCapabilities = (
+  mine: ReadonlyArray<string>,
+  theirs: ReadonlyArray<string>,
+): ReadonlyArray<string> => mine.filter((capability) => theirs.includes(capability));
 
 /**
  * Serves one runner connection until it closes: answers the hello, handles
@@ -207,6 +241,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
     const identity = yield* ControllerIdentity;
     const promotion = yield* PromotionState;
     const pings = yield* RunnerPingSchedule;
+    const host = yield* PluginHost;
     const { write } = yield* socket.writer;
 
     const mine: Connection = mintConnection();
@@ -242,11 +277,16 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
       promotion.whenServingOr(
         Effect.gen(function* () {
           const controller = yield* identity.readOrDie;
+          const capabilities = [
+            ...FIXED_CAPABILITIES,
+            MCP_SERVERS_CAPABILITY,
+            ...(yield* host.harnesses()).map((harness) => buildMcpServersCapability(harness.id)),
+          ];
           const signature = yield* identity.sign(encodeChallengeBytes(runnerId, hello.nonce));
           const answer: ControllerHello = {
             _tag: "controllerHello",
             protocolVersion: PROTOCOL_VERSION,
-            capabilities: CAPABILITIES,
+            capabilities,
             identityId: controller.id,
             publicKey: Buffer.from(controller.publicKey).toString("base64"),
             nonce: hello.nonce,
@@ -269,7 +309,7 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
             {
               binaryVersion: hello.binaryVersion,
               protocolVersion: hello.protocolVersion,
-              negotiatedCapabilities: negotiateCapabilities(hello.capabilities),
+              negotiatedCapabilities: negotiateCapabilities(capabilities, hello.capabilities),
               facts: hello.facts,
             },
           );
@@ -477,9 +517,13 @@ const holdConnection = (runnerId: string, socket: Socket.Socket) =>
 
     yield* Effect.ensuring(
       Effect.race(
-        Effect.tapCause(receiveFrames, (cause) =>
-          Effect.logError("A runner's connection ended in an error", cause),
-        ).pipe(Effect.ignore),
+        receiveFrames.pipe(
+          Effect.catchIf(endedNormally, () => Effect.void),
+          Effect.tapCause((cause) =>
+            Effect.logError("A runner's connection ended in an error", cause),
+          ),
+          Effect.ignore,
+        ),
         Effect.race(ask, closeWhenAsked),
       ),
       Effect.tapCause(leave, (cause) =>

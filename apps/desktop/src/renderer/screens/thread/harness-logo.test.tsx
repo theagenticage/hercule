@@ -10,14 +10,17 @@ import { HarnessLogo } from "./harness-logo";
 afterEach(cleanup);
 
 describe("HarnessLogo", () => {
-  it.each(["claude-code/claude-code", "codex/codex"])("draws %s as an SVG mark", (harnessId) => {
-    const { container } = render(<HarnessLogo harnessId={harnessId} size={13} />);
+  it.each(["claude-code/claude-code", "codex/codex", "antigravity/antigravity"])(
+    "draws %s as an SVG mark",
+    (harnessId) => {
+      const { container } = render(<HarnessLogo harnessId={harnessId} size={13} />);
 
-    const svg = container.querySelector("svg");
-    expect(svg).not.toBeNull();
-    expect(svg!.getAttribute("fill")).toBe("currentColor");
-    expect(svg!.getAttribute("aria-hidden")).toBe("true");
-  });
+      const svg = container.querySelector("svg");
+      expect(svg).not.toBeNull();
+      expect(svg!.getAttribute("fill")).toBe("currentColor");
+      expect(svg!.getAttribute("aria-hidden")).toBe("true");
+    },
+  );
 
   it("draws pi as the character π, not as an SVG", () => {
     const { container } = render(<HarnessLogo harnessId="pi/pi" size={13} />);

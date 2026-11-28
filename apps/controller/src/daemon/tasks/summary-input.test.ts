@@ -19,7 +19,7 @@ import { runRepository } from "../../runs";
 import { inputRepository, sessionRepository } from "../../sessions";
 import { taskRepository } from "../../tasks";
 import { TestDatabase } from "../../db/testing";
-import { TaskTrackingRunsLayer } from "../runs";
+import { TaskRunsLayer } from "../runs";
 import {
   buildTaskSummaryCall,
   MAX_SUMMARY_INPUT_BYTES,
@@ -247,7 +247,7 @@ const buildCallFor = (fixture: TaskFixture) =>
           }),
       );
       return { taskId, built, statements };
-    }).pipe(Effect.provide(TaskTrackingRunsLayer.pipe(Layer.provideMerge(TestDatabase)))),
+    }).pipe(Effect.provide(TaskRunsLayer.pipe(Layer.provideMerge(TestDatabase)))),
   );
 
 /** Builds the call of `fixture` and returns it with the input the model reads, parsed. */
@@ -406,7 +406,7 @@ describe("the call that writes a summary", () => {
   it("builds nothing for a Task that does not exist", async () => {
     const built = await Effect.runPromise(
       buildTaskSummaryCall(uuidToString(mintUuid())).pipe(
-        Effect.provide(TaskTrackingRunsLayer.pipe(Layer.provideMerge(TestDatabase))),
+        Effect.provide(TaskRunsLayer.pipe(Layer.provideMerge(TestDatabase))),
       ),
     );
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Skill, SkillDetail, SkillImportInput, SkillRevision } from "@hercule/contract";
+import type { SenderReading } from "./threads/sender";
 import { createClient, type HerculeClient } from "./client";
 import { ApiError, ConnectionError } from "./errors";
 import {
@@ -7,7 +8,11 @@ import {
   countSkillImportOutcomes,
   describeFolderWithoutSkills,
   describeLockedSkillSource,
+  describeSkillProposal,
+  describeSkillProposedBadge,
+  describeSkillProposer,
   describeSkillRevisionApplied,
+  describeSkillThirdPartyContent,
   describeSkillRevisionOrigin,
   describeSkillImportSummary,
   describeSkillSource,
@@ -54,6 +59,13 @@ describe("listSkillApprovalEffectLines", () => {
         tools: ["Bash(git tag:*)", "Read"],
       },
       { text: "After the update, has hooks, which run without asking", tools: [] },
+    ]);
+    expect(listSkillApprovalEffectLines(effects, "afterApply")).toEqual([
+      {
+        text: "After you apply it, lets tools run without asking:",
+        tools: ["Bash(git tag:*)", "Read"],
+      },
+      { text: "After you apply it, has hooks, which run without asking", tools: [] },
     ]);
   });
 });
@@ -164,6 +176,17 @@ describe("describeSkillRevisionOrigin", () => {
   });
 });
 
+const SESSION = "session:0199a3c2-7b41-7e2a-9c3d-5f1e2a2a8b4c60";
+const SESSION_LABEL = "session 2a8b4c60";
+
+/** How the app reads the agent of `SESSION`, as `describeSender` returns it, with `name`. */
+const senderNamed = (name: string): SenderReading => ({
+  label: name,
+  name,
+  face: { kind: "assistant", seed: "a1" },
+  link: { kind: "assistant", assistantId: "a1" },
+});
+
 describe("describeSkillRevisionApplied", () => {
   const now = new Date("2026-10-18T16:00:00Z");
 
@@ -171,6 +194,7 @@ describe("describeSkillRevisionApplied", () => {
     expect(
       describeSkillRevisionApplied(
         { appliedAt: "2026-10-18T14:02:00Z", appliedBy: "user" },
+        undefined,
         now,
         "UTC",
       ),
@@ -181,31 +205,95 @@ describe("describeSkillRevisionApplied", () => {
     expect(
       describeSkillRevisionApplied(
         { appliedAt: "2026-09-28T10:15:00Z", appliedBy: "user" },
+        undefined,
         now,
         "UTC",
       ),
     ).toBe("applied by you, 28 Sep 10:15");
   });
 
-  it("names a session by its id", () => {
+  it("names a session's agent and keeps the session's id tail", () => {
     expect(
       describeSkillRevisionApplied(
-        {
-          appliedAt: "2026-10-18T14:02:00Z",
-          appliedBy: "session:0199a3c2-7b41-7e2a-9c3d-5f1e2a8b4c60",
-        },
+        { appliedAt: "2026-10-18T14:02:00Z", appliedBy: SESSION },
+        senderNamed("Ada"),
         now,
         "UTC",
       ),
-    ).toMatch(/^applied by session \S+, 14:02$/);
+    ).toBe("applied by Ada, session 2a8b4c60, 14:02");
+  });
+
+  it("names a session by its id tail alone while its agent is not known", () => {
+    expect(
+      describeSkillRevisionApplied(
+        { appliedAt: "2026-10-18T14:02:00Z", appliedBy: SESSION },
+        undefined,
+        now,
+        "UTC",
+      ),
+    ).toBe("applied by session 2a8b4c60, 14:02");
+  });
+
+  it("never names a session twice when its only name is its id", () => {
+    expect(
+      describeSkillRevisionApplied(
+        { appliedAt: "2026-10-18T14:02:00Z", appliedBy: SESSION },
+        senderNamed(SESSION_LABEL),
+        now,
+        "UTC",
+      ),
+    ).toBe("applied by session 2a8b4c60, 14:02");
   });
 
   it("leaves out what is not known", () => {
-    expect(describeSkillRevisionApplied({ appliedAt: null, appliedBy: "user" }, now, "UTC")).toBe(
-      "applied by you",
+    expect(
+      describeSkillRevisionApplied({ appliedAt: null, appliedBy: "user" }, undefined, now, "UTC"),
+    ).toBe("applied by you");
+    expect(
+      describeSkillRevisionApplied({ appliedAt: null, appliedBy: null }, undefined, now, "UTC"),
+    ).toBe("applied");
+  });
+});
+
+describe("describeSkillProposedBadge", () => {
+  it("shows no badge without proposals, and the count from two", () => {
+    expect(describeSkillProposedBadge({ proposedCount: 0 })).toBeNull();
+    expect(describeSkillProposedBadge({ proposedCount: 1 })).toBe("Proposed");
+    expect(describeSkillProposedBadge({ proposedCount: 2 })).toBe("Proposed 2");
+  });
+});
+
+describe("describeSkillProposer and describeSkillProposal", () => {
+  const now = new Date("2026-10-18T16:00:00Z");
+  const revision = { createdBy: SESSION, createdAt: "2026-10-18T14:02:00Z" };
+
+  it("names the proposing agent and its session", () => {
+    expect(describeSkillProposer(SESSION, senderNamed("Ada"))).toBe(
+      "Proposed by Ada, session 2a8b4c60",
     );
-    expect(describeSkillRevisionApplied({ appliedAt: null, appliedBy: null }, now, "UTC")).toBe(
-      "applied",
+    expect(describeSkillProposal(revision, senderNamed("Ada"), now, "UTC")).toBe(
+      "Proposed by Ada, session 2a8b4c60, 14:02",
+    );
+  });
+
+  it("names the session once when it has no other name", () => {
+    expect(describeSkillProposal(revision, undefined, now, "UTC")).toBe(
+      "Proposed by session 2a8b4c60, 14:02",
+    );
+    expect(describeSkillProposer(SESSION, senderNamed(SESSION_LABEL))).toBe(
+      "Proposed by session 2a8b4c60",
+    );
+  });
+});
+
+describe("describeSkillThirdPartyContent", () => {
+  it("names the agent when it has a name, and says the session otherwise", () => {
+    expect(describeSkillThirdPartyContent(SESSION, senderNamed("Milo"))).toBe(
+      "Milo's session had read third-party messages when it proposed this revision, so the changes may carry their words. Read them before you apply.",
+    );
+    expect(describeSkillThirdPartyContent(SESSION, undefined)).toMatch(/^The session had read/);
+    expect(describeSkillThirdPartyContent(SESSION, senderNamed(SESSION_LABEL))).toMatch(
+      /^The session had read/,
     );
   });
 });
@@ -271,6 +359,7 @@ const SKILL: Skill = {
   availableRevisionHash: null,
   availableApprovalEffects: null,
   proposedCount: 0,
+  proposedBy: null,
   lastCheckedAt: null,
   checkError: null,
   createdAt: "2026-10-18T10:00:00Z",

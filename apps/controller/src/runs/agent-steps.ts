@@ -35,6 +35,7 @@ import { RunExecutor } from "./executor";
 import { runRepository, type ExecutionFailureReason, type StoredRun } from "./repository";
 import { buildRunContext } from "./run-context";
 import { ENDED, WAITS_FOR_RUNNER, type StepKind, type StepRecordKey } from "./step";
+import { describeMissingAgentHost, type AgentHosts } from "./missing-agent-host";
 import { isUnfinished } from "./step-records";
 import { WorkspaceSteps, type AgentStep } from "./workspace-steps";
 
@@ -164,30 +165,33 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
     const workspaceSteps = yield* WorkspaceSteps;
 
     /**
-     * Returns the Agent's name and the ids of the runners that can host it:
-     * those that can run the Agent's provider account in the Agent's harness (the
-     * account's default when the Agent names none). Returns `undefined`
-     * when the Agent no longer exists. Placing the step's session refuses a
-     * deleted Agent, with a message that says so.
+     * Returns the Agent's name and where it can run: on the runners that can
+     * run the Agent's provider account in the Agent's harness (the account's
+     * default when the Agent names none), with the reason for each runner that
+     * cannot. An Agent whose account is gone, and that names no harness, runs
+     * nowhere. Returns `undefined` when the Agent no longer exists. Placing the
+     * step's session refuses a deleted Agent, with a message that says so.
      */
-    const listAgentHosts = (
-      agentId: string,
-    ): Effect.Effect<
-      { readonly agentName: string; readonly runnerIds: ReadonlySet<string> } | undefined,
-      SqlError
-    > =>
+    const listAgentHosts = (agentId: string): Effect.Effect<AgentHosts | undefined, SqlError> =>
       Effect.gen(function* () {
         const agent = yield* agents.read(agentId);
         if (Option.isNone(agent)) return undefined;
         const account = yield* providerAccounts.one(agent.value.providerAccountId);
         const harnessId = agent.value.harnessId ?? Option.getOrUndefined(account)?.defaultHarnessId;
-        const available =
-          harnessId === undefined
-            ? undefined
-            : yield* accountRunners.list(agent.value.providerAccountId, harnessId);
+        if (harnessId === undefined) {
+          return {
+            agentName: agent.value.name,
+            available: {
+              runnerIds: [],
+              subject: agent.value.name,
+              noRunnerMessage: `the provider account of ${agent.value.name} no longer exists`,
+              refusals: new Map(),
+            },
+          };
+        }
         return {
           agentName: agent.value.name,
-          runnerIds: new Set(available?.runnerIds),
+          available: yield* accountRunners.list(agent.value.providerAccountId, harnessId),
         };
       });
 
@@ -286,9 +290,8 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
        * step of `plan`: those signed in to the provider account of each
        * Agent the steps name, in the Agent's harness. A plan with no agent step keeps every
        * candidate. Returns `noHost`, with a message for the user, when
-       * `candidates` is not empty and none of them can: the message names
-       * the Agents that no candidate can host, or every Agent of the plan
-       * when each one has a host but no candidate hosts them all.
+       * `candidates` is not empty and none of them can: the message says what
+       * stops each Agent on each candidate (see `describeMissingAgentHost`).
        *
        * A runner signed in to an account stays a host while it is offline,
        * so a run whose host is offline waits for it rather than failing.
@@ -309,20 +312,17 @@ export const makeAgentSteps = ({ writeStepFailure, placeOnRunner }: AgentStepNee
             (agentHosts) => agentHosts !== undefined,
           );
           const hosting = candidates.filter((candidate) =>
-            hosts.every(({ runnerIds }) => runnerIds.has(candidate.id)),
+            hosts.every(({ available }) => available.runnerIds.includes(candidate.id)),
           );
           if (candidates.length === 0 || hosting.length > 0) {
             return { _tag: "hosts", candidates: hosting } as const;
           }
-          const hostedByNone = hosts.filter(({ runnerIds }) =>
-            candidates.every((candidate) => !runnerIds.has(candidate.id)),
-          );
-          const named = (hostedByNone.length > 0 ? hostedByNone : hosts).map(
-            ({ agentName }) => agentName,
-          );
           return {
             _tag: "noHost",
-            message: `No runner that can take this run is signed in to the provider of ${named.join(" and ")}; sign a runner in, then start the run again.`,
+            message: describeMissingAgentHost(
+              hosts,
+              candidates.map(({ id }) => id),
+            ),
           } as const;
         }),
 

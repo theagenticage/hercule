@@ -43,6 +43,24 @@ describe("buildBoardSnapshot", () => {
   });
 });
 
+describe("buildBoardSnapshot and a report's cause", () => {
+  it("leaves out the cause of a card a report placed, whose text quotes a Thread's title", () => {
+    const board = buildBoard(
+      buildCard("a", {
+        stage: "planned",
+        stageCause: {
+          kind: "report",
+          sessionId: "s1",
+          stageRevision: 3,
+          text: "\u201cPricing research\u201d says Planned",
+        },
+      }),
+    );
+
+    expect(buildBoardSnapshot(board).cards).toEqual([{ id: "a", stage: "planned" }]);
+  });
+});
+
 describe("summarizeCardMoves", () => {
   it("counts what landed, what moved elsewhere and what is new, in that order", () => {
     const previous = buildBoard(

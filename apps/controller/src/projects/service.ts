@@ -2,8 +2,9 @@
  * The project operations of the API: `project.query`, `read`, `create`,
  * `update` and `delete`.
  *
- * A project has no behaviour of its own and one default, the Model Profile a
- * new thread in it starts on. It groups information: a task refers to one
+ * A project has no behaviour of its own and two defaults for a new thread in
+ * it: the Model Profile it starts on and the MCP Servers it starts with. It
+ * groups information: a task refers to one
  * project through `projectId`, and a resource can belong to any number of
  * projects through `project_resources`.
  *
@@ -57,6 +58,7 @@ import {
   type ResolvedSortKey,
 } from "../db";
 import { AuditLog } from "../events";
+import { mcpServerListRule, requireMcpManage } from "../mcp-servers";
 import { ModelProfileLookup } from "./model-profile-lookup";
 import { projectRepository, type ProjectSortField } from "./repository";
 
@@ -104,6 +106,7 @@ const make = Effect.gen(function* () {
   const projects = yield* projectRepository;
   const audit = yield* AuditLog;
   const modelProfiles = yield* ModelProfileLookup;
+  const mcpServerLists = yield* mcpServerListRule;
 
   /** Fails with `Validation` on `modelProfileId` when no Model Profile has this id. */
   const requireModelProfile = (
@@ -162,13 +165,18 @@ const make = Effect.gen(function* () {
         return yield* readLiveProjectOrFail(id);
       }),
 
-    /** Creates a project and returns it. */
+    /**
+     * Creates a project and returns it. A call that gives `mcpServerIds` also
+     * needs the `mcp.manage` grant, and fails with `Validation` when the list
+     * breaks the rules of a list of MCP Servers.
+     */
     create: (
       input: ProjectCreateInput,
     ): Effect.Effect<Project, Unauthenticated | Forbidden | Validation | SqlError> =>
       Effect.gen(function* () {
         yield* requireGrant("project.create");
         const decoded = yield* Effect.mapError(decodeCreate(input), createDecodeValidationError);
+        if (decoded.mcpServerIds !== undefined) yield* requireMcpManage;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -178,10 +186,13 @@ const make = Effect.gen(function* () {
             if (decoded.modelProfileId !== undefined) {
               yield* requireModelProfile(decoded.modelProfileId);
             }
+            const mcpServerIds = decoded.mcpServerIds ?? [];
+            yield* mcpServerLists.checkList(mcpServerIds, ["mcpServerIds"]);
             const project = yield* projects.insert({
               name: decoded.name,
               description: decoded.description,
               modelProfileId: decoded.modelProfileId,
+              mcpServerIds,
               at,
             });
             yield* audit.append({
@@ -202,6 +213,12 @@ const make = Effect.gen(function* () {
      * that only repeats the current values writes nothing. Otherwise either
      * patch would change `updatedAt` and record a `project.updated` event with
      * no changes in it.
+     *
+     * `mcpServerIds` replaces the project's list, and a patch without it
+     * leaves the list as it is. A patch that gives it also needs the
+     * `mcp.manage` grant, and fails with `Validation` when the list breaks the
+     * rules of a list of MCP Servers. A caller without `mcp.manage` may still
+     * change every other field.
      */
     update: (
       input: UpdateInput,
@@ -217,6 +234,7 @@ const make = Effect.gen(function* () {
             createValidationError([{ path: [], message: "name a field to change" }]),
           );
         }
+        if (patch.mcpServerIds !== undefined) yield* requireMcpManage;
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
@@ -241,11 +259,23 @@ const make = Effect.gen(function* () {
               }
             }
 
+            // The list is replaced as a whole, so it changed when its ids or
+            // their order differ.
+            const mcpServers = patch.mcpServerIds;
+            if (mcpServers !== undefined)
+              yield* mcpServerLists.checkList(mcpServers, ["mcpServerIds"]);
+            const mcpServersChanged =
+              mcpServers !== undefined && mcpServers.join() !== before.mcpServerIds.join();
+            if (mcpServersChanged) {
+              changes["mcpServerIds"] = { old: before.mcpServerIds, new: mcpServers };
+            }
+
             // No field changed, so return the project as it is, without writing
             // the row or recording an event.
             if (Object.keys(changes).length === 0) return before;
 
             yield* projects.update(id, edit, at);
+            if (mcpServersChanged) yield* projects.replaceMcpServers(id, mcpServers);
             yield* audit.append({
               kind: "project.updated",
               actor: yield* currentStamp,
@@ -256,6 +286,41 @@ const make = Effect.gen(function* () {
             // exactly the row that was written.
             return yield* readLiveProjectOrFail(id);
           }),
+        );
+      }),
+
+    /**
+     * Removes an MCP Server from every project's list, deleted projects
+     * included, and records a `project.updated` event for each project that
+     * is not deleted. Projects have no live topic, so nothing else announces
+     * the change. The MCP Server list holder calls it when a server is deleted,
+     * in the same transaction. It is not an operation and checks no grant: the
+     * caller has checked its own.
+     */
+    removeMcpServer: (mcpServerId: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const at = yield* nowIso;
+        const live = yield* projects.liveHoldingMcpServer(mcpServerId);
+        yield* projects.removeMcpServer(mcpServerId, at);
+        const actor = yield* currentStamp;
+        yield* Effect.forEach(
+          live,
+          (project) =>
+            audit.append({
+              kind: "project.updated",
+              actor,
+              payload: {
+                projectId: project.id,
+                changes: {
+                  mcpServerIds: {
+                    old: project.mcpServerIds,
+                    new: project.mcpServerIds.filter((id) => id !== mcpServerId),
+                  },
+                },
+              },
+              at,
+            }),
+          { discard: true },
         );
       }),
 

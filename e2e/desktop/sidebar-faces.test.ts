@@ -3,8 +3,8 @@
  * controller whose threads a fleet of scripted runners puts in known states
  * (spec 17, §Design system, **The sidebar**):
  *
- * - the face switch, Threads | Hercule, sits in the window's drag strip and
- *   still takes a click; it, View › Threads and View › Hercule (⌥⌘1, ⌥⌘2),
+ * - the face switch, Threads | Work, sits in the window's drag strip and
+ *   still takes a click; it, View › Threads and View › Work (⌥⌘1, ⌥⌘2),
  *   and ← and → on its focused segment change the face without leaving the
  *   screen;
  * - the Office and Settings keep the Hercule face, and opening a thread shows
@@ -19,17 +19,17 @@ import { arrangeFleet, chooseMenuItem, openSignedIn, openThread } from "./harnes
 /**
  * Returns which face the sidebar shows, as the face switch's selected segment
  * and the label of the list under it, such as
- * `{ tab: "Hercule", list: "Hercule" }`. The list is the sidebar's `nav`,
- * named "Threads" on the threads face and "Hercule" on the Hercule face.
+ * `{ tab: "Work", list: "Work" }`. The list is the sidebar's `nav`,
+ * named "Threads" on the threads face and "Work" on the Hercule face.
  */
 async function readSidebarFace(page: Page): Promise<{ tab: string | null; list: string | null }> {
   const tab = page.getByRole("tablist", { name: "Sidebar" }).locator('[aria-selected="true"]');
-  const list = page.locator('nav[aria-label="Threads"], nav[aria-label="Hercule"]');
+  const list = page.locator('nav[aria-label="Threads"], nav[aria-label="Work"]');
   return { tab: await tab.textContent(), list: await list.getAttribute("aria-label") };
 }
 
 const THREADS_FACE = { tab: "Threads", list: "Threads" };
-const ORCHESTRATION_FACE = { tab: "Hercule", list: "Hercule" };
+const ORCHESTRATION_FACE = { tab: "Work", list: "Work" };
 
 describe("the sidebar's faces", () => {
   it("changes the face from the switch in the drag strip, from View's items and with ← and →, without leaving the thread", async () => {
@@ -41,7 +41,7 @@ describe("the sidebar's faces", () => {
     await openThread(page, "Thread 1");
     const transcript = page.locator('section[aria-label="Transcript"]');
     const switchList = page.getByRole("tablist", { name: "Sidebar" });
-    const orchestrationTab = switchList.getByRole("tab", { name: "Hercule" });
+    const orchestrationTab = switchList.getByRole("tab", { name: "Work" });
     const threadsTab = switchList.getByRole("tab", { name: "Threads" });
     expect(await readSidebarFace(page)).toEqual(THREADS_FACE);
 
@@ -74,7 +74,7 @@ describe("the sidebar's faces", () => {
 
     await chooseMenuItem(app, "View", "Threads");
     await expect.poll(() => readSidebarFace(page)).toEqual(THREADS_FACE);
-    await chooseMenuItem(app, "View", "Hercule");
+    await chooseMenuItem(app, "View", "Work");
     await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
     await transcript.waitFor();
   });
@@ -85,10 +85,7 @@ describe("the sidebar's faces", () => {
     const [thread] = await fleet.spawnThreads(1, { runner });
     await waitForStatus(thread!.id, "busy");
     const { app, page } = await openSignedIn(url);
-    await page
-      .getByRole("tablist", { name: "Sidebar" })
-      .getByRole("tab", { name: "Hercule" })
-      .click();
+    await page.getByRole("tablist", { name: "Sidebar" }).getByRole("tab", { name: "Work" }).click();
     await expect.poll(() => readSidebarFace(page)).toEqual(ORCHESTRATION_FACE);
 
     await page.getByRole("link", { name: "Office ⌘⇧O" }).click();

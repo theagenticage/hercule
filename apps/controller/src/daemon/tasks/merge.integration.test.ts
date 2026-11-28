@@ -34,8 +34,6 @@ import {
   TaskSummaries,
   TaskSummariesLayer,
   taskRepository,
-  TaskTracking,
-  TaskTrackingLayer,
 } from "../../tasks";
 import { TextGeneration } from "../../text-generation";
 import { AccountUsageLayer } from "../../usage";
@@ -46,10 +44,10 @@ import {
   WorkflowEntities,
 } from "../../workflows";
 import { WorkspaceServiceLayer } from "../../workspaces";
-import { RunExecutorLayer, TaskTrackingRunsLayer } from "../runs";
+import { RunExecutorLayer } from "../runs";
 import { TaskServicePortsLayer } from "./task-service";
 
-type Deps = RunService | TaskService | TaskSummaries | TaskTracking | SqlClient.SqlClient;
+type Deps = RunService | TaskService | TaskSummaries | SqlClient.SqlClient;
 
 /** Runs `body` against a fresh controller on a temporary database, as `actor`, with the held plugin booted. */
 const run = <A, E>(body: (held: HeldAction) => Effect.Effect<A, E, Deps>, actor: Actor = USER) => {
@@ -68,7 +66,6 @@ const run = <A, E>(body: (held: HeldAction) => Effect.Effect<A, E, Deps>, actor:
     Layer.provideMerge(TaskServiceLayer.pipe(Layer.provide(TaskServicePortsLayer))),
     Layer.provideMerge(TaskSummariesLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
-    Layer.provideMerge(TaskTrackingLayer.pipe(Layer.provide(TaskTrackingRunsLayer))),
     Layer.provideMerge(
       WorkspaceServiceLayer.pipe(
         Layer.provide(SessionTokensLayer),
@@ -245,7 +242,6 @@ describe("what a merge moves and carries", () => {
         const tasks = yield* TaskService;
         const sql = yield* SqlClient.SqlClient;
         const runs = yield* RunService;
-        const tracking = yield* TaskTracking;
         const source = yield* createTask("Refund bug", {
           description: "Refunds to a Northwind gift card fail.",
           labels: ["payments", "bug"],
@@ -273,7 +269,6 @@ describe("what a merge moves and carries", () => {
 
         const merged = yield* merge(source.id, survivor.id);
 
-        const legs = yield* tracking.queryLegs([runId]);
         return {
           sourceBefore,
           survivorBefore,
@@ -283,7 +278,6 @@ describe("what a merge moves and carries", () => {
           sessionTask: yield* readSessionTask(sessionId),
           workspaceTask: yield* readWorkspaceTask(workspaceId),
           runTask: (yield* runs.read(runId)).taskId,
-          legs,
           signalId,
           runId,
           audit: yield* readEventsOfKind("task.merged"),
@@ -319,13 +313,8 @@ describe("what a merge moves and carries", () => {
     expect(result.merged.provenance).toHaveLength(
       result.survivorBefore.provenance.length + result.sourceBefore.provenance.length + 1,
     );
-    // Tracking finds the handoff on the survivor: the entry and the run moved together.
-    expect(result.legs.legs).toHaveLength(1);
-    expect(result.legs.legs[0]).toMatchObject({
-      runId: result.runId,
-      signalId: result.signalId,
-      taskId: result.survivor.id,
-    });
+    // The handoff entry and its run moved together.
+    expect(handoff).toMatchObject({ runId: result.runId, signalId: result.signalId });
     // One audit entry names both Tasks, and the survivor's update lists the merge.
     expect(result.audit.map((entry) => entry.payload)).toMatchObject([
       {

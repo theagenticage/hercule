@@ -19,15 +19,18 @@ import {
   type ProviderAccountReadinessState,
   type ResolvedModelProfileAccount,
   type ResolvedModelProfileEntry,
+  joinNames,
 } from "@hercule/contract";
 import {
   decideProviderAccountHarness,
+  decideTextGenerationHarness,
   findCredentialSecretName,
   type RegisteredHarness,
   type RegisteredProvider,
 } from "../plugins";
 import {
   computeArrivedModels,
+  describeFloorToUpdateTo,
   describeProviderAccount,
   findRunDescriptor,
   type CatalogWithFirstRead,
@@ -64,19 +67,14 @@ const MOST_ACTIONABLE_FIRST = [
   "harness-missing",
 ] as const satisfies ReadonlyArray<Exclude<ProviderAccountReadinessState, "ready">>;
 
-/** Joins machine names for a message: `Laptop`, `Laptop and Server`, `Laptop, Server and Desk`. */
-const joinNames = (names: ReadonlyArray<string>): string =>
-  names.length <= 1
-    ? (names[0] ?? "")
-    : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-
 /**
  * Describes why an account cannot run in the harness on the connected runners
  * that are in `state`. The sentence names the account, the harness or the
  * machines, and says where to fix it. `holdsToken` tells a token from a key,
  * for a missing or an expired credential. `not-signed-in` is only reached by
  * an account that signs in on each machine, because the controller keeps the
- * credential of the others.
+ * credential of the others. `floorToUpdateTo` ends the instruction to update
+ * a harness that is too old (see `describeFloorToUpdateTo`).
  */
 const describeRunnerProblem = (
   state: (typeof MOST_ACTIONABLE_FIRST)[number],
@@ -84,6 +82,7 @@ const describeRunnerProblem = (
   harnessName: string,
   machines: ReadonlyArray<string>,
   holdsToken: boolean,
+  floorToUpdateTo: string,
 ): string => {
   switch (state) {
     case "not-signed-in":
@@ -97,7 +96,7 @@ const describeRunnerProblem = (
         ? `${accountName} has no token. Make one in Settings › Providers.`
         : `${accountName} has no key. Add one in Settings › Providers.`;
     case "harness-too-old":
-      return `${harnessName} on ${joinNames(machines)} is older than this version of Hercule supports. Update it there.`;
+      return `${harnessName} on ${joinNames(machines)} is older than this version of Hercule supports. Update it there${floorToUpdateTo}.`;
     case "harness-missing":
       return `${harnessName} is not installed on ${joinNames(machines)}. Install it there.`;
   }
@@ -141,6 +140,9 @@ const resolveEntry = (
     options: runDescriptor?.options ?? [],
     imageInput: runDescriptor?.imageInput ?? null,
     problem: findEntryProblem(entry, account, resolvedHarnessId, catalog, world),
+    canGenerateText:
+      decideTextGenerationHarness(world.providers, world.harnesses, account, resolvedHarnessId)
+        ._tag === "chosen",
   };
 };
 
@@ -217,6 +219,7 @@ const findEntryProblem = (
           harnessName,
           machines,
           secretName === "token",
+          describeFloorToUpdateTo(harnessId),
         ),
       };
     }

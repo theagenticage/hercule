@@ -39,6 +39,7 @@ import {
   rememberOpenProfile,
   writeRecentModels,
 } from "../../app/recent-models";
+import { mcpServersQuery } from "../../app/queries";
 import { useComposerDraft } from "../../app/thread-drafts";
 import { useStopAgent } from "../use-stop-agent";
 
@@ -285,7 +286,14 @@ export function useComposerModel(
       // A second Enter or click before the first send settles is ignored, so
       // one message is never sent twice.
       if (sendingRef.current || spawn.isPending || input.isPending) return;
-      const sent = buildSubmission(resolved, message);
+      // A draft's picked servers are checked against the servers the cache holds, which
+      // are read only once the user opened its list of servers.
+      const servers = queryClient.getQueryData(mcpServersQuery(client).queryKey);
+      const sent = buildSubmission(
+        resolved,
+        message,
+        servers === undefined ? undefined : new Set(servers.items.map((each) => each.id)),
+      );
       sendingRef.current = true;
       const shelf = message.attachments;
       // Taken from the picks and the resolved thread this send was built

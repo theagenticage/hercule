@@ -47,16 +47,18 @@ const longTests = process.env["HERCULE_LONG_TESTS"] === "1";
  *   name of the thread that asks when it is not the row's lead, as
  *   "Thread 1, waiting on you: Run pnpm test?" or
  *   "Thread 1, waiting on you: Thread 3 asks · Run pnpm test?";
- * - a row of one thread: its accessible name, its second line and its status,
- *   as "Thread 1, working | main | Working",
- *   "Thread 4, working | studio | Queued" or
- *   "Thread 5, idle | laptop | now". While a Request waits, the second line is
- *   its question, as "Thread 1, waiting on you | Run pnpm test? | Approval";
+ * - a row of one thread: its accessible name and its second line, which
+ *   starts with the state in words while the row has one and ends with the
+ *   age when it has none, as "Thread 1, working | Working · main",
+ *   "Thread 4, working | Queued · studio" or "Thread 5, idle | laptop · now".
+ *   While a Request waits, the second line holds its question, as
+ *   "Thread 1, waiting on you | Approval · Run pnpm test?";
  * - a row of 2 or more threads: the same, then the accessible name of its dots,
  *   which counts the threads in words, as
- *   "Thread 1, working | main | Working | 2 threads: 2 working. Unfold";
+ *   "Thread 1, working | Working · main | 2 threads: 2 working. Unfold";
  * - a "more" row: its label, which counts rows, "35 more";
- * - the Draft Thread's row: its name and its end, "New thread | draft".
+ * - the Draft Thread's row: its name and the word that starts its second
+ *   line, "New thread | Draft".
  *
  * The app opens on a Draft Thread in no project, so every list has the
  * draft's row first under "No project", which is the last section.
@@ -77,8 +79,11 @@ function readSidebarItems(page: Page): Promise<string[]> {
       if (item.matches(".side-h")) return item.textContent;
       if (item.matches(".side-row--wait")) return `${name}: ${readText(".side-ask")}`;
       if (item.matches(".side-row--more")) return item.textContent;
-      if (keyed?.getAttribute("data-key") === "draft") return `${name} | ${readText(".side-end")}`;
-      const row = `${name} | ${readText(".side-detail")} | ${readText(".side-end")}`;
+      if (keyed?.getAttribute("data-key") === "draft")
+        return `${name} | ${readText(".side-state")}`;
+      // Each part of the second line is a flex item, which `innerText` ends
+      // with a line break; the line itself never holds one.
+      const row = `${name} | ${readText(".side-detail").replaceAll("\n", "")}`;
       // Only a row of 2 or more threads has dots.
       const dots = item.querySelector(".side-dots")?.getAttribute("aria-label");
       return dots === null || dots === undefined ? row : `${row} | ${dots}`;
@@ -127,7 +132,7 @@ describe("the sidebar", () => {
     expect(refusals).toEqual([]);
   });
 
-  it("lists the rows by project, newest started first, each row naming where it works and ending in its status, and holds the threads of one workspace in one row", async () => {
+  it("lists the rows by project, newest started first, each row naming its state, where it works and, with no state, its age, and holds the threads of one workspace in one row", async () => {
     const { url, fleet, client, waitForStatus } = await arrangeFleet();
     const webshop = await fleet.createProject("Webshop");
     const payments = await fleet.createProject("Payments");
@@ -194,14 +199,14 @@ describe("the sidebar", () => {
         "Waiting on you 1",
         "Thread 1, waiting on you: Thread 3 asks · Run pnpm test?",
         "project Payments",
-        "Thread 6, can't be reached | laptop | now",
-        "Thread 5, can't be reached | laptop | Offline",
-        "Thread 4, working | studio | Queued",
+        "Thread 6, can't be reached | laptop · now",
+        "Thread 5, can't be reached | Offline · laptop",
+        "Thread 4, working | Queued · studio",
         "project Webshop",
-        "Thread 2, working | studio | Working",
-        "Thread 1, waiting on you | Thread 3 asks · Run pnpm test? | Approval | 2 threads: 1 waiting on you, 1 working. Unfold",
+        "Thread 2, working | Working · studio",
+        "Thread 1, waiting on you | Approval · Thread 3 asks · Run pnpm test? | 2 threads: 1 waiting on you, 1 working. Unfold",
         "project No project",
-        "New thread | draft",
+        "New thread | Draft",
       ]);
     // The foot counts threads, not rows.
     expect(await readCounts(page)).toBe("3 working · 1 waiting · 0 idle");
@@ -215,8 +220,8 @@ describe("the sidebar", () => {
     const { page } = await openSignedIn(url);
     const working = [
       "project No project",
-      "New thread | draft",
-      "Thread 1, working | studio | Working",
+      "New thread | Draft",
+      "Thread 1, working | Working · studio",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(working);
 
@@ -230,8 +235,8 @@ describe("the sidebar", () => {
       "Waiting on you 1",
       "Thread 1, waiting on you: Run pnpm test?",
       "project No project",
-      "New thread | draft",
-      "Thread 1, waiting on you | Run pnpm test? | Approval",
+      "New thread | Draft",
+      "Thread 1, waiting on you | Approval · Run pnpm test?",
     ]);
 
     await client.session.respondToApprovalRequest({
@@ -261,9 +266,9 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 1, working | main | Working",
+        "Thread 1, working | Working · main",
         "project No project",
-        "New thread | draft",
+        "New thread | Draft",
       ]);
 
     // Thread 2 works in the same main workspace, so it joins Thread 1's row
@@ -278,9 +283,9 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 1, working | main | Working | 2 threads: 2 working. Unfold",
+        "Thread 1, working | Working · main | 2 threads: 2 working. Unfold",
         "project No project",
-        "New thread | draft",
+        "New thread | Draft",
       ]);
 
     // The new worktree's branch was generated, so the row names the machine.
@@ -295,10 +300,10 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project Webshop",
-        "Thread 3, working | studio | Working",
-        "Thread 1, working | main | Working | 2 threads: 2 working. Unfold",
+        "Thread 3, working | Working · studio",
+        "Thread 1, working | Working · main | 2 threads: 2 working. Unfold",
         "project No project",
-        "New thread | draft",
+        "New thread | Draft",
       ]);
   });
 
@@ -315,9 +320,9 @@ describe("the sidebar", () => {
     const { page } = await openSignedIn(url);
     const before = [
       "project No project",
-      "New thread | draft",
-      "Thread 2, idle | laptop | now",
-      "Thread 1, working | laptop | Working",
+      "New thread | Draft",
+      "Thread 2, idle | laptop · now",
+      "Thread 1, working | Working · laptop",
     ];
     await expect.poll(() => readSidebarItems(page)).toEqual(before);
 
@@ -326,9 +331,9 @@ describe("the sidebar", () => {
       .poll(() => readSidebarItems(page))
       .toEqual([
         "project No project",
-        "New thread | draft",
-        "Thread 2, can't be reached | laptop | Offline",
-        "Thread 1, can't be reached | laptop | Offline",
+        "New thread | Draft",
+        "Thread 2, can't be reached | Offline · laptop",
+        "Thread 1, can't be reached | Offline · laptop",
       ]);
     expect(await readCounts(page)).toBe("0 working · 0 waiting · 0 idle");
 

@@ -26,10 +26,14 @@ const definition: HarnessDefinition = {
       auto: "native",
       "full-access": "native",
     },
+    // The adapter maps the gateway entry into the config of `thread/start`,
+    // `thread/resume` and `thread/fork`, so the servers of the session's list
+    // are callable.
     mcpPassthrough: "native",
     // The app-server exposes no per-turn tool denylist.
     disallowedTools: "unsupported",
     structuredOutput: "supported",
+    textGeneration: "supported",
   },
   // The login of a ChatGPT subscription lives in the Harness Home, so that
   // kind has no credential variable. An API key is handed over in

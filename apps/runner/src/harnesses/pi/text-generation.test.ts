@@ -13,6 +13,7 @@ import type { HarnessAdapter } from "../index";
 import { makePiAdapter } from "./adapter";
 import {
   ACCESS_MODE_VARIABLE,
+  MCP_GATEWAY_URL_VARIABLE,
   OUTPUT_SCHEMA_VARIABLE,
   SUBAGENTS_VARIABLE,
   SUBMIT_RESULT_TOOL,
@@ -63,22 +64,35 @@ const USAGE = { input: 261, output: 27, cacheRead: 0, cacheWrite: 0, cost: { tot
 const generate = (
   adapter: HarnessAdapter,
   home: string = createPiHome(),
+  runnerEnv: Readonly<Record<string, string>> = {},
 ): Effect.Effect<TextGenerationOutcome> =>
-  Effect.catch(
-    adapter.generateText(buildTextGenerationContext(buildContext(home)), SPEC),
-    (message) => Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+  Effect.suspend(() => {
+    const ctx = buildContext(home);
+    return adapter.generateText(
+      buildTextGenerationContext({ ...ctx, env: { ...ctx.env, ...runnerEnv } }),
+      SPEC,
+    );
+  }).pipe(
+    Effect.catch((message) =>
+      Effect.succeed<TextGenerationOutcome>({ outcome: "failed", message }),
+    ),
   );
 
-/** Starts a text generation on a fake pi and waits until the adapter has launched pi. */
+/**
+ * Starts a text generation on a fake pi and waits until the adapter has
+ * launched pi. `runnerEnv` holds variables added to the runner's own
+ * environment, which the adapter passes on to pi.
+ */
 const startGeneration = async (
   behaviour: FakePiBehaviour = {},
+  runnerEnv: Readonly<Record<string, string>> = {},
 ): Promise<{
   readonly outcome: Promise<TextGenerationOutcome>;
   readonly child: Spawn;
   readonly spawns: ReadonlyArray<Spawn>;
 }> => {
   const { seam, spawns } = buildFakePiSeam(behaviour);
-  const outcome = Effect.runPromise(generate(makePiAdapter(seam)));
+  const outcome = Effect.runPromise(generate(makePiAdapter(seam), createPiHome(), runnerEnv));
   await waitUntil("launched a pi", () => spawns.length === 1);
   return { outcome, child: spawns[0]!, spawns };
 };
@@ -316,6 +330,21 @@ describe("launching pi for a text generation", () => {
     expect(argv).not.toContain("--session-dir");
     expect(readFlagValue(argv, "--model")).toBe("zai/glm-5.3-flash");
     expect(readFlagValue(argv, "--thinking")).toBe("off");
+
+    answerWith(child, ANSWER);
+    await outcome;
+  });
+
+  it("loads none of pi's MCP, and removes a gateway address the runner inherited", async () => {
+    // A runner started from inside a pi session inherits that session's value.
+    const { outcome, child } = await startGeneration(
+      {},
+      { [MCP_GATEWAY_URL_VARIABLE]: "http://127.0.0.1:7421/mcp" },
+    );
+
+    expect(child.command).not.toContain("builtin:mcp");
+    expect(child.command).not.toContain("builtin:tool-search");
+    expect(child.env).not.toHaveProperty(MCP_GATEWAY_URL_VARIABLE);
 
     answerWith(child, ANSWER);
     await outcome;

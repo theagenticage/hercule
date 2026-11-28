@@ -19,6 +19,7 @@ import {
   buildPage,
   prepareKeysetListing,
   uuidFromString,
+  uuidHexToString,
   uuidToString,
   type CursorError,
   type Page,
@@ -44,6 +45,8 @@ export interface NewProject {
   readonly name: string;
   readonly description: string | undefined;
   readonly modelProfileId?: string | undefined;
+  /** The ids of the MCP Servers the project starts a Thread with, in order. */
+  readonly mcpServerIds: ReadonlyArray<string>;
   readonly at: string;
 }
 
@@ -59,12 +62,18 @@ interface ProjectRow {
   readonly name: string;
   readonly description: string | null;
   readonly model_profile_id: Uint8Array | null;
+  /** A JSON array of the hex of each MCP Server id, in list order. */
+  readonly mcp_server_ids: string;
   readonly created_at: string;
   readonly updated_at: string;
   readonly deleted_at: string | null;
 }
 
-const COLUMNS = "id, name, description, model_profile_id, created_at, updated_at, deleted_at";
+// The list is one subquery, so a page of projects costs one query.
+const COLUMNS =
+  "id, name, description, model_profile_id, created_at, updated_at, deleted_at, " +
+  "(SELECT json_group_array(hex(mcp_server_id)) FROM (SELECT mcp_server_id " +
+  "FROM project_mcp_servers WHERE project_id = projects.id ORDER BY position)) AS mcp_server_ids";
 
 /** How a project list sorts by each of its sortable fields. */
 const PROJECT_SORT_COLUMNS: Record<ProjectSortField, SortColumn<Project>> = {
@@ -86,6 +95,7 @@ const toProject = (row: ProjectRow): Project => ({
   name: row.name,
   ...(row.description === null ? {} : { description: row.description }),
   ...(row.model_profile_id === null ? {} : { modelProfileId: uuidToString(row.model_profile_id) }),
+  mcpServerIds: (JSON.parse(row.mcp_server_ids) as ReadonlyArray<string>).map(uuidHexToString),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   ...(row.deleted_at === null ? {} : { deletedAt: row.deleted_at }),
@@ -93,6 +103,19 @@ const toProject = (row: ProjectRow): Project => ({
 
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+
+  /** Writes the project's list of MCP Servers, one row per id, at the position given. */
+  const insertMcpServers = (
+    projectId: Uint8Array,
+    mcpServerIds: ReadonlyArray<string>,
+  ): Effect.Effect<void, SqlError> =>
+    Effect.forEach(
+      mcpServerIds,
+      (mcpServerId, position) =>
+        sql`INSERT INTO project_mcp_servers (project_id, position, mcp_server_id)
+            VALUES (${projectId}, ${position}, ${uuidFromString(mcpServerId)})`,
+      { discard: true },
+    );
 
   return {
     /** Returns the project with that id, or `None` if there is none or it has been deleted. */
@@ -113,6 +136,7 @@ const make = Effect.gen(function* () {
                   ${project.modelProfileId === undefined ? null : uuidFromString(project.modelProfileId)},
                   ${project.at}, ${project.at})
         `;
+        yield* insertMcpServers(id, project.mcpServerIds);
         return {
           id: uuidToString(id),
           name: project.name,
@@ -120,6 +144,7 @@ const make = Effect.gen(function* () {
           ...(project.modelProfileId === undefined
             ? {}
             : { modelProfileId: project.modelProfileId }),
+          mcpServerIds: project.mcpServerIds,
           createdAt: project.at,
           updatedAt: project.at,
         };
@@ -139,6 +164,43 @@ const make = Effect.gen(function* () {
         sql`UPDATE projects SET ${sql.csv(sets)} WHERE id = ${uuidFromString(id)}`,
       );
     },
+
+    /** Replaces the project's list of MCP Servers with the ids given, in that order. */
+    replaceMcpServers: (
+      id: string,
+      mcpServerIds: ReadonlyArray<string>,
+    ): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const projectId = uuidFromString(id);
+        yield* sql`DELETE FROM project_mcp_servers WHERE project_id = ${projectId}`;
+        yield* insertMcpServers(projectId, mcpServerIds);
+      }),
+
+    /** Returns the projects that are not deleted and have the MCP Server in their list. */
+    liveHoldingMcpServer: (mcpServerId: string): Effect.Effect<ReadonlyArray<Project>, SqlError> =>
+      Effect.map(
+        sql<ProjectRow>`
+          SELECT ${sql.literal(COLUMNS)} FROM projects
+          WHERE deleted_at IS NULL AND id IN (SELECT project_id FROM project_mcp_servers
+                                              WHERE mcp_server_id = ${uuidFromString(mcpServerId)})
+          ORDER BY id`,
+        (rows) => rows.map(toProject),
+      ),
+
+    /**
+     * Removes the MCP Server from every project's list, deleted projects
+     * included, and sets `updated_at` of each project that held it. The
+     * projects' other entries keep their order.
+     */
+    removeMcpServer: (mcpServerId: string, at: string): Effect.Effect<void, SqlError> =>
+      Effect.gen(function* () {
+        const server = uuidFromString(mcpServerId);
+        yield* sql`
+          UPDATE projects SET updated_at = ${at}
+          WHERE id IN (SELECT project_id FROM project_mcp_servers WHERE mcp_server_id = ${server})
+        `;
+        yield* sql`DELETE FROM project_mcp_servers WHERE mcp_server_id = ${server}`;
+      }),
 
     /**
      * Clears the Model Profile from every project row that names it, deleted

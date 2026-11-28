@@ -18,12 +18,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type * as SqlClient from "effect/sql/SqlClient";
-import {
-  TaskSummaries,
-  TaskSummaryWake,
-  type SummaryDescriber,
-  type TaskTrackingRuns,
-} from "../../tasks";
+import { TaskSummaries, TaskSummaryWake, type SummaryDescriber, type TaskRuns } from "../../tasks";
 import {
   buildTextGenerationUnavailableReason,
   TextGeneration,
@@ -49,7 +44,7 @@ const SUMMARY_BACKSTOP = Duration.minutes(1);
 const buildDescriber = Effect.gen(function* () {
   const generation = yield* TextGeneration;
   const models = yield* TextGenerationModels;
-  const inputServices = yield* Effect.context<SqlClient.SqlClient | TaskTrackingRuns>();
+  const inputServices = yield* Effect.context<SqlClient.SqlClient | TaskRuns>();
   return {
     canDescribe: Effect.suspend(() =>
       Effect.map(
@@ -112,7 +107,7 @@ const writeDueSummaries = Effect.gen(function* () {
 export const runTaskSummaryLoop: Effect.Effect<
   never,
   never,
-  TaskSummaries | TextGeneration | TextGenerationModels | TaskTrackingRuns | SqlClient.SqlClient
+  TaskSummaries | TextGeneration | TextGenerationModels | TaskRuns | SqlClient.SqlClient
 > = Effect.gen(function* () {
   const wake = yield* TaskSummaryWake;
   while (true) {

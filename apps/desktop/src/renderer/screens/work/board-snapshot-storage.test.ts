@@ -1,6 +1,7 @@
 /** Tests that the board snapshot read back from `localStorage` is trusted only when every part of it is what it should be. */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BoardSnapshot } from "@hercule/client-core/work";
+import { buildBoardSnapshot, type BoardSnapshot } from "@hercule/client-core/work";
+import { buildBoard, buildCard } from "@hercule/client-core/work/testing";
 import {
   buildBoardSnapshotKey,
   readSavedBoardSnapshot,
@@ -113,42 +114,38 @@ describe("the saved board snapshot", () => {
     ]);
   });
 
-  it("reads and keeps a cause that is a report", () => {
-    const report = {
-      kind: "report",
-      sessionId: "s1",
-      stageRevision: 3,
-      text: "“Pricing research” says Planned",
-    };
-    store({ cards: [{ id: "b", stage: "planned", stageCause: report }], isTruncated: false });
+  it("stores no Thread title for a card placed by a report", () => {
+    const board = buildBoard(
+      buildCard("b", {
+        stage: "planned",
+        stageCause: {
+          kind: "report",
+          sessionId: "s1",
+          stageRevision: 3,
+          text: "\u201cPricing research\u201d says Planned",
+        },
+      }),
+    );
 
-    expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([
-      { id: "b", stage: "planned", stageCause: report },
-    ]);
+    writeSavedBoardSnapshot(KEY, buildBoardSnapshot(board));
+
+    expect(localStorage.getItem(KEY)).not.toContain("Pricing research");
+    expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([{ id: "b", stage: "planned" }]);
   });
 
-  it("reads the whole snapshot as none for a report with no stage revision", () => {
+  it("reads a report cause stored by an earlier build as no cause", () => {
     store({
       cards: [
         {
           id: "b",
           stage: "planned",
-          stageCause: { kind: "report", sessionId: "s1", text: "says Planned" },
+          stageCause: { kind: "report", sessionId: "s1", stageRevision: 3, text: "says Planned" },
         },
       ],
       isTruncated: false,
     });
 
-    expect(readSavedBoardSnapshot(KEY)).toBeUndefined();
-  });
-
-  it("reads the whole snapshot as none for a report with no session", () => {
-    store({
-      cards: [{ id: "b", stage: "planned", stageCause: { kind: "report", text: "says Planned" } }],
-      isTruncated: false,
-    });
-
-    expect(readSavedBoardSnapshot(KEY)).toBeUndefined();
+    expect(readSavedBoardSnapshot(KEY)?.cards).toEqual([{ id: "b", stage: "planned" }]);
   });
 
   it("reads a missing or odd truncation flag as a whole board", () => {

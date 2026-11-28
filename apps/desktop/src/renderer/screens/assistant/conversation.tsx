@@ -28,6 +28,7 @@ import { useRouteContext } from "@tanstack/react-router";
 import {
   buildConversationBlocks,
   flattenMessagePages,
+  hasMessageAfter,
   resolveBrowserTimezone,
   type ConversationBlock,
   type Pose,
@@ -70,17 +71,20 @@ const STAMP_HEIGHT = 15;
 const OWNER_FRAME_HEIGHT = 40;
 /** The height of a reply's name line with its 2px margin, above the text. */
 const REPLY_NAME_HEIGHT = 21.5;
-/** The height of a notice: the 28px failed face inside 8px of padding above and below. */
+/** The height of the newest notice: the 28px failed face inside 8px of padding above and below. */
 const NOTICE_HEIGHT = 44;
+/** The height of a notice a message follows: one line of 12px text at the transcript's 1.45 line height, above the 16px failed face. */
+const PAST_NOTICE_HEIGHT = 17.4;
 /** The height of the reply being written before any text: its name line and the caret's line. */
 const OPEN_REPLY_HEIGHT = 43.9;
 
 /**
- * Estimates a block's height, without the gap above it, before it is
- * measured, from the heights above. Only blocks that were never mounted use
- * the estimate.
+ * Estimates the height of the block at `index` in `blocks`, without the gap
+ * above it, before it is measured, from the heights above. Only blocks that
+ * were never mounted use the estimate.
  */
-const estimateBlockHeight = (block: ListBlock): number => {
+const estimateBlockHeight = (blocks: readonly ListBlock[], index: number): number => {
+  const block = blocks[index]!;
   switch (block.kind) {
     case "stamp":
       return STAMP_HEIGHT;
@@ -96,7 +100,7 @@ const estimateBlockHeight = (block: ListBlock): number => {
       );
     case "notice":
     case "unreadable-stream":
-      return NOTICE_HEIGHT;
+      return hasMessageAfter(blocks, index) ? PAST_NOTICE_HEIGHT : NOTICE_HEIGHT;
     case "open-reply":
       return OPEN_REPLY_HEIGHT;
   }
@@ -278,7 +282,7 @@ function ConversationList({
   // Compiler is told to leave this component alone.
   const getItemKey = useCallback((index: number) => blocks[index]!.key, [blocks]);
   const estimateSize = useCallback(
-    (index: number) => BLOCK_GAP + estimateBlockHeight(blocks[index]!),
+    (index: number) => BLOCK_GAP + estimateBlockHeight(blocks, index),
     [blocks],
   );
 
@@ -337,8 +341,9 @@ function ConversationList({
 
   useImperativeHandle(ref, () => ({ scrollToBottom }));
 
-  /** Returns the element that draws `block`. */
-  const renderBlock = (block: ListBlock): JSX.Element => {
+  /** Returns the element that draws the block at `index`. */
+  const renderBlock = (index: number): JSX.Element => {
+    const block = blocks[index]!;
     switch (block.kind) {
       case "stamp":
         return <DayStamp label={block.label} />;
@@ -362,13 +367,21 @@ function ConversationList({
           />
         );
       case "notice":
-        return <Notice look={look} text={block.message.text} time={block.time} />;
+        return (
+          <Notice
+            look={look}
+            text={block.message.text}
+            time={block.time}
+            isPast={hasMessageAfter(blocks, index)}
+          />
+        );
       case "unreadable-stream":
         return (
           <Notice
             look={look}
             text={UNREADABLE_STREAM_MESSAGE}
             time={formatBlockTime(block.at, timezone, today)}
+            isPast={hasMessageAfter(blocks, index)}
           />
         );
       case "open-reply":
@@ -401,7 +414,7 @@ function ConversationList({
         )}
         {virtualItems.map(({ index, key }) => (
           <div key={key} ref={virtualizer.measureElement} data-index={index} className="atx-item">
-            {renderBlock(blocks[index]!)}
+            {renderBlock(index)}
           </div>
         ))}
         {last === undefined || last.end >= end ? null : <div style={{ height: end - last.end }} />}

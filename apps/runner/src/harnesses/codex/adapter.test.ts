@@ -35,7 +35,7 @@ import {
 } from "@hercule/protocol";
 import type { OutputSchema, ProbeResult, HarnessEvent, SessionSpec } from "@hercule/protocol";
 import { SESSION_MARKS_DIR_VARIABLE, takeStartMarks } from "../../edit-marks";
-import type { EditMarks, HarnessRunnerContext } from "../index";
+import type { EditMarks, SessionStartContext } from "../index";
 import { INSTALL_DEADLINE } from "../install";
 import { makeCodexAdapter, CONTROL_DEADLINE, type CodexSeam } from "./adapter";
 import { USAGE_READ_DEADLINE } from "../probe";
@@ -47,7 +47,7 @@ import {
   MAX_PENDING_BYTES,
   MAX_PENDING_THREADS,
 } from "./threads";
-import { NO_USER_MATERIAL_PATHS, writeTestImage } from "../testing";
+import { NO_USER_MATERIAL, PNG_BYTES, writeTestImage } from "../testing";
 import type { ResolvedSkillReference } from "../../skills/references";
 import {
   computeSubagentAfter,
@@ -146,7 +146,7 @@ describe("what the Codex adapter reports about a machine", () => {
     const { result } = runProbe();
 
     const probed = await result;
-    expect(probed.harnessVersion).toBe("0.154.0");
+    expect(probed.harnessVersion).toBe("0.171.0");
   });
 
   it("reports no version when the user agent has none", async () => {
@@ -221,7 +221,7 @@ describe("what the Codex adapter reports about a machine", () => {
     const home = createCodexHome();
     // The app-server reports no account for a key given through a model provider.
     const { seam, spawns } = buildScriptedSeam({ "account/read": () => LOGGED_OUT });
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(home),
       credentialVariables: ["OPENAI_API_KEY"],
       credential: { variable: "OPENAI_API_KEY", value: "sk-test-not-real" },
@@ -447,7 +447,7 @@ describe("the home directories a session's app-server gets", () => {
   it("reads the key of an account through a model provider of its own, and keeps it out of the arguments and the Harness Home", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, OPENAI_API_KEY: "sk-from-the-runner" },
       credentialVariables: ["OPENAI_API_KEY", "CODEX_API_KEY"],
@@ -482,7 +482,7 @@ describe("the home directories a session's app-server gets", () => {
   it("starts no model provider of its own for an account that signs in with ChatGPT, and drops a key of the runner's", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, OPENAI_API_KEY: "sk-from-the-runner" },
       credentialVariables: ["OPENAI_API_KEY"],
@@ -625,10 +625,10 @@ describe("the home directories a session's app-server gets", () => {
   it("moves HOME for a Thread that sees the user's material too, and gives it the account's own Harness Home", async () => {
     const home = createCodexHome();
     const { seam, spawns } = buildScriptedSeam();
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(home),
       env: { ...buildContext(home).env, HOME: "/Users/someone" },
-      userMaterial: NO_USER_MATERIAL_PATHS,
+      userMaterial: NO_USER_MATERIAL,
     };
 
     await Effect.runPromise(makeCodexAdapter(seam).startSession(SESSION, SPEC, ctx));
@@ -644,8 +644,24 @@ describe("the home directories a session's app-server gets", () => {
     expect(readdirSync(codexHome)).toEqual([]);
   });
 
+  it("reports what the user's instructions lost as a warning of the session, after session.started", async () => {
+    const run = createDriving();
+    const warning = "Cut /Users/someone/.codex/AGENTS.md in the Thread's instructions";
+
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, SPEC, {
+        ...run.ctx,
+        userMaterial: { ...NO_USER_MATERIAL, warnings: [warning] },
+      }),
+    );
+
+    const tags = run.seen.map((event) => event._tag);
+    expect(filterByTag(run.seen, "runtime.warning")).toMatchObject([{ message: warning }]);
+    expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+  });
+
   it("runs a Thread's commands in the user's real HOME, and no other session's", async () => {
-    const startWith = async (userMaterial: HarnessRunnerContext["userMaterial"]) => {
+    const startWith = async (userMaterial: SessionStartContext["userMaterial"]) => {
       const home = createCodexHome();
       const { seam, spawns } = buildScriptedSeam();
       const ctx = buildContext(home);
@@ -660,7 +676,7 @@ describe("the home directories a session's app-server gets", () => {
     };
 
     // The quotes in the path are escaped, so the value still parses as TOML.
-    expect((await startWith(NO_USER_MATERIAL_PATHS)).slice(-2)).toEqual([
+    expect((await startWith(NO_USER_MATERIAL)).slice(-2)).toEqual([
       "-c",
       'shell_environment_policy.set.HOME="/Users/some \\"one\\""',
     ]);
@@ -905,7 +921,7 @@ describe("a session that cannot start", () => {
     const refused = await Effect.runPromise(Effect.flip(adapter.startSession(SESSION, SPEC, ctx)));
 
     expect(refused).toBeInstanceOf(HarnessLoginMissing);
-    expect(refused.message).toContain("not logged in");
+    expect(refused.message).toBe("Codex is not signed in on this runner.");
     // The app-server must not be left running for a session that never started.
     expect(spawns).toHaveLength(1);
     expect(spawns[0]?.kills()).toBe(1);
@@ -1249,36 +1265,6 @@ describe("what an input does to a Codex session", () => {
       expect(new Set(input.slice(1).map((item) => item.path)).size).toBe(2);
     });
 
-    it("adds one item for a skill referenced twice", async () => {
-      const review = stageLibrarySkill("review");
-
-      const input = await sendWithSkills([review, { ...review, start: 20, end: 27 }]);
-
-      expect(input).toHaveLength(2);
-    });
-
-    it("leaves out a skill whose SKILL.md is gone, and keeps the text", async () => {
-      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
-
-      const input = await sendWithSkills([gone]);
-
-      expect(input).toHaveLength(1);
-    });
-
-    it("leaves out a skill whose SKILL.md resolves outside the skill folder", async () => {
-      const secret = join(scratch, "secret.txt");
-      writeFileSync(secret, "not a skill");
-      const swapped = stageLibrarySkill("swapped");
-      const target = join(realpathSync(swapped.folder), "SKILL.md");
-      rmSync(target);
-      symlinkSync(secret, target);
-
-      const input = await sendWithSkills([swapped]);
-
-      expect(input).toHaveLength(1);
-      expect(JSON.stringify(input)).not.toContain(secret);
-    });
-
     it("records on the user message only the skills it gave Codex an item for", async () => {
       const review = stageLibrarySkill("review");
       const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
@@ -1301,6 +1287,40 @@ describe("what an input does to a Codex session", () => {
         (event) => event.kind === "user_message",
       );
       expect(reported?.detail).toEqual({ text: "$review $gone", skills: ["review"] });
+    });
+
+    it("warns the user, after the user message, about a skill it gave Codex no item for", async () => {
+      const review = stageLibrarySkill("review");
+      const gone = { ...stageLibrarySkill("gone"), folder: join(scratch, "does-not-exist") };
+      const run = await startTestSession();
+
+      const sent = await Effect.runPromise(
+        run.adapter.sendInput(SESSION, { text: "$review $gone", skillReferences: [review, gone] }),
+      );
+
+      const warnings = filterByTag(run.seen, "runtime.warning");
+      expect(warnings).toEqual([
+        expect.objectContaining({
+          turnId: sent.turnId,
+          message:
+            "Hercule could not give Codex the skill $gone: its SKILL.md is missing, is not a regular file, or leads outside the skill's folder. The message was sent without it. Check the skill's folder, then send the message again.",
+        }),
+      ]);
+      const tags = run.seen.map((event) => event._tag);
+      expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.lastIndexOf("item.completed"));
+    });
+
+    it("sends no warning when every skill got an item", async () => {
+      const run = await startTestSession();
+
+      await Effect.runPromise(
+        run.adapter.sendInput(SESSION, {
+          text: "$review",
+          skillReferences: [stageLibrarySkill("review")],
+        }),
+      );
+
+      expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
     });
 
     it("refuses to steer an input with a skill into a running turn, before it changes anything", async () => {
@@ -2150,21 +2170,14 @@ describe("hercule-as-a-tool on a Codex thread", () => {
 describe("the user's own instructions on a Codex Thread", () => {
   const USER_INSTRUCTIONS = "Always answer in English.\nKeep commits small.";
 
-  /** Writes the user's instructions file into a scratch directory and returns its path. */
-  const writeInstructions = (text: string): string => {
-    const file = join(createCodexHome(), "AGENTS.md");
-    writeFileSync(file, text);
-    return file;
-  };
-
-  /** Returns a context for a Thread whose user's instructions file is `instructionsFile`. */
+  /** Returns a context for a Thread whose user's instructions text is `instructions`. */
   const buildThreadContext = (
-    ctx: HarnessRunnerContext,
-    instructionsFile: string,
-  ): HarnessRunnerContext => ({
+    ctx: SessionStartContext,
+    instructions: string,
+  ): SessionStartContext => ({
     ...ctx,
     herculeTool: TOOL,
-    userMaterial: { ...NO_USER_MATERIAL_PATHS, instructionsFile },
+    userMaterial: { ...NO_USER_MATERIAL, instructions },
   });
 
   const RESUME: SessionSpec["continue"] = { nativeSessionId: PRIOR, mode: "resume" };
@@ -2200,72 +2213,17 @@ describe("the user's own instructions on a Codex Thread", () => {
   ];
 
   it.each(OPENINGS)(
-    "sends the file's text between the system prompt and the skill on %s",
+    "sends the user's instructions between the system prompt and the skill on %s",
     async (method, spec, instructions) => {
       const { adapter, ctx, requests } = createDriving();
-      const file = writeInstructions(USER_INSTRUCTIONS);
 
-      await Effect.runPromise(adapter.startSession(SESSION, spec, buildThreadContext(ctx, file)));
+      await Effect.runPromise(
+        adapter.startSession(SESSION, spec, buildThreadContext(ctx, USER_INSTRUCTIONS)),
+      );
 
       expect(listSentParams(requests, method)).toEqual([
         expect.objectContaining({ developerInstructions: instructions }),
       ]);
-    },
-  );
-
-  it("reads the file again for each thread it opens, so a resumed thread gets the current text", async () => {
-    const file = writeInstructions("The old text.");
-    const first = createDriving();
-    await Effect.runPromise(
-      first.adapter.startSession(SESSION, SPEC, buildThreadContext(first.ctx, file)),
-    );
-    writeFileSync(file, "The new text.");
-    const second = createDriving();
-
-    await Effect.runPromise(
-      second.adapter.startSession(
-        SESSION,
-        { ...SPEC, continue: RESUME },
-        buildThreadContext(second.ctx, file),
-      ),
-    );
-
-    expect(listSentParams(second.requests, "thread/resume")).toEqual([
-      expect.objectContaining({
-        developerInstructions: `${TOOL.orientation}\n\nThe new text.\n\n${TOOL.skill}`,
-      }),
-    ]);
-  });
-
-  it.each([
-    ["a file that no longer exists", () => join(createCodexHome(), "AGENTS.md"), "ENOENT"],
-    ["a directory", () => createCodexHome(), "it is not a regular file"],
-  ])(
-    "starts the Thread with only the orientation and the skill, and logs a warning, when the instructions are %s",
-    async (_, makePath, reason) => {
-      const { adapter, ctx, requests } = createDriving();
-      const path = makePath();
-      const warnings: Array<string> = [];
-      const collecting = Logger.make<unknown, void>(({ logLevel, message }) => {
-        if (logLevel === "Warn") warnings.push(String(message));
-      });
-
-      await Effect.runPromise(
-        Effect.provide(
-          adapter.startSession(SESSION, SPEC, buildThreadContext(ctx, path)),
-          Logger.layer([collecting]),
-        ),
-      );
-
-      // The user's own files never stop a Thread from starting.
-      expect(listSentParams(requests, "thread/start")).toEqual([
-        expect.objectContaining({
-          developerInstructions: `${TOOL.orientation}\n\n${TOOL.skill}`,
-        }),
-      ]);
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toContain(`Did not read ${path} into the Thread's instructions: `);
-      expect(warnings[0]).toContain(reason);
     },
   );
 });
@@ -4435,6 +4393,132 @@ describe("the bytes of a generated image", () => {
   });
 });
 
+describe("an MCP tool call item", () => {
+  const IMAGE = PNG_BYTES.toString("base64");
+
+  const buildCall = (result: unknown, status = "completed") => ({
+    type: "mcpToolCall",
+    id: "call-1",
+    server: "tools",
+    tool: "sentry__get_snapshot_image",
+    status,
+    arguments: {},
+    appContext: null,
+    result,
+    error: null,
+    durationMs: 5,
+  });
+
+  const completedFrame = (result: unknown, itemId = "call-1") => ({
+    method: "item/completed",
+    params: {
+      threadId: THREAD,
+      turnId: TURN,
+      item: { ...buildCall(result), id: itemId },
+      completedAtMs: 1,
+    },
+  });
+
+  it("has the media of its result removed before the item is emitted", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push(
+      completedFrame({
+        content: [
+          { type: "text", text: "Snapshot of the issue" },
+          { type: "image", data: IMAGE, mimeType: "image/png" },
+        ],
+        structuredContent: { screenshot: IMAGE },
+        _meta: null,
+      }),
+    );
+    await waitUntil(
+      "completed the call",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+
+    expect(JSON.stringify(run.seen)).not.toContain(IMAGE);
+    // The expanded step shows the same blocks, as Claude Code's tool result does.
+    const notKeptNotice: unknown = expect.stringContaining("does not keep");
+    expect(filterByTag(run.seen, "item.completed")[0]?.detail).toEqual({
+      name: "get_snapshot_image",
+      server: "sentry",
+      kind: "mcp",
+      content: [
+        { type: "text", text: "Snapshot of the issue" },
+        { type: "image", unavailable: notKeptNotice },
+      ],
+    });
+  });
+
+  it("shows the message of a call that failed as the item's content", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+
+    run.spawns[0]!.push({
+      method: "item/completed",
+      params: {
+        threadId: THREAD,
+        turnId: TURN,
+        item: { ...buildCall(null, "failed"), error: { message: "Sentry refused the request" } },
+        completedAtMs: 1,
+      },
+    });
+    await waitUntil(
+      "completed the call",
+      () => filterByTag(run.seen, "item.completed").length === 1,
+    );
+
+    const completed = filterByTag(run.seen, "item.completed")[0]!;
+    expect(completed.status).toBe("failed");
+    expect(completed.detail).toMatchObject({ content: "Sentry refused the request" });
+  });
+});
+
+describe("a session whose app-server exits", () => {
+  it("emits every call Codex wrote before it exited, and the exit after them", async () => {
+    const run = createDriving();
+    await Effect.runPromise(run.adapter.startSession(SESSION, SPEC, run.ctx));
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "call the tool" }));
+
+    for (let index = 0; index < 12; index += 1) {
+      run.spawns[0]!.push({
+        method: "item/completed",
+        params: {
+          threadId: THREAD,
+          turnId: TURN,
+          item: {
+            type: "mcpToolCall",
+            id: `trailing-${String(index)}`,
+            server: "tools",
+            tool: "sentry__search_issues",
+            status: "completed",
+            arguments: {},
+            appContext: null,
+            result: { content: [{ type: "text", text: "3 issues" }], structuredContent: null },
+            error: null,
+            durationMs: 5,
+          },
+          completedAtMs: 1,
+        },
+      });
+    }
+    run.spawns[0]!.crash();
+    await waitUntil("exited", () => filterByTag(run.seen, "session.exited").length === 1);
+
+    // The exit is reported after the output was read to its end.
+    const order = run.seen
+      .filter(
+        (event) =>
+          (event._tag === "item.completed" && event.itemId.startsWith("trailing-")) ||
+          event._tag === "session.exited",
+      )
+      .map((event) => event._tag);
+    expect(order).toEqual([...Array<string>(12).fill("item.completed"), "session.exited"]);
+  });
+});
+
 /** The reply to `account/rateLimits/read` for a Plus account, shaped like `GetAccountRateLimitsResponse`. */
 const PLUS_RATE_LIMITS = {
   ordinaryUsageAllowed: true,
@@ -4529,7 +4613,7 @@ describe("a probe that reads usage", () => {
       "account/read": () => CHATGPT,
       "account/rateLimits/read": () => PLUS_RATE_LIMITS,
     });
-    const ctx: HarnessRunnerContext = {
+    const ctx: SessionStartContext = {
       ...buildContext(createCodexHome()),
       credentialVariables: ["OPENAI_API_KEY"],
       credential: { variable: "OPENAI_API_KEY", value: "sk-test-not-real" },
@@ -4697,4 +4781,133 @@ describe("the rate limits a Codex session reports", () => {
       [{ window: "five-hour", usedPercent: 80 }],
     ]);
   });
+});
+
+describe("the MCP servers a Codex session is given", () => {
+  const GATEWAY = { name: "tools", url: "http://127.0.0.1:7777/mcp" };
+
+  /** Starts a session whose context lists the gateway, or no MCP server at all. */
+  const startWithServers = async (
+    servers: SessionStartContext["mcpServers"],
+    spec: SessionSpec = SPEC,
+    answers: Answers = {},
+  ): Promise<ReturnType<typeof createDriving>> => {
+    const run = createDriving(answers);
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, spec, { ...run.ctx, mcpServers: servers }),
+    );
+    return run;
+  };
+
+  const CONTINUATIONS: ReadonlyArray<readonly [string, SessionSpec]> = [
+    ["thread/start", SPEC],
+    ["thread/resume", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "resume" } }],
+    ["thread/fork", { ...SPEC, continue: { nativeSessionId: PRIOR, mode: "fork" } }],
+  ];
+
+  it.each(CONTINUATIONS)(
+    "sends the gateway in the config of %s, and the name of the token variable, not the token",
+    async (method, spec) => {
+      const { requests } = await startWithServers([GATEWAY], spec);
+
+      expect(listSentParams(requests, method)).toEqual([
+        expect.objectContaining({
+          config: {
+            "mcp_servers.tools.url": GATEWAY.url,
+            "mcp_servers.tools.bearer_token_env_var": "HERCULE_TOKEN",
+            "mcp_servers.tools.default_tools_approval_mode": "prompt",
+            "features.mcp_tool_list_changed": true,
+          },
+        }),
+      ]);
+    },
+  );
+
+  it.each(CONTINUATIONS)(
+    "sends no config in %s when the session has no MCP server",
+    async (method, spec) => {
+      const { requests } = await startWithServers([], spec);
+
+      const [params] = listSentParams(requests, method);
+      expect(params).not.toHaveProperty("config");
+    },
+  );
+
+  it.each([
+    ["approval-required", "prompt"],
+    ["auto-accept-edits", "prompt"],
+    ["auto", "prompt"],
+    ["full-access", "approve"],
+  ] as const)("asks about MCP tool calls in %s mode as %s", async (accessMode, approvalMode) => {
+    const { requests } = await startWithServers([GATEWAY], { ...SPEC, accessMode });
+
+    expect(listSentParams(requests, "thread/start")[0]).toMatchObject({
+      config: { "mcp_servers.tools.default_tools_approval_mode": approvalMode },
+    });
+  });
+
+  it("starts a session with the gateway without a warning", async () => {
+    const run = await startWithServers([GATEWAY], SPEC);
+    await settle();
+
+    expect(filterByTag(run.seen, "runtime.warning")).toEqual([]);
+  });
+
+  it("gives a subagent thread resumed on its own the same config as the root", async () => {
+    const spec: SessionSpec = {
+      ...SPEC,
+      continue: {
+        nativeSessionId: PRIOR,
+        mode: "resume",
+        subagents: [{ subagentId: CHILD, itemId: "original-spawn" }],
+      },
+    };
+    const run = createDriving();
+    await Effect.runPromise(
+      run.adapter.startSession(SESSION, spec, { ...run.ctx, mcpServers: [GATEWAY] }),
+    );
+
+    // Codex does not keep the MCP servers with a thread, so the child has none
+    // unless the resume sends them again.
+    await Effect.runPromise(run.adapter.sendInput(SESSION, { text: "continue" }));
+
+    const [root, child] = listSentParams(run.requests, "thread/resume");
+    expect(child).toEqual({
+      threadId: CHILD,
+      excludeTurns: false,
+      config: (root as { readonly config: unknown }).config,
+    });
+  });
+
+  it.each(CONTINUATIONS)(
+    "gives %s no gateway keys when a layer sets the gateway's name, and warns after session.started",
+    async (method, spec) => {
+      const run = await startWithServers([GATEWAY], spec, {
+        "config/read": () => ({
+          config: {},
+          origins: {},
+          layers: [
+            {
+              name: { type: "project", dotCodexFolder: "/work/repo/.codex" },
+              version: "sha256:0",
+              config: { mcp_servers: { tools: { url: "http://example.test/mcp" } } },
+              disabledReason: null,
+            },
+          ],
+        }),
+      });
+      await waitUntil(
+        "warned about the name",
+        () => filterByTag(run.seen, "runtime.warning").length === 1,
+      );
+
+      expect(listSentParams(run.requests, method)[0]).not.toHaveProperty("config");
+      expect(listSentParams(run.requests, "config/read")).toEqual([
+        { cwd: CWD, includeLayers: true },
+      ]);
+      const tags = run.seen.map((event) => event._tag);
+      expect(tags.indexOf("runtime.warning")).toBeGreaterThan(tags.indexOf("session.started"));
+      expect(filterByTag(run.seen, "runtime.warning")[0]?.message).toContain("/work/repo/.codex");
+    },
+  );
 });

@@ -12,7 +12,7 @@ import type { InputNotDelivered } from "@hercule/protocol";
 import { now } from "../../report";
 import { buildInputStopped, buildSessionNotRunning } from "../adapter-error-builders";
 import { truncateFact, truncateMessage } from "../text";
-import type { Asked } from "./approvals";
+import type { Asked, RunningMcpCall } from "./approvals";
 import {
   buildNormalizingState,
   initializeUsageBaseline,
@@ -53,6 +53,8 @@ export interface CodexThreadState {
   readonly turnId: string | undefined;
   readonly parks: Map<string, Park>;
   readonly fileChanges: Map<string, ReadonlyArray<string>>;
+  /** The MCP tool call items that have started and not completed, by item id. */
+  readonly runningMcpCalls: Map<string, RunningMcpCall>;
   usage: Usage | undefined;
 }
 
@@ -117,6 +119,12 @@ export const makeCodexThreads = (options: {
   readonly sessionId: string;
   readonly rootThreadId: string;
   readonly spec: SessionSpec;
+  /**
+   * The `config` the root thread was opened with. Codex does not save it with
+   * a thread, so a subagent thread resumed on its own needs it again, or it
+   * has no MCP server. Absent when the session has none.
+   */
+  readonly config: ThreadResumeParams["config"];
   readonly rpc: Rpc;
   readonly emit: (event: HarnessEvent) => void;
   readonly dispatch: (
@@ -169,6 +177,7 @@ export const makeCodexThreads = (options: {
       },
       parks: new Map(),
       fileChanges: new Map(),
+      runningMcpCalls: new Map(),
       usage: undefined,
     };
     if (root) thread.state.model = options.spec.modelSelection.model;
@@ -653,6 +662,7 @@ export const makeCodexThreads = (options: {
             const resumed = yield* options.rpc.request("thread/resume", {
               threadId,
               excludeTurns: false,
+              ...(options.config === undefined ? {} : { config: options.config }),
             } satisfies ThreadResumeParams);
             if (preparation !== work || phase !== "live") return;
             if ((resumed as ThreadReadResponse | undefined)?.thread?.id !== threadId) return;

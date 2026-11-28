@@ -79,6 +79,12 @@ export const stubApi = (
 export interface LiveStub {
   /** The topics the app is subscribed to right now, oldest first. */
   topics(): readonly string[];
+  /**
+   * How many times the app has subscribed to `topic` on its current socket,
+   * including subscriptions it has ended since. A subscription dropped and
+   * made again counts twice, which `topics` cannot show.
+   */
+  countSubscriptions(topic: string): number;
   /** Whether the app has a socket open. */
   connected(): boolean;
   /**
@@ -283,6 +289,7 @@ export const buildMainProfile = (accounts: readonly ProviderAccount[]): ModelPro
         name: model.name,
         options: model.options,
         imageInput: model.imageInput,
+        canGenerateText: true,
         problem: runnable ? null : { reason: "not-signed-in" as const, message: "not signed in" },
       }));
     return {
@@ -379,6 +386,12 @@ export const renderApp = async ({
         .at(-1)
         ?.subscriptions()
         .map((each) => each.topic) ?? [],
+    countSubscriptions: (topic) =>
+      sockets
+        .at(-1)
+        ?.calls("subscribe")
+        .filter((frame) => (frame.payload as { readonly topic: string }).topic === topic).length ??
+      0,
     connected: () => sockets.at(-1)?.readyState === 1,
     push: (topic, message) => {
       readSocket().push(topic, message);

@@ -100,6 +100,12 @@ describe("an answer that was not sent", () => {
     expect(unsent.actions.map((action) => action.id)).toEqual(["send-again", "discard"]);
   });
 
+  it("says the app closed during the send, so it may have been sent, and still offers Send again", () => {
+    const unsent = describeUnsentAnswer(source("interrupted-while-sending", "ignored"));
+    expect(unsent.notice).toBe("The app closed while it was being sent, so it may have been sent.");
+    expect(unsent.actions.map((action) => action.id)).toEqual(["send-again", "discard"]);
+  });
+
   it("says the question closed, keeps the words, and offers Open thread instead of Send again", () => {
     const unsent = describeUnsentAnswer(source("no-longer-open"));
     expect(unsent.notice).toBe(

@@ -12,7 +12,7 @@
  * drift apart, for example a wait with a different timeout, or a home one copy
  * forgets to remove.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect } from "vitest";
@@ -35,10 +35,11 @@ export const cleanupHomes = (): void => {
 
 /**
  * Creates a scratch home for one test, with `label` (the harness) in its name, and returns its
- * path.
+ * path. The path has no symbolic link in it: on macOS the temporary folder is reached through a
+ * link, and code that returns resolved paths would otherwise not match what a test expects.
  */
 export const createScratchHome = (label: string): string => {
-  const home = mkdtempSync(join(tmpdir(), `hercule-${label}-`));
+  const home = realpathSync(mkdtempSync(join(tmpdir(), `hercule-${label}-`)));
   homes.push(home);
   return home;
 };
@@ -128,13 +129,15 @@ export const filterByTag = <Tag extends HarnessEvent["_tag"]>(
   seen.filter((event): event is Extract<HarnessEvent, { _tag: Tag }> => event._tag === tag);
 
 /**
- * User Material with no paths: what a Thread gets when its user has none of
- * the material, and what a Claude Code Thread always gets, because Claude
+ * User Material with nothing in it: what a Thread gets when its user has none
+ * of the material, and what a Claude Code Thread always gets, because Claude
  * reads the user's material through links in its Harness Home.
  */
-export const NO_USER_MATERIAL_PATHS: UserMaterial = {
+export const NO_USER_MATERIAL: UserMaterial = {
   promptTemplateDirs: [],
+  instructions: undefined,
   instructionsFile: undefined,
+  warnings: [],
 };
 
 /**

@@ -91,25 +91,22 @@ import {
 } from "../db";
 import { AuditLog } from "../events";
 import { applyIntakeOverrides, normalizeIntakeOverrides, PluginIntake } from "../intake-settings";
+import { computeChallenge, exchangeCode, serializeTokens, type TokenSet } from "../oauth";
 import { Secrets, type SecretNameRef, type SecretOwner } from "../secrets";
 import { ActivePlugins } from "./active-plugins";
 import { deviceSetupRepository } from "./device-setups";
 import {
   buildAuthorizationUrl,
   CALLBACK_PATH,
-  computeChallenge,
   decodeCallback,
-  exchangeCode,
   exchangeDeviceCode,
   oauthClients,
   OAUTH_TOKENS,
   buildRedirectUri,
   requestDeviceCode,
-  serializeTokens,
   SETUP_LIFETIME_MS,
   SLOW_DOWN_STEP_SECONDS,
   type Outcome,
-  type TokenSet,
 } from "./oauth";
 import { buildDefaultLabel } from "./default-label";
 import { PluginConfigs } from "./plugin-configs";
@@ -197,6 +194,9 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
   const steps = named.flatMap((each) =>
     each.kind === "step" ? [`${each.stepId} in the workflow ${each.workflowName}`] : [],
   );
+  const mcpServers = named.flatMap((each) =>
+    each.kind === "mcpServer" ? [`${each.mcpServerName} (${each.mcpServerId})`] : [],
+  );
   const parts: Array<string> = [];
   if (resources.length > 0) {
     parts.push(
@@ -214,6 +214,12 @@ const buildNamedByMessage = (named: ReadonlyArray<ConnectionReference>): string 
     parts.push(
       `workflow steps act through this connection: ${steps.join(", ")}; ` +
         "point those steps at another connection, or delete them, before deleting this one",
+    );
+  }
+  if (mcpServers.length > 0) {
+    parts.push(
+      `MCP servers call out with this connection's credentials: ${mcpServers.join(", ")}; ` +
+        "remove each server first with `hercule mcp-server delete <id>`, then delete this connection",
     );
   }
   return parts.join("; ");
@@ -804,6 +810,7 @@ const make = Effect.gen(function* () {
               status: "connected",
               statusDetail: null,
               warning: readAccountWarning(account),
+              replacesCredentials: true,
             },
             now,
           );
@@ -1113,6 +1120,7 @@ const make = Effect.gen(function* () {
                 status: "connected",
                 statusDetail: null,
                 warning: readAccountWarning(account),
+                replacesCredentials: true,
               },
               at,
             );

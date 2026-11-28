@@ -2,7 +2,7 @@ The marks below are taken from lobehub's icon set: each is
 the `d` of the single path in the file named below, on its 24x24 box.
 
 Source:  https://github.com/lobehub/lobe-icons
-Package: @lobehub/icons-static-svg 1.95.0
+Package: @lobehub/icons-static-svg 1.95.0 (1.106.0 for antigravity.svg)
 
   claude.svg -> CLAUDE_MARK
     https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/claude.svg
@@ -10,8 +10,13 @@ Package: @lobehub/icons-static-svg 1.95.0
   openai.svg -> OPENAI_MARK
     https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/openai.svg
     commit a88f09a2892016a74f4c20f096c167c88f6c19c1
+  antigravity.svg -> ANTIGRAVITY_MARK, and the "antigravity/antigravity" entry of
+    HARNESS_MARKS in apps/desktop/src/renderer/screens/thread/harness-logo.tsx
+    https://raw.githubusercontent.com/lobehub/lobe-icons/master/packages/static-svg/icons/antigravity.svg
+    commit 63c800e3db6427b3f156f7b88d426ccb3f7277a1
 
-Copied on 2026-09-12, unchanged. Nothing is fetched from lobehub at build time
+Copied on 2026-09-12 (claude.svg and openai.svg) and on 2026-11-25
+(antigravity.svg), unchanged. Nothing is fetched from lobehub at build time
 or at runtime.
 
 Two provider plugins carry a mark from the same set, scaled from the 24x24 box

@@ -1,4 +1,4 @@
-import type { JSX, ReactNode } from "react";
+import type { ComponentProps, JSX, ReactNode } from "react";
 import { cn } from "@hercule/ui";
 
 /**
@@ -30,6 +30,7 @@ export function MenuRow({
   plain = false,
   trailing,
   className,
+  buttonProps,
   onPick,
 }: {
   /** The content of the marker column; defaults to the row's dot. */
@@ -63,6 +64,8 @@ export function MenuRow({
   readonly trailing?: ReactNode;
   /** Extra classes for the row, such as a rule above it. */
   readonly className?: string;
+  /** Extra attributes for the row's button, such as `aria-expanded` on a row that opens a submenu. Ignored on a row that is not a button. */
+  readonly buttonProps?: ComponentProps<"button">;
   readonly onPick?: () => void;
 }): JSX.Element {
   const body = (
@@ -139,6 +142,7 @@ export function MenuRow({
         "cursor-pointer hover:bg-line-soft hover:text-ink",
         "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-live",
       )}
+      {...buttonProps}
     >
       {body}
     </button>

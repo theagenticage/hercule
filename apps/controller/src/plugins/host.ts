@@ -77,6 +77,11 @@ import { applyIntakeOverrides, createPluginNotLoadedError, PluginIntake } from "
 import type { RegisteredSignalKind } from "./signal-kinds";
 import { checkPluginMark } from "./mark";
 import { IngestLoops, IngestLoopsLayer } from "./ingest";
+import {
+  checkMcpServerConnectionTypes,
+  registerMcpServerContribution,
+  type RegisteredMcpServer,
+} from "./mcp-servers";
 import type { IngestExecutor } from "./ingest-executor";
 import type { EntityObservations } from "./entity-observations";
 import type { OpenSignals } from "./open-signals";
@@ -106,6 +111,7 @@ const IMPLEMENTED: ReadonlyArray<PluginCapability> = [
   "resources",
   "entities",
   "workflow-actions",
+  "mcp-servers",
 ];
 
 /**
@@ -383,6 +389,7 @@ const buildRegistrationHost = (
   kinds: Map<string, RegisteredEventKind>,
   sources: Array<RegisteredEventSource>,
   actions: Map<string, RegisteredWorkflowAction>,
+  mcpServers: Array<RegisteredMcpServer>,
   otherPluginsSources: ReadonlyArray<RegisteredEventSource>,
 ): RegistrationHost => ({
   ...(manifest.capabilities.includes("harnesses")
@@ -509,6 +516,14 @@ const buildRegistrationHost = (
         },
       }
     : {}),
+  ...(manifest.capabilities.includes("mcp-servers")
+    ? {
+        mcpServers: {
+          register: (contribution) =>
+            registerMcpServerContribution(manifest, contribution, declared, mcpServers),
+        },
+      }
+    : {}),
 });
 
 const make = Effect.gen(function* () {
@@ -535,6 +550,8 @@ const make = Effect.gen(function* () {
    * by the qualified id a step uses. Set at boot, like the harnesses.
    */
   const workflowActions = yield* Ref.make<ReadonlyMap<string, RegisteredWorkflowAction>>(new Map());
+  /** Every MCP server this boot registered, in registry order. Set at boot, like the harnesses. */
+  const mcpServers = yield* Ref.make<ReadonlyArray<RegisteredMcpServer>>([]);
   /**
    * One permit for the whole host, held across a lifecycle change's reads,
    * plugin hooks and writes. Without it, two changes could interleave while
@@ -716,6 +733,7 @@ const make = Effect.gen(function* () {
     kinds: Map<string, RegisteredEventKind>,
     sources: Array<RegisteredEventSource>,
     actions: Map<string, RegisteredWorkflowAction>,
+    servers: Array<RegisteredMcpServer>,
     otherPluginsSources: ReadonlyArray<RegisteredEventSource>,
   ): Effect.Effect<PluginStatus> =>
     Effect.suspend(() =>
@@ -729,10 +747,19 @@ const make = Effect.gen(function* () {
           kinds,
           sources,
           actions,
+          servers,
           otherPluginsSources,
         ),
       ),
     ).pipe(
+      Effect.andThen(
+        Effect.suspend(() =>
+          checkMcpServerConnectionTypes(
+            servers,
+            types.map((type) => type.contribution.type),
+          ),
+        ),
+      ),
       Effect.as<PluginStatus>({ _tag: "inactive" }),
       Effect.catchCause((cause) =>
         Effect.succeed<PluginStatus>({ _tag: "errored", message: summarizeCause(cause) }),
@@ -904,6 +931,7 @@ const make = Effect.gen(function* () {
         const registeredKinds = new Map<string, RegisteredEventKind>();
         const registeredSources: Array<RegisteredEventSource> = [];
         const registeredActions = new Map<string, RegisteredWorkflowAction>();
+        const registeredServers: Array<RegisteredMcpServer> = [];
         // The built-in actions go into the same catalog as the plugins'
         // actions, so every reader finds all actions in one list.
         registerBuiltInWorkflowActions(catalog, registeredActions);
@@ -959,6 +987,7 @@ const make = Effect.gen(function* () {
           const kinds = new Map<string, RegisteredEventKind>();
           const sources: Array<RegisteredEventSource> = [];
           const actions = new Map<string, RegisteredWorkflowAction>();
+          const servers: Array<RegisteredMcpServer> = [];
           const status = yield* registerPass(
             plugin,
             manifest,
@@ -969,6 +998,7 @@ const make = Effect.gen(function* () {
             kinds,
             sources,
             actions,
+            servers,
             registeredSources,
           );
           const registered = status._tag !== "errored";
@@ -987,6 +1017,7 @@ const make = Effect.gen(function* () {
             for (const [kind, entry] of kinds) registeredKinds.set(kind, entry);
             registeredSources.push(...sources);
             for (const [id, action] of actions) registeredActions.set(id, action);
+            registeredServers.push(...servers);
           }
           booted.set(manifest.id, {
             ...facts,
@@ -1011,6 +1042,7 @@ const make = Effect.gen(function* () {
         yield* Ref.set(eventKinds, registeredKinds);
         yield* Ref.set(eventSources, registeredSources);
         yield* Ref.set(workflowActions, registeredActions);
+        yield* Ref.set(mcpServers, registeredServers);
         yield* connectionTypes.replace(registeredTypes);
 
         yield* gate.withPermits(1)(
@@ -1136,6 +1168,19 @@ const make = Effect.gen(function* () {
      */
     findWorkflowAction: (id: string): Effect.Effect<Option.Option<RegisteredWorkflowAction>> =>
       Effect.map(Ref.get(workflowActions), (actions) => Option.fromUndefinedOr(actions.get(id))),
+
+    /**
+     * Returns the MCP server with this qualified id, whatever the status of
+     * its plugin, or `None` when no plugin this boot loaded registered it. The
+     * caller decides what a plugin that is not active means, with `isActive`.
+     */
+    findMcpServer: (id: string): Effect.Effect<Option.Option<RegisteredMcpServer>> =>
+      Effect.map(Ref.get(mcpServers), (servers) =>
+        Option.fromUndefinedOr(servers.find((server) => server.id === id)),
+      ),
+
+    /** Returns every MCP server this boot registered, whatever the status of its plugin. */
+    listMcpServers: (): Effect.Effect<ReadonlyArray<RegisteredMcpServer>> => Ref.get(mcpServers),
 
     /** Checks whether the plugin is running, as `listActivePluginIds` defines it. */
     isActive: (pluginId: string): Effect.Effect<boolean> =>

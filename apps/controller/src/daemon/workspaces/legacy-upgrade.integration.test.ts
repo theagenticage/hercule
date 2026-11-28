@@ -285,6 +285,8 @@ const withLegacyController = async (
       //   session had its start claimed under skill tracking, so the column
       //   stays null (an empty list would mean a start was claimed with no skills);
       // - its role: no old session was given one, so it stays null;
+      // - whether it has read third-party messages: no old session was
+      //   delivered a wrapped line, so it is 0;
       // - its kind: computed from the ids, and no old session has an Agent, so
       //   each is a Thread;
       // - when its last turn ended: each session is exited, so the migration
@@ -321,7 +323,9 @@ const withLegacyController = async (
             reopened_at: null,
             process_started_at: null,
             library_skills: null,
+            mcp_gateway: null,
             role: null,
+            tainted: 0,
             kind: "thread",
             last_turn_ended_at: (row as { last_activity_at: string }).last_activity_at,
           };
@@ -482,7 +486,6 @@ describe("pre-change controller and provider-state upgrade", () => {
         expect(existsSync(join(fixture.primary, ".git", "objects"))).toBe(true);
       });
     },
-    30_000,
   );
 
   it("creates new local work from the bound standalone main after migration while retaining the old cache worktree", async () => {
@@ -559,5 +562,5 @@ describe("pre-change controller and provider-state upgrade", () => {
       expect(hashContents(fixture.ephemeral)).toBe(fixture.before.ephemeral);
       expect(hashContents(fixture.providerHome)).toBe(fixture.before.provider);
     });
-  }, 30_000);
+  });
 });

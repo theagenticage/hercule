@@ -4,10 +4,12 @@
  * in (`signsInPerMachine`, `listProviderAccountCredentialFields`).
  */
 import { describe, expect, it } from "vitest";
+import type { Runner } from "@hercule/contract";
 import {
   ANTHROPIC_IDENTITY,
   OPENAI_IDENTITY,
   PROVIDERS,
+  WITH_CLAUDE,
   ZAI_IDENTITY,
   buildProviderAccount,
   buildSnapshot,
@@ -229,20 +231,42 @@ describe("findProviderAccountReadiness", () => {
       { runnerId: "moss", harnessId: "pi/pi", state: "harness-too-old" },
     ],
   );
+  const adapters = ["claude-code/claude-code", "codex/codex", "pi/pi"];
+  const runner = (id: string, withFacts = true): Runner => ({
+    ...WITH_CLAUDE,
+    id,
+    facts: withFacts ? { ...WITH_CLAUDE.facts!, adapters } : null,
+  });
 
   it("is the state the controller sent for the harness on the runner", () => {
-    expect(findProviderAccountReadiness(account, "claude-code/claude-code", "moss")).toBe("ready");
-    expect(findProviderAccountReadiness(account, "claude-code/claude-code", "atlas")).toBe(
+    expect(findProviderAccountReadiness(account, "claude-code/claude-code", runner("moss"))).toBe(
+      "ready",
+    );
+    expect(findProviderAccountReadiness(account, "claude-code/claude-code", runner("atlas"))).toBe(
       "not-signed-in",
     );
-    expect(findProviderAccountReadiness(account, "pi/pi", "moss")).toBe("harness-too-old");
+    expect(findProviderAccountReadiness(account, "pi/pi", runner("moss"))).toBe("harness-too-old");
   });
 
   it("is harness-missing when the account has no row for the pair", () => {
-    expect(findProviderAccountReadiness(account, "claude-code/claude-code", "cove")).toBe(
+    expect(findProviderAccountReadiness(account, "claude-code/claude-code", runner("cove"))).toBe(
       "harness-missing",
     );
-    expect(findProviderAccountReadiness(account, "codex/codex", "moss")).toBe("harness-missing");
+    expect(findProviderAccountReadiness(account, "codex/codex", runner("moss"))).toBe(
+      "harness-missing",
+    );
+  });
+
+  it("is no-adapter instead of harness-missing when the runner's facts list no adapter for the harness", () => {
+    const old = { ...runner("cove"), facts: { ...runner("cove").facts!, adapters: [] } };
+
+    expect(findProviderAccountReadiness(account, "claude-code/claude-code", old)).toBe(
+      "no-adapter",
+    );
+    // A runner that has reported no facts is not known to lack an adapter.
+    expect(
+      findProviderAccountReadiness(account, "claude-code/claude-code", runner("cove", false)),
+    ).toBe("harness-missing");
   });
 });
 

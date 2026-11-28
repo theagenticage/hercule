@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { cn } from "../primitives/cn";
-import { CLAUDE_MARK, OPENAI_MARK } from "../logos/marks";
+import { ANTIGRAVITY_MARK, CLAUDE_MARK, OPENAI_MARK } from "../logos/marks";
 
 /**
  * The SVG path of each harness's monochrome mark, by qualified harness id. The marks
@@ -13,6 +13,7 @@ import { CLAUDE_MARK, OPENAI_MARK } from "../logos/marks";
 const MARKS: Readonly<Record<string, string>> = {
   "claude-code/claude-code": CLAUDE_MARK,
   "codex/codex": OPENAI_MARK,
+  "antigravity/antigravity": ANTIGRAVITY_MARK,
 };
 
 export function HarnessLogo({

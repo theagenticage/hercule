@@ -18,7 +18,7 @@ import type {
   EntityReason,
   EntityStatus,
 } from "@hercule/contract";
-import type { PluginName } from "../intake";
+import type { PluginName } from "../plugin-names";
 import { lowerFirst } from "../text";
 import { readEntityPluginId } from "./entity-words";
 import { describeClaim, describeHint } from "./link-claim";

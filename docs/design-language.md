@@ -168,7 +168,12 @@ and "split view" are not used as names.
 
 Each screen's own numbers and keys (its minimums, which column is sized, what Esc does after the
 pane closes) are written with the screen: the thread in [spec 14](./spec/14-web-app.md) §The
-thread surface, Intake in [spec 17](./spec/17-desktop-app.md#intake).
+thread surface, ~~Intake in [spec 17](./spec/17-desktop-app.md#intake)~~ the Inbox in
+[spec 17](./spec/17-desktop-app.md#inbox).
+
+*(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* The desktop Intake screen is deleted, so the examples above that
+name Intake (its open item, its sized list, its bar above the split, its list's motion) are kept
+as the record of the screen that first used these rules. The rules themselves stand.
 
 ## Monitoring semantics (pinned by ticket #20, 2026-08-28)
 
@@ -221,7 +226,7 @@ rounded square = task, outline triangle = run, speech bubble = session, three-no
 
 **Placement rule: one mark per slot, never two side by side.** A row's leading cell
 holds its state mark and nothing else. Entity glyphs appear only where they are the sole
-mark: the sidebar nav (the four entity items only - Intake (in the desktop app), Check-in,
+mark: the sidebar nav (the four entity items only - ~~Intake (in the desktop app),~~ Check-in,
 Fleet, Connections, Notifications and Settings carry no icon) and the decision card's FROM / AGENT fields.
 Strand rows, detail lines and the outcomes digest carry no entity glyph; the domain noun
 in text ("task · in-progress") says it. Priority bars and progress segments count as
@@ -242,7 +247,7 @@ marks are not a fixed list. Each plugin contributes one mark, its own, declared 
 never in brand colours. A system reached through another
 plugin is text, never a mark: "Sentry, via Gmail". A plugin without a valid mark gets its name's
 initial in a rounded square. Hercule's own signals carry [Hercule's face](./spec/17-desktop-app.md#the-hercule-face) as their mark. How the
-apps draw a mark safely is owned by [spec 17](./spec/17-desktop-app.md#intake).
+apps draw a mark safely is owned by [spec 17](./spec/17-desktop-app.md#design-system) *(amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the link pointed at the deleted Intake section)*.
 
 ## Intake semantics
 
@@ -253,6 +258,15 @@ section, a lead card over condensed rows, "Made from" with a fixed list of syste
 a drawer, and a per-connection events view stamped with triage's verdicts.~~ The Asks direction
 replaced it: what the user works through all day is what other people and systems ask of them,
 not only triage's findings. The old text is in git history.
+
+*(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243).)* **The Intake screen is deleted,** on Rogier's word of
+2026-11-21. The Inbox ([spec 17](./spec/17-desktop-app.md#inbox), [spec 20](./spec/20-external-entities.md))
+is where the user works through what is asked of them: a Signal shows inside the row of the thing
+it is about. To do, Later, Done, Everything, Tracking, snooze, Not urgent and To do clear are gone.
+A signal with no External Entity has no place on the desktop for now; `hercule signal list` lists
+it, and follow-up [#1246](https://github.com/theagenticage/hercule/issues/1246) gives it a place on the Inbox. The rules below are kept as the record of
+the deleted screen. Two of them still hold for any surface that shows Signals: provenance on every
+signal, and the open item's answers as a ledger.
 
 The model is [spec 10 §9](./spec/10-triage-intake-and-notifications.md#9-signals); the desktop
 screen is [spec 17 §Intake](./spec/17-desktop-app.md#intake). These are the rules every app's
@@ -318,6 +332,8 @@ GitHub is not told"). An answer that sends something or runs an operation never 
 and neither does Dismiss: turning down what an agent suggested is a judgement made from the open
 item, where its reasoning shows. A broad "list rows excepted" line was rejected, because it would
 let a later screen put Approve one hover-click away with no describe line. Owner: spec 17 §Intake.
+*(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the Intake screen is deleted, and Snooze, Unsnooze and Not urgent
+with it. The exception stands for Done and a row's checkbox on any list of Signals.)*
 
 Amended 2026-09-01 by ticket #51 (Prototype: the app shell and navigation): the **app shell** is one
 sidebar with two faces behind a segmented switch (Threads: the t3-code list; Hercule: the orchestration

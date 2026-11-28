@@ -6,6 +6,8 @@
  * - the undo stack (Undo must not reach the next user);
  * - the card moves the controller has not answered yet;
  * - the pending intents, with their undo-window timers;
+ * - the Inbox's unsent start-thread dialogs;
+ * - the Inbox's held answers and the reply drafts;
  * - the check a request makes before it goes on with its answer.
  *
  * A request that waits (a read before a spawn, a Try again on its way) can end
@@ -24,7 +26,9 @@
  */
 import type { QueryClient } from "@tanstack/react-query";
 import { queryKeys, type HerculeClient } from "@hercule/client-core";
+import { actOnSignal } from "./act-on-signal";
 import type { CardMover } from "./card-mover";
+import { createHeldSignalAnswers, type HeldSignalAnswers } from "./held-signal-answers";
 import { createPendingCardMoves, type PendingCardMoves } from "./pending-card-moves";
 import {
   buildPendingIntentsKey,
@@ -33,6 +37,7 @@ import {
   type IntentStorage,
   type PendingIntents,
 } from "./pending-intents";
+import { createThreadStartDrafts, type ThreadStartDrafts } from "./thread-start-drafts";
 import { createUndoStack, type UndoStack } from "./undo-stack";
 
 /**
@@ -58,6 +63,10 @@ export interface AccountScope {
   readonly pendingCardMoves: PendingCardMoves;
   /** The answers and merges the app holds back for the undo line before it sends them. */
   readonly pendingIntents: PendingIntents;
+  /** The Inbox's start-thread dialogs that were closed unsent, which N on the same things opens again. */
+  readonly threadStarts: ThreadStartDrafts;
+  /** The Inbox's answers that act on their source, held and sent through `pendingIntents`, and the words typed into reply boxes. */
+  readonly heldSignalAnswers: HeldSignalAnswers;
   /**
    * Returns whether this user is still the one signed in. It is `false` once
    * the scope is closed, and once the client no longer holds the token the
@@ -137,6 +146,9 @@ const buildIntentSender =
         });
         if (isCurrent()) await readAgainAfterChange(queryClient, intent.taskId, intent.intoTaskId);
         return;
+      case "signal-answer":
+        await actOnSignal(client, queryClient, isCurrent, intent);
+        return;
     }
   };
 
@@ -170,15 +182,18 @@ export const createAccountScopes = ({
       const token = client.getToken();
       let isClosed = false;
       const isCurrent = (): boolean => !isClosed && client.getToken() === token;
+      const pendingIntents = createPendingIntents({
+        storage,
+        storageKey: buildPendingIntentsKey(controllerUrl, username),
+        send: buildIntentSender(client, queryClient, isCurrent),
+      });
       const scope: AccountScope = {
         username,
         undoStack: createUndoStack(),
         pendingCardMoves: createPendingCardMoves(),
-        pendingIntents: createPendingIntents({
-          storage,
-          storageKey: buildPendingIntentsKey(controllerUrl, username),
-          send: buildIntentSender(client, queryClient, isCurrent),
-        }),
+        threadStarts: createThreadStartDrafts(),
+        pendingIntents,
+        heldSignalAnswers: createHeldSignalAnswers(pendingIntents),
         isCurrent,
       };
       open = {
@@ -188,6 +203,8 @@ export const createAccountScopes = ({
           scope.pendingIntents.dispose();
           scope.undoStack.clear();
           scope.pendingCardMoves.clear();
+          scope.threadStarts.clear();
+          scope.heldSignalAnswers.clear();
         },
       };
       return scope;

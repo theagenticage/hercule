@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import {
   buildTextGenerationField,
-  describeTextGenerationFailure,
+  describeTextGenerationProblem,
   formatAccessMode,
 } from "@hercule/client-core";
 import { ACCESS_MODE_CHAIN } from "@hercule/contract";
@@ -60,7 +60,11 @@ function System(): JSX.Element {
     modelProfiles,
     controller.textGeneration,
   );
-  const lastFailure = describeTextGenerationFailure(stored, controller.textGeneration, new Date());
+  const textGenerationProblem = describeTextGenerationProblem(
+    stored,
+    controller.textGeneration,
+    new Date(),
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -86,7 +90,9 @@ function System(): JSX.Element {
             ))}
           </Select>
         </Row>
-        {lastFailure === null ? null : <p className="text-fine text-muted">{lastFailure}</p>}
+        {textGenerationProblem === null ? null : (
+          <p className="text-fine text-muted">{textGenerationProblem}</p>
+        )}
         <SaveStatus saved={saved} failure={failure} />
       </FormCard>
       <FormCard

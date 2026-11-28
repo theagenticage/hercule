@@ -26,7 +26,28 @@ export type ThreadChoice =
   | { readonly kind: "runner"; readonly runnerId: string }
   | { readonly kind: "workspace"; readonly workspace: WorkspacePick }
   | { readonly kind: "option"; readonly id: string; readonly value: string | boolean }
-  | { readonly kind: "accessMode"; readonly value: AccessMode };
+  | { readonly kind: "accessMode"; readonly value: AccessMode }
+  /**
+   * A change of the draft's own list of MCP Servers, made while the draft was
+   * in `projectId` (`null` for no project). The new list is decided from the
+   * draft's list at the moment the choice is recorded, so two changes made
+   * before the screen draws again both count.
+   * `decideMcpServerIds` receives the ids the draft's pick holds for
+   * `projectId`, or `undefined` while the draft holds no pick for it. It
+   * returns the new list, or `undefined` when nothing changes.
+   */
+  | {
+      readonly kind: "mcpServers";
+      readonly projectId: string | null;
+      readonly decideMcpServerIds: (
+        pickedIds: readonly string[] | undefined,
+      ) => readonly string[] | undefined;
+    }
+  /**
+   * Forgets the draft's own list of MCP Servers, so the draft follows the
+   * list it starts from again, including later changes to that list.
+   */
+  | { readonly kind: "mcpServersReset" };
 
 /**
  * Returns `picks` with `choice` recorded. It reads no catalog, so it never
@@ -35,6 +56,9 @@ export type ThreadChoice =
  * - A model choice sets the account, the harness and the model together.
  * - An option choice merges into the picked options. A `false` is a choice
  *   too, so it is kept.
+ * - The MCP Servers choice records the list it decides from the pick held now,
+ *   with the project it was made under. It records nothing when it decides no change.
+ * - The MCP Servers reset removes that pick.
  * - The other choices set their field.
  */
 export const applyThreadChoice = (picks: ThreadPicks, choice: ThreadChoice): ThreadPicks => {
@@ -54,5 +78,18 @@ export const applyThreadChoice = (picks: ThreadPicks, choice: ThreadChoice): Thr
       return { ...picks, options: { ...picks.options, [choice.id]: choice.value } };
     case "accessMode":
       return { ...picks, accessMode: choice.value };
+    case "mcpServers": {
+      const held = picks.mcpServers;
+      const mcpServerIds = choice.decideMcpServerIds(
+        held?.projectId === choice.projectId ? held.mcpServerIds : undefined,
+      );
+      return mcpServerIds === undefined
+        ? picks
+        : { ...picks, mcpServers: { projectId: choice.projectId, mcpServerIds } };
+    }
+    case "mcpServersReset": {
+      const { mcpServers, ...rest } = picks;
+      return mcpServers === undefined ? picks : rest;
+    }
   }
 };

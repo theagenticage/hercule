@@ -28,7 +28,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { Effect } from "effect";
 import type { SessionStart } from "@hercule/protocol";
 import { resolveSessionContext, type Machine } from "./context";
-import { NO_USER_MATERIAL_PATHS } from "../harnesses/testing";
+import { ANTIGRAVITY, CODEX } from "../harnesses";
+import { NO_USER_MATERIAL } from "../harnesses/testing";
 
 import {
   addBranch,
@@ -227,6 +228,40 @@ describe("what a workspace-less session runs in", () => {
     // adapter to fail the start.
     expect(outcome._tag === "Success" ? outcome.success.ctx.binary : "").toBeUndefined();
   });
+});
+
+describe("the MCP servers a session is given", () => {
+  const GATEWAY = { name: "tools", type: "http", url: "/mcp", bearer: "session-token" } as const;
+  const withEntry = (entry: unknown): SessionStart => {
+    const base = buildSessionStart();
+    return { ...base, spec: { ...base.spec, mcpServers: [entry as typeof GATEWAY] } };
+  };
+  const readMcpServers = (frame: SessionStart) => {
+    const outcome = resolveSync(frame, buildMachine());
+    expect(outcome._tag).toBe("Success");
+    return outcome._tag === "Success" ? outcome.success.ctx.mcpServers : [];
+  };
+
+  it("resolves the gateway entry to an absolute URL on the controller", () => {
+    expect(readMcpServers(withEntry(GATEWAY))).toEqual([
+      { name: "tools", url: "https://controller.example:4938/mcp" },
+    ]);
+  });
+
+  it("gives none to a start without the entry", () => {
+    expect(readMcpServers(buildSessionStart())).toEqual([]);
+  });
+
+  it.each([
+    "https://elsewhere.example/mcp",
+    "//elsewhere.example/mcp",
+    "http://controller.example:4938/mcp",
+  ])(
+    "drops an entry whose URL %s is not on the controller's origin, so the token goes nowhere else",
+    (url) => {
+      expect(readMcpServers(withEntry({ ...GATEWAY, url }))).toEqual([]);
+    },
+  );
 });
 
 describe("the environment a session runs with", () => {
@@ -676,6 +711,20 @@ describe("the user's own material", () => {
     expect(readdirSync(join(machine.storageDir, HARNESS_HOME))).toEqual([]);
   });
 
+  it("is left out of an Antigravity session whose frame does not set the userMaterial flag", () => {
+    const userHome = createRoot();
+    mkdirSync(join(userHome, ".gemini"));
+    writeFileSync(join(userHome, ".gemini", "AGENTS.md"), "the user's instructions");
+    const machine = buildMachine({ baseEnv: { PATH: "/usr/bin", HOME: userHome } });
+
+    const outcome = resolveSync(buildSessionStart({ harnessId: ANTIGRAVITY }), machine);
+
+    expect(outcome._tag).toBe("Success");
+    expect(
+      outcome._tag === "Success" ? outcome.success.ctx.userMaterial : "failed",
+    ).toBeUndefined();
+  });
+
   it("reaches a session whose frame sets the userMaterial flag, and Claude Code's is linked into the Harness Home", () => {
     const machine = buildMachineWithUserMaterial();
 
@@ -683,11 +732,40 @@ describe("the user's own material", () => {
 
     expect(outcome._tag).toBe("Success");
     expect(outcome._tag === "Success" ? outcome.success.ctx.userMaterial : undefined).toEqual(
-      NO_USER_MATERIAL_PATHS,
+      NO_USER_MATERIAL,
     );
     const link = join(machine.storageDir, HARNESS_HOME, "CLAUDE.md");
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
     expect(readFileSync(link, "utf8")).toBe("the user's instructions");
+  });
+});
+
+describe("the user's instructions across a start and a resume", () => {
+  it("are read again for every start frame, so a resumed session gets the text as it is then", () => {
+    const userHome = createRoot();
+    mkdirSync(join(userHome, ".codex"));
+    const instructions = join(userHome, ".codex", "AGENTS.md");
+    const machine = buildMachine({ baseEnv: { PATH: "/usr/bin", HOME: userHome } });
+    // A resume reaches the runner as one more start frame for the same session.
+    const start = buildSessionStart({ harnessId: CODEX, userMaterial: true });
+    const resume = buildSessionStart({
+      harnessId: CODEX,
+      userMaterial: true,
+      spec: {
+        ...start.spec,
+        continue: { nativeSessionId: "native-session", mode: "resume" },
+      },
+    });
+    const readInstructions = (frame: SessionStart): string | undefined => {
+      const outcome = resolveSync(frame, machine);
+      return outcome._tag === "Success" ? outcome.success.ctx.userMaterial?.instructions : "failed";
+    };
+
+    writeFileSync(instructions, "The old text.");
+    expect(readInstructions(start)).toBe("The old text.");
+
+    writeFileSync(instructions, "The new text.");
+    expect(readInstructions(resume)).toBe("The new text.");
   });
 });
 

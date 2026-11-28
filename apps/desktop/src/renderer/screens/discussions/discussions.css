@@ -1,4 +1,4 @@
-/* The Discussions screen: its list's table, the overlap mark, and the open
+/* The Discussions screen: its list's table, the kind mark, and the open
    Discussion with its shared files and Posts. The rules are the Bureau book's
    "Discussions and Wiki" block (system.css), with their selectors, except
    where a comment explains a difference. The rows draw with the workflow list's
@@ -8,13 +8,34 @@
    open-item.css, the sessions' faces and names with actor.css, and the Posts'
    text with the transcript's (markdown.css). */
 
-/* Discussions table: the mark, the subject, then three numbers. */
+/* Discussions table: the mark, the subject, then three numbers. The table is
+   at most as wide as a thread's conversation, 760px, and stays at the left
+   of the page, so each row's numbers sit near its subject. The band behind
+   the column heads keeps the list's full width. The Wiki's table stays as
+   wide as the page, because its summaries need the room. */
 .discussion-list.workflow-list--table :is(.table-heads, .table-row) {
   grid-template-columns: 14px minmax(0, 1fr) 64px 44px 72px;
 }
-/* The overlap mark: two rings, in faint ink, in the mark's 14px slot. A
-   general Discussion leaves it empty. */
-.overlap-mark {
+.discussion-list.workflow-list--table :is(.table-heads, .virtual-list-items) {
+  max-width: 760px;
+}
+/* A repository's sub-heading starts where the subjects do, past the mark's
+   slot, so it reads as a label of the rows under it. */
+.discussion-list.workflow-list--table .group-h.group-h--repo {
+  padding-left: 36px;
+}
+/* A last Post written today is in the rows' ink; older ones keep the numbers' faint ink. End House's
+   ink is brighter than the ceiling the dark themes keep body text under (APCA Lc 95), so there it
+   takes the strongest text token under it, as the project headings do. */
+.discussion-list .table-num.is-today {
+  color: var(--ink);
+}
+[data-theme="end-house"] .discussion-list .table-num.is-today {
+  color: var(--muted-firm);
+}
+/* The mark of a Discussion's kind: two rings for an overlap, a speech bubble
+   for a general one, in faint ink, in the mark's 14px slot. */
+.kind-mark {
   display: grid;
   place-items: center;
   color: var(--faint);
@@ -42,7 +63,7 @@
 .open-lead {
   max-width: 760px;
 }
-.open-name .overlap-mark {
+.open-name .kind-mark {
   flex: none;
   color: var(--muted);
 }

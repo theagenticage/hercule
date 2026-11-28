@@ -43,6 +43,7 @@ export const SESSION: Session = {
   exitedAt: null,
   lastActivityAt: "2026-09-08T10:01:03.000Z",
   unenforced: [],
+  mcpServers: [],
 };
 
 /** Builds `SESSION` with `over` applied. */

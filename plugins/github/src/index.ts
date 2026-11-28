@@ -1,12 +1,14 @@
 /**
  * The GitHub plugin: the GitHub connection type, the event source that polls
- * GitHub for what changed, and the workflow actions that act on GitHub.
+ * GitHub for what changed, the workflow actions that act on GitHub, and the
+ * MCP server that gives sessions GitHub's tools.
  */
 import { Effect, Schema } from "effect";
 import {
   HOST_API,
   registerConnectionType,
   registerEventSource,
+  registerMcpServer,
   registerWorkflowAction,
   type EventSourceContribution,
   type Plugin,
@@ -17,6 +19,7 @@ import { githubEntityLookup } from "./entity-lookup";
 import { GITHUB_ENTITY_KINDS } from "./entity-kinds";
 import { openGithubIngest } from "./ingest";
 import { GITHUB_EVENT_KINDS } from "./kinds";
+import { githubMcpServer } from "./mcp-server";
 import { GITHUB_SIGNAL_KINDS } from "./signal-kinds";
 
 /**
@@ -48,6 +51,15 @@ const eventSource: EventSourceContribution = {
   },
   signalKinds: GITHUB_SIGNAL_KINDS,
   entityKinds: GITHUB_ENTITY_KINDS,
+  savedQueries: [
+    {
+      word: "review-requests",
+      name: "Review requests",
+      order: "waiting",
+      // A review asked of the user or of one of the user's teams.
+      clauses: [{ key: "signal", op: "is", value: ["review-requested", "team-review-requested"] }],
+    },
+  ],
   entityLookup: githubEntityLookup,
   open: openGithubIngest,
 };
@@ -64,6 +76,7 @@ export const github: Plugin = {
       "resources",
       "entities",
       "workflow-actions",
+      "mcp-servers",
     ],
     configSchema: Schema.Struct({}),
     mark: { paths: [GITHUB_MARK_PATH] },
@@ -73,6 +86,7 @@ export const github: Plugin = {
       yield* registerConnectionType(host, connectionType);
       yield* registerEventSource(host, eventSource);
       for (const action of GITHUB_WORKFLOW_ACTIONS) yield* registerWorkflowAction(host, action);
+      yield* registerMcpServer(host, githubMcpServer);
     }),
   // The host opens and polls the ingest handles itself, so there is nothing
   // for the plugin to start.

@@ -151,10 +151,14 @@ export function OpenedProviderAccountSheet({
   const buildMachineButton = (machine: ProviderAccountMachine): MachineAction | null => {
     const { action } = machine;
     if (action === null) return null;
-    if (action.kind === "install") {
+    // Update installs the version this build runs over the old one, so it is
+    // the same request as Install.
+    if (action.kind === "install" || action.kind === "update") {
       const installing = install.isPending && install.variables.runnerId === machine.runnerId;
+      const [label, busyLabel] =
+        action.kind === "install" ? ["Install", "Installing…"] : ["Update", "Updating…"];
       return {
-        label: installing ? "Installing…" : "Install",
+        label: installing ? busyLabel : label,
         onPress: () => {
           install.mutate(machine);
         },
@@ -202,8 +206,9 @@ export function OpenedProviderAccountSheet({
                 key={machine.runnerId}
                 runnerName={machine.runnerName}
                 isThisMac={machine.runnerId === thisMacRunnerId}
-                signedIn={machine.signedIn}
+                ready={machine.ready}
                 identity={machine.identity}
+                problem={machine.problem}
                 action={buildMachineButton(machine)}
                 error={
                   install.isError && install.variables.runnerId === machine.runnerId

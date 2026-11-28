@@ -7,6 +7,7 @@
  * (`findSkillReferences`). This file only decides which tokens name a skill of
  * the session.
  */
+import { realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { findSkillReferences } from "@hercule/protocol";
 import type { ListedRepositorySkill } from "./repository";
@@ -107,4 +108,62 @@ export function resolveSkillReferences(
     if (skill !== undefined) resolved.push({ ...skill, referenceName: name, start, end });
   }
   return resolved;
+}
+
+/**
+ * Returns the real path of `<folder>/SKILL.md`, with every symbolic link
+ * resolved. Returns undefined when the file does not exist, when it is not a
+ * regular file (a folder named `SKILL.md`, for example), or when it resolves
+ * to a file outside the real `folder`, such as a `SKILL.md` that is a link to
+ * another file the user can read. A skill folder that is itself a symbolic
+ * link is fine, because the file is compared with the resolved folder.
+ *
+ * `resolveSkillFiles` calls this for every skill folder an input names, so
+ * an adapter never points a harness at a path outside the skill.
+ */
+export function resolveSkillFile(folder: string): string | undefined {
+  try {
+    const path = realpathSync(join(folder, "SKILL.md"));
+    if (path !== join(realpathSync(folder), "SKILL.md")) return undefined;
+    return statSync(path).isFile() ? path : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A skill folder the references name, with the checked path of its `SKILL.md`. */
+export interface FoundSkillFile {
+  /** The first reference to the skill folder in the message. */
+  readonly reference: ResolvedSkillReference;
+  /** The real path `resolveSkillFile` returned for the folder. */
+  readonly skillFile: string;
+}
+
+/**
+ * Checks the skill file of every distinct skill folder the `references` name,
+ * so every adapter points its harness at the same files. Returns:
+ *
+ * - `found`: one entry per skill folder, in order of first reference, with
+ *   the first reference to it and the real path `resolveSkillFile` returned;
+ * - `skipped`: the `referenceName` of each skill folder whose file
+ *   `resolveSkillFile` rejects, in order of first reference.
+ *
+ * A folder is checked once, however many tokens name it. A folder has one
+ * reference name, so a skipped name also covers the later tokens of that skill.
+ */
+export function resolveSkillFiles(references: ReadonlyArray<ResolvedSkillReference>): {
+  readonly found: ReadonlyArray<FoundSkillFile>;
+  readonly skipped: ReadonlyArray<string>;
+} {
+  const seenFolders = new Set<string>();
+  const found: Array<FoundSkillFile> = [];
+  const skipped: Array<string> = [];
+  for (const reference of references) {
+    if (seenFolders.has(reference.folder)) continue;
+    seenFolders.add(reference.folder);
+    const skillFile = resolveSkillFile(reference.folder);
+    if (skillFile === undefined) skipped.push(reference.referenceName);
+    else found.push({ reference, skillFile });
+  }
+  return { found, skipped };
 }

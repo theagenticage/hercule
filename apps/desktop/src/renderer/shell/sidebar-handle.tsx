@@ -107,7 +107,7 @@ export function SidebarHandle({
     };
     const move = (moved: globalThis.PointerEvent): void => {
       dragged = moved.clientX + offset;
-      frame ??= requestAnimationFrame(draw);
+      if (frame === undefined) frame = requestAnimationFrame(draw);
     };
     const stop = (): void => {
       stopDragRef.current = undefined;

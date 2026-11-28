@@ -18,6 +18,7 @@ import {
 const PROJECT = {
   id: "01a06d02-beca-760b-a6b2-83af536c3c20",
   name: "hercule",
+  mcpServerIds: [],
   createdAt: "2026-09-04T15:21:31.594Z",
   updatedAt: "2026-09-04T15:21:31.594Z",
 };

@@ -13,7 +13,7 @@ import * as Statement from "effect/sql/Statement";
 import { MAX_CARD_BLOCKERS, type Grant, type Task, type TaskStage } from "@hercule/contract";
 import { CurrentActor, type Actor } from "../actor";
 import { TaskBoardFactsLayer, TaskDetailFactsLayer, TaskServicePortsLayer } from "../daemon/tasks";
-import { TaskTrackingRunsLayer } from "../daemon/runs";
+import { TaskRunsLayer } from "../daemon/runs";
 import { mintUuid, uuidFromString, uuidToString, withTransaction, type Change } from "../db";
 import { buildAnnouncementRecorder } from "../db/testing";
 import { PlatformEventsLayer } from "../events";
@@ -26,7 +26,7 @@ import { TaskService, TaskServiceLayer } from "./index";
 import { A_MINUTE, USER } from "./testing";
 
 const reads = Layer.mergeAll(TaskBoardLayer, TaskDetailsLayer).pipe(
-  Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskTrackingRunsLayer, TaskDetailFactsLayer)),
+  Layer.provide(Layer.mergeAll(TaskBoardFactsLayer, TaskRunsLayer, TaskDetailFactsLayer)),
   Layer.provideMerge(buildPluginStack()),
 );
 

@@ -287,7 +287,7 @@ describe("Settings > Providers > model browser", () => {
         // A thread started on the first pick runs in pi on the real runner.
         const chosen = picks[0]!;
         await openDraft(app, page);
-        const pill = page.locator(".composer-row button.pick--pill");
+        const pill = page.locator(".composer-row button.pick--model");
         const menu = page.getByRole("dialog", { name: "Model", exact: true });
         await pill.click();
         await menu.waitFor();

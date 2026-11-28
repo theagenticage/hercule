@@ -26,6 +26,7 @@ import {
 import {
   buildAccountPlugins,
   buildFakeProviderApi,
+  inertProviderAccountObserver,
   type AccountServices,
 } from "../provider-accounts/testing";
 import { RunnerConnectionsLayer } from "../runners";
@@ -43,6 +44,7 @@ const buildStack = (providerApi: HttpClient.HttpClient) =>
     Layer.provideMerge(ProjectServiceLayer),
     Layer.provideMerge(ModelProfileLookupLayer),
     Layer.provideMerge(ProviderAccountServiceLayer),
+    Layer.provideMerge(inertProviderAccountObserver),
     Layer.provideMerge(ProviderKeyRequestsLayer),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, providerApi)),
     Layer.provideMerge(ProviderAccountProbesLayer),

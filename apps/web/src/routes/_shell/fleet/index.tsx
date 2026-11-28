@@ -6,6 +6,7 @@ import { resolveDisplayTimezone } from "@hercule/client-core";
 import { useLiveInvalidation } from "../../../app/live-invalidation";
 import {
   controllerQuery,
+  harnessesQuery,
   localRunnerQuery,
   runnersQuery,
   settingsQuery,
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/_shell/fleet/")({
     await Promise.all([
       context.queryClient.ensureQueryData(runnersQuery(context.client)),
       context.queryClient.ensureQueryData(controllerQuery(context.client)),
+      context.queryClient.ensureQueryData(harnessesQuery(context.client)),
     ]);
   },
   component: Fleet,
@@ -37,6 +39,7 @@ function Fleet(): JSX.Element {
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
   );
+  const harnesses = useSuspenseQuery(harnessesQuery(client)).data;
   const local = useQuery(localRunnerQuery(detectLocalRunner, runners)).data ?? null;
 
   return (
@@ -44,7 +47,7 @@ function Fleet(): JSX.Element {
       <section>
         <LaneLabel>Runners</LaneLabel>
         {runners.length === 0 ? (
-          <NoRunners />
+          <NoRunners harnessNames={harnesses.map((harness) => harness.displayName)} />
         ) : (
           <Group>
             {runners.map((runner) => (

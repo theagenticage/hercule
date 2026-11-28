@@ -9,7 +9,7 @@ import { formatRepositoryPath } from "@hercule/client-core";
 import type { DiscussionSummary } from "@hercule/contract";
 import { BranchIcon } from "../../icons/branch";
 import { InlineCode } from "../inline-code";
-import { OverlapMark } from "./overlap-mark";
+import { DiscussionKindMark } from "./discussion-kind-mark";
 import "../workflows/workflow-detail.css";
 import "./discussions.css";
 
@@ -34,7 +34,9 @@ export function DiscussionLead({
   return (
     <div className="open-lead">
       <div className="open-name">
-        {discussion.kind === "overlap" ? <OverlapMark size={MARK_SIZE} /> : null}
+        {discussion.kind === "overlap" ? (
+          <DiscussionKindMark kind="overlap" size={MARK_SIZE} />
+        ) : null}
         <h1 id={headingId} title={subject}>
           <InlineCode text={discussion.subject} />
         </h1>

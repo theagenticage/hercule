@@ -9,7 +9,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { Duration, Effect } from "effect";
-import { isExecutableNotFound, killProcessesHolding, stopChild, type StopSignal } from "./process";
+import {
+  isExecutableNotFound,
+  killProcessesHolding,
+  spawnCheckedFramed,
+  splitLines,
+  stopChild,
+  type StopSignal,
+} from "./process";
 
 const directory = mkdtempSync(join(tmpdir(), "hercule-process-"));
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
@@ -133,6 +140,36 @@ describe("stopping a child", () => {
   });
 });
 
+describe("writing to a checked framed child", () => {
+  it("resolves when the process is alive and takes the line", async () => {
+    const child = spawnCheckedFramed(["cat"], {});
+    try {
+      await expect(child.write("hello\n")).resolves.toBeUndefined();
+    } finally {
+      child.kill();
+      await child.exited;
+    }
+  });
+
+  it("rejects when the process has exited", async () => {
+    const child = spawnCheckedFramed(["true"], {});
+    await child.exited;
+    await expect(child.write("hello\n")).rejects.toThrow("has exited");
+  });
+
+  it("rejects when the process is alive but closed its stdin", async () => {
+    const child = spawnCheckedFramed(["sh", "-c", "exec 0<&-; sleep 5"], {});
+    try {
+      // Gives the shell time to close its stdin.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      await expect(child.write("hello\n")).rejects.toThrow();
+    } finally {
+      child.kill();
+      await child.exited;
+    }
+  });
+});
+
 describe("recognising a spawn of a missing executable", () => {
   /** Returns what spawning `command` in `cwd` throws, and fails when it does not throw. */
   const catchSpawnError = (command: string, cwd?: string): unknown => {
@@ -173,5 +210,47 @@ describe("recognising a spawn of a missing executable", () => {
     ).toBe(false);
     expect(isExecutableNotFound(new Error("boom"), spawn)).toBe(false);
     expect(isExecutableNotFound("ENOENT", spawn)).toBe(false);
+  });
+});
+
+/** Builds a byte stream that delivers each of `chunks` as one read. */
+const streamOf = (chunks: ReadonlyArray<Uint8Array | string>): ReadableStream<Uint8Array> => {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start: (controller) => {
+      for (const chunk of chunks) {
+        controller.enqueue(typeof chunk === "string" ? encoder.encode(chunk) : chunk);
+      }
+      controller.close();
+    },
+  });
+};
+
+const readLines = async (stream: ReadableStream<Uint8Array>): Promise<Array<string>> => {
+  const lines: Array<string> = [];
+  for await (const line of splitLines(stream)) lines.push(line);
+  return lines;
+};
+
+describe("splitting a stream into lines", () => {
+  it("returns whole lines in order, joins a line split over chunks, and keeps a trailing partial line", async () => {
+    const lines = await readLines(streamOf(["one\ntw", "o\n\nthr", "ee\nfo", "ur"]));
+    expect(lines).toEqual(["one", "two", "", "three", "four"]);
+  });
+
+  it("keeps the carriage return of a CRLF line", async () => {
+    expect(await readLines(streamOf(["a\r\nb\r", "\n"]))).toEqual(["a\r", "b\r"]);
+  });
+
+  it("joins a multi-byte character split between two chunks", async () => {
+    const bytes = new TextEncoder().encode("é€\n");
+    // Cuts inside the three bytes of the euro sign.
+    expect(await readLines(streamOf([bytes.slice(0, 3), bytes.slice(3)]))).toEqual(["é€"]);
+  });
+
+  it("returns a long line that arrives in many small chunks", async () => {
+    const chunks = Array.from({ length: 2000 }, () => "x".repeat(1000));
+    const lines = await readLines(streamOf([...chunks, "\nnext\n"]));
+    expect(lines.map((line) => line.length)).toEqual([2_000_000, 4]);
   });
 });

@@ -1,6 +1,6 @@
 /**
  * Which secrets the user may write on the Secrets screen. The API refuses a
- * set, a rotate or a delete for three owner kinds, so the screen offers none
+ * set, a rotate or a delete for four owner kinds, so the screen offers none
  * of them there:
  *
  * - `core` holds the controller's own key material, such as its signing key.
@@ -9,6 +9,9 @@
  *   or `connection.setCredentials` checks that.
  * - `provider-account` holds a Provider Account's key or token. Only
  *   `providerAccount.update` and `providerAccount.signIn` write it.
+ * - `mcp-server` holds the sign-in of an MCP Server added by URL. Only the
+ *   server's own operations (setting its token, signing in, deleting it)
+ *   write it.
  */
 import type { OwnerKind } from "@hercule/contract";
 
@@ -30,6 +33,7 @@ const READ_ONLY_NOTES: Readonly<Record<OwnerKind, string | null>> = {
   plugin: null,
   runner: null,
   "provider-account": "account credential",
+  "mcp-server": "MCP server sign-in",
 };
 
 /**

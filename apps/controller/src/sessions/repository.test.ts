@@ -20,8 +20,10 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as Statement from "effect/sql/Statement";
 import { LIVE_SESSION_STATUSES, type SessionKind } from "@hercule/contract";
 import type { HarnessEvent } from "@hercule/protocol";
+import { connectionRepository, GITHUB_CONNECTION_TYPE } from "../connections";
 import { CursorError, mintUuid, uuidFromString, uuidToString } from "../db";
 import { inTransaction, TestDatabase } from "../db/testing";
+import { mcpServerRepository } from "../mcp-servers";
 import { inputRepository } from "./inputs";
 import { sessionRepository, type TranscriptPageRequest } from "./repository";
 import { fold, startTracking } from "./stream";
@@ -1228,7 +1230,7 @@ describe("an event the controller writes itself", () => {
         WHERE session_id = unhex(${sessionId.replaceAll("-", "")}) ORDER BY position`,
     );
 
-  it("goes before the first event of a session that never ran, and keeps that event", async () => {
+  it("keeps the first event of a session that never ran", async () => {
     const stream = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -1240,12 +1242,12 @@ describe("an event the controller writes itself", () => {
     );
 
     expect(stream).toEqual([
-      { runner_seq: 1, tag: "runtime.warning" },
-      { runner_seq: 2, tag: "session.started" },
+      { runner_seq: -1, tag: "runtime.warning" },
+      { runner_seq: 1, tag: "session.started" },
     ]);
   });
 
-  it("goes past every event of a resumed session, and keeps the resumed process's first event", async () => {
+  it("keeps the resumed process's first event, and numbers each warning below zero", async () => {
     const stream = await run(
       Effect.gen(function* () {
         const sessions = yield* sessionRepository;
@@ -1254,6 +1256,7 @@ describe("an event the controller writes itself", () => {
         // A resume moves the offset to the highest sequence stored, 3.
         yield* sessions.resume(sessionId, "{}");
         yield* sessions.appendRuntimeWarning(sessionId, "a notice", at);
+        yield* sessions.appendRuntimeWarning(sessionId, "another notice", at);
         expect(yield* ingestFirstRunnerEvent(sessionId)).toBe(true);
         return yield* readStream(sessionId);
       }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
@@ -1263,8 +1266,9 @@ describe("an event the controller writes itself", () => {
       { runner_seq: 1, tag: "turn.started" },
       { runner_seq: 2, tag: "turn.started" },
       { runner_seq: 3, tag: "turn.started" },
-      { runner_seq: 4, tag: "runtime.warning" },
-      { runner_seq: 5, tag: "session.started" },
+      { runner_seq: -1, tag: "runtime.warning" },
+      { runner_seq: -2, tag: "runtime.warning" },
+      { runner_seq: 4, tag: "session.started" },
     ]);
   });
 });
@@ -1321,5 +1325,114 @@ describe("the archived mark of a session", () => {
     expect(result.onlyArchived).toEqual([result.archived]);
     expect(result.notArchived).toEqual([result.open]);
     expect(result.every).toEqual([result.open, result.archived]);
+  });
+});
+
+/** Inserts one MCP Server named `name` on a Connection of its own, and returns its id. */
+const insertMcpServer = (name: string) =>
+  Effect.gen(function* () {
+    const connections = yield* connectionRepository;
+    const servers = yield* mcpServerRepository;
+    const connection = yield* connections.insert({
+      pluginId: "github",
+      type: GITHUB_CONNECTION_TYPE,
+      label: name,
+      displayName: name,
+      accountId: `account-${name}`,
+      labels: [],
+      config: {},
+      at,
+    });
+    const stored = yield* servers.insertPlugin({
+      name,
+      contributionId: "acme/desk",
+      connectionId: connection.id,
+      accountId: `account-${name}`,
+      connectionGeneration: 0,
+      at,
+    });
+    return stored.id;
+  });
+
+describe("a session's list of MCP Servers", () => {
+  const readLeftOut = (sessionId: string) =>
+    Effect.map(
+      Effect.flatMap(sessionRepository, (sessions) => sessions.one(sessionId)),
+      (row) => Option.getOrThrow(row).mcpServers.map((entry) => [entry.name, entry.leftOut]),
+    );
+
+  it("keeps the reason a start recorded for a server that stays, and starts a new entry unchecked", async () => {
+    const lists = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        const alpha = yield* insertMcpServer("alpha");
+        const bravo = yield* insertMcpServer("bravo");
+        const charlie = yield* insertMcpServer("charlie");
+        yield* sessions.replaceMcpServers(sessionId, [alpha, bravo]);
+        yield* sessions.recordLeftOut(sessionId, new Map([[bravo, "needs-sign-in"]]));
+        const before = yield* readLeftOut(sessionId);
+
+        yield* sessions.replaceMcpServers(sessionId, [charlie, bravo]);
+
+        return { before, after: yield* readLeftOut(sessionId) };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(lists.before).toEqual([
+      ["alpha", null],
+      ["bravo", "needs-sign-in"],
+    ]);
+    expect(lists.after).toEqual([
+      ["charlie", null],
+      ["bravo", "needs-sign-in"],
+    ]);
+  });
+
+  it("records each reason of a start on its servers, clears the reasons of the last start, and ignores an id outside the list", async () => {
+    const lists = await run(
+      Effect.gen(function* () {
+        const sessions = yield* sessionRepository;
+        const sessionId = yield* aSession;
+        const alpha = yield* insertMcpServer("alpha");
+        const bravo = yield* insertMcpServer("bravo");
+        const charlie = yield* insertMcpServer("charlie");
+        const delta = yield* insertMcpServer("delta");
+        const outsider = yield* insertMcpServer("outsider");
+        yield* sessions.replaceMcpServers(sessionId, [alpha, bravo, charlie, delta]);
+        yield* sessions.recordLeftOut(
+          sessionId,
+          new Map([
+            [alpha, "needs-sign-in"],
+            [delta, "checking"],
+          ]),
+        );
+        const first = yield* readLeftOut(sessionId);
+
+        yield* sessions.recordLeftOut(
+          sessionId,
+          new Map([
+            [bravo, "error"],
+            [charlie, "error"],
+            [outsider, "switched-off"],
+          ]),
+        );
+
+        return { first, second: yield* readLeftOut(sessionId) };
+      }).pipe(inTransaction, Effect.provide(TestDatabase), Effect.orDie),
+    );
+
+    expect(lists.first).toEqual([
+      ["alpha", "needs-sign-in"],
+      ["bravo", null],
+      ["charlie", null],
+      ["delta", "checking"],
+    ]);
+    expect(lists.second).toEqual([
+      ["alpha", null],
+      ["bravo", "error"],
+      ["charlie", "error"],
+      ["delta", null],
+    ]);
   });
 });

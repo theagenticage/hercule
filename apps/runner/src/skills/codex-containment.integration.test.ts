@@ -17,10 +17,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import * as Effect from "effect/Effect";
+import { findCodexTestBinary } from "../harnesses/codex/codex-binary.testing";
 import { listRepositorySkills } from "./repository";
 import { stageRepositorySkills } from "./repository-staging";
 
-const binary = process.env["HERCULE_CODEX_TEST_BINARY"] ?? Bun.which("codex") ?? undefined;
+const binary = findCodexTestBinary();
 
 const roots: Array<string> = [];
 

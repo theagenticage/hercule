@@ -9,7 +9,7 @@ import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { buildSession, buildWorkspace } from "@hercule/client-core/threads/testing";
 import { DISK_USAGE_CAPABILITY } from "@hercule/contract";
-import type { EventWithFacts, RunnerMetricsPoint, Session, Workspace } from "@hercule/contract";
+import type { ListedEvent, RunnerMetricsPoint, Session, Workspace } from "@hercule/contract";
 import { buildErrorBody, stubIntersectionObserver, type Call } from "../../../../app/testing";
 import {
   buildFacts,
@@ -181,7 +181,7 @@ const readThreadReads = (calls: readonly Call[]): readonly (readonly string[])[]
  * workspaces, what the runner negotiated, the hour points, and the Threads of
  * the workspaces a read names.
  */
-const openStorage = async (world: World, events: readonly EventWithFacts[] = []) => {
+const openStorage = async (world: World, events: readonly ListedEvent[] = []) => {
   const opened = await openMachineWithEvents(`/fleet/${ATLAS.id}`, events, {
     overrides: {
       "GET /api/v1/runners": { body: { items: [MEASURED_ATLAS] } },

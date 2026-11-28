@@ -50,9 +50,46 @@ jobs:
       - uses: ./.github/actions/setup
       - run: pnpm lint
 
+  # Hands every sharded test job the same recorded run times, so that their
+  # shards split the files the same way. `--shard` splits the files by these
+  # times (see `scripts/test-shards.ts`), so the shards take about as long as
+  # each other. Each shard of `test-node`, `test-react` and
+  # `desktop-e2e-linux` records the time of each of its files, and after a run
+  # on `main`, `test-shard-weights` saves them to the Actions cache. This job
+  # restores the newest save once. The shards must not restore it themselves:
+  # a save that lands between two shards' restores would give them different
+  # times, and a file could then run in two shards or in none, with no error.
+  # A file with no recorded time weighs the median of the others. With no
+  # save at all (GitHub deletes a cache entry that nothing restores for 7
+  # days), the shards get about the same number of files each, and this job
+  # warns.
+  test-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - id: restore
+        uses: actions/cache/restore@v6
+        with:
+          path: test-shard-weights.json
+          key: test-shard-weights-${{ github.run_id }}
+          restore-keys: test-shard-weights-
+      - if: steps.restore.outputs.cache-matched-key == ''
+        run: |
+          echo "::warning::No recorded test run times in the Actions cache: the test shards get about the same number of files each, not the same run time."
+          echo '{}' > test-shard-weights.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: test-shard-weights
+          path: test-shard-weights.json
+          retention-days: 3
+
   # The two halves of `pnpm test`. Each needs its own runtime (see
-  # `vitest.config.ts`), so each is its own job, split into shards.
+  # `vitest.config.ts`), so each is its own job, split into shards. Add a
+  # shard when the slowest one grows. The longest file sets a floor: the
+  # shard that holds it can never be shorter.
   test-node:
+    name: test-node (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -64,19 +101,50 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm test:node --shard=${{ matrix.shard }}/3
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - run: >-
+          pnpm test:node --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      # The run times of this shard's files, for `test-shard-weights`. The
+      # repository keeps artifacts for 3 days.
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-node-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
 
   test-react:
+    name: test-react (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
+      # The React files take about 2,900 s on a runner's 3 workers, measured
+      # on 2026-11-12: with 4 shards a shard took about 4.5 minutes, with 6
+      # about 3. The longest file takes about 95 s, so more shards still help.
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
-      - run: pnpm test:react --shard=${{ matrix.shard }}/3
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - run: >-
+          pnpm test:react --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-durations-react-${{ matrix.shard }}
+          path: test-durations.json
+          retention-days: 3
+          if-no-files-found: ignore
 
   check:
     runs-on: ubuntu-latest
@@ -231,7 +299,7 @@ jobs:
   # It runs on Linux in Playwright's Chromium, with no Electron and no
   # controller, so it needs no macOS runner. Its budget is 3 minutes of
   # wall-clock time per shard: it must add nothing to the longest job of this
-  # workflow. The themes are split over two shards that run in parallel, each
+  # workflow. The themes are split over three shards that run in parallel, each
   # a runner of its own, and each shard compares only the baseline keys of its
   # themes. The first shard holds the first theme, which also measures the
   # metrics of the whole run (`run/...`), so every key is checked on every
@@ -250,15 +318,18 @@ jobs:
     strategy:
       # A failure in one shard must not hide the numbers of the other.
       fail-fast: false
-      # Three themes each. The first shard also measures the run-wide
-      # metrics, and on 2026-10-26 a split of three and two took 99 s and
-      # 50 s to measure. With six themes, run on one machine on 2026-10-28,
-      # each shard took 36 s. A test (scripts/ui-screens.test.ts) fails
-      # unless every theme is in exactly one shard.
+      # Two themes each. The first shard also measures the run-wide metrics.
+      # With two shards of three themes, the measuring step took about 400 s
+      # on 2026-11-22, once the app had 38 screens, and a shard on `main`
+      # reached this job's 10 minutes and was cancelled. Two themes take
+      # about two thirds of that. A test
+      # (apps/desktop/scripts/ui-screens.test.ts) fails unless every theme is
+      # in exactly one shard.
       matrix:
         themes:
-          - whitehaven,styles,blue-train
-          - orient-express,nile,end-house
+          - whitehaven,styles
+          - blue-train,orient-express
+          - nile,end-house
     steps:
       - uses: actions/checkout@v7
         with:
@@ -321,6 +392,124 @@ jobs:
         with:
           name: ui-metrics-${{ matrix.themes }}
           path: apps/desktop/out/ui-metrics
+          retention-days: 7
+
+  # The desktop counts check (spec 17 §Performance › The counts check):
+  # `perf:counts` builds the desktop bundle, runs the Work board's and the
+  # Inbox's speed tests in their counts mode, and drives the Inbox and Work in
+  # Chromium on a fake controller, all at once. It took 23 s on 2026-11-12 in
+  # the container; its budget is 5 minutes.
+  #
+  # It informs and never fails on a count (#1146). On `main` it saves the
+  # counts to the Actions cache. On a pull request it restores main's latest
+  # counts, compares, and posts the report as one comment, which each push
+  # updates. A pull request from a fork gets no comment, because its token
+  # cannot write one; its report is in the job's log. The job fails only when
+  # it cannot measure, such as a request the fake controller does not answer.
+  #
+  # It runs only when something it counts can have changed: the desktop app,
+  # the controller (whose reads the speed tests count), the shared packages,
+  # the bundle measure and the toolchain. On `main` it always runs.
+  desktop-counts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether the counts check applies
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          touched=$(git diff --name-only "$BASE_SHA"...HEAD | grep -E '^(apps/desktop/|apps/controller/src/|packages/|scripts/(check-bundle-budget|compare-bundle)\.ts$|pnpm-lock\.yaml$|package\.json$|\.bun-version$|\.github/workflows/ci\.yml$|\.github/actions/)' || true)
+          if [ -n "$touched" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "The counts check applies, because of:"
+            echo "$touched"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No file the counts check reads changed, so it is skipped."
+          fi
+
+      - if: steps.changes.outputs.run == 'true'
+        uses: ./.github/actions/setup
+
+      - name: Read the Playwright version
+        if: steps.changes.outputs.run == 'true'
+        id: playwright
+        run: echo "version=$(grep -m1 -oE '^  playwright@[0-9.]+' pnpm-lock.yaml | cut -d@ -f2)" >> "$GITHUB_OUTPUT"
+      - if: steps.changes.outputs.run == 'true'
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}
+      - if: steps.changes.outputs.run == 'true'
+        run: pnpm exec playwright install --with-deps chromium
+
+      # main's latest counts, which the report compares with. The first pull
+      # request after the cache lost them gets a report with nothing to compare.
+      - name: Restore main's counts
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request'
+        uses: actions/cache/restore@v6
+        with:
+          path: apps/desktop/out/perf-counts.baseline.json
+          key: desktop-counts-${{ github.run_id }}
+          restore-keys: desktop-counts-
+
+      # On `main` the run writes the counts the next pull requests compare with.
+      - name: Count
+        if: steps.changes.outputs.run == 'true'
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            pnpm --filter @hercule/desktop perf:counts --write-baseline
+          else
+            pnpm --filter @hercule/desktop perf:counts
+          fi
+
+      - name: Save main's counts
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'push'
+        uses: actions/cache/save@v6
+        with:
+          path: apps/desktop/out/perf-counts.baseline.json
+          key: desktop-counts-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # One comment per pull request, found by its first line and replaced on
+      # each push, so the conversation holds the latest report only.
+      - name: Post the report on the pull request
+        if: steps.changes.outputs.run == 'true' && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          marker='<!-- desktop-counts -->'
+          { echo "$marker"; cat apps/desktop/out/perf-counts/report.md; } > "$RUNNER_TEMP/comment.md"
+          id=$(gh api "repos/$REPOSITORY/issues/$PR/comments" --paginate \
+            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api --method PATCH "repos/$REPOSITORY/issues/comments/$id" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+          else
+            gh api --method POST "repos/$REPOSITORY/issues/$PR/comments" -F "body=@$RUNNER_TEMP/comment.md" > /dev/null
+          fi
+
+      # The build's and the speed tests' logs, and what the run counted.
+      - if: failure() && steps.changes.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-counts
+          path: apps/desktop/out/perf-counts
           retention-days: 7
 
   # The Android app's check (spec 18, Testing). It runs on every change, like
@@ -484,16 +673,11 @@ jobs:
   #
   # The suite is CPU-bound: its tests take about 9 minutes on one runner. So
   # it is split over several runners, one per entry of `shard`, and the job
-  # finishes with its slowest shard. `scripts/desktop-e2e-shards.ts` gives each
-  # shard its files, balanced by the run times recorded in
-  # `scripts/desktop-e2e-shard-weights.json`, and puts every file in exactly
-  # one shard. The target is a job of under 5 minutes; the spec's Testing
-  # section records what was measured. More shards finish sooner, but queue
-  # for runners and use more of them. Add a shard when the slowest one grows.
-  # Refresh the weights from a green run's reports with
-  # `bun run scripts/update-desktop-e2e-shard-weights.ts <run id>`, which
-  # refuses a run that is unfinished, failed or incomplete. Each shard uploads
-  # its Vitest report and its plan for that.
+  # finishes with its slowest shard. `--shard` splits the files by their
+  # recorded run times, as in `test-node` (see `test-plan`). The target is a
+  # job of under 5 minutes; the spec's Testing section records what was
+  # measured. More shards finish sooner, but queue for runners and use more
+  # of them. Add a shard when the slowest one grows.
   #
   # Each shard prepares itself: it installs the dependencies on the host,
   # which the container mounts, gets the container image, builds the compiled
@@ -504,6 +688,7 @@ jobs:
   # as the runner, about 100 MB, which takes seconds.
   desktop-e2e-linux:
     name: desktop-e2e-linux (${{ matrix.shard }}/${{ strategy.job-total }})
+    needs: test-plan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -515,24 +700,51 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - uses: ./.github/actions/desktop-e2e-image
-      - name: Run this shard's tests
-        run: |
-          files=$(bun run scripts/desktop-e2e-shards.ts "${{ matrix.shard }}/${{ strategy.job-total }}" --record desktop-e2e-report/plan.json)
-          echo "$files"
-          pnpm test:desktop:container \
-            --reporter=default --reporter=json --outputFile.json=desktop-e2e-report/report.json \
-            $files
-      # The run times of this shard's files and the plan they ran under, which
-      # refresh the shard weights. The repository keeps artifacts for 3 days.
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      # The container mounts the checkout, so it reads the weights and
+      # writes the run times at the checkout's root.
+      - run: >-
+          pnpm test:desktop:container
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=./scripts/test-durations-reporter.ts
       - if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: desktop-e2e-report-${{ matrix.shard }}
-          path: |
-            desktop-e2e-report/report.json
-            desktop-e2e-report/plan.json
+          name: test-durations-desktop-${{ matrix.shard }}
+          path: test-durations.json
           retention-days: 3
           if-no-files-found: ignore
+
+  # Merges the run times that the shards of `test-node`, `test-react` and
+  # `desktop-e2e-linux` recorded into the weights `test-plan` handed out, and
+  # saves them to the Actions cache for the runs after this one. Only a push
+  # to `main` saves, as for the container image: every later run restores
+  # what is saved, and a pull request's save would be visible to that pull
+  # request alone. A suite with a failed or missing shard keeps the times it
+  # had (see `scripts/update-test-shard-weights.ts`). Runs on `main` take
+  # turns (see `concurrency`), so the saves land in push order.
+  test-shard-weights:
+    if: ${{ always() && github.event_name == 'push' && needs.test-plan.result == 'success' }}
+    needs: [test-plan, test-node, test-react, desktop-e2e-linux]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - uses: actions/download-artifact@v8
+        with:
+          name: test-shard-weights
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: test-durations-*
+          path: test-durations
+      - run: bun run scripts/update-test-shard-weights.ts test-durations
+      - uses: actions/cache/save@v6
+        with:
+          path: test-shard-weights.json
+          key: test-shard-weights-${{ github.run_id }}-${{ github.run_attempt }}
 
   # Saves the container image of the end-to-end shards to the Actions cache,
   # so that the shards load it and do not build it. Only a push to `main` runs

@@ -24,6 +24,7 @@ import { copyDatabaseAndStopWrites, resumeWrites } from "../db";
 import { openDatabase } from "../db/client";
 import { ConnectionTypesLayer } from "../connections";
 import { AuditLogLayer } from "../events";
+import { NotifierLayer } from "../notifications";
 import { get, post, send } from "../http/testing";
 import { SessionTokensLayer } from "../permissions";
 import { PluginConfigsLayer } from "../plugins";
@@ -208,6 +209,7 @@ const reopenWorkspaceDomain = (database: string, home: string) =>
     Layer.provideMerge(PluginConfigsLayer),
     Layer.provideMerge(ServingPromotionStateLayer),
     Layer.provideMerge(SettingsLayer),
+    Layer.provideMerge(NotifierLayer),
     Layer.provideMerge(AuditLogLayer),
     Layer.provideMerge(secretsLayer.pipe(Layer.provide(masterKeyLayer("file")))),
     Layer.provideMerge(Layer.succeed(HerculeHome, buildHomePaths(home, join(home, "data")))),

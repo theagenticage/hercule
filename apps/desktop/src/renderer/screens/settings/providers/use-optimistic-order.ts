@@ -45,12 +45,10 @@ export function useOptimisticOrder(savedKeys: readonly string[]) {
     if (from === -1 || from === Math.max(0, Math.min(toIndex, keys.length - 1))) return;
     setMade(moveKey(keys, from, toIndex));
     saving.current += 1;
-    try {
-      await save();
-    } finally {
+    await save().finally(() => {
       saving.current -= 1;
       if (saving.current === 0) setMade(null);
-    }
+    });
   };
   return { keys, move };
 }

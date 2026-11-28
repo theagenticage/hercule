@@ -13,10 +13,11 @@
  *   without a checkout, and no other session does.
  */
 import { describe, expect, it, vi } from "vitest";
+import type { WikiPage } from "@hercule/contract";
 import { Cause, Effect, Exit } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { LiveSessionsServices } from "../../http/testing";
 import { uuidFromString, withTransaction } from "../../db";
+import { post, type LiveSessionsServices } from "../../http/testing";
 import { permissionRequestRepository } from "../../permissions";
 import {
   WAIT_DEADLINE_MS,
@@ -72,10 +73,26 @@ const readRepositoryLines = (paragraph: string | undefined): ReadonlyArray<strin
   paragraph?.split("\n\n").at(-1)?.split("\n");
 
 describe("the coordination paragraph", () => {
-  it("names a repository's page count and its five most recently changed titles, newest first", async () => {
+  it("names a repository's page count and its five most recently changed titles, newest first, leaving archived pages out", async () => {
     await withFleet(async (arranged) => {
       const web = await createRepo(arranged, "https://github.com/acme/web.git");
       await seedPages(arranged, web, 7);
+      // A page written and archived after those seven. Archived, it is neither
+      // counted nor named, though it is the newest.
+      const created = await post(
+        arranged.harness.base,
+        "/api/v1/wiki-pages",
+        { resourceId: web, slug: "page-8", title: "Page 8", summary: "Written", body: "Text." },
+        arranged.token,
+      );
+      expect(created.status, await created.clone().text()).toBe(200);
+      const archived = await post(
+        arranged.harness.base,
+        `/api/v1/wiki-pages/${((await created.json()) as WikiPage).id}/archive`,
+        { expectedRevision: 1, reason: "Out of date" },
+        arranged.token,
+      );
+      expect(archived.status, await archived.clone().text()).toBe(200);
       const reader = await createProfile(arranged, "wiki-reader", ["wiki.read"]);
 
       const frame = await spawnWithCheckouts(arranged, reader.id, [web]);

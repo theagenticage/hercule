@@ -1,9 +1,9 @@
 /**
  * Tests how the latest release of each harness is read from the npm registry
- * and what `harness.query` then answers: a read that succeeds, one that fails
- * after a good one, one that fails first, the limits on what is accepted from
- * the registry, which reads a wake makes, and the live update that follows
- * only when something changed.
+ * or from GitHub, and what `harness.query` then answers: a read that
+ * succeeds, one that fails after a good one, one that fails first, the limits
+ * on what is accepted from the publisher, which reads a wake makes, and the
+ * live update that follows only when something changed.
  */
 import { describe, expect, it } from "vitest";
 import { Duration, Effect, Fiber, Layer } from "effect";
@@ -11,6 +11,7 @@ import { TestClock } from "effect/testing";
 import * as HttpClient from "effect/http/HttpClient";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { Harness } from "@hercule/contract";
+import type { Plugin } from "@hercule/plugin-host";
 import { AfterCommit, type Change } from "../db";
 import { PluginHost } from "../plugins";
 import {
@@ -49,12 +50,37 @@ const buildPlugins = () => [
   }).plugin,
 ];
 
+const GITHUB_HARNESS = "antigravity/antigravity";
+
+/** One harness whose releases are published on GitHub. */
+const buildGithubPlugins = () => [
+  createPluginFixture({
+    id: "antigravity",
+    definitions: [
+      {
+        ...buildHarnessDefinition("antigravity"),
+        releaseSource: {
+          kind: "github-releases",
+          repository: "google-antigravity/antigravity-cli",
+        },
+      },
+    ],
+  }).plugin,
+];
+
 const SCOPED_URL = "https://registry.npmjs.org/%40acme%2Ftool/latest";
 const PLAIN_URL = "https://registry.npmjs.org/plain-tool/latest";
 
 /** The registry's answer for a release: a package document of which only `version` is used. */
 const buildReleaseResponse = (version: string): Response =>
   new Response(JSON.stringify({ name: "tool", version, dist: { shasum: "abc" } }));
+
+const GITHUB_URL =
+  "https://api.github.com/repos/google-antigravity/antigravity-cli/releases/latest";
+
+/** GitHub's answer for a release: the release document, of which only `tag_name` is used. */
+const buildGithubReleaseResponse = (tag: string): Response =>
+  new Response(JSON.stringify({ id: 1, tag_name: tag, draft: false, prerelease: false }));
 
 /** Everything the registry answers, by default the release 1.0.0 for both packages. */
 const buildRegistry = (answer: (request: FakeProviderRequest) => FakeProviderAnswer) =>
@@ -67,13 +93,14 @@ const TIME_OF_FIRST_READ = Date.parse("2026-11-03T08:00:00.000Z");
 /**
  * Runs `body` against the real services with a fake registry, a test clock set
  * to `TIME_OF_FIRST_READ`, and a recorder of what the controller announces to
- * its live clients.
+ * its live clients. The harnesses are those of `plugins`.
  */
 const run = <A, E>(
   client: HttpClient.HttpClient,
   body: (
     announced: Array<Change>,
   ) => Effect.Effect<A, E, HarnessService | HarnessReleases | SqlClient.SqlClient>,
+  plugins: ReadonlyArray<Plugin> = buildPlugins(),
 ) => {
   const announced: Array<Change> = [];
   const stack = Layer.mergeAll(
@@ -83,7 +110,7 @@ const run = <A, E>(
   return Effect.runPromise(
     Effect.gen(function* () {
       yield* TestClock.setTime(TIME_OF_FIRST_READ);
-      yield* Effect.flatMap(PluginHost, (host) => host.boot(buildPlugins()));
+      yield* Effect.flatMap(PluginHost, (host) => host.boot(plugins));
       return yield* body(announced);
     }).pipe(
       Effect.provideService(AfterCommit, {
@@ -214,7 +241,7 @@ describe("reading the latest releases", () => {
       () => new Response(JSON.stringify({ version: "1.0.0", padding: "x".repeat(256 * 1024) })),
       UNREADABLE,
     ],
-    ["cannot be reached", () => "unreachable", "Could not reach the npm registry."],
+    ["cannot be reached", () => "unreachable", "The npm registry could not be reached."],
   ])(
     "records the reason, with no version, when the first read finds a registry that %s",
     async (_name, answer, error) => {
@@ -364,5 +391,59 @@ describe("reading the latest releases", () => {
     expect(announced).toEqual([
       { _tag: "record", topic: "provider", id: SCOPED_HARNESS, kind: "updated" },
     ]);
+  });
+});
+
+describe("reading the latest release of a harness published on GitHub", () => {
+  const readGithubHarness = (client: HttpClient.HttpClient) =>
+    run(
+      client,
+      () =>
+        Effect.gen(function* () {
+          yield* refresh;
+          return yield* queryLatest(GITHUB_HARNESS);
+        }),
+      buildGithubPlugins(),
+    );
+
+  it("stores the tag of the newest release as its version, asking GitHub for it with a user agent and no credential", async () => {
+    const { client, requests } = buildRegistry(() => buildGithubReleaseResponse("1.5.17"));
+
+    const latest = await readGithubHarness(client);
+
+    expect(latest).toEqual({
+      lastGoodRead: { version: "1.5.17", checkedAt: new Date(TIME_OF_FIRST_READ).toISOString() },
+      error: null,
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.url).toBe(GITHUB_URL);
+    expect(requests[0]?.headers["user-agent"]).toBe("Hercule");
+    expect(Object.keys(requests[0]?.headers ?? {})).not.toContain("authorization");
+  });
+
+  it.each<[string, () => FakeProviderAnswer, string]>([
+    [
+      "answers a tag with a leading v",
+      () => buildGithubReleaseResponse("v1.5.17"),
+      "GitHub's answer could not be read.",
+    ],
+    [
+      "answers a release with no tag",
+      () => new Response(JSON.stringify({ id: 1 })),
+      "GitHub's answer had no version.",
+    ],
+    ["answers 403", () => new Response("", { status: 403 }), "GitHub answered 403."],
+    [
+      "answers 403 because its limit on requests ran out",
+      () => new Response("", { status: 403, headers: { "x-ratelimit-remaining": "0" } }),
+      "GitHub's limit on requests without a sign-in ran out for this controller's address. The next check tries again.",
+    ],
+    ["cannot be reached", () => "unreachable", "GitHub could not be reached."],
+  ])("records the reason, with no version, when GitHub %s", async (_name, answer, error) => {
+    const { client } = buildRegistry(answer);
+
+    const latest = await readGithubHarness(client);
+
+    expect(latest).toEqual({ lastGoodRead: null, error });
   });
 });

@@ -20,7 +20,7 @@ import {
   MAX_CARD_CONTEXTS,
   MAX_CARD_QUESTION,
   MAX_ENTITY_MARKS,
-  MAX_TRACKING_FAILURE_CAUSE,
+  MAX_FAILURE_CAUSE,
   WorkBoard,
   WorkCard,
   type Grant,
@@ -351,7 +351,7 @@ describe("buildWorkCard", () => {
       );
 
       expect(withoutMessage.failure?.cause).toBe("workspace failed");
-      expect(longMessage.failure?.cause.length).toBeLessThanOrEqual(MAX_TRACKING_FAILURE_CAUSE);
+      expect(longMessage.failure?.cause.length).toBeLessThanOrEqual(MAX_FAILURE_CAUSE);
       expect(Schema.is(WorkCard)(withoutMessage)).toBe(true);
       expect(Schema.is(WorkCard)(longMessage)).toBe(true);
     });
@@ -726,6 +726,7 @@ const ticket = (name: string, relations?: ObservedRelations): ObservedEntity => 
     sourceUpdatedAt: OBSERVED_AT,
     ...(relations === undefined ? {} : { relations }),
   },
+  fieldRows: [],
 });
 
 /** Builds the observation of a project: a place with a caption, so it can group. */
@@ -740,6 +741,7 @@ const projectPlace = (ref: string, title: string): ObservedEntity => ({
     concerns: [],
     sourceUpdatedAt: OBSERVED_AT,
   },
+  fieldRows: [],
 });
 
 const partOf = (...parents: ReadonlyArray<string>): ObservedRelations => ({
@@ -1061,6 +1063,7 @@ describe("the stack candidates of the board", () => {
       sourceUpdatedAt: OBSERVED_AT,
       relations: { complete: true, partOf: [], linked },
     },
+    fieldRows: [],
   });
 
   it("pairs the Task of a rich thing with the Tasks of the compact things it reports, and leaves a Task of an unrelated thing out", async () => {

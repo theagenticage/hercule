@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EventWithFacts, Trigger } from "@hercule/contract";
+import type { ListedEvent, Trigger } from "@hercule/contract";
 import { isPausedWithHeldEvents } from "./spawn-bounds";
 import { describeHeldEvents, describeTrigger } from "./trigger-display";
 
@@ -222,7 +222,7 @@ describe("describeTrigger", () => {
 });
 
 describe("describeHeldEvents", () => {
-  const buildEvent = (id: number, title: string | null, author: string | null): EventWithFacts =>
+  const buildEvent = (id: number, title: string | null, author: string | null): ListedEvent =>
     ({
       id,
       kind: "github.issue.opened",

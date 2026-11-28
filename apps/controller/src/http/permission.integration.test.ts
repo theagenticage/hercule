@@ -229,6 +229,39 @@ describe("permission.request", () => {
       expect(user.message).toMatch(/only a session can ask/);
     });
   });
+
+  it("refuses an operation that is neither a contract operation nor a plugin action, and accepts a plugin action", async () => {
+    await withPipeline(async (arranged) => {
+      const { asker } = await spawnTwoWorkers(arranged);
+
+      const refused = await readErrorBody(
+        await requestPermission(
+          arranged,
+          {
+            grant: "task.delete",
+            reason: REASON,
+            operation: { op: "task.obliterate", input: {} },
+          },
+          asker.token,
+        ),
+      );
+      expect(refused.code).toBe("validation");
+      expect(refused.message).toMatch(/There is no operation named "task\.obliterate"/);
+      expect(await readOpenRequests(arranged, asker.session.id)).toEqual([]);
+
+      const accepted = await requestPermission(
+        arranged,
+        {
+          grant: "task.delete",
+          reason: REASON,
+          operation: { op: "github/pr.merge", input: {} },
+        },
+        asker.token,
+      );
+      expect(accepted.status).toBe(200);
+    });
+  });
+
   it("refuses an operation whose input can carry a secret, and names what to send instead", async () => {
     await withPipeline(async (arranged) => {
       const { asker } = await spawnTwoWorkers(arranged);
@@ -250,6 +283,43 @@ describe("permission.request", () => {
       expect(await readOpenRequests(arranged, asker.session.id)).toEqual([]);
     });
   });
+
+  it.each([
+    [
+      "mcpServer.setToken",
+      { id: "0199e0e7-0000-7000-8000-00000000dead", token: "tok-3f9a1c7e5b2d" },
+    ],
+    [
+      "mcpServer.create",
+      { source: { kind: "url", url: "https://mcp.example.com/mcp", token: "tok-3f9a1c7e5b2d" } },
+    ],
+  ])(
+    "refuses %s, whose input holds the token of an MCP server, and keeps the input nowhere",
+    async (op, input) => {
+      await withPipeline(async (arranged) => {
+        const { asker } = await spawnTwoWorkers(arranged);
+
+        const refused = await readErrorBody(
+          await requestPermission(
+            arranged,
+            { grant: "mcp.manage", reason: REASON, operation: { op, input } },
+            asker.token,
+          ),
+        );
+
+        expect(refused.code).toBe("validation");
+        expect(refused.message).toMatch(/send the request without operation/);
+        expect(refused.message).not.toContain("tok-3f9a1c7e5b2d");
+        expect(await readOpenRequests(arranged, asker.session.id)).toEqual([]);
+        const requests = await runEffect(arranged.harness.sql`SELECT * FROM permission_requests`);
+        const events = await runEffect(
+          arranged.harness.sql`SELECT * FROM events WHERE kind = 'permission.requested'`,
+        );
+        expect(events).toEqual([]);
+        expect(JSON.stringify(requests)).not.toContain("tok-3f9a1c7e5b2d");
+      });
+    },
+  );
 
   it("refuses an operation input nested past the bound, and accepts one at the bound", async () => {
     await withPipeline(async (arranged) => {

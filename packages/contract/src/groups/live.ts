@@ -88,6 +88,9 @@ export const MUTABLE_LIVE_TOPICS = [
   // A Skill is named by its name, so this topic's invalidations carry
   // names, not ids.
   "skill",
+  // An MCP Server changes when the user writes it and when a check ends, a
+  // Connection needs sign-in again, or the daily list of its tools runs.
+  "mcpServer",
 ] as const;
 
 /**

@@ -13,7 +13,7 @@ import {
   type FilterValue,
 } from "../desk/filter";
 import { buildPlaceFacets } from "../desk/place-facets";
-import { namePlugin, type PluginName } from "../intake";
+import { namePlugin, type PluginName } from "../plugin-names";
 import { isCardWaiting } from "./card-state";
 import { chooseLaneId, type WorkInitiative, type WorkLane } from "./lanes";
 

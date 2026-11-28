@@ -1,9 +1,9 @@
 /** Tests the words and the Stop of a run row in the pane. */
 import { describe, expect, it } from "vitest";
-import type { TrackingDetailRun } from "@hercule/contract";
+import type { TaskDetailRun } from "@hercule/contract";
 import { buildTaskRunRow, describeRunStopRefused, describeRunStopRequested } from "./task-run";
 
-const buildRun = (overrides: Partial<TrackingDetailRun> = {}): TrackingDetailRun => ({
+const buildRun = (overrides: Partial<TaskDetailRun> = {}): TaskDetailRun => ({
   id: "run-1",
   workflowId: "workflow-1",
   workflowName: "Review PR",
@@ -31,7 +31,7 @@ describe("a run row of the pane", () => {
   ] as const)(
     "shows a %s run's state, mark and Stop",
     (name, extra, state, shape, tone, canStop) => {
-      const status = name.split(" ")[0] as TrackingDetailRun["status"];
+      const status = name.split(" ")[0] as TaskDetailRun["status"];
       const row = buildTaskRunRow(buildRun({ status, ...extra }));
       expect(row).toEqual({
         id: "run-1",

@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { formatStamp } from "@hercule/client-core";
+import { HARNESSES } from "@hercule/client-core/testing";
 import { readPageText, renderApp, stubApi, type Call, type Handler } from "../../../app/testing";
 import { CONTROLLER_VERSION, GIB, MOSS, ZONE, type Fixture } from "./-fixtures";
 
@@ -222,9 +223,23 @@ describe("Fleet", () => {
   });
 
   it("shows a placeholder row and the add card when no runner has joined", async () => {
-    await openApp([]);
+    await openApp([], {
+      extra: {
+        "GET /api/v1/harnesses": {
+          body: [
+            ...HARNESSES,
+            { ...HARNESSES[0]!, id: "antigravity/antigravity", displayName: "Antigravity" },
+          ],
+        },
+      },
+    });
 
     expect(readPageText()).toContain("no runner has joined yet");
+    // Each harness is a row of its own, so the name must be the whole text of
+    // its element: a bare "pi" would match any word that contains it.
+    for (const harness of ["Claude Code", "Codex", "pi", "Antigravity"]) {
+      expect(screen.getByText(harness)).toBeTruthy();
+    }
     expect(readPageText()).toContain(
       "A runner probes the machine it runs on and reports what it found. Until one joins, Hercule knows nothing about this machine.",
     );

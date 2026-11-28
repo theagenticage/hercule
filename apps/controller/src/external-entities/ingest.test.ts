@@ -28,6 +28,7 @@ import { signalRepository } from "../signals/repository";
 import { taskRepository } from "../tasks";
 import { TaskTestLayer } from "../tasks/testing";
 import { ExternalEntityIngest, ExternalEntityIngestLayer } from "./ingest";
+import { externalEntityRepository } from "./repository";
 import type { FullEntityObservation } from "./slots";
 
 type Ingest = typeof ExternalEntityIngest.Service;
@@ -808,5 +809,334 @@ describe("recognizing the addresses and texts of a call", () => {
       ConnectionNotIngesting,
     );
     expect(result.written).toEqual(NOTHING_WRITTEN);
+  });
+});
+
+describe("the typed fields of an observation", () => {
+  const FIELDS_KIND: QualifiedEntityKindDeclaration = {
+    ...TICKET_KIND,
+    fields: [
+      { key: "owner", label: "Owner", type: "person" },
+      { key: "size", label: "Size", type: "number" },
+      { key: "level", label: "Level", type: "enum", values: [{ value: "high" }, { value: "low" }] },
+      {
+        key: "project",
+        label: "Project",
+        type: "text",
+        facet: { plural: "Projects", values: "acme-tracker/project" },
+      },
+    ],
+  };
+  const fieldReporter: EntityReporter = { ...reporter, kinds: [FIELDS_KIND, PROJECT_KIND] };
+  const SIZE_ONLY: EntityReporter = {
+    ...reporter,
+    kinds: [
+      { ...FIELDS_KIND, fields: FIELDS_KIND.fields!.filter(({ key }) => key === "size") },
+      PROJECT_KIND,
+    ],
+  };
+  const OLD = "2020-01-01T00:00:00.000Z";
+
+  const withFields = (
+    name: string,
+    fields: Record<string, string | number | boolean | null>,
+    overrides: Partial<FullEntityObservation> = {},
+  ) => ticket(name, { fields: { key: name, ...fields }, ...overrides });
+
+  const readFields = (sql: SqlClient.SqlClient) =>
+    sql<{
+      readonly ref: string;
+      readonly key: string;
+      readonly text_value: string | null;
+      readonly number_value: number | null;
+    }>`
+      SELECT ref, key, text_value, number_value FROM external_entity_fields ORDER BY ref, key`;
+
+  /** Backdates the entities, so that a later write that dates one is seen. */
+  const backdate = (sql: SqlClient.SqlClient) =>
+    inTransaction(sql`UPDATE external_entities SET updated_at = ${OLD}`).pipe(
+      Effect.provideService(SqlClient.SqlClient, sql),
+    );
+
+  const readUpdatedAt = (sql: SqlClient.SqlClient) =>
+    Effect.map(
+      sql<{ readonly updated_at: string }>`SELECT updated_at FROM external_entities ORDER BY ref`,
+      (rows) => rows.map((row) => row.updated_at),
+    );
+
+  it("stores the declared fields of a full observation, from a reconcile and from a refresh", async () => {
+    const rows = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        yield* ingest.reconcile(
+          fieldReporter,
+          complete([withFields("a", { owner: "marta", size: 3, level: "high", ignored: "x" })]),
+        );
+        yield* ingest.refresh(fieldReporter, [
+          withFields("b", { project: "acme-tracker:project:harbour" }),
+        ]);
+        return yield* readFields(sql);
+      }),
+    );
+    expect(rows).toEqual([
+      { ref: ticketRef("a"), key: "level", text_value: "high", number_value: null },
+      { ref: ticketRef("a"), key: "owner", text_value: "marta", number_value: null },
+      { ref: ticketRef("a"), key: "size", text_value: null, number_value: 3 },
+      {
+        ref: ticketRef("b"),
+        key: "project",
+        text_value: "acme-tracker:project:harbour",
+        number_value: null,
+      },
+    ]);
+  });
+
+  it.each([
+    { name: "a wrong type", fields: { size: "big" }, message: 'the field "size"' },
+    { name: "an undeclared enum value", fields: { level: "mid" }, message: 'one of "high", "low"' },
+    {
+      name: "a context field that is not a ref of its kind",
+      fields: { project: "Harbour" },
+      message: 'a ref that starts with "acme-tracker:project:"',
+    },
+  ])("refuses $name before anything is written", async ({ fields, message }) => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const call = (invoke: Effect.Effect<void, PluginError>) => Effect.flip(invoke);
+        const reconciled = yield* call(
+          ingest.reconcile(
+            fieldReporter,
+            complete([withFields("ok", {}), withFields("bad", fields)]),
+          ),
+        );
+        const refreshed = yield* call(ingest.refresh(fieldReporter, [withFields("bad", fields)]));
+        return {
+          messages: [reconciled.message, refreshed.message],
+          written: yield* countWrittenRows(sql),
+          fieldRows: yield* countRows(sql, "external_entity_fields"),
+        };
+      }),
+    );
+    for (const text of result.messages) {
+      expect(text).toContain(ticketRef("bad"));
+      expect(text).toContain(message);
+    }
+    expect(result.written).toEqual(NOTHING_WRITTEN);
+    expect(result.fieldRows).toBe(0);
+  });
+
+  it("replaces the set: a value that becomes null, a field the kind stopped declaring, and a field left out are dropped", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        yield* ingest.reconcile(
+          fieldReporter,
+          complete([withFields("a", { owner: "marta", size: 3, level: "low" })]),
+        );
+        yield* ingest.reconcile(
+          fieldReporter,
+          complete([
+            withFields("a", { owner: null, size: 3 }, { sourceUpdatedAt: "2026-03-02T10:00:00Z" }),
+          ]),
+        );
+        const afterNull = yield* readFields(sql);
+        // The kind now declares only `size`; the same time, so the presenter's write is accepted.
+        yield* ingest.reconcile(
+          SIZE_ONLY,
+          complete([
+            withFields(
+              "a",
+              { owner: "marta", size: 3 },
+              { sourceUpdatedAt: "2026-03-02T10:00:00Z" },
+            ),
+          ]),
+        );
+        return { afterNull, afterUndeclared: yield* readFields(sql) };
+      }),
+    );
+    expect(result.afterNull.map((row) => row.key)).toEqual(["size"]);
+    expect(result.afterUndeclared.map((row) => row.key)).toEqual(["size"]);
+  });
+
+  it("leaves the rows alone for a partial observation", async () => {
+    const rows = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        yield* ingest.reconcile(fieldReporter, complete([withFields("a", { size: 3 })]));
+        yield* ingest.refresh(fieldReporter, [
+          {
+            kind: "ticket",
+            ref: ticketRef("a"),
+            title: "Renamed",
+            partial: true,
+            sourceUpdatedAt: "2026-03-05T10:00:00Z",
+          },
+        ]);
+        return yield* readFields(sql);
+      }),
+    );
+    expect(rows).toEqual([{ ref: ticketRef("a"), key: "size", text_value: null, number_value: 3 }]);
+  });
+
+  it("changes no row when the observation loses to a newer stored one", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        yield* ingest.reconcile(fieldReporter, complete([withFields("a", { size: 3 })]));
+        yield* backdate(sql);
+        const announcedBefore = yield* readUpdatedAt(sql);
+        yield* ingest.refresh(fieldReporter, [
+          withFields("a", { size: 9, owner: "old" }, { sourceUpdatedAt: "2026-02-01T10:00:00Z" }),
+        ]);
+        return {
+          rows: yield* readFields(sql),
+          updatedAt: yield* readUpdatedAt(sql),
+          announcedBefore,
+        };
+      }),
+    );
+    expect(result.rows).toEqual([
+      { ref: ticketRef("a"), key: "size", text_value: null, number_value: 3 },
+    ]);
+    expect(result.updatedAt).toEqual(result.announcedBefore);
+  });
+
+  it("fills the rows of an accepted observation whose revision is unchanged, once the kind declares the field", async () => {
+    const result = await run(({ ingest, sql, announced }) =>
+      Effect.gen(function* () {
+        const undeclared: EntityReporter = { ...reporter, kinds: [TICKET_KIND, PROJECT_KIND] };
+        const observation = withFields("a", { size: 3 }, { sourceRevision: "r1" });
+        yield* ingest.reconcile(undeclared, complete([observation]));
+        const before = yield* readFields(sql);
+        yield* backdate(sql);
+        const announcedBefore = announced.length;
+        yield* ingest.reconcile(SIZE_ONLY, complete([observation]));
+        return {
+          before,
+          after: yield* readFields(sql),
+          updatedAt: yield* readUpdatedAt(sql),
+          announcedNow: announced.length - announcedBefore,
+          entityId: yield* readEntityId(sql, ticketRef("a")),
+          announced: [...announced],
+        };
+      }),
+    );
+    expect(result.before).toEqual([]);
+    expect(result.after).toEqual([
+      { ref: ticketRef("a"), key: "size", text_value: null, number_value: 3 },
+    ]);
+    expect(result.updatedAt[0]).not.toBe(OLD);
+    expect(result.announced.slice(-5)).toContainEqual({
+      _tag: "record",
+      topic: "externalEntity",
+      id: result.entityId,
+      kind: "updated",
+    });
+  });
+
+  it("dates and announces a change of fields alone, and nothing when a poll repeats it", async () => {
+    const result = await run(({ ingest, sql, announced }) =>
+      Effect.gen(function* () {
+        yield* ingest.reconcile(fieldReporter, complete([withFields("a", { size: 3 })]));
+        yield* backdate(sql);
+        const afterFirst = announced.length;
+        yield* ingest.reconcile(fieldReporter, complete([withFields("a", { size: 4 })]));
+        const changed = {
+          updatedAt: yield* readUpdatedAt(sql),
+          announced: announced.length - afterFirst,
+        };
+        yield* backdate(sql);
+        const afterChange = announced.length;
+        yield* ingest.reconcile(fieldReporter, complete([withFields("a", { size: 4 })]));
+        return {
+          changed,
+          quiet: {
+            updatedAt: yield* readUpdatedAt(sql),
+            announced: announced.length - afterChange,
+          },
+        };
+      }),
+    );
+    expect(result.changed.updatedAt[0]).not.toBe(OLD);
+    expect(result.changed.announced).toBeGreaterThan(0);
+    expect(result.quiet).toEqual({ updatedAt: [OLD], announced: 0 });
+  });
+
+  it("deletes the field rows of a pruned entity", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const repository = yield* externalEntityRepository;
+        yield* ingest.reconcile(
+          fieldReporter,
+          complete([withFields("a", { size: 3 }, { concerns: [] })]),
+        );
+        const before = yield* readFields(sql);
+        // A listed record is kept, so the inventory lets go of it first.
+        yield* ingest.reconcile(fieldReporter, complete([]));
+        const later = new Date(Date.now() + 40 * 24 * 60 * 60 * 1000).toISOString();
+        yield* inTransaction(repository.pruneEntities(later)).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+        );
+        return {
+          before: before.length,
+          entities: yield* countRows(sql, "external_entities"),
+          after: yield* readFields(sql),
+        };
+      }),
+    );
+    expect(result).toEqual({ before: 1, entities: 0, after: [] });
+  });
+
+  it("keeps a listed context record with no concern when the sweep runs, and prunes it once it is unlisted", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const repository = yield* externalEntityRepository;
+        const project = {
+          kind: "project",
+          ref: "acme-tracker:project:harbour",
+          title: "Harbour",
+          fields: { key: "HARBOUR" },
+          concerns: [],
+          sourceUpdatedAt: "2026-03-01T10:00:00Z",
+        } satisfies FullEntityObservation;
+        const sweep = () => {
+          const later = new Date(Date.now() + 40 * 24 * 60 * 60 * 1000).toISOString();
+          return inTransaction(repository.pruneEntities(later)).pipe(
+            Effect.provideService(SqlClient.SqlClient, sql),
+          );
+        };
+        yield* ingest.reconcile(fieldReporter, {
+          kind: "project",
+          complete: true,
+          observations: [project],
+        });
+        yield* sweep();
+        const listed = yield* countRows(sql, "external_entities");
+        yield* ingest.reconcile(fieldReporter, {
+          kind: "project",
+          complete: true,
+          observations: [],
+        });
+        yield* sweep();
+        return { listed, unlisted: yield* countRows(sql, "external_entities") };
+      }),
+    );
+    expect(result).toEqual({ listed: 1, unlisted: 0 });
+  });
+
+  it("prunes a listed work record that has no concern, however long its complete call has listed it", async () => {
+    const result = await run(({ ingest, sql }) =>
+      Effect.gen(function* () {
+        const repository = yield* externalEntityRepository;
+        // A call cut short (`complete: false`) lists what it reports and nothing clears that.
+        yield* ingest.reconcile(fieldReporter, {
+          kind: "ticket",
+          complete: false,
+          observations: [withFields("a", {}, { concerns: [] })],
+        });
+        const later = new Date(Date.now() + 40 * 24 * 60 * 60 * 1000).toISOString();
+        yield* inTransaction(repository.pruneEntities(later)).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+        );
+        return yield* countRows(sql, "external_entities");
+      }),
+    );
+    expect(result).toBe(0);
   });
 });

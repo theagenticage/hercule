@@ -81,6 +81,11 @@ export { runSkillUpdateCheckLoop, SkillUpdateCheckInterval } from "./skills";
 export { runHarnessReleaseCheckLoop } from "./harnesses";
 export { ConnectionServiceWithReferencesLayer } from "./connections";
 export {
+  McpServerCheckInterval,
+  McpServerListHoldersLayer,
+  runMcpServerChecksScheduler,
+} from "./mcp-servers";
+export {
   DiscussionInputs,
   DiscussionInputsLayer,
   DiscussionInputsReference,
@@ -142,7 +147,7 @@ export {
   RunExecutorLayer,
   RunFibers,
   RunTargetsLayer,
-  TaskTrackingRunsLayer,
+  TaskRunsLayer,
   WorkspaceStepsLayer,
 } from "./runs";
 export {

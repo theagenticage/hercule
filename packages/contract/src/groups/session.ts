@@ -28,6 +28,7 @@ import * as HttpApiEndpoint from "effect/http-api/HttpApiEndpoint";
 import * as HttpApiGroup from "effect/http-api/HttpApiGroup";
 import { closedStruct } from "../closed";
 import {
+  Conflict,
   Forbidden,
   Internal,
   InvalidState,
@@ -38,8 +39,10 @@ import {
 import { Actor, Id, Timestamp } from "../ids";
 import { UnenforcedSpecField } from "./agent";
 import { AttachmentId, MAX_ATTACHMENTS_PER_INPUT } from "./attachment";
+import { McpServerIds, SessionMcpServer } from "./mcp-server";
 import { PermissionRequest } from "./permission";
 import { SessionSkillList } from "./session-skill";
+import { TaskTitle } from "./task-title";
 import { Branch } from "./workspace";
 import { MAX_PAGE_LIMIT, page, pageParams } from "../pagination";
 import { Authenticated } from "../security";
@@ -108,6 +111,9 @@ const PromptAttachments = Schema.optionalKey(atMost(AttachmentId, MAX_ATTACHMENT
 /** The message of the issue for a prompt or input with no text and no images. */
 export const EMPTY_PROMPT_MESSAGE = "A prompt needs text or at least one image.";
 
+/** The message of the issue for a spawn with no text, no images and no context. */
+const EMPTY_SPAWN_PROMPT_MESSAGE = "A prompt needs text, an image, or context.";
+
 /**
  * Refuses a session prompt or input with no text and no images. It checks
  * `text` or `prompt`, whichever field the payload names its text with, so one
@@ -125,6 +131,23 @@ export const refuseEmptyPrompt = Schema.makeFilter(
       return undefined;
     return { path: [field], issue: EMPTY_PROMPT_MESSAGE };
   },
+);
+
+/**
+ * Refuses a spawn with no text, no images and no context. It is
+ * `refuseEmptyPrompt` for `session.spawn`, which can start on context alone.
+ */
+const refuseEmptySpawnPrompt = Schema.makeFilter(
+  (payload: {
+    readonly prompt: string;
+    readonly attachments?: ReadonlyArray<string>;
+    readonly context?: ReadonlyArray<unknown>;
+  }) =>
+    payload.prompt.length > 0 ||
+    (payload.attachments?.length ?? 0) > 0 ||
+    (payload.context?.length ?? 0) > 0
+      ? undefined
+      : { path: ["prompt"], issue: EMPTY_SPAWN_PROMPT_MESSAGE },
 );
 
 /**
@@ -407,6 +430,13 @@ export const Session = Schema.Struct({
    * is read.
    */
   unenforced: Schema.Array(UnenforcedSpecField),
+  /**
+   * The session's own list of MCP Servers, in the order it was given: empty
+   * for a session that has none, and always empty for a session that is not a
+   * Thread. Changing a Project's list or the thread default later never
+   * touches it.
+   */
+  mcpServers: Schema.Array(SessionMcpServer),
 });
 
 export type Session = Schema.Schema.Type<typeof Session>;
@@ -559,6 +589,74 @@ export const SpawnWorkspace = Schema.Union([
 export type SpawnWorkspace = Schema.Schema.Type<typeof SpawnWorkspace>;
 
 /**
+ * The most things one Thread can be started on: the bound of `newTask` in
+ * `session.spawn` and of `externalEntity.matchProject`, which finds the project
+ * of the same things.
+ */
+export const MAX_THREAD_THINGS = 50;
+
+/**
+ * The most things one session can be told about at its start. It is the same
+ * bound as `MAX_THREAD_THINGS`, because the Thread dialog sends the same list
+ * as `context` and as `newTask`.
+ */
+export const MAX_CONTEXT_REFERENCES = MAX_THREAD_THINGS;
+
+/**
+ * A reference to an External Entity ("thing", such as a pull request or an
+ * issue) that the agent is told about. The controller reads the thing's stored
+ * record and writes a short description of it after the prompt text.
+ */
+export const EntityContextReference = closedStruct({
+  kind: Schema.Literal("entity"),
+  entityId: Id,
+});
+
+export type EntityContextReference = Schema.Schema.Type<typeof EntityContextReference>;
+
+/**
+ * One piece of context sent with a prompt. Context only tells the agent about
+ * something. It never takes anything on: to make a Task of things, use
+ * `newTask`. There is one kind today, `entity`; the union is where other kinds
+ * are added.
+ */
+export const ContextReference = Schema.Union([EntityContextReference]);
+
+export type ContextReference = Schema.Schema.Type<typeof ContextReference>;
+
+/**
+ * The new Task a Thread starts, made from External Entities ("things"). Each
+ * thing is taken on by the user, as `externalEntity.takeOn` takes one on. The
+ * ids are distinct, and the list is never empty.
+ */
+const NewThreadTask = closedStruct({
+  /** The new Task's title. A title the user chose is never replaced by a generated one. */
+  title: TaskTitle,
+  entityIds: atMost(Id, MAX_THREAD_THINGS).check(
+    Schema.isMinLength(1),
+    Schema.isUnique({ message: "Each thing can be listed once; remove the repeated id." }),
+  ),
+});
+
+type NewThreadTask = Schema.Schema.Type<typeof NewThreadTask>;
+
+/** The message for a spawn that names both a new Task and an existing one or an Agent. */
+const NEW_TASK_CONFLICT_MESSAGE =
+  "newTask starts a Thread on a new Task, so it cannot be combined with taskId or agentId. Leave newTask out to join an existing Task, or leave taskId and agentId out to start on the new Task.";
+
+/**
+ * Refuses a spawn that names `newTask` together with `taskId` or `agentId`.
+ * A new Task and a Task to join contradict each other, and an Agent's session
+ * never makes a Task. The issue points at `newTask`.
+ */
+const refuseNewTaskWithTaskOrAgent = Schema.makeFilter(
+  (payload: { readonly newTask?: unknown; readonly taskId?: string; readonly agentId?: string }) =>
+    payload.newTask !== undefined && (payload.taskId !== undefined || payload.agentId !== undefined)
+      ? { path: ["newTask"], issue: NEW_TASK_CONFLICT_MESSAGE }
+      : undefined,
+);
+
+/**
  * The payload of `session.spawn`. A spawn with an `agentId` takes its settings
  * from that Agent. A spawn with no `agentId` is a Thread. When the user starts
  * it, it takes the user's `thread.*` settings. When a session starts it, it
@@ -570,6 +668,23 @@ export const SessionSpawnInput = closedStruct({
   prompt: PromptText,
   /** Ids from `attachment.create`; the prompt's images. */
   attachments: PromptAttachments,
+  /**
+   * Things the agent is told about with this prompt. The controller appends a
+   * short description of each after the prompt text, so the stored prompt is
+   * exactly what the agent got. It never takes a thing on: a Thread that
+   * should also own them as a Task sends `newTask` too. The list is never
+   * empty, holds each thing once, and a prompt with empty text is accepted
+   * when it has context. Fails `NotFound` for an unknown thing. Nothing is
+   * written when it fails.
+   */
+  context: Schema.optionalKey(
+    atMost(ContextReference, MAX_CONTEXT_REFERENCES).check(
+      Schema.isMinLength(1),
+      Schema.isUnique({
+        message: "Each thing can be listed once in context; remove the repeated entity id.",
+      }),
+    ),
+  ),
   /**
    * The session's role, its name for its job. Once set, a role never changes:
    * `session.update` has no `role`. A Thread spawned without one gets a
@@ -616,6 +731,16 @@ export const SessionSpawnInput = closedStruct({
    */
   taskId: Schema.optionalKey(Id),
   /**
+   * The new Task this Thread starts, made from these things, each taken on by
+   * the user. The Thread joins it, and its title is the one given here, never
+   * a generated one. Only the user may send it, and it is refused together
+   * with `taskId` or `agentId`. It fails `NotFound` for an unknown thing,
+   * `InvalidState` for a thing that is not work Hercule can read, and
+   * `Conflict` for a thing already on an active Task. Nothing is written when
+   * it fails.
+   */
+  newTask: Schema.optionalKey(NewThreadTask),
+  /**
    * Where the session works. When absent, a session's spawn on its caller's
    * runner joins the caller's workspace; any other spawn has no checkout.
    */
@@ -627,7 +752,15 @@ export const SessionSpawnInput = closedStruct({
    * actor and per operation.
    */
   dedupKey: Schema.optionalKey(DedupKey),
-}).check(refuseEmptyPrompt);
+  /**
+   * The MCP Servers the Thread starts with, in place of its default list; an
+   * empty list is kept as empty. Needs `mcp.manage` as well as
+   * `session.spawn`. Refused `validation` when an id is unknown or deleted,
+   * names a server twice, or when two servers share a name, and with
+   * `agentId`.
+   */
+  mcpServerIds: Schema.optionalKey(McpServerIds),
+}).check(refuseEmptySpawnPrompt, refuseNewTaskWithTaskOrAgent);
 
 export type SessionSpawnInput = Schema.Schema.Type<typeof SessionSpawnInput>;
 
@@ -663,7 +796,15 @@ export const SESSION_INPUT_FIELDS = {
   ...SESSION_SELECTION_FIELDS,
 } as const;
 
-export const SESSION_UPDATE_FIELDS = SESSION_SELECTION_FIELDS;
+export const SESSION_UPDATE_FIELDS = {
+  ...SESSION_SELECTION_FIELDS,
+  /**
+   * Replaces the session's list of MCP Servers. Needs `mcp.manage` as well as
+   * `session.steer`. Refused `validation` for the same reasons as on
+   * `session.spawn`.
+   */
+  mcpServerIds: Schema.optionalKey(McpServerIds),
+} as const;
 
 export const SessionUpdateInput = closedStruct(SESSION_UPDATE_FIELDS);
 
@@ -1022,7 +1163,7 @@ export const session = HttpApiGroup.make("session")
     HttpApiEndpoint.post("spawn", "/sessions", {
       payload: SessionSpawnInput,
       success: Session,
-      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Internal],
+      error: [Unauthenticated, Forbidden, Validation, NotFound, InvalidState, Conflict, Internal],
     }),
     HttpApiEndpoint.patch("update", "/sessions/:id", {
       params: { id: Id },

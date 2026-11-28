@@ -87,9 +87,16 @@ export const showHeldAnswers = (
  *   been taken, and the app does not send it anywhere else. A refusal for
  *   another reason, such as the runner being away, is `send-failed`: the
  *   question is still open, so Send again stays useful;
- * - `interrupted`: the app quit while the intent was held or being sent.
+ * - `interrupted`: the app quit while the intent was held, so it was not sent;
+ * - `interrupted-while-sending`: the app quit while the intent was being sent,
+ *   so the other side may have it.
  */
-export type FailureReason = "send-failed" | "closed-before-sent" | "no-longer-open" | "interrupted";
+export type FailureReason =
+  | "send-failed"
+  | "closed-before-sent"
+  | "no-longer-open"
+  | "interrupted"
+  | "interrupted-while-sending";
 
 /** What an answer that was not sent holds, as the app keeps it. */
 export interface UnsentAnswerSource {
@@ -120,6 +127,13 @@ export interface UnsentAnswer {
   readonly actions: readonly UnsentAnswerAction[];
 }
 
+/** What an answer says when the app closed before the answer was sent. */
+export const APP_CLOSED_BEFORE_SENT = "The app closed before it was sent.";
+
+/** What an answer says when the app closed during the send, so the source may have it. */
+export const APP_CLOSED_WHILE_SENDING =
+  "The app closed while it was being sent, so it may have been sent.";
+
 const SEND_AGAIN: UnsentAnswerAction = { id: "send-again", label: "Send again" };
 const OPEN_THREAD: UnsentAnswerAction = { id: "open-thread", label: "Open thread" };
 const DISCARD: UnsentAnswerAction = { id: "discard", label: "Discard" };
@@ -131,6 +145,8 @@ const DISCARD: UnsentAnswerAction = { id: "discard", label: "Discard" };
  * - `interrupted`: the app closed first, then Send again and Discard. The
  *   answer is never sent by itself after a restart, because it may have been
  *   sent already.
+ * - `interrupted-while-sending`: the app closed during the send, so the answer
+ *   may have been sent. Send again and Discard, never sent by itself.
  * - `closed-before-sent`: the question closed before the answer was sent, so
  *   it reached nothing. Sending it again would be refused again, so the pane
  *   offers Open thread and Discard, never Send again.
@@ -153,7 +169,13 @@ export const describeUnsentAnswer = (source: UnsentAnswerSource): UnsentAnswer =
     case "interrupted":
       return {
         ...base,
-        notice: "The app closed before it was sent.",
+        notice: APP_CLOSED_BEFORE_SENT,
+        actions: [SEND_AGAIN, DISCARD],
+      };
+    case "interrupted-while-sending":
+      return {
+        ...base,
+        notice: APP_CLOSED_WHILE_SENDING,
         actions: [SEND_AGAIN, DISCARD],
       };
     case "closed-before-sent":

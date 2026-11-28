@@ -30,6 +30,7 @@ import { toPluginError, describeFieldIssues } from "./errors";
 import { deriveCatalogJsonSchema } from "./json-schema";
 import type { CatalogEntityKind, NewContribution } from "./repository";
 import { decodeEntityKinds } from "./entity-kinds";
+import { decodeSavedQueries, type RegisteredSavedQuery } from "./saved-queries";
 import { decodeSignalKinds, type RegisteredSignalKind } from "./signal-kinds";
 
 /**
@@ -73,6 +74,8 @@ const buildCatalogEntityKinds = (
  * - `entityKinds` are the checked, qualified kinds of External Entity it
  *   reports. They are kept whatever the status of the plugin, so a disabled
  *   plugin's declaration is still returned.
+ * - `savedQueries` are the checked, qualified saved queries it adds to the
+ *   Inbox's rail.
  * - `entityLookup` is how it recognizes, searches and reads its things, when it
  *   offers one.
  */
@@ -86,6 +89,7 @@ export interface RegisteredEventSource {
   readonly entities: boolean;
   readonly signalKinds: ReadonlyArray<RegisteredSignalKind>;
   readonly entityKinds: ReadonlyArray<QualifiedEntityKindDeclaration>;
+  readonly savedQueries: ReadonlyArray<RegisteredSavedQuery>;
   readonly entityLookup?: EntityLookup;
   readonly open: EventSourceContribution["open"];
 }
@@ -204,7 +208,8 @@ const decodeFeeds = (
  * - a kind has the name of a core kind;
  * - a feed is invalid, as `decodeFeeds` explains;
  * - a signal kind is invalid, as `decodeSignalKinds` explains;
- * - an entity kind is invalid, as `decodeEntityKinds` explains.
+ * - an entity kind is invalid, as `decodeEntityKinds` explains;
+ * - a saved query is invalid, as `decodeSavedQueries` explains.
  *
  * The collections belong to the registration pass, which passes them in for
  * this function to append to. A pass registers every plugin before anything
@@ -373,6 +378,17 @@ export const registerEventSourceContribution = (
         source.entityKinds.map(({ word, refPrefix }) => ({ kind: word, refPrefix })),
       ),
     });
+    const savedQueries = yield* decodeSavedQueries(manifest, id, contribution.savedQueries ?? [], {
+      signalKinds: new Set(
+        [...ownSources.flatMap((source) => source.signalKinds), ...signalKinds].map(
+          (registered) => registered.kind,
+        ),
+      ),
+      entityKinds: [...ownSources.flatMap((source) => source.entityKinds), ...entityKinds],
+      takenIds: new Set(
+        ownSources.flatMap((source) => source.savedQueries.map((query) => query.id)),
+      ),
+    });
     declared.push({
       owner: pluginId,
       extensionPoint: EVENT_SOURCE,
@@ -394,6 +410,7 @@ export const registerEventSourceContribution = (
       entities: manifest.capabilities.includes("entities"),
       signalKinds,
       entityKinds,
+      savedQueries,
       ...(contribution.entityLookup === undefined
         ? {}
         : { entityLookup: contribution.entityLookup }),

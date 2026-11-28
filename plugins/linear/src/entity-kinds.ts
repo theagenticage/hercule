@@ -5,7 +5,7 @@
  * the plugin reports raw `fields` and a status key, and these tables say how
  * a card shows them. `entity-reads.ts` builds the status keys written here.
  */
-import type { EntityKindDeclaration } from "@hercule/plugin-host";
+import type { EntityFieldDeclaration, EntityKindDeclaration } from "@hercule/plugin-host";
 import {
   BACKLOG_ICON,
   CANCELED_ICON,
@@ -32,11 +32,41 @@ export const INITIATIVE_KIND = "initiative";
  * state type for it. `duplicate` is a state type the plugin treats like
  * `canceled`, in case a workspace has one.
  */
+/** Linear's priorities, in the order Linear lists them. `entity-reads.ts` maps its number to these values. */
+export const PRIORITY_VALUES = [
+  { value: "urgent", label: "Urgent" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+  { value: "none", label: "No priority" },
+] as const;
+
+/** The fields of an issue. `team` and `project` hold the ref of the place's record, not its name. */
+const ISSUE_FIELDS: ReadonlyArray<EntityFieldDeclaration> = [
+  {
+    key: "team",
+    label: "Team",
+    type: "text",
+    facet: { plural: "Teams", values: TEAM_KIND },
+  },
+  {
+    key: "project",
+    label: "Project",
+    type: "text",
+    facet: { plural: "Projects", values: PROJECT_KIND },
+  },
+  { key: "status", label: "Status", type: "text", facet: { plural: "Statuses" } },
+  { key: "priority", label: "Priority", type: "enum", values: [...PRIORITY_VALUES] },
+  { key: "assignee", label: "Assignee", type: "person" },
+];
+
 const ISSUE: EntityKindDeclaration = {
   word: ISSUE_KIND,
   connect: "Tickets, with their projects and milestones",
   card: "rich",
   noun: "Issue",
+  plural: "Issues",
+  lasting: 3,
   refPrefix: "linear:issue:",
   pace: "slow",
   patience: 336,
@@ -89,8 +119,10 @@ const ISSUE: EntityKindDeclaration = {
     canceled: { shape: "cross", tone: "quiet", word: "Canceled", icon: CANCELED_ICON },
     duplicate: { shape: "cross", tone: "quiet", word: "Duplicate", icon: CANCELED_ICON },
   },
+  fields: [...ISSUE_FIELDS],
+  face: { place: "team", context: "project" },
   facts: [
-    { field: "priority", form: "bars" },
+    { field: "priorityLevel", form: "bars" },
     { field: "milestone", form: "word" },
     { field: "archived", form: "word" },
   ],

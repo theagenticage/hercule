@@ -342,7 +342,7 @@ const handOffWhileWriterHeld = async (
 };
 
 describe("the signals a handoff ends", () => {
-  it("ends the open signals of the kinds the workflow answers, snoozed ones too, and leaves the rest open", async () => {
+  it("ends the open signals of the kinds the workflow answers, and leaves the rest open", async () => {
     await withNorthwind(async (controller, northwind) => {
       const account = await createAccount(controller, "bot");
       const thing = await arrangeThing(controller, {
@@ -364,20 +364,13 @@ describe("the signals a handoff ends", () => {
       const arrange = (target: Thing, kind: string) =>
         arrangeSignal(controller, { thing: target, kind, connectionId: account, replyBody: "Hi" });
       const request = await arrange(thing, REVIEW_REQUESTED);
-      const snoozed = await arrange(thing, REVIEW_REQUESTED);
+      const second = await arrange(thing, REVIEW_REQUESTED);
       const mention = await arrange(thing, MENTIONED);
       const onOther = await arrange(elsewhere, REVIEW_REQUESTED);
-      const snooze = await post(
-        controller.base,
-        "/api/v1/signals/snooze",
-        { signalIds: [snoozed], until: "2099-01-01T00:00:00.000Z" },
-        controller.token,
-      );
-      expect(snooze.status).toBe(200);
 
       const result = await handOff(controller, thing, { workflowId });
 
-      for (const id of [request, snoozed]) {
+      for (const id of [request, second]) {
         expect((await readSignal(controller, id)).resolution, id).toMatchObject({
           kind: "decided",
           actionId: `hand-to-${workflowId}`,
@@ -799,6 +792,54 @@ describe("undoHandOff", () => {
       expect(first.outcome).toBe("undone");
       expect(second).toEqual(first);
       expect(await listTasks(controller.base, controller.token)).toHaveLength(1);
+    });
+  });
+
+  it("tells the menu when the user last handed a thing of this kind to the workflow, until the hand-off is taken back", async () => {
+    await withNorthwind(async (controller) => {
+      const { thing, workflowId } = await arrangeOneThing(controller);
+      // A Task holds the thing, so it is on the Inbox before and after. The
+      // arranged record lacks the columns a page of the Inbox reads.
+      const { sql } = controller.harness;
+      await Effect.runPromise(
+        Effect.orDie(
+          withTransaction(
+            sql,
+            sql`UPDATE external_entities SET card = 'compact', url = '', patience = 24,
+                  lifecycle = 'open', source_updated_at = first_observed_at
+                WHERE ref = ${thing.ref}`,
+          ),
+        ),
+      );
+      await createTaskFor(controller, thing, "planned");
+      const readLastHandedAt = async () => {
+        const response = await post(
+          controller.base,
+          "/api/v1/external-entities/inbox/query",
+          { mode: "first", list: { savedQuery: "everything" } },
+          controller.token,
+        );
+        const page = (await response.json()) as {
+          readonly things: ReadonlyArray<{ readonly id: string; readonly offerSetId: string }>;
+          readonly offerSets: Readonly<
+            Record<
+              string,
+              ReadonlyArray<{ readonly workflowId: string; readonly lastHandedAt?: string }>
+            >
+          >;
+        };
+        const row = page.things.find((entry) => entry.id === thing.id)!;
+        return page.offerSets[row.offerSetId]!.find((offer) => offer.workflowId === workflowId)
+          ?.lastHandedAt;
+      };
+      expect(await readLastHandedAt()).toBeUndefined();
+
+      const result = await handOff(controller, thing, { workflowId });
+      expect(await readLastHandedAt()).toEqual(expect.any(String));
+
+      await rewindRunToPending(controller, result.runId);
+      await undoHandOff(controller, result.runId);
+      expect(await readLastHandedAt()).toBeUndefined();
     });
   });
 

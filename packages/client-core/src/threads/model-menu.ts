@@ -276,7 +276,7 @@ const findProblem = (
     return { message: problem.message, signIn: null };
   }
   const readiness = (each: Runner) =>
-    findProviderAccountReadiness(account, entry.resolvedHarnessId, each.id);
+    findProviderAccountReadiness(account, entry.resolvedHarnessId, each);
   const runnerState = runner === undefined ? null : readiness(runner);
   const reason: MachineProblemReason | null =
     runnerState === null ? readRunReason(problem) : runnerState === "ready" ? null : runnerState;

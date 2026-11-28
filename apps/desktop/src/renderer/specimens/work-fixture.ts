@@ -26,7 +26,7 @@ import type {
   Initiative,
   Project,
   TaskDetail,
-  TrackingDetailRun,
+  TaskDetailRun,
   WorkBoard,
   WorkCard,
   WorkCardBlocker,
@@ -56,9 +56,9 @@ const runId = (n: number): string => taskId(799 + n);
 const buildRun = (
   n: number,
   workflowName: string,
-  status: TrackingDetailRun["status"],
+  status: TaskDetailRun["status"],
   hours: number,
-): TrackingDetailRun => ({
+): TaskDetailRun => ({
   id: runId(n),
   workflowId: null,
   workflowName,

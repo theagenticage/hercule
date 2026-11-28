@@ -61,7 +61,7 @@ import { mintUuid, nowIso, uuidToString, withTransaction } from "../db";
 import { AuditLog, readPipelineEvent } from "../events";
 import { buildEvaluationContext, evaluateExpression, formatExpressionValue } from "../expressions";
 import { Notifier } from "../notifications";
-import { PluginHost, signalBuilds, type RegisteredSignalKind } from "../plugins";
+import { listAskingKinds, PluginHost, signalBuilds, type RegisteredSignalKind } from "../plugins";
 import { buildHandToActions, checkSignalFits, listOwnActionIssues } from "./actions";
 import { ignoreRuleRepository } from "./ignore-rule-repository";
 import { signalRepository, type PendingRaise } from "./repository";
@@ -373,8 +373,10 @@ const make = Effect.gen(function* () {
         const written: Signal =
           lowered && signal.priority === "urgent" ? { ...signal, priority: "high" } : signal;
         // The entity decides what an arrival is, so this only reports the raise.
+        const sources = yield* host.listActiveEventSources();
         yield* entities.recordArrivalAfter(
           raise.threadRef,
+          listAskingKinds(sources.flatMap((source) => source.signalKinds)),
           signals.insert(written, [raise.eventId], { priorityLowered: lowered }),
         );
         yield* audit.append({

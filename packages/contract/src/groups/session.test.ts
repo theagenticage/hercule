@@ -189,7 +189,7 @@ describe("text and images in a session prompt or input", () => {
 
   it.each(payloads)(
     "$name refuses empty text with no images, at the text field",
-    ({ schema, base, field }) => {
+    ({ name, schema, base, field }) => {
       const decode = Schema.decodeUnknownExit(schema);
       for (const payload of [
         { ...base, [field]: "" },
@@ -197,7 +197,11 @@ describe("text and images in a session prompt or input", () => {
       ]) {
         const exit = decode(payload);
         expect(exit._tag).toBe("Failure");
-        expect(String(exit)).toContain("A prompt needs text or at least one image.");
+        expect(String(exit)).toContain(
+          name === "session.spawn"
+            ? "A prompt needs text, an image, or context."
+            : "A prompt needs text or at least one image.",
+        );
         expect(String(exit)).toContain(`["${field}"]`);
       }
     },
@@ -226,6 +230,43 @@ describe("text and images in a session prompt or input", () => {
     expect(
       Schema.decodeUnknownExit(SessionInputPayload)({ text: "", attachments: eleven })._tag,
     ).toBe("Failure");
+  });
+});
+
+describe("context in session.spawn", () => {
+  const first = "0199e0e7-1111-7000-8000-000000000011";
+  const second = "0199e0e7-1111-7000-8000-000000000012";
+  const thing = (entityId: string) => ({ kind: "entity", entityId });
+  const decode = Schema.decodeUnknownExit(SessionSpawnInput);
+
+  it("accepts things with words, and things with no words at all", () => {
+    for (const payload of [
+      { prompt: "Compare these", context: [thing(first), thing(second)] },
+      { prompt: "", context: [thing(first)] },
+    ])
+      expect(Schema.decodeUnknownSync(SessionSpawnInput)(payload)).toEqual(payload);
+  });
+
+  it("refuses an empty prompt whose context is left out", () => {
+    expect(decode({ prompt: "" })._tag).toBe("Failure");
+  });
+
+  it.each([
+    ["an empty list", [], "at least 1"],
+    ["a repeated thing", [thing(first), thing(first)], "remove the repeated entity id"],
+    ["a kind it does not know", [{ kind: "wiki", entityId: first }], "kind"],
+    [
+      "more than fifty things",
+      Array.from({ length: 51 }, (_, index) =>
+        thing(`0199e0e7-1111-7000-8000-${String(index).padStart(12, "0")}`),
+      ),
+      "50",
+    ],
+  ])("refuses context with %s, at the context field", (_name, context, reason) => {
+    const exit = decode({ prompt: "Compare these", context });
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain(`["context"]`);
+    expect(String(exit)).toContain(reason);
   });
 });
 

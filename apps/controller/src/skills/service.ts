@@ -1,13 +1,20 @@
 /**
  * The Skill Library operations: `skill.query`, `skill.read`, `skill.import`,
- * `skill.delete`, `skill.check`, `skill.diff`, `skill.apply` and
- * `skill.applyUpdates` (spec 11 §2 `skill`).
+ * `skill.propose`, `skill.delete`, `skill.check`, `skill.diff`, `skill.apply`,
+ * `skill.reject` and `skill.applyUpdates` (spec 11 §2 `skill`).
  *
- * An import checks the whole archive in memory before it writes any file.
- * Its rows are then written by one transaction run under the Skill Library
- * lock, after the revision's archive is in place (`files.ts`), so the
- * created, unchanged, conflict and revised outcomes are all decided on rows
- * read in that transaction.
+ * An import or a proposal checks the whole archive in memory before it writes
+ * any file. Its rows are then written by one transaction run under the Skill
+ * Library lock, after the revision's archive is in place (`files.ts`), so the
+ * created, unchanged, conflict and revised outcomes of an import, and the
+ * proposed and unchanged outcomes of a proposal, are all decided on rows read
+ * in that transaction.
+ *
+ * A session that has read third-party messages (a tainted session) is refused
+ * every operation that changes the library and needs `skill.apply`: `apply`,
+ * `applyUpdates`, `reject` and `delete`. The check runs inside the write
+ * transaction, so a taint committed meanwhile cannot slip in between the
+ * check and the write (spec 13 §10).
  *
  * Every write appends one audit entry in the same transaction as the rows it
  * describes. The entry holds names, hashes and the Skill Source, never a file.
@@ -26,11 +33,14 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   createCapExceededError,
   createConflictError,
+  createForbiddenError,
   createInternalError,
   createInvalidStateError,
   createNotFoundError,
   createValidationError,
+  MAX_PROPOSED_SKILL_REVISIONS,
   MAX_SKILLS,
+  ONLY_A_SESSION_PROPOSES_SKILLS,
   ONLY_THE_USER_IMPORTS_SKILLS,
   SkillRevisionHash,
   type CapExceeded,
@@ -45,16 +55,27 @@ import {
   type SkillDetail,
   type SkillImportInput,
   type SkillImportResult,
+  type SkillProposeInput,
+  type SkillProposeResult,
   type SkillRevision,
   type SkillRevisionDiff,
   type SkillSource,
   type Unauthenticated,
   type Validation,
+  OPERATIONS,
+  joinAllNames,
 } from "@hercule/contract";
 import { readSkillArchive } from "@hercule/protocol";
-import { CurrentActor, currentStamp, requireGrant, requireUserActor } from "../actor";
+import {
+  CurrentActor,
+  currentStamp,
+  findRequiredGrant,
+  requireGrant,
+  requireUserActor,
+} from "../actor";
 import { nowIso, withTransaction } from "../db";
 import { AuditLog } from "../events";
+import { sessionTaint } from "../taint";
 import { checkSkillContent, type CheckedSkillContent } from "./content";
 import { computeSkillFileChanges } from "./diff";
 import {
@@ -84,6 +105,18 @@ const NO_APPLIED_REVISION =
   "no applied Skill Revision has that hash; a runner fetches only the revisions a start frame names";
 
 const NO_ACTOR = { _tag: "none" } as const;
+
+/** The refusal of `skill.apply` for a tainted session that applies a proposed revision. */
+const TAINTED_SESSION_APPLIES_PROPOSAL =
+  "This session has read third-party messages, so it cannot apply skills. The revision stays proposed: apply it on the Skills screen, or from a session that has not read third-party messages.";
+
+/** The refusal of every other change to the library by a tainted session. */
+const TAINTED_SESSION_CHANGES_LIBRARY =
+  "A session that has read third-party messages cannot change the Skill Library. Ask the user to do it on the Skills screen.";
+
+/** Returns whether the revision was proposed by a session and never applied. */
+const isProposed = (revision: SkillRevision): boolean =>
+  revision.origin === "session" && revision.appliedAt === null;
 
 /** Returns the refusal for a name no Skill has. */
 const describeUnknownSkill = (name: string): string =>
@@ -140,7 +173,7 @@ const describeRevisionNotWaiting = (
 ): string | undefined => {
   const hash = revision.revisionHash;
   if (hash === skill.availableRevisionHash) return undefined;
-  if (revision.origin === "session" && revision.appliedAt === null) return undefined;
+  if (isProposed(revision)) return undefined;
   if (hash === skill.currentRevisionHash) {
     return `\`${hash}\` is already the current revision of \`${skill.name}\`, so there is nothing to apply.`;
   }
@@ -164,6 +197,7 @@ const make = Effect.gen(function* () {
   const skills = yield* skillRepository;
   const files = yield* SkillFiles;
   const audit = yield* AuditLog;
+  const taint = yield* sessionTaint;
   const updateChecks = yield* makeSkillUpdateChecks;
   // A check that `skill.check` starts runs on a fiber owned by this layer,
   // not by the request, which has answered long before the check ends. The
@@ -233,6 +267,135 @@ const make = Effect.gen(function* () {
         record: { topic: "skill", id: stored.skill.name },
       });
       return yield* readWrittenSkill(stored.skill.name);
+    });
+
+  /**
+   * Fails with `Forbidden` naming `skill.apply` when the caller is a tainted
+   * session, with the message for applying a proposed revision when
+   * `proposedRevision` is true and the general one otherwise. Run it inside
+   * the write transaction, so the flag it reads cannot change before the
+   * write commits.
+   */
+  const refuseTaintedCaller = (
+    proposedRevision = false,
+  ): Effect.Effect<void, Forbidden | SqlError> =>
+    Effect.flatMap(taint.isCallerTainted, (tainted) =>
+      tainted
+        ? Effect.fail(
+            createForbiddenError(
+              "skill.apply",
+              proposedRevision ? TAINTED_SESSION_APPLIES_PROPOSAL : TAINTED_SESSION_CHANGES_LIBRARY,
+            ),
+          )
+        : Effect.void,
+    );
+
+  /**
+   * Requires the caller to hold the grant `skill.propose` needs and to be a
+   * session. Fails with `Forbidden` for the user and for a run: they hold every
+   * grant, but a proposal the user files for themselves would only be a detour
+   * around an import.
+   */
+  const requireSessionProposer = Effect.flatMap(
+    requireGrant("skill.propose"),
+    (actor): Effect.Effect<void, Forbidden> => {
+      if (actor._tag === "session") return Effect.void;
+      const grant = findRequiredGrant(OPERATIONS["skill.propose"].requires);
+      return grant === undefined
+        ? Effect.die("skill.propose must require a grant")
+        : Effect.fail(createForbiddenError(grant, ONLY_A_SESSION_PROPOSES_SKILLS));
+    },
+  );
+
+  /**
+   * Reads an archive and checks its content as the skill `name`, failing with
+   * `Validation` listing every problem. Nothing is written.
+   */
+  const readCheckedContent = (
+    name: string,
+    archive: Uint8Array,
+  ): Effect.Effect<CheckedSkillContent, Validation> =>
+    Effect.gen(function* () {
+      const entries = yield* Effect.mapError(readSkillArchive(archive), (error) =>
+        createValidationError([{ path: [], message: error.message }], error.message),
+      );
+      return yield* Effect.mapError(checkSkillContent(name, entries), (error) =>
+        createValidationError(
+          error.issues.map((message) => ({ path: [], message })),
+          CONTENT_REFUSED,
+        ),
+      );
+    });
+
+  /**
+   * Stores the rows of one proposal and returns its result, deciding it on
+   * rows read in the same transaction. A hash the Skill already holds is
+   * `unchanged` before any cap applies. A proposal never changes the Skill's
+   * source or current revision.
+   */
+  const storeProposal = (
+    name: string,
+    content: CheckedSkillContent,
+  ): Effect.Effect<CommittedSkillChange<SkillProposeResult>, CapExceeded | SqlError> =>
+    Effect.gen(function* () {
+      const hash = content.revisionHash;
+      const found = yield* skills.findByName(name);
+      if (Option.isSome(found) && (yield* skills.hasRevision(found.value.id, hash))) {
+        return { answer: { result: "unchanged", skill: found.value.skill }, releasedHashes: [] };
+      }
+
+      const proposed = yield* skills.listProposedCounts();
+      const proposedTotal = proposed.reduce((total, { count }) => total + count, 0);
+      if (proposedTotal >= MAX_PROPOSED_SKILL_REVISIONS) {
+        return yield* Effect.fail(
+          createCapExceededError(
+            { count: proposedTotal + 1, cap: MAX_PROPOSED_SKILL_REVISIONS },
+            `${String(proposedTotal)} proposed revisions already wait for review, in ${joinAllNames(proposed.map((entry) => `\`${entry.name}\``))}. Ask the user to apply or reject them on the Skills screen before you propose another.`,
+          ),
+        );
+      }
+
+      const change: SkillChange = { at: yield* nowIso, actor: yield* currentStamp };
+      let id: Uint8Array;
+      if (Option.isSome(found)) {
+        id = found.value.id;
+      } else {
+        const count = yield* skills.count();
+        if (count >= MAX_SKILLS) {
+          return yield* Effect.fail(
+            createCapExceededError(
+              { count: count + 1, cap: MAX_SKILLS },
+              `The Skill Library holds ${String(MAX_SKILLS)} skills, the most it can hold. Delete a skill you no longer use, then try again.`,
+            ),
+          );
+        }
+        id = yield* skills.insert(name, { kind: "upload" }, change);
+      }
+      const includesThirdPartyContent = yield* taint.isCallerTainted;
+      yield* skills.insertRevision(id, {
+        hash,
+        origin: "session",
+        fileCount: content.files.length,
+        sizeBytes: content.sizeBytes,
+        description: content.description,
+        approvalEffects: content.approvalEffects,
+        includesThirdPartyContent,
+        ...change,
+      });
+      // A new Skill's row already holds this change; an existing one gained a
+      // proposed revision, which its record counts.
+      if (Option.isSome(found)) yield* skills.touch(id, change);
+      yield* audit.append({
+        kind: "skill.proposed",
+        actor: change.actor,
+        payload: { name, revisionHash: hash, includesThirdPartyContent },
+        at: change.at,
+        record: { topic: "skill", id: name },
+      });
+      return {
+        answer: { result: "proposed", skill: yield* readWrittenSkill(name) },
+        releasedHashes: [],
+      };
     });
 
   const findOrFail = (name: string): Effect.Effect<StoredSkill, NotFound | SqlError> =>
@@ -313,6 +476,7 @@ const make = Effect.gen(function* () {
         sizeBytes: content.sizeBytes,
         description: content.description,
         approvalEffects: content.approvalEffects,
+        includesThirdPartyContent: false,
         ...change,
       } as const;
 
@@ -413,12 +577,7 @@ const make = Effect.gen(function* () {
                   revisions.find(
                     (revision) => revision.revisionHash === skill.availableRevisionHash,
                   ) ?? null,
-                proposedRevisions: sortNewestFirst(
-                  revisions.filter(
-                    (revision) => revision.origin === "session" && revision.appliedAt === null,
-                  ),
-                  "createdAt",
-                ),
+                proposedRevisions: sortNewestFirst(revisions.filter(isProposed), "createdAt"),
               };
             }),
           )
@@ -447,15 +606,7 @@ const make = Effect.gen(function* () {
     > =>
       Effect.gen(function* () {
         yield* requireUserActor("skill.import", ONLY_THE_USER_IMPORTS_SKILLS);
-        const entries = yield* Effect.mapError(readSkillArchive(archive), (error) =>
-          createValidationError([{ path: [], message: error.message }], error.message),
-        );
-        const content = yield* Effect.mapError(checkSkillContent(input.name, entries), (error) =>
-          createValidationError(
-            error.issues.map((message) => ({ path: [], message })),
-            CONTENT_REFUSED,
-          ),
-        );
+        const content = yield* readCheckedContent(input.name, archive);
         return yield* files
           .publish(
             content,
@@ -464,6 +615,42 @@ const make = Effect.gen(function* () {
               storeImport(input.name, content, buildSkillSource(input), input.replace === true),
             ),
           )
+          .pipe(
+            Effect.catchTag("SkillFileError", (error) => reportSkillFileError(input.name, error)),
+          );
+      }),
+
+    /**
+     * Files the skill in the archive as a proposed Skill Revision, which
+     * waits for the user to apply it, and returns `proposed` or `unchanged`
+     * with the Skill. The Skill is created, with no current revision, when
+     * no Skill has the name. Fails with:
+     *
+     * - `Forbidden` when the caller is not a session holding `skill.write`:
+     *   the user and a run are refused, and the message says to import;
+     * - `Validation` when the archive cannot be read, or its content breaks
+     *   any content rule, with every broken rule listed;
+     * - `CapExceeded` when the library already holds the most proposed
+     *   revisions, naming every Skill that has one, or the name is new and
+     *   the library is full;
+     * - `Internal` when the archive cannot be written.
+     *
+     * A revision the Skill already holds, whatever its state, is `unchanged`
+     * and stores nothing. A session that has read third-party messages may
+     * propose; its revision is marked `includesThirdPartyContent`.
+     */
+    propose: (
+      input: SkillProposeInput,
+      archive: Uint8Array,
+    ): Effect.Effect<
+      SkillProposeResult,
+      Unauthenticated | Forbidden | Validation | CapExceeded | Internal | SqlError
+    > =>
+      Effect.gen(function* () {
+        yield* requireSessionProposer;
+        const content = yield* readCheckedContent(input.name, archive);
+        return yield* files
+          .publish(content, withTransaction(sql, storeProposal(input.name, content)))
           .pipe(
             Effect.catchTag("SkillFileError", (error) => reportSkillFileError(input.name, error)),
           );
@@ -523,7 +710,8 @@ const make = Effect.gen(function* () {
     /**
      * Deletes a Skill and every revision it has, then removes the revisions'
      * archives that no other Skill's revision names. Fails with `NotFound`
-     * when no Skill has the name.
+     * when no Skill has the name, and with `Forbidden` when the caller is a
+     * tainted session.
      */
     delete: (name: string): Effect.Effect<Record<string, never>, Forbidden | NotFound | SqlError> =>
       Effect.gen(function* () {
@@ -531,6 +719,7 @@ const make = Effect.gen(function* () {
         const deletedHashes = yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            yield* refuseTaintedCaller();
             const stored = yield* findOrFail(name);
             const hashes = yield* skills.delete(stored.id);
             const at = yield* nowIso;
@@ -645,7 +834,9 @@ const make = Effect.gen(function* () {
      *   hash. When the Skill has an available update, the message says a
      *   newer update replaced the one chosen;
      * - `InvalidState` when the revision is neither available nor proposed,
-     *   with a message that says how to go back to an earlier revision.
+     *   with a message that says how to go back to an earlier revision;
+     * - `Forbidden` when the caller is a tainted session. The message depends
+     *   on whether the revision is a proposed one.
      */
     apply: (input: {
       readonly name: string;
@@ -658,6 +849,9 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const stored = yield* findOrFail(input.name);
             const revision = yield* skills.findRevision(stored.id, input.revisionHash);
+            yield* refuseTaintedCaller(
+              Option.isSome(revision) && isProposed(revision.value.revision),
+            );
             if (Option.isNone(revision)) {
               // A check that finds a newer update deletes the one it replaces,
               // so the update the user chose may be gone.
@@ -678,6 +872,60 @@ const make = Effect.gen(function* () {
       }),
 
     /**
+     * Deletes one of the Skill's proposed revisions and returns `{}`. A
+     * revision that is also the Skill's available one is no longer available.
+     * When it was the last proposed revision of a Skill with no current
+     * revision, the Skill goes too. The archives no row names any more are
+     * removed after the commit. Fails with:
+     *
+     * - `NotFound` when no Skill has the name, or it has no revision with
+     *   the hash;
+     * - `InvalidState` when the revision is not a proposed one;
+     * - `Forbidden` when the caller is a tainted session.
+     */
+    reject: (input: {
+      readonly name: string;
+      readonly revisionHash: string;
+    }): Effect.Effect<Record<string, never>, Forbidden | NotFound | InvalidState | SqlError> =>
+      Effect.gen(function* () {
+        yield* requireGrant("skill.reject");
+        const deletedHashes = yield* withTransaction(
+          sql,
+          Effect.gen(function* () {
+            yield* refuseTaintedCaller();
+            const stored = yield* findOrFail(input.name);
+            const { id, skill } = stored;
+            const { revision } = yield* findRevisionOrFail(stored, input.revisionHash);
+            if (!isProposed(revision)) {
+              return yield* Effect.fail(
+                createInvalidStateError(
+                  `\`${input.revisionHash}\` is not a proposed revision of \`${input.name}\`, and only a proposed revision can be rejected.`,
+                ),
+              );
+            }
+            const change: SkillChange = { at: yield* nowIso, actor: yield* currentStamp };
+            if (skill.availableRevisionHash === input.revisionHash) {
+              yield* skills.setAvailableRevision(id, null, change);
+            }
+            yield* skills.deleteRevision(id, input.revisionHash);
+            const skillDeleted = skill.currentRevisionHash === null && skill.proposedCount === 1;
+            const hashes = skillDeleted ? yield* skills.delete(id) : [];
+            if (!skillDeleted) yield* skills.touch(id, change);
+            yield* audit.append({
+              kind: "skill.rejected",
+              actor: change.actor,
+              payload: { name: input.name, revisionHash: input.revisionHash, skillDeleted },
+              at: change.at,
+              record: { topic: "skill", id: input.name },
+            });
+            return [input.revisionHash, ...hashes];
+          }),
+        );
+        yield* files.removeDeletedRevisionArchives(deletedHashes);
+        return {};
+      }),
+
+    /**
      * Makes each named Skill's available revision current, all in one
      * transaction, and returns the Skill records it changed. Each update
      * names the available revision the caller showed the user. Fails, and
@@ -685,7 +933,8 @@ const make = Effect.gen(function* () {
      *
      * - `NotFound` when no Skill has one of the names;
      * - `Conflict` when a Skill's available revision is no longer the one
-     *   named, because a check found a newer one since.
+     *   named, because a check found a newer one since;
+     * - `Forbidden` when the caller is a tainted session.
      */
     applyUpdates: (
       input: SkillApplyUpdatesInput,
@@ -698,6 +947,7 @@ const make = Effect.gen(function* () {
         return yield* withTransaction(
           sql,
           Effect.gen(function* () {
+            yield* refuseTaintedCaller();
             const found = yield* Effect.forEach(input.updates, (update) =>
               Effect.map(findOrFail(update.name), (stored) => ({ stored, update })),
             );

@@ -124,8 +124,8 @@ export function StatusShape({
  * Renders the status of an External Entity, `size` CSS pixels square:
  *
  * - the icon its plugin draws for it, such as GitHub's merged icon, filled in
- *   the plugin's colour (see `buildPluginColorStyle`), or grey when the plugin
- *   gives it none;
+ *   the plugin's colour (see `buildPluginColorStyle`), or in the status's tone
+ *   when the plugin gives it no colour;
  * - otherwise the status's shape in its tone (`StatusShape`).
  *
  * The icon is hidden from assistive technology, because the status's word
@@ -141,14 +141,16 @@ export function EntityStatusIcon({
   if (status.icon === undefined) {
     return <StatusShape shape={status.shape} tone={status.tone} size={size} />;
   }
+  const color = buildPluginColorStyle(decidePluginColor(status));
   return (
     <svg
-      className="shape status-icon"
+      // With no plugin colour, the tone class colours the icon. A plugin colour is inline, so it wins.
+      className={color === undefined ? `shape tone-${status.tone}` : "shape"}
       viewBox="0 0 16 16"
       width={size}
       height={size}
       fill="currentColor"
-      style={buildPluginColorStyle(decidePluginColor(status))}
+      style={color}
       aria-hidden="true"
     >
       {status.icon.paths.map((path, index) => (

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { EventWithFacts } from "@hercule/contract";
+import type { ListedEvent } from "@hercule/contract";
 import { stubElementSize, stubIntersectionObserver } from "../../../../app/testing";
 import {
   ATLAS,
@@ -50,18 +50,18 @@ const buildSixEntries = () => [
  * going back from two minutes ago, so no two fold into one. The oldest has the
  * id `firstId`.
  */
-const buildQuietEntries = (count: number, firstId = 1): EventWithFacts[] =>
+const buildQuietEntries = (count: number, firstId = 1): ListedEvent[] =>
   Array.from({ length: count }, (_, index) =>
     buildCameOnline(firstId + index, (count - index) * 2),
   );
 
 /** Builds `count` sessions spawned in one minute, by the same actor, which fold into one entry. The oldest has the id 1. */
-const buildSpawnBurst = (count: number): EventWithFacts[] =>
+const buildSpawnBurst = (count: number): ListedEvent[] =>
   Array.from({ length: count }, (_, index) =>
     buildSessionSpawned(index + 1, 5, `01a06d02-0000-7000-8000-${String(index).padStart(12, "0")}`),
   );
 
-const openActivity = async (events: readonly EventWithFacts[]) => {
+const openActivity = async (events: readonly ListedEvent[]) => {
   const opened = await openMachineWithEvents(ACTIVITY_PATH, events);
   await screen.findByRole("heading", { level: 2, name: "Activity" });
   // The controller's first push on each topic reads the shell's data again. Waiting for it

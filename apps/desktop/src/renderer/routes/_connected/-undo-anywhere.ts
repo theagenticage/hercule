@@ -11,7 +11,6 @@ import type { HerculeClient } from "@hercule/client-core";
 import {
   buildCachedCardMover,
   buildCachedEndedCardMover,
-  buildCachedInboxWriter,
   type CardMover,
 } from "../../app/card-mover";
 import type { DoneToastStore } from "../../app/done-toast-store";
@@ -46,7 +45,6 @@ export function useUndoAnywhere({
     const mover: CardMover = {
       putCardBack: buildCachedCardMover(client, queryClient),
       putEndedCardBack: buildCachedEndedCardMover(client, queryClient),
-      writeInboxEdit: buildCachedInboxWriter(queryClient),
     };
     return undoStack.registerFallback({
       buildPage: () => mover,

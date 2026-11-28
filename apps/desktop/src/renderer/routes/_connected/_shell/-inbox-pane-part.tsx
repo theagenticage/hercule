@@ -1,0 +1,217 @@
+import { useImperativeHandle, useReducer, useRef, type JSX, type Ref } from "react";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
+import { namePlugin, type HerculeClient } from "@hercule/client-core";
+import {
+  NO_PANE_ASK_CHOICE,
+  describeInboxRow,
+  reducePaneAskChoice,
+  readThingPlace,
+  type InboxRowView,
+} from "@hercule/client-core/inbox";
+import type { InboxOrder } from "@hercule/contract";
+import type { AccountScope } from "../../../app/account-scope";
+import { pluginsQuery } from "../../../app/queries";
+import { InboxPaneHead } from "../../../screens/inbox/inbox-pane-head";
+import {
+  InboxSelectionHead,
+  InboxSelectionPane,
+} from "../../../screens/inbox/inbox-selection-pane";
+import type { InboxAnswers } from "./-inbox-answers";
+import { useInboxNow } from "./-inbox-clock";
+import type { InboxPaneAsksHandle } from "./-inbox-pane-asks";
+import { InboxPaneThingPart, type InboxPaneMoves } from "./-inbox-pane-thing-part";
+import type { InboxListRow } from "./-inbox-visit";
+
+export type { InboxPaneMoves };
+
+/** What the keys ask of the pane. */
+export interface InboxPaneHandle extends InboxPaneAsksHandle {
+  /** Scrolls the pane down by a page, or up with `back`. */
+  readonly scrollPage: (back: boolean) => void;
+  /** Returns the pane's hand-off button, where the hand menu anchors, or `null` when the pane has none. */
+  readonly findHandAnchor: () => HTMLElement | null;
+}
+
+/**
+ * Renders the line at the start of the pane's head: for one thing, its source,
+ * its kind and its place (left out when it has none); for a
+ * selection, which sources the selected things come from.
+ */
+export function InboxPaneHeadPart({
+  client,
+  thing,
+  selection,
+}: {
+  readonly client: HerculeClient;
+  readonly thing: InboxListRow;
+  /** The selected things when the pane shows a selection, else `null`. */
+  readonly selection: ReadonlyArray<InboxListRow> | null;
+}): JSX.Element {
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
+  const now = useInboxNow([thing]);
+  if (selection !== null) {
+    const sourceNames = [...new Set(selection.map((row) => namePlugin(row.source, plugins)))];
+    return <InboxSelectionHead sourceNames={sourceNames} />;
+  }
+  const place = readThingPlace(thing, now);
+  return (
+    <InboxPaneHead
+      pluginId={thing.source}
+      plugins={plugins}
+      parts={[
+        namePlugin(thing.source, plugins),
+        thing.noun,
+        ...(place === undefined ? [] : [place]),
+      ]}
+    />
+  );
+}
+
+/**
+ * Renders the pane of a selection: each selected thing as a row and Dismiss for
+ * all of them. Orchestrating: it describes the rows with the user's name and
+ * the time they show.
+ */
+function InboxSelectionPart({
+  client,
+  members,
+  order,
+  scrollRef,
+  onWalk,
+  onDismiss,
+  onStartThread,
+  onTakeOn,
+  onLink,
+}: {
+  readonly client: HerculeClient;
+  readonly members: ReadonlyArray<InboxListRow>;
+  readonly order: InboxOrder;
+  readonly scrollRef: Ref<HTMLDivElement>;
+  readonly onWalk: (ref: string) => void;
+  readonly onDismiss: () => void;
+  readonly onStartThread: () => void;
+  readonly onTakeOn: () => void;
+  readonly onLink: () => void;
+}): JSX.Element {
+  const { bridge } = useRouteContext({ from: "/_connected/_shell" });
+  const { data: plugins } = useSuspenseQuery(pluginsQuery(client));
+  const now = useInboxNow(members);
+  const views: InboxRowView[] = members.map((row) =>
+    describeInboxRow(row, { order, now, offers: row.offers }),
+  );
+  return (
+    <InboxSelectionPane
+      members={views}
+      plugins={plugins}
+      platform={bridge.platform}
+      ref={scrollRef}
+      onWalk={onWalk}
+      onStartThread={onStartThread}
+      onTakeOn={onTakeOn}
+      onLink={onLink}
+      onDismiss={onDismiss}
+    />
+  );
+}
+
+/**
+ * Renders the body of the pane: the pane of the selection when `selection`
+ * holds things, else the pane of the current `thing`.
+ *
+ * It keeps what the user chose in the pane for as long as the screen lives
+ * (`reducePaneAskChoice`): the ask unfolded last for each thing, so walking
+ * away and back finds it as it was left, and the reply box that is open.
+ * `ref` receives the handle the keys use.
+ *
+ * Orchestrating: it owns that client state.
+ */
+export function InboxPanePart({
+  client,
+  scope,
+  thing,
+  selection,
+  order,
+  isActive,
+  isHandMenuOpen,
+  savedQueryKinds,
+  answers,
+  moves,
+  ref,
+  onWalk,
+  onDismissSelection,
+  onStartThreadSelection,
+  onTakeOnSelection,
+  onLinkSelection,
+}: {
+  readonly client: HerculeClient;
+  readonly scope: AccountScope;
+  readonly thing: InboxListRow;
+  readonly selection: ReadonlyArray<InboxListRow> | null;
+  readonly order: InboxOrder;
+  readonly isActive: boolean;
+  readonly isHandMenuOpen: boolean;
+  /** The signal kinds of the saved query the user is on: the ask of such a kind is unfolded first. */
+  readonly savedQueryKinds: readonly string[];
+  readonly answers: InboxAnswers;
+  readonly moves: InboxPaneMoves;
+  readonly ref: Ref<InboxPaneHandle>;
+  readonly onWalk: (ref: string) => void;
+  readonly onDismissSelection: () => void;
+  readonly onStartThreadSelection: () => void;
+  readonly onTakeOnSelection: () => void;
+  readonly onLinkSelection: () => void;
+}): JSX.Element {
+  const [choice, dispatchAskMove] = useReducer(reducePaneAskChoice, NO_PANE_ASK_CHOICE);
+  const asksRef = useRef<InboxPaneAsksHandle>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const handAnchorRef = useRef<HTMLButtonElement>(null);
+  useImperativeHandle(ref, () => ({
+    answerCurrentAsk: () => {
+      asksRef.current?.answerCurrentAsk();
+    },
+    stepAsk: (by) => {
+      asksRef.current?.stepAsk(by);
+    },
+    scrollPage: (back) => {
+      const scroller = scrollRef.current;
+      if (scroller === null) return;
+      const page = scroller.clientHeight * 0.9;
+      scroller.scrollBy({ top: back ? -page : page });
+    },
+    findHandAnchor: () => handAnchorRef.current,
+  }));
+
+  if (selection !== null) {
+    return (
+      <InboxSelectionPart
+        client={client}
+        members={selection}
+        order={order}
+        scrollRef={scrollRef}
+        onWalk={onWalk}
+        onDismiss={onDismissSelection}
+        onStartThread={onStartThreadSelection}
+        onTakeOn={onTakeOnSelection}
+        onLink={onLinkSelection}
+      />
+    );
+  }
+  return (
+    <InboxPaneThingPart
+      client={client}
+      scope={scope}
+      thing={thing}
+      isActive={isActive}
+      isHandMenuOpen={isHandMenuOpen}
+      savedQueryKinds={savedQueryKinds}
+      choice={choice}
+      answers={answers}
+      moves={moves}
+      asksRef={asksRef}
+      scrollRef={scrollRef}
+      handAnchorRef={handAnchorRef}
+      dispatchAskMove={dispatchAskMove}
+    />
+  );
+}

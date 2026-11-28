@@ -27,17 +27,12 @@ const readSnapshotCard = (value: unknown): BoardSnapshot["cards"][number] | unde
   if (projectId !== undefined && typeof projectId !== "string") return undefined;
   if (stageCause !== undefined) {
     if (!isRecord(stageCause)) return undefined;
-    const { kind, factId, ref, sessionId, stageRevision, text } = stageCause;
-    if (typeof text !== "string") return undefined;
+    const { kind, factId, ref, text } = stageCause;
     const base = { id, stage, ...(projectId === undefined ? {} : { projectId }) };
-    if (kind === "report") {
-      // A report cause stored without a revision cannot be told from the next one: drop the snapshot.
-      if (typeof sessionId !== "string" || !Number.isInteger(stageRevision)) return undefined;
-      return {
-        ...base,
-        stageCause: { kind, sessionId, stageRevision: stageRevision as number, text },
-      };
-    }
+    // An earlier build stored a report's cause, with the title of the Thread that
+    // reported. It is read as no cause, so the title is not kept past the next write.
+    if (kind === "report") return base;
+    if (typeof text !== "string") return undefined;
     // A snapshot written before reports existed has no `kind`; its causes are all facts.
     if (
       (kind !== undefined && kind !== "fact") ||

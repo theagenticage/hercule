@@ -199,6 +199,21 @@ export const permissionRequestRepository = Effect.gen(function* () {
       ),
 
     /**
+     * Returns the grants of the session's permission profile and nothing a
+     * request decided for the session. Returns an empty list when there is no
+     * such session or its profile row is missing.
+     */
+    listProfileGrants: (sessionId: string): Effect.Effect<ReadonlyArray<Grant>, SqlError> =>
+      Effect.map(
+        sql<{ readonly grants: string }>`
+          SELECT p.grants AS grants
+          FROM sessions s
+          JOIN permission_profiles p ON p.id = s.permission_profile_id
+          WHERE s.id = ${uuidFromString(sessionId)}`,
+        (rows) => (rows[0] === undefined ? [] : parseStoredGrants(rows[0].grants)),
+      ),
+
+    /**
      * Returns every grant the session holds: its profile's grants, and the
      * grants of its requests decided with outcome `session` under that
      * profile. A grant in both lists is returned once. Returns an empty list

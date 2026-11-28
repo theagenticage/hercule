@@ -38,7 +38,7 @@ What a thread does - its transcript, its Requests, its composer - is owned by [.
 6. **You:** the account, the live connection with Sign out, the two phone settings that keep alerts arriving, and the licences.
 7. **Alerts and Live Updates,** posted by a foreground service that holds one `/ws` socket while the user is signed in.
 
-**Out:** Intake, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
+**Out:** Intake *(superseded 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the desktop Intake screen is deleted, so the phone will not get one; what takes its place is the Inbox, which this spec does not plan yet)*, Decision, New thread, Runs, Triggers, Settings (except sign out and the connection), tablets, and themes other than light and dark following the system. The tab bar keeps the book's shape: its Intake tab and new-thread button are drawn faint and do nothing ([The tab bar](#the-tab-bar)).
 
 ## Architecture
 
@@ -404,7 +404,7 @@ The You screen keeps the look of the book's `mobile/settings.html`, but holds on
 
 The book's tab bar: Threads, Intake, the new-thread button, Office and You. Threads, Office and You have screens, and switching tabs replaces the whole back stack with that tab's screen. Intake and the new-thread button are drawn faint and do nothing, so the bar keeps the book's shape without offering what the app cannot do. The app still opens on the Office.
 
-Threads carries a badge, on every tab's screen, with the number of threads waiting on the user, hidden at zero. It counts threads only, not assistants: an assistant's question shows at a glance in the Office's Waiting on you lane and its receipt. Intake has no badge, because the app reads no Intake data. *(Amended 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659): Threads was drawn faint and had no screen, and its badge was the Office's Waiting on you count, assistants included.)*
+Threads carries a badge, on every tab's screen, with the number of threads waiting on the user, hidden at zero. It counts threads only, not assistants: an assistant's question shows at a glance in the Office's Waiting on you lane and its receipt. Intake has no badge, because the app reads no Intake data. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): the desktop Intake screen is deleted, so the faint Intake tab now points at nothing that will be built. The tab bar stays drawn as the book draws it until a ticket redraws it.)* *(Amended 2026-10-14, [#659](https://github.com/theagenticage/hercule/issues/659): Threads was drawn faint and had no screen, and its badge was the Office's Waiting on you count, assistants included.)*
 
 ### Following new messages
 
@@ -805,7 +805,7 @@ The steps to pair the phone are in [the platform research §3](../research/andro
 
 The phone app is itself beyond what spec 01 obliges for v1. These are what later milestones add:
 
-- **The other screens:** Intake, Decision, New thread, Runs and Triggers.
+- **The other screens:** ~~Intake,~~ Decision, New thread, Runs and Triggers. *(Amended 2026-11-21, [#1243](https://github.com/theagenticage/hercule/issues/1243): Intake is superseded; the desktop screen it would have followed is deleted.)*
 - **Mark done, Reopen and search** on the Threads tab.
 - **Memory and reminders** on the Assistant screen, once operations read them.
 - **Voice in the thread composer.**

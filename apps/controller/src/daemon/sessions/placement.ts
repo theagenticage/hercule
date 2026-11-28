@@ -24,11 +24,14 @@ import {
 } from "@hercule/protocol";
 import {
   ACCESS_MODE_CHAIN,
+  appendPromptContext,
   createForbiddenError,
   Id,
   createInvalidStateError,
   createNotFoundError,
   findNearestSupportedAccessMode,
+  flattenToOneLine,
+  MAX_PROMPT_LENGTH,
   MEMORY_CORE,
   refuseEmptyPrompt,
   SESSION_CONTINUE_FIELDS,
@@ -36,6 +39,7 @@ import {
   createValidationError,
   createDecodeValidationError,
   InvalidState,
+  type Conflict,
   type Forbidden,
   type NotFound,
   type Session,
@@ -52,10 +56,12 @@ import {
   type UserActor,
 } from "../../actor";
 import { mintUuid, nowIso, uuidToString, withTransaction } from "../../db";
+import { ExternalEntityService } from "../../external-entities";
+import { mcpServerListRule, requireMcpManage } from "../../mcp-servers";
 import { memoryRepository, renderSessionMemory } from "../../memory";
 import { modelProfileRepository } from "../../model-profiles";
 import { PermissionProfiles, type GrantsError, type PermissionProfile } from "../../permissions";
-import { deriveCatalogJsonSchema, PluginHost } from "../../plugins";
+import { deriveCatalogJsonSchema, PluginHost, type RegisteredHarness } from "../../plugins";
 import { projectRepository } from "../../projects";
 import { PromotionState } from "../../promotion";
 import {
@@ -88,8 +94,9 @@ import {
   dedupKeyRepository,
   type DedupOperation,
   type TaskSource,
+  type TitleParts,
 } from "../../sessions";
-import { Settings, type SettingError } from "../../settings";
+import { Settings, SettingsOperations, type SettingError } from "../../settings";
 import { buildThreadBranch, WorkspaceService } from "../../workspaces";
 import { TextGeneration } from "../../text-generation";
 import { makeForkAfterCommit } from "./after-commit";
@@ -208,6 +215,18 @@ const refuseAgentOwnedFields = (spawn: SessionSpawnInput): Effect.Effect<void, V
 
 const NO_SUCH_PROJECT_NAMED = "no such project";
 
+/**
+ * The error message when a spawn from an Agent gives a list of MCP Servers.
+ * An Agent's session has an empty list until Agents can have one.
+ */
+const AGENT_MCP_SERVERS_REFUSED =
+  "an agent's session cannot have MCP servers yet (#222); leave mcpServerIds out, or spawn a Thread without agentId";
+
+/** The error message when a session starts a Thread on a new Task made from things. */
+const NEW_TASK_IS_THE_USERS =
+  "only the user may start a Thread on a new Task made from things, because taking things on is the user's own act; " +
+  "ask the user to start it, or start the Thread without newTask";
+
 /** The error message when a session without the `thread.start` grant starts a Thread. */
 const START_THREAD_NEEDS_GRANT =
   "only the user, or a session that holds the thread.start grant, may start a Thread, " +
@@ -315,8 +334,12 @@ type Refusal =
   | SettingError
   | Schema.SchemaError;
 
-/** The errors of a spawn, which also reads permission profiles. A fork takes its parent's profile. */
-type PlaceError = Refusal | GrantsError;
+/**
+ * The errors of a spawn, which also reads permission profiles (a fork takes
+ * its parent's profile) and, for a new Task made from things, refuses a thing
+ * that is already on an active Task.
+ */
+type PlaceError = Refusal | GrantsError | Conflict;
 
 /** The errors of a continue, which also fails when the parent session does not exist. */
 type ContinueError = Refusal | NotFound;
@@ -345,8 +368,15 @@ interface Placing {
   readonly attachments: ReadonlyArray<string>;
   /** The session's title, or undefined to take it from the prompt. */
   readonly title: string | undefined;
+  /** The words and the first thing's title of a prompt with a context block; undefined when the prompt is all words. */
+  readonly titleParts?: TitleParts | undefined;
   /** The session's role, or undefined for none. */
   readonly role: string | undefined;
+  /**
+   * The ids of the servers in the session's own list, checked or copied from a
+   * list that was, in list order. Absent for a session that places with none.
+   */
+  readonly mcpServerIds?: ReadonlyArray<string>;
   readonly kind: "session.spawned" | "session.continued";
   /** The audit entry's payload, beyond the new session's id. */
   readonly payload: Readonly<Record<string, unknown>>;
@@ -384,11 +414,14 @@ const make = Effect.gen(function* () {
   const connections = yield* RunnerConnections;
   const profiles = yield* PermissionProfiles;
   const settings = yield* Settings;
+  const settingsOperations = yield* SettingsOperations;
+  const mcpServerLists = yield* mcpServerListRule;
   const promotion = yield* PromotionState;
   const one = readSessionOrFail(rows);
   const resumableNativeSession = yield* resumable;
   const { dispatch } = yield* Dispatch;
   const textGeneration = yield* TextGeneration;
+  const externalEntities = yield* ExternalEntityService;
   const forkAfterCommit = yield* makeForkAfterCommit;
 
   /** Resolves an account and a harness (`resolveProviderAccountHarness`) in this layer's context. */
@@ -406,13 +439,17 @@ const make = Effect.gen(function* () {
    * title it was given from the message, and the role it was spawned with, if
    * any.
    *
+   * `titleInput` is what the model reads: the user's words when there are
+   * any, and the whole message otherwise, so text that came from outside
+   * Hercule stays away from the title model when the user wrote something.
+   *
    * `madeTaskId` is the Task made for this Thread, if the join made one. It is
    * handed on to `setGeneratedTitleAndRole`, which renames that Task together
    * with the Thread.
    */
   const startThreadTitle = (
     sessionId: string,
-    firstMessage: string,
+    titleInput: string,
     madeTaskId: string | undefined,
   ): Effect.Effect<void> =>
     forkAfterCommit(
@@ -427,7 +464,7 @@ const make = Effect.gen(function* () {
               caller: "core:sessions",
               purpose: "thread.title",
               instructions: THREAD_TITLE_INSTRUCTIONS,
-              input: firstMessage.slice(0, MAX_TITLE_INPUT_LENGTH),
+              input: titleInput.slice(0, MAX_TITLE_INPUT_LENGTH),
               outputSchema: THREAD_TITLE_AND_ROLE_OUTPUT_SCHEMA,
               // A title is only worth having soon; the Thread keeps its
               // cut-short title instead.
@@ -505,7 +542,11 @@ const make = Effect.gen(function* () {
    * session on `providerAccountId` starts with, in this order:
    *
    * 0. the harness: the one requested, or else the account's default. The
-   *    session stores it, so it runs in the same harness for good;
+   *    session stores it, so it runs in the same harness for good. The
+   *    output schema is checked against it (`requireUsableOutputSchema`):
+   *    the harness must give a structured result, and the schema must stay
+   *    inside the supported subset. That happens before a runner is chosen,
+   *    so the answer is the same when no machine is connected;
    * 1. the runner: the one named, or else the first placeable runner that can
    *    run the account in the harness (`ProviderAccountRunners`);
    * 2. the access mode: the nearest one at or below the requested mode that
@@ -520,7 +561,8 @@ const make = Effect.gen(function* () {
    * the harness supports no such access mode, or no model was requested and
    * no runner has reported a model list for the account in the harness yet,
    * and with `Validation` for an unknown account, harness, runner or
-   * option.
+   * option, or for an output schema that the harness cannot give a result for
+   * or that breaks the supported subset (on the path `outputSchema`).
    */
   const resolveStartSettings = (request: {
     readonly providerAccountId: string;
@@ -532,6 +574,8 @@ const make = Effect.gen(function* () {
     /** The model asked for, or undefined for the runner's default. */
     readonly model: string | undefined;
     readonly options: ModelSelection["options"];
+    /** The schema the session's result must match, or undefined for none. */
+    readonly outputSchema: SessionSpec["outputSchema"];
   }): Effect.Effect<
     {
       readonly harnessId: string;
@@ -546,6 +590,7 @@ const make = Effect.gen(function* () {
         request.providerAccountId,
         request.harnessId,
       );
+      yield* requireUsableOutputSchema(request.outputSchema, definition);
       const available = yield* accountRunners.list(request.providerAccountId, harnessId);
       const hostingRunnerId = yield* request.runnerId === undefined
         ? choosePlacement(available)
@@ -665,18 +710,36 @@ const make = Effect.gen(function* () {
     ACCESS_MODE_CHAIN.indexOf(requested) <= ACCESS_MODE_CHAIN.indexOf(agent.accessMode);
 
   /**
-   * Checks the output schema against the subset every harness supports.
-   * Returns the schema, or fails with a validation error for each rule it
-   * breaks. The check runs before anything is written, so an invalid schema
-   * leaves no session behind.
+   * Checks that a session may run with this output schema in this harness.
+   * Succeeds when there is no schema. Otherwise fails with a validation error
+   * on `outputSchema`, and names the first problem that applies:
+   *
+   * 1. the harness cannot give a structured result: one issue, and the schema
+   *    is not looked at;
+   * 2. the schema breaks a rule of the subset that every harness giving
+   *    structured results supports: one issue for each rule it breaks.
+   *
+   * The check runs before anything is written, so a refused schema leaves no
+   * session behind.
    */
-  const validateOutputSchema = (
+  const requireUsableOutputSchema = (
     schema: SessionSpec["outputSchema"],
-  ): Effect.Effect<SessionSpec["outputSchema"], Validation> => {
-    if (schema === undefined) return Effect.succeed(undefined);
+    definition: Pick<RegisteredHarness, "displayName" | "declared">,
+  ): Effect.Effect<void, Validation> => {
+    if (schema === undefined) return Effect.void;
+    if (definition.declared.structuredOutput === "unsupported") {
+      return Effect.fail(
+        createValidationError([
+          {
+            path: ["outputSchema"],
+            message: `${definition.displayName} cannot give a structured result. Leave out the output schema, or run on another harness.`,
+          },
+        ]),
+      );
+    }
     const issues = lintOutputSchema(schema);
     return issues.length === 0
-      ? Effect.succeed(schema)
+      ? Effect.void
       : Effect.fail(
           createValidationError(
             issues.map((issue) => ({ path: ["outputSchema"], message: issue })),
@@ -879,24 +942,65 @@ const make = Effect.gen(function* () {
     );
 
   /**
-   * Writes the workspace and the session in one transaction, joining the
-   * caller's when there is one. Returns the new session's id, the workspace
-   * frame the runner must be told about after the commit, if any, and the id
-   * of the Task made for the session, if any (`SessionService.create` decides
-   * the session's Task).
+   * Checks a list of MCP Server ids the spawn was given, and returns it.
+   * Fails with `Validation`.
+   */
+  const checkMcpServerIds = (
+    ids: ReadonlyArray<string>,
+  ): Effect.Effect<ReadonlyArray<string>, Validation | SqlError> =>
+    Effect.as(mcpServerLists.checkList(ids, ["mcpServerIds"]), ids);
+
+  /**
+   * Returns the ids of the MCP Servers a Thread starts with when its spawn
+   * gives no list (spec 21 section 4.3):
+   *
+   * - a Thread a session starts gets a copy of the calling session's list;
+   * - a Thread the user starts gets the list of its Project, or, when it has
+   *   no Project, the user's setting `thread.mcpServerIds`. A Thread in a
+   *   Project never reads the setting.
+   *
+   * The caller's and the Project's list are copied as they are: they were
+   * checked when they were written, and a delete of a server removes it from
+   * them in its own transaction. The setting is not rewritten by a delete, so
+   * the read drops the ids of deleted servers
+   * (`SettingsOperations.readThreadMcpServerIds`). Nothing else can have
+   * changed in it, because a server's name is fixed. Run it inside the
+   * transaction that writes the session, so a server deleted at the same
+   * moment cannot slip into the list.
+   */
+  const chooseDefaultMcpServerIds = (
+    actor: Actor,
+    caller: StoredSession | undefined,
+    project: Option.Option<{ readonly mcpServerIds: ReadonlyArray<string> }>,
+  ): Effect.Effect<ReadonlyArray<string>, SettingError | SqlError> =>
+    Effect.gen(function* () {
+      if (caller !== undefined) return caller.mcpServers.map((entry) => entry.mcpServerId);
+      if (Option.isSome(project)) return project.value.mcpServerIds;
+      // A run or a plugin cannot start a Thread (refused before this), so the
+      // actor here is the user.
+      if (actor._tag !== "user") return [];
+      return yield* settingsOperations.readThreadMcpServerIds(actor.userId);
+    });
+
+  /**
+   * Writes the workspace and the session `sessionId` in one transaction,
+   * joining the caller's when there is one. The caller mints the id, so a
+   * Task made for the session before this runs can already name it as its
+   * lead. Returns the workspace frame the runner must be told about after the
+   * commit, if any, and the id of the Task made for the session, if any
+   * (`SessionService.create` decides the session's Task).
    */
   const writeSession = (
+    sessionId: string,
     open: Placing,
   ): Effect.Effect<
     {
-      readonly sessionId: string;
       readonly frame: WorkspaceProvision | undefined;
       readonly madeTaskId: string | undefined;
     },
     Validation | NotFound | InvalidState | SqlError
   > =>
     Effect.gen(function* () {
-      const sessionId = uuidToString(mintUuid());
       const { frame, madeTaskId } = yield* withTransaction(
         sql,
         Effect.gen(function* () {
@@ -934,7 +1038,9 @@ const make = Effect.gen(function* () {
             prompt: open.prompt,
             attachments: open.attachments,
             title: open.title,
+            titleParts: open.titleParts,
             role: open.role,
+            mcpServerIds: open.mcpServerIds,
             kind: open.kind,
             payload: open.payload,
             projectId: open.projectId,
@@ -953,7 +1059,7 @@ const make = Effect.gen(function* () {
           return { frame: opened.frame, madeTaskId };
         }),
       );
-      return { sessionId, frame, madeTaskId };
+      return { frame, madeTaskId };
     });
 
   /**
@@ -999,6 +1105,10 @@ const make = Effect.gen(function* () {
    * `NotFound` or `InvalidState` when the call named a Task that is missing,
    * deleted or finished.
    *
+   * `sessionId` is the id the new session gets. The caller mints it, so
+   * `prepare` can name the session in a Task it makes for it first
+   * (`session.spawn` with `newTask`).
+   *
    * `prepare` builds the `Placing` and is the part of the call that can be
    * refused. It runs inside the transaction, so it may wait on nothing but the
    * database and short local checks (spec 04, the transaction rule). The
@@ -1018,6 +1128,7 @@ const make = Effect.gen(function* () {
   const place = <E>(
     operation: DedupOperation,
     dedupKey: string | undefined,
+    sessionId: string,
     prepare: Effect.Effect<Placing, E>,
   ): Effect.Effect<Session, E | Validation | NotFound | InvalidState | SqlError> =>
     promotion.whenServing(
@@ -1026,19 +1137,21 @@ const make = Effect.gen(function* () {
           sql,
           Effect.gen(function* () {
             if (dedupKey !== undefined) {
-              const sessionId = yield* dedupKeys.findResultId(operation, dedupKey);
-              if (sessionId !== undefined) return { _tag: "existing" as const, sessionId };
+              const existingSessionId = yield* dedupKeys.findResultId(operation, dedupKey);
+              if (existingSessionId !== undefined) {
+                return { _tag: "existing" as const, sessionId: existingSessionId };
+              }
             }
             const open = yield* prepare;
-            const written = yield* writeSession(open);
+            const written = yield* writeSession(sessionId, open);
             if (dedupKey !== undefined) {
-              yield* dedupKeys.recordDedupKey(operation, dedupKey, written.sessionId);
+              yield* dedupKeys.recordDedupKey(operation, dedupKey, sessionId);
             }
             return { _tag: "created" as const, open, ...written };
           }),
         );
         if (saved._tag === "existing") return yield* readSessionRecord(saved.sessionId);
-        const { open, sessionId, frame, madeTaskId } = saved;
+        const { open, frame, madeTaskId } = saved;
         yield* tellRunnerAndDispatch(open.runnerId, frame);
         // Read back instead of using the inserted row, so the caller sees
         // `starting` when dispatch started the session at once, not `queued`.
@@ -1048,7 +1161,12 @@ const make = Effect.gen(function* () {
         // text to title. The call also runs when spawn gave a role, because
         // the title still needs it. A fork of a Thread is a Thread.
         if (open.agentId === undefined && open.prompt.trim() !== "") {
-          yield* startThreadTitle(session.id, open.prompt, madeTaskId);
+          const words = open.titleParts?.words ?? open.prompt;
+          yield* startThreadTitle(
+            session.id,
+            words.trim() === "" ? open.prompt : words,
+            madeTaskId,
+          );
         }
         return session;
       }),
@@ -1120,6 +1238,7 @@ const make = Effect.gen(function* () {
           requestedAccessMode: agent.accessMode,
           model: agent.model?.model,
           options: agent.model?.options ?? {},
+          outputSchema: undefined,
         });
         const defaults = yield* settings.allForUser(user.userId);
         const core = yield* memory.read(agent.id, MEMORY_CORE);
@@ -1140,7 +1259,7 @@ const make = Effect.gen(function* () {
           timeouts: buildConversationTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
-        const { frame } = yield* writeSession({
+        const { frame } = yield* writeSession(uuidToString(mintUuid()), {
           permissionProfileId: agent.permissionProfileId,
           agentId: agent.id,
           conversationId: request.conversationId,
@@ -1243,8 +1362,8 @@ const make = Effect.gen(function* () {
           requestedAccessMode,
           model: request.model ?? agentSelection?.model,
           options: request.options ?? agentSelection?.options ?? {},
+          outputSchema: request.outputSchema,
         });
-        const outputSchema = yield* validateOutputSchema(request.outputSchema);
 
         const spec = {
           providerAccountId: agent.providerAccountId,
@@ -1255,11 +1374,12 @@ const make = Effect.gen(function* () {
           accessMode,
           systemPrompt: agent.systemPrompt,
           ...(agent.disallowedTools.length === 0 ? {} : { disallowedTools: agent.disallowedTools }),
-          ...(outputSchema === undefined ? {} : { outputSchema }),
+          ...(request.outputSchema === undefined ? {} : { outputSchema: request.outputSchema }),
           timeouts: buildStepSessionTimeouts(yield* settings.all()),
         } satisfies SessionSpec;
 
-        const { sessionId, frame } = yield* writeSession({
+        const sessionId = uuidToString(mintUuid());
+        const { frame } = yield* writeSession(sessionId, {
           permissionProfileId: agent.permissionProfileId,
           agentId: agent.id,
           conversationId: undefined,
@@ -1348,14 +1468,86 @@ const make = Effect.gen(function* () {
      * With a `dedupKey` the caller can retry safely. A repeat by the same
      * actor returns the first call's session, read as it is now, and places
      * nothing; no other field of the repeat is compared. The key is looked up
-     * after the grant check and the decode, in the transaction that writes the
-     * session and before anything else in it, so a repeat succeeds even when
-     * the call could no longer be placed.
+     * after the grant check and the decode, before anything is read at a
+     * source, and again in the transaction that writes the session and before
+     * anything else in it, so a repeat succeeds even when the call could no
+     * longer be placed.
+     *
+     * With `newTask`, the Thread starts on a new Task made from External
+     * Entities, in the same transaction as the session. Only the user may
+     * send it: a session fails with `Forbidden`. Before the transaction, the
+     * things are prepared as `takeOn` prepares one, so a thing Hercule holds
+     * only in part is read at its source (`prepareThingsForTask`); an unknown
+     * thing fails with `NotFound` and one that cannot be taken on with
+     * `InvalidState`. Inside it, `takeOnAsOneTask` stores what was read and
+     * makes the Task. A thing that changed since the read, or is already on an
+     * active Task, fails the call with `Conflict`. Nothing is written when
+     * the call fails.
+     *
+     * With `context`, the controller appends a block that describes those
+     * things after the user's words (`buildPromptContext`), and that text is
+     * the session's first input. `context` needs `task.read` and
+     * `signal.query`, refused before any source is read, and works with or
+     * without `newTask`: the two lists are independent. The block's origin is
+     * read before the transaction, because the group read scans the link graph
+     * and stays off the writer. Its entries are read after the take-on, inside
+     * the transaction. A prompt that grows past
+     * `MAX_PROMPT_LENGTH` fails with `Validation` at `context`. The Thread's
+     * title is made from the user's words (`titleParts` and `buildTitle`), and
+     * so is its generation (`startThreadTitle`). A Thread with context and no
+     * words gets a title from the first thing, and a generated one from the
+     * block.
      */
     placeSession: (input: SessionSpawnInput): Effect.Effect<Session, PlaceError | NotFound> =>
       Effect.gen(function* () {
         const actor = yield* requireGrant("session.spawn");
         const decoded = yield* Effect.mapError(decodeSpawn(input), createDecodeValidationError);
+        if (decoded.newTask !== undefined && actor._tag !== "user") {
+          return yield* Effect.fail(createForbiddenError("session.spawn", NEW_TASK_IS_THE_USERS));
+        }
+        if (decoded.mcpServerIds !== undefined) {
+          yield* requireMcpManage;
+          if (decoded.agentId !== undefined) {
+            return yield* Effect.fail(
+              createValidationError([
+                { path: ["mcpServerIds"], message: AGENT_MCP_SERVERS_REFUSED },
+              ]),
+            );
+          }
+        }
+        // A repeat of a call that already committed returns its session before
+        // anything is read: the things may have become unreadable since (the
+        // plugin was disabled, the account lost access), and the repeat must
+        // still succeed. The same lookup runs again inside `place`'s
+        // transaction, which is the one that decides.
+        const contextEntityIds = decoded.context?.map((reference) => reference.entityId);
+        if (
+          (decoded.newTask !== undefined || contextEntityIds !== undefined) &&
+          decoded.dedupKey !== undefined
+        ) {
+          const savedId = yield* dedupKeys.findResultId("session.spawn", decoded.dedupKey);
+          if (savedId !== undefined) return yield* readSessionRecord(savedId);
+        }
+        // The origin of the context is read here, outside the transaction,
+        // because deciding it scans the link graph and that must not run on
+        // the single writer. The read also checks the grants the context
+        // needs, so a caller without them is refused before any source is
+        // read for `newTask`.
+        const context =
+          contextEntityIds === undefined
+            ? undefined
+            : {
+                entityIds: contextEntityIds,
+                labelRef: yield* externalEntities.readGroupLabelRef(contextEntityIds),
+              };
+        // Reading the things at their source can take seconds, so it happens
+        // here, before the transaction that writes the session.
+        const prepared =
+          decoded.newTask === undefined
+            ? undefined
+            : yield* externalEntities.prepareThingsForTask(decoded.newTask.entityIds);
+        // Minted here so the Task `newTask` makes can name the Thread as its lead.
+        const sessionId = uuidToString(mintUuid());
         const prepareSpawn = Effect.gen(function* () {
           if (decoded.agentId !== undefined) yield* refuseAgentOwnedFields(decoded);
           // The calling session, when a session spawns: its spawn runs next to
@@ -1412,7 +1604,6 @@ const make = Effect.gen(function* () {
               return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_ACCESS_MODE));
             }
           }
-          const outputSchema = yield* validateOutputSchema(decoded.outputSchema);
           const projectId = decoded.projectId ?? threadDefaults?.projectId;
           // A project the call names must be live. One inherited from the
           // caller was checked when its defaults were copied.
@@ -1423,6 +1614,13 @@ const make = Effect.gen(function* () {
               createValidationError([{ path: ["projectId"], message: NO_SUCH_PROJECT_NAMED }]),
             );
           }
+          // An Agent's session has no MCP Servers yet.
+          const mcpServerIds =
+            decoded.mcpServerIds !== undefined
+              ? yield* checkMcpServerIds(decoded.mcpServerIds)
+              : agent === undefined
+                ? yield* chooseDefaultMcpServerIds(actor, caller, project)
+                : [];
           // A Thread that names no model starts on its project's default entry
           // when the project has a profile (spec 06 section 17.9). An Agent
           // keeps its own entry.
@@ -1503,6 +1701,7 @@ const make = Effect.gen(function* () {
             requestedAccessMode,
             model: decoded.model ?? agent?.model?.model ?? defaultModel,
             options: decoded.options ?? defaultOptions ?? {},
+            outputSchema: decoded.outputSchema,
           }).pipe(
             Effect.mapError((error) =>
               caller !== undefined &&
@@ -1529,9 +1728,44 @@ const make = Effect.gen(function* () {
             ...(agent === undefined || agent.disallowedTools.length === 0
               ? {}
               : { disallowedTools: agent.disallowedTools }),
-            ...(outputSchema === undefined ? {} : { outputSchema }),
+            ...(decoded.outputSchema === undefined ? {} : { outputSchema: decoded.outputSchema }),
             timeouts: buildTimeouts(yield* settings.all()),
           } satisfies SessionSpec;
+
+          // The Task is made last, after every refusal that writes nothing, and
+          // before the session is stored: the session then joins it by the
+          // ordinary rule for a named Task. A Task with a chosen title is
+          // never one the generated title renames, because the join made no
+          // Task (`madeTaskId` stays undefined).
+          const madeTask =
+            decoded.newTask === undefined || prepared === undefined
+              ? undefined
+              : yield* externalEntities.takeOnAsOneTask(prepared, {
+                  title: decoded.newTask.title,
+                  projectId: Option.isSome(project) ? projectId : undefined,
+                  leadSessionId: sessionId,
+                });
+
+          // The entries are read after the take-on, so a thing that was read
+          // at its source for the Task carries the fields it was stored with.
+          const promptContext =
+            context === undefined
+              ? undefined
+              : yield* externalEntities.buildPromptContext(context.entityIds, context.labelRef);
+          const prompt =
+            promptContext === undefined
+              ? decoded.prompt
+              : appendPromptContext(decoded.prompt, promptContext);
+          if (prompt.length > MAX_PROMPT_LENGTH) {
+            return yield* Effect.fail(
+              createValidationError([
+                {
+                  path: ["context"],
+                  message: `The words and the description of the context together are ${String(prompt.length)} characters, and a prompt holds at most ${String(MAX_PROMPT_LENGTH)}. Send fewer things or shorter words.`,
+                },
+              ]),
+            );
+          }
 
           return {
             permissionProfileId: profileId,
@@ -1543,15 +1777,25 @@ const make = Effect.gen(function* () {
             requestedAccessMode,
             parentSessionId: undefined,
             spec,
-            prompt: decoded.prompt,
+            prompt,
             attachments: decoded.attachments ?? [],
             title: undefined,
+            titleParts:
+              promptContext === undefined
+                ? undefined
+                : {
+                    words: decoded.prompt,
+                    firstThingTitle: promptContext.things
+                      .map((thing) => flattenToOneLine(thing.title ?? ""))
+                      .find((title) => title.length > 0),
+                  },
             role: decoded.role,
+            mcpServerIds,
             kind: "session.spawned",
             projectId,
             taskSource: {
               _tag: "joining",
-              requestedTaskId: decoded.taskId,
+              requestedTaskId: madeTask?.taskId ?? decoded.taskId,
               callerTaskId: caller?.taskId ?? undefined,
             },
             workspace,
@@ -1569,7 +1813,7 @@ const make = Effect.gen(function* () {
           } satisfies Placing;
         });
 
-        return yield* place("session.spawn", decoded.dedupKey, prepareSpawn);
+        return yield* place("session.spawn", decoded.dedupKey, sessionId, prepareSpawn);
       }),
 
     /**
@@ -1586,6 +1830,10 @@ const make = Effect.gen(function* () {
      * open a Thread with a prompt of its own choosing, which `session.spawn`
      * refuses without the grant. Forking an Agent's session needs no
      * `thread.start`.
+     *
+     * Fails with `InvalidState` when the parent's harness declares
+     * `fork: "unsupported"`. Resuming a session is not a fork and is not
+     * affected (it is `session.input`).
      *
      * The fork takes the parent's profile rather than the user's thread
      * defaults. So a session may fork a session only from a parent on its own
@@ -1627,6 +1875,25 @@ const make = Effect.gen(function* () {
           if (actor._tag === "session" && parent.permissionProfileId !== actor.profileId) {
             return yield* Effect.fail(createForbiddenError("session.spawn", NOT_ITS_PROFILE));
           }
+          // Asked before the resume check, which tells the user to stop a live
+          // parent: nobody should stop a session for a fork that can never
+          // happen. A harness this build does not carry passes here and is
+          // refused by `resolveHarnessChoice` below.
+          const parentHarness = (yield* host.harnesses()).find(
+            (harness) => harness.id === parent.harnessId,
+          );
+          if (parentHarness?.declared.fork === "unsupported") {
+            return yield* Effect.fail(
+              createInvalidStateError(
+                `${parentHarness.displayName} cannot fork a thread. Start a new thread and tell it what to build on.`,
+              ),
+            );
+          }
+          // A fork a session makes copies that session's list, and a fork the
+          // user makes copies its parent's. An Agent's lineage has no list yet.
+          const listSource = actor._tag === "session" ? yield* one(actor.sessionId) : parent;
+          const mcpServerIds =
+            parent.agentId === null ? listSource.mcpServers.map((entry) => entry.mcpServerId) : [];
           const nativeSessionId = yield* resumableNativeSession(parent);
           // Called only for its failures: it fails when the account can no
           // longer run in the harness, or this build no longer carries it. It
@@ -1666,6 +1933,7 @@ const make = Effect.gen(function* () {
             // A fork takes no role from its parent: a fork of a Thread gets a
             // generated one, like any Thread.
             role: undefined,
+            mcpServerIds,
             kind: "session.continued",
             projectId: parent.projectId ?? undefined,
             // A fork takes its parent's Task when that is live, and no fork
@@ -1682,7 +1950,7 @@ const make = Effect.gen(function* () {
           } satisfies Placing;
         });
 
-        return yield* place("session.continue", dedupKey, prepareFork);
+        return yield* place("session.continue", dedupKey, uuidToString(mintUuid()), prepareFork);
       }),
   };
 });
@@ -1700,9 +1968,11 @@ export const PlacementLayer: Layer.Layer<
   | RunnerConnections
   | PermissionProfiles
   | Settings
+  | SettingsOperations
   | PluginHost
   | Dispatch
   | PromotionState
   | TextGeneration
   | ProviderAccountRunners
+  | ExternalEntityService
 > = Layer.effect(Placement)(make);

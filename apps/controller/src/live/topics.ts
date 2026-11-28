@@ -62,7 +62,7 @@ import {
   type Validation,
 } from "@hercule/contract";
 import type { SubagentId } from "@hercule/protocol";
-import { AfterCommit, type Change } from "../db";
+import { AfterCommit, RecordChanges, RecordChangesLayer, type Change } from "../db";
 import { readEventsAfter, readLogHead } from "../events";
 import { agentExists, readTranscriptHead, readTranscriptRowsAfter } from "../sessions";
 
@@ -662,6 +662,8 @@ const make = Effect.gen(function* () {
             taps.push(change);
             continue;
           }
+          // No live topic carries a profile's grants.
+          if (change._tag === "profileGrants") continue;
           const collect = isSlowPaced(change) ? collectSlowChange : collectChange;
           yield* collect(change);
         }
@@ -695,16 +697,24 @@ export class LiveTopics extends Context.Service<LiveTopics, Effect.Success<typeo
 ) {}
 
 /**
- * Provides both the Live Topics and the `AfterCommit` hook that feeds them.
- * They are one layer because they are one object: what a commit publishes is
- * what subscribers receive. Wired separately, a controller could hold
- * subscriptions but never hear about commits, and the socket would never
- * push.
+ * Provides the Live Topics, the `RecordChanges` of the in-process followers,
+ * and the one `AfterCommit` hook that feeds both. They are one layer because
+ * they are one object: what a commit publishes is what every subscriber
+ * receives. Wired separately, a controller could hold subscriptions but never
+ * hear about commits, the socket would never push, and a code path that gets
+ * `AfterCommit` alone, such as the fiber of a run, could commit a change that
+ * a follower never sees.
  */
-export const LiveTopicsLayer: Layer.Layer<LiveTopics | AfterCommit, never, SqlClient.SqlClient> =
-  Layer.effect(AfterCommit)(
-    Effect.gen(function* () {
-      const topics = yield* LiveTopics;
-      return { publish: topics.publish };
-    }),
-  ).pipe(Layer.provideMerge(Layer.effect(LiveTopics)(make)));
+export const LiveTopicsLayer: Layer.Layer<
+  LiveTopics | RecordChanges | AfterCommit,
+  never,
+  SqlClient.SqlClient
+> = Layer.effect(AfterCommit)(
+  Effect.gen(function* () {
+    const topics = yield* LiveTopics;
+    const recordChanges = yield* RecordChanges;
+    return {
+      publish: (changes) => Effect.andThen(topics.publish(changes), recordChanges.publish(changes)),
+    };
+  }),
+).pipe(Layer.provideMerge(Layer.mergeAll(Layer.effect(LiveTopics)(make), RecordChangesLayer)));

@@ -120,7 +120,7 @@ export function GitHubStep({
         <>
           <StepKicker step="github" />
           <h1 className="st-h">GitHub is connected</h1>
-          <p className="st-sub">What deserves your attention shows up in Intake as a Proposal.</p>
+          <p className="st-sub">What deserves your attention shows up on the Inbox.</p>
           <MarkedCard
             mark={<GitHubMark size={18} />}
             name={`Connected as ${state.account}`}

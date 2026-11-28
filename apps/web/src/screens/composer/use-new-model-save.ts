@@ -52,19 +52,20 @@ export function useNewModelSave(client: HerculeClient) {
     if (saving.some((each) => isSameRow(each, key))) return;
     setRefusal(null);
     setSaving((current) => [...current, key]);
-    try {
-      await save.mutateAsync({
+    await save
+      .mutateAsync({
         profileId,
         newModelEdit: { action, providerAccountId: row.providerAccountId, model: row.model },
+      })
+      .catch((error: unknown) => {
+        setRefusal({
+          ...key,
+          message: `The change was not saved. ${readErrorMessage(error)}`,
+        });
+      })
+      .finally(() => {
+        setSaving((current) => current.filter((each) => !isSameRow(each, key)));
       });
-    } catch (error) {
-      setRefusal({
-        ...key,
-        message: `The change was not saved. ${readErrorMessage(error)}`,
-      });
-    } finally {
-      setSaving((current) => current.filter((each) => !isSameRow(each, key)));
-    }
   };
 
   return {

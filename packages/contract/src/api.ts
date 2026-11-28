@@ -7,7 +7,7 @@
  * second naming scheme.
  */
 import * as HttpApi from "effect/http-api/HttpApi";
-import { API_PREFIX } from "./operations";
+import { API_PREFIX } from "./api-prefix";
 import { agent } from "./groups/agent";
 import { apiKey } from "./groups/api-key";
 import { assistant } from "./groups/assistant";
@@ -41,6 +41,7 @@ import { secret } from "./groups/secret";
 import { session } from "./groups/session";
 import { settings } from "./groups/settings";
 import { setup } from "./groups/setup";
+import { mcpServer } from "./groups/mcp-server";
 import { skill } from "./groups/skill";
 import { subscription } from "./groups/subscription";
 import { task } from "./groups/task";
@@ -97,6 +98,7 @@ export const api = HttpApi.make("hercule")
     memory,
     wikiPage,
     skill,
+    mcpServer,
     attachment,
     controller,
   )

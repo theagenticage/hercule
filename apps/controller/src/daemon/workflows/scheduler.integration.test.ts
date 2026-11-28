@@ -7,7 +7,8 @@
  * for, and a real Bun listener cannot use a `TestClock`. So each test moves
  * the trigger's next scheduled time instead, straight in the database:
  *
- * 1. The test saves a workflow whose cron trigger fires at 02:00 UTC, and
+ * 1. The test saves a workflow whose cron trigger fires every day at
+ *    `SCHEDULED_HOUR_UTC`, and
  *    waits until the Scheduler has computed the trigger's next scheduled
  *    time. From then on the Scheduler leaves the row alone until that time
  *    comes, so the update in the next step cannot race a pass.
@@ -45,8 +46,18 @@ vi.setConfig({ testTimeout: WAIT_DEADLINE_MS * 2 + 10_000 });
 const TRIGGER_ID = "nightly";
 
 /**
- * A workflow whose cron trigger fires every night at 02:00 UTC and maps both
- * times of the tick onto the run's inputs. `previousFiredAt` accepts null,
+ * The hour of day, in UTC, at which the test workflow's cron trigger fires:
+ * twelve hours away from the hour the test run starts in. The Scheduler reads
+ * the real clock, so a schedule near the current time would make the outcome
+ * depend on when the test runs. A scheduled time just passed is within the
+ * minute a trigger may fire late, and a run that straddles a scheduled time
+ * sees it come due mid-test. Twelve hours away, no run comes near one.
+ */
+const SCHEDULED_HOUR_UTC = (new Date().getUTCHours() + 12) % 24;
+
+/**
+ * A workflow whose cron trigger fires every day at `SCHEDULED_HOUR_UTC` and
+ * maps both times of the tick onto the run's inputs. `previousFiredAt` accepts null,
  * because a trigger's first tick has no previous firing.
  */
 const NIGHTLY_REPORT_SOURCE = `name: Nightly report
@@ -63,7 +74,7 @@ triggers:
   - id: ${TRIGGER_ID}
     kind: start
     on:
-      schedule: "0 2 * * *"
+      schedule: "0 ${SCHEDULED_HOUR_UTC} * * *"
       timezone: UTC
     inputs:
       scheduledFor: event.payload.scheduledFor
@@ -131,23 +142,21 @@ const moveSchedule = async (
 const computeInstantBeforeNow = (milliseconds: number): string =>
   new Date(Date.now() - milliseconds).toISOString();
 
-/** Returns the latest 02:00 UTC at or before `now`: the last time the schedule came due. */
+/** Returns the latest scheduled time at or before `now`: the last time the schedule came due. */
 const computeLatestScheduledTime = (now: Date): Date => {
   const latest = new Date(now);
-  latest.setUTCHours(2, 0, 0, 0);
+  latest.setUTCHours(SCHEDULED_HOUR_UTC, 0, 0, 0);
   if (latest > now) latest.setUTCDate(latest.getUTCDate() - 1);
   return latest;
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-/**
- * Checks that `nextFireAt` is a 02:00 UTC in the coming day. The check does
- * not compute the exact night from the clock, so a test that runs across
- * 02:00 UTC still passes.
- */
-const expectNextNightlyTime = (nextFireAt: string | undefined): void => {
-  expect(nextFireAt).toMatch(/T02:00:00\.000Z$/);
+/** Checks that `nextFireAt` is the scheduled time of day, within the coming day. */
+const expectNextScheduledTime = (nextFireAt: string | undefined): void => {
+  expect(nextFireAt).toMatch(
+    new RegExp(`T${String(SCHEDULED_HOUR_UTC).padStart(2, "0")}:00:00\\.000Z$`),
+  );
   const untilNext = Date.parse(nextFireAt ?? "") - Date.now();
   expect(untilNext).toBeGreaterThan(0);
   expect(untilNext).toBeLessThanOrEqual(DAY_MS);
@@ -208,11 +217,11 @@ describe("a cron trigger whose scheduled time comes", () => {
         run.id,
       ]);
 
-      // The trigger records the firing and waits for the next 02:00.
+      // The trigger records the firing and waits for the next scheduled time.
       const fired = await readTrigger(base, token, { workflowId, triggerId: TRIGGER_ID });
       expect(fired.lastFiredAt).toBe(scheduledFor);
       expect(fired.skippedTicks).toBeUndefined();
-      expectNextNightlyTime(fired.nextFireAt);
+      expectNextScheduledTime(fired.nextFireAt);
       expect(await listCronTicks(controller)).toHaveLength(1);
     });
   });
@@ -285,9 +294,9 @@ describe("a cron trigger more than a minute late", () => {
       });
 
       expect(skipped.skippedTicks?.from).toBe(missedFrom);
-      // The stretch ends at the last 02:00 before the pass, and the trigger
-      // waits for the 02:00 after it.
-      expectNextNightlyTime(skipped.nextFireAt);
+      // The stretch ends at the last scheduled time before the pass, and the
+      // trigger waits for the one after it.
+      expectNextScheduledTime(skipped.nextFireAt);
       expect(skipped.skippedTicks?.until).toBe(
         new Date(Date.parse(skipped.nextFireAt ?? "") - DAY_MS).toISOString(),
       );

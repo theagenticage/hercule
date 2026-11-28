@@ -14,6 +14,7 @@ interface RowField {
   readonly flag?: string;
   readonly help?: string;
   readonly resolves?: string;
+  readonly oneOf?: unknown;
 }
 
 interface Row {
@@ -151,13 +152,14 @@ describe("the spelling of a command", () => {
 describe("a command's fields against the schema", () => {
   it("has exactly the fields of the schema, minus the ones the row hides", () => {
     for (const command of COMMANDS) {
+      // A flag that fills one key of an object field stands for that field.
       const reflected = [...command.positionals, ...command.payload, ...command.query].map(
-        (field) => field.name,
+        (field) => field.within ?? field.name,
       );
       const shown = Object.entries(readRow(command.id).fields ?? {})
         .filter(([, field]) => field.hidden !== true)
         .map(([name]) => name);
-      expect(reflected.sort(), readSpelling(command)).toEqual(shown.sort());
+      expect([...new Set(reflected)].sort(), readSpelling(command)).toEqual(shown.sort());
     }
   });
 
@@ -305,7 +307,33 @@ describe("a command's fields against the schema", () => {
       "runner",
       "core",
       "provider-account",
+      "mcp-server",
     ]);
+  });
+
+  // `queryInbox` is a union of four modes. The command line gets the fields of
+  // all of them, and sends the mode it is given.
+  it("takes the fields of a payload that is a union of modes, once each", () => {
+    const list = findCommandByWords(["entity", "list"])!;
+    expect(list.payload.map((field) => field.spelling)).toEqual([
+      "mode",
+      "list",
+      "clause",
+      "text",
+      "after",
+    ]);
+    expect(list.payload.find((field) => field.name === "mode")).toMatchObject({
+      optional: true,
+      defaultText: "first",
+    });
+    expect([...list.payload.find((field) => field.name === "mode")!.choices!.keys()]).toEqual([
+      "first",
+      "next",
+      "refresh",
+      "rows",
+    ]);
+    // Only the modes that read it have `after`, so it is optional.
+    expect(list.payload.find((field) => field.name === "after")!.optional).toBe(true);
   });
 
   // Only a row that opts in makes a record field take named values: a record
@@ -324,6 +352,34 @@ describe("a command's fields against the schema", () => {
   });
 });
 
+// A row's `oneOf` form turns one field that is a union of objects into one flag per key of the members.
+describe("a field of several shapes filled from flags", () => {
+  const command = findCommandByWords(["mcp-server", "create"])!;
+  const fields = command.payload;
+
+  it("becomes one field per key, a key two members share counting once", () => {
+    expect(fields.map((field) => [field.spelling, field.name, field.within])).toEqual([
+      ["plugin", "contributionId", "source"],
+      ["connection", "connectionId", "source"],
+      ["name", "name", "source"],
+      ["url", "url", "source"],
+      ["token", "token", "source"],
+    ]);
+    expect(fields.map((field) => field.optional)).toEqual([false, false, true, false, true]);
+    expect(fields.find((field) => field.name === "connectionId")!.resolves).toBe(
+      "connection.query",
+    );
+    expect(fields.filter((field) => field.stdin).map((field) => field.name)).toEqual(["token"]);
+  });
+
+  it("names each entry's selector, fixed values and flags", () => {
+    const [plugin, url] = command.choices[0]!.entries;
+    expect([plugin!.selector.spelling, plugin!.fixed]).toEqual(["plugin", { kind: "plugin" }]);
+    expect([url!.selector.spelling, url!.fixed]).toEqual(["url", { kind: "url" }]);
+    expect(url!.flags.map(({ field }) => field.spelling)).toEqual(["url", "name", "token"]);
+  });
+});
+
 describe("the placeholders a usage line shows", () => {
   const buildUsageShape = (spelled: string): string =>
     findCommandByWords(spelled.split(" "))!.positionals.map(formatPositionalShape).join(" ");
@@ -332,9 +388,14 @@ describe("the placeholders a usage line shows", () => {
   const NAMED: Record<string, string> = {
     "entity search": "<source> <text>",
     "entity add-to-work": "<ref>",
+    "entity group": "<ref>",
     "entity link": "<ref>",
     "entity unlink": "<ref>",
     "entity undo-hand-off": "<run-id>",
+    "entity take-on-together": "<id>...",
+    "entity dismiss": "<id>...",
+    "entity restore": "<id>...",
+    "entity match-project": "<id>...",
     "secret set": "<owner-kind> <owner-id> <name>",
     "subscription create": "<target>",
     "permission request": "<grant>",
@@ -373,9 +434,6 @@ describe("the placeholders a usage line shows", () => {
     "trigger pause": "<workflow-id> <trigger-id>",
     "trigger resume": "<workflow-id> <trigger-id>",
     "signal done": "<signal-id>...",
-    "signal snooze": "<signal-id>...",
-    "signal unsnooze": "<signal-id>...",
-    "signal lower-priority": "<signal-id>...",
     "session done": "<session-id>...",
     "session reopen": "<session-id>...",
     "session archive": "<session-id>...",
@@ -386,6 +444,8 @@ describe("the placeholders a usage line shows", () => {
     "skill read": "<name>",
     "skill delete": "<name>",
     "skill import": "<folder>",
+    "skill propose": "<folder>",
+    "skill reject": "<name> <revision-hash>",
     "runner metrics": "[<runner-id>]",
     "skill diff": "<name> <revision-hash>",
     "skill apply": "<name> <revision-hash>",

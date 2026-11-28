@@ -158,6 +158,7 @@ export const connectionType: ConnectionTypeContribution = {
         {
           name: "pat",
           label: "Personal access token",
+          secret: true,
           help: "A fine-grained or classic token with the scopes for the repositories you want Hercule to see.",
         },
       ],

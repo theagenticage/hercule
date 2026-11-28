@@ -94,6 +94,8 @@ export interface GoldensLocation {
   readonly diffDir: string;
   /** The themes the run did not measure. A golden of such a theme is neither missing nor extra, because a CI shard measures only some themes. Empty for a full run. */
   readonly unmeasuredThemes: ReadonlyArray<string>;
+  /** The screens the run did not measure (`ui:metrics --screens`). A golden of such a screen is neither missing nor extra, in any theme. Empty when every screen is measured. */
+  readonly unmeasuredScreens: ReadonlyArray<string>;
   /** The names of the screenshots the run took, such as `whitehaven/thread-long.png`. */
   readonly names: ReadonlyArray<string>;
 }
@@ -265,11 +267,15 @@ async function listFiles(dir: string): Promise<string[]> {
     .sort();
 }
 
-/** Returns the names of the files in the goldens folder that no screenshot corresponds to. `provenance.json` and the goldens of unmeasured themes are left out. */
+/** Returns the names of the files in the goldens folder that no screenshot corresponds to. `provenance.json` and the goldens of unmeasured themes and screens are left out. */
 async function listExtraGoldens(location: GoldensLocation): Promise<string[]> {
   const known = new Set<string>([...location.names, PROVENANCE_FILE]);
+  const unmeasuredFiles = new Set(location.unmeasuredScreens.map((screen) => `${screen}.png`));
   return (await listFiles(location.goldensDir)).filter(
-    (name) => !known.has(name) && !location.unmeasuredThemes.includes(name.split("/")[0] ?? ""),
+    (name) =>
+      !known.has(name) &&
+      !unmeasuredFiles.has(name.split("/")[1] ?? "") &&
+      !location.unmeasuredThemes.includes(name.split("/")[0] ?? ""),
   );
 }
 

@@ -75,8 +75,9 @@ const pollEntitiesFeed = async (
 
 /** Returns the one inventory a poll reported. */
 const reconciledIssues = (reported: ReportedEntities): EntityInventory => {
-  expect(reported.reconciled).toHaveLength(1);
-  return reported.reconciled[0]!;
+  const inventories = reported.reconciled.filter(({ kind }) => kind === "issue");
+  expect(inventories).toHaveLength(1);
+  return inventories[0]!;
 };
 
 /** Narrows an observation to the full variant, which has concerns. */
@@ -106,12 +107,14 @@ describe("the entities feed's inventory", () => {
       "LinearAssignedIssues",
       "LinearAssignedIssues",
       "LinearIssueContext",
+      "LinearProjects",
     ]);
   });
 
   it("reports an issue as assigned and owned by the user, with its fields for the kind table", async () => {
     const issue = buildFakeIssue(7, {
       priority: 1,
+      project: { id: "project-checkout", name: "Checkout revamp" },
       projectMilestone: { id: "milestone-beta", name: "Beta" },
     });
 
@@ -128,7 +131,11 @@ describe("the entities feed's inventory", () => {
       fields: {
         key: "ENG-7",
         assignee: "Ada Lovelace",
-        priority: 3,
+        team: placeRef("team", "team-eng"),
+        project: placeRef("project", "project-checkout"),
+        status: "Todo",
+        priority: "urgent",
+        priorityLevel: 3,
         milestone: "Beta",
         archived: null,
       },
@@ -279,6 +286,129 @@ describe("the entities feed's inventory", () => {
   });
 });
 
+describe("the entities feed's project listing", () => {
+  const projectInventories = (reported: ReportedEntities) =>
+    reported.reconciled.filter(({ kind }) => kind === "project");
+
+  it("reports every project of the workspace, with its health, in one complete call", async () => {
+    const { reported } = await pollEntitiesFeed([], {
+      prepare: (world) => {
+        world.projects[1]!.health = "atRisk";
+      },
+    });
+
+    const inventories = projectInventories(reported);
+    expect(inventories).toHaveLength(1);
+    expect(inventories[0]!.complete).toBe(true);
+    expect(inventories[0]!.observations.map((observation) => observation.ref)).toEqual([
+      placeRef("project", "project-checkout"),
+      placeRef("project", "project-oncall"),
+    ]);
+    expect(full(inventories[0]!.observations[1])).toMatchObject({
+      kind: "project",
+      title: "On-call tooling",
+      status: "at-risk",
+      concerns: [],
+    });
+  });
+
+  it("lists a project no issue sits in, and makes one call however many pages Linear has", async () => {
+    const { reported, requestNames } = await pollEntitiesFeed([buildFakeIssue(1)], {
+      pageSize: 1,
+    });
+
+    expect(projectInventories(reported)).toHaveLength(1);
+    expect(projectInventories(reported)[0]!.observations).toHaveLength(2);
+    expect(requestNames.filter((name) => name === "LinearProjects")).toHaveLength(2);
+  });
+
+  it("reports each project with the initiatives and teams it is part of", async () => {
+    const { reported } = await pollEntitiesFeed([], {
+      prepare: (world) => {
+        world.projects[0]!.initiativeIds = ["initiative-q4"];
+      },
+    });
+
+    expect(full(projectInventories(reported)[0]!.observations[0]).relations).toEqual({
+      complete: true,
+      partOf: [placeRef("initiative", "initiative-q4"), placeRef("team", "team-eng")],
+      linked: [],
+    });
+  });
+
+  it("reads every page, keeps the smallest refs whatever the order Linear lists in, and asks for pages Linear can afford", async () => {
+    const count = MAX_ENTITY_OBSERVATIONS + 5;
+    const { reported, fake } = await pollEntitiesFeed([], {
+      prepare: (world) => {
+        // More pages than any fixed page limit, listed in reverse of ref order.
+        world.projects = Array.from({ length: count }, (_, index) => ({
+          id: `p-${String(index).padStart(5, "0")}`,
+          name: `Project ${String(index)}`,
+          url: `https://linear.app/acme/project/p-${String(index)}`,
+          teamIds: [],
+        })).reverse();
+      },
+    });
+
+    const listing = fake.requests.filter(({ operationName }) => operationName === "LinearProjects");
+    expect(listing).toHaveLength(Math.ceil(count / 50));
+    expect(listing.every(({ variables }) => variables["first"] === 50)).toBe(true);
+    const [inventory] = projectInventories(reported);
+    expect(inventory!.observations).toHaveLength(MAX_ENTITY_OBSERVATIONS);
+    expect(inventory!.observations[0]!.ref).toBe(placeRef("project", "p-00000"));
+    expect(inventory!.observations.at(-1)!.ref).toBe(
+      placeRef("project", `p-${String(MAX_ENTITY_OBSERVATIONS - 1).padStart(5, "0")}`),
+    );
+  });
+
+  it("still refreshes what the host wants when the project listing fails", async () => {
+    const fake = buildFakeLinear(buildFakeWorld([buildFakeIssue(1)]));
+    fake.world.override = (request) =>
+      request.operationName === "LinearProjects" ? { status: 500, body: {} } : undefined;
+    const { entities, reported } = buildFakeEntities({ team: [placeRef("team", "team-eng")] });
+
+    const result = await runAgainstStub(
+      pollWithConnection("entities", {}, { ...buildIngestHarness().context, entities }),
+      fake,
+    );
+
+    expect(Result.isSuccess(result)).toBe(false);
+    expect(reported.reconciled.map(({ kind }) => kind)).toEqual(["issue"]);
+    expect(reported.refreshed.flat().map(({ ref }) => ref)).toEqual([placeRef("team", "team-eng")]);
+  });
+});
+
+describe("the fields of an issue", () => {
+  it.each([
+    [0, "none", null],
+    [1, "urgent", 3],
+    [2, "high", 3],
+    [3, "medium", 2],
+    [4, "low", 1],
+  ])(
+    "reports Linear's priority %i as %s, and the bars level %s",
+    async (priority, value, level) => {
+      const { reported } = await pollEntitiesFeed([buildFakeIssue(1, { priority })]);
+
+      expect(full(reconciledIssues(reported).observations[0]).fields).toMatchObject({
+        priority: value,
+        priorityLevel: level,
+      });
+    },
+  );
+
+  it("reports no project for an issue outside any project, and the workflow state's name as its status", async () => {
+    const { reported } = await pollEntitiesFeed([
+      buildFakeIssue(1, { state: { id: "state-qa", name: "QA", type: "started" } }),
+    ]);
+
+    expect(full(reconciledIssues(reported).observations[0]).fields).toMatchObject({
+      project: null,
+      status: "QA",
+    });
+  });
+});
+
 describe("the entities feed's refresh", () => {
   /** Reads `issue` through the refresh and returns the one observation it reported. */
   const refreshOne = async (issue: FakeIssue) => {
@@ -393,6 +523,7 @@ describe("the entities feed's request count", () => {
       "LinearAssignedIssues",
       "LinearIssueContext",
       "LinearIssueLookup",
+      "LinearProjects",
     ]);
     expect(fake.requests[3]?.variables["filter"]).toEqual({
       id: { in: wanted.map((ref) => ref.split("/")[1]) },
@@ -412,13 +543,18 @@ describe("the entities feed's request count", () => {
     const { requestNames } = await pollEntitiesFeed(issues);
 
     expect(requestNames.filter((name) => name === "LinearIssueContext")).toHaveLength(3);
-    expect(requestNames).toHaveLength(1 + 1 + 3);
+    expect(requestNames).toHaveLength(1 + 1 + 3 + 1);
   });
 
   it("sends no refresh request when the host wants nothing read", async () => {
     const { requestNames } = await pollEntitiesFeed([buildFakeIssue(1)]);
 
-    expect(requestNames).toEqual(["LinearIdentity", "LinearAssignedIssues", "LinearIssueContext"]);
+    expect(requestNames).toEqual([
+      "LinearIdentity",
+      "LinearAssignedIssues",
+      "LinearIssueContext",
+      "LinearProjects",
+    ]);
   });
 
   it("sends one request for each kind of place the host wants, however many it wants", async () => {
@@ -434,6 +570,7 @@ describe("the entities feed's request count", () => {
       "LinearAssignedIssues",
       "LinearProjectContext",
       "LinearTeamContext",
+      "LinearProjects",
     ]);
   });
 });

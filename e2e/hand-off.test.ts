@@ -11,7 +11,7 @@
  * No agent runs: the workflows are made of the built-in `wait` action, so a
  * run needs no runner and no provider. The refusal of a session's token needs
  * a session, which only a scripted runner can host without an agent, so it is
- * tested in `e2e/desktop/tracking.test.ts`, whose program can import the
+ * tested in `e2e/desktop/signal-hand-off.test.ts`, whose program can import the
  * fleet.
  *
  * Continuing the Task of a plugin signal's thread is not tested here: no

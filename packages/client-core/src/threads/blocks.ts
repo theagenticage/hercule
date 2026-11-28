@@ -19,8 +19,10 @@ import {
   type TranscriptRow,
 } from "@hercule/contract";
 import { readJsonObject, readStringList } from "../json-shape";
+import type { McpServerWarningEntry } from "../mcp-servers/fix";
 import type { AgentState } from "./agent-state";
 import { readFetchedUrl, readToolCallName, summarizeTodoList } from "./item-detail";
+import { findFirstMessageItemId, splitSendingTexts } from "./first-message";
 import { findOpenItem } from "./open-item";
 import { readInputSender } from "./sender";
 import {
@@ -198,6 +200,13 @@ export interface WarningBlock {
   /** The warning's text, as the runner wrote it. */
   readonly message: string;
   readonly at: string;
+  /**
+   * The MCP Servers the warning is about and why, as the controller wrote
+   * them. Absent for a warning that is not about MCP Servers. Kept as the
+   * event has them, so a screen decides each button from the servers as they
+   * are now (`decideWarningFix`).
+   */
+  readonly mcpServers?: readonly McpServerWarningEntry[];
 }
 
 /**
@@ -426,6 +435,7 @@ export const buildThreadBlocks = (
   const openRequestIds = new Set(parkedRequests.map((request) => request.requestId));
   const awaitingItemIds = new Set(parkedRequests.map((request) => request.itemId));
   const slots: Slot[] = [];
+  const firstMessageItemId = findFirstMessageItemId(rows, agent);
   const turns = new Map<string, BuildingTurn>();
   const agents = new Map<string, BuildingAgent>();
   const workItems = new Map<
@@ -533,7 +543,7 @@ export const buildThreadBlocks = (
           slots.push({
             kind: "user",
             key: `user:${event.itemId}`,
-            ...buildUserMessage(event),
+            ...buildUserMessage(event, event.itemId === firstMessageItemId),
             at: event.at,
           });
           turn.boundary = event.at;
@@ -677,6 +687,7 @@ export const buildThreadBlocks = (
           key: `warning:${String(row.position)}`,
           message: event.message,
           at: event.at,
+          ...(event.mcpServers === undefined ? {} : { mcpServers: event.mcpServers }),
         });
         break;
       }
@@ -815,7 +826,8 @@ const findFaceAgent = (
  * block, but above a closing status line, so the agent's status stays the
  * last line. Each block is keyed by its input, is marked `sending`, and
  * names the session whose agent sent it, when another session's agent did
- * (`readInputSender`).
+ * (`readInputSender`). `rows` are the transcript rows `blocks` were built
+ * from: they decide whether the oldest input is the session's first message.
  *
  * Returns `blocks` itself when nothing is sending, so a memoized list keeps
  * its identity.
@@ -823,15 +835,17 @@ const findFaceAgent = (
 export const appendSendingMessages = (
   blocks: readonly ThreadBlock[],
   sending: readonly Input[],
+  rows: readonly TranscriptRow[],
 ): readonly ThreadBlock[] => {
   if (sending.length === 0) return blocks;
-  const messages = sending.map((input): UserBlock => {
+  const sentTexts = splitSendingTexts(rows, sending);
+  const messages = sending.map((input, index): UserBlock => {
     const senderSessionId = readInputSender(input);
     return {
       kind: "user",
       key: `sending:${input.id}`,
       itemId: input.id,
-      text: input.text,
+      ...sentTexts[index]!,
       attachments: input.attachments,
       skills: [],
       steered: false,

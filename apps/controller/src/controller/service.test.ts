@@ -145,7 +145,8 @@ describe("controller.read text generation", () => {
 
     expect(result.textGeneration).toEqual({
       model: null,
-      unavailableReason: expect.stringContaining("pick a model in Settings › System") as unknown,
+      unavailableReason:
+        "Automatic finds no model, because no provider names a small model for it; pick a model in Settings › System",
       lastFailure: null,
     });
   });

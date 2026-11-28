@@ -468,6 +468,18 @@ export const buildConversationBlocks = (input: {
 };
 
 /**
+ * Checks whether a message comes after the block at `index` in `blocks`: a
+ * stored message, a notice, the open reply or any other block that is not a
+ * day stamp. A notice with a message after it is in the past, so the desktop
+ * draws it quietly; only the newest notice is drawn filled. The check reads
+ * the blocks' order only, never their text.
+ */
+export const hasMessageAfter = (
+  blocks: readonly { readonly kind: string }[],
+  index: number,
+): boolean => blocks.some((block, position) => position > index && block.kind !== "stamp");
+
+/**
  * Returns the words beside the assistant's name on the open reply, where a
  * stored reply shows its time:
  *

@@ -595,7 +595,9 @@ describe("Runner > providers", () => {
     // A version inside the tested range gets no remark.
     expect(claude).not.toMatch(/below|above|untested/i);
 
-    expect(readPageText(await findProviderAccountRow("OpenAI"))).toContain("no adapter");
+    expect(readPageText(await findProviderAccountRow("OpenAI"))).toContain(
+      "cannot run the harness",
+    );
   });
 
   it("marks a harness older than the version this build was tested with", async () => {
@@ -639,7 +641,7 @@ describe("Runner > providers", () => {
     const codex = within(codexRow);
     expect(codex.getByRole("button", { name: /install/i }).hasAttribute("disabled")).toBe(true);
     // The reason is shown up front, rather than found out when an install fails.
-    expect(readPageText(codexRow)).toMatch(/no adapter/i);
+    expect(readPageText(codexRow)).toMatch(/cannot run the harness/i);
   });
 
   it("signs in through the dialog and shows the account the machine then reports", async () => {

@@ -186,6 +186,28 @@ const decidePullRequestStatus = (node: PullRequestNode): string => {
   return "open";
 };
 
+/** Returns the `checks` field value of a pull request: its latest commit's rollup, or null when it has none. */
+const decideChecksField = (node: PullRequestNode): string | null => {
+  switch (node.commits.nodes?.[0]?.commit.statusCheckRollup?.state) {
+    case "SUCCESS":
+      return "passing";
+    case "FAILURE":
+    case "ERROR":
+      return "failing";
+    case "PENDING":
+    case "EXPECTED":
+      return "pending";
+    default:
+      return null;
+  }
+};
+
+const REVIEW_FIELD_BY_DECISION: Readonly<Record<string, string>> = {
+  APPROVED: "approved",
+  CHANGES_REQUESTED: "changes",
+  REVIEW_REQUIRED: "required",
+};
+
 /** The reason a card of the user's own pull request gives, by status. A status left out has none. */
 const OWN_PULL_REQUEST_REASONS: Readonly<Record<string, string>> = {
   failing: "checks-failed",
@@ -278,8 +300,13 @@ const buildPullRequestObservation = (
     ...buildItemTexts(node),
     fields: {
       number: node.number,
-      repo,
+      repo: buildRepoRef(repo),
       author: node.author?.login ?? null,
+      checks: decideChecksField(node),
+      review:
+        node.reviewDecision === null
+          ? null
+          : (REVIEW_FIELD_BY_DECISION[node.reviewDecision] ?? null),
       // The kind's `delta` fact reads this text: additions, then deletions.
       diff: `+${String(node.additions)} -${String(node.deletions)}`,
       files: node.changedFiles,
@@ -363,7 +390,7 @@ const buildIssueObservation = (
     ...buildItemTexts(node),
     fields: {
       number: node.number,
-      repo,
+      repo: buildRepoRef(repo),
       assignee: assignees[0] ?? null,
       labels: summarizeLabels(labels),
     },

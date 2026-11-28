@@ -61,8 +61,20 @@ import { TallyPill } from "../subagents/tally-pill";
 import { useStopAgent } from "../use-stop-agent";
 import { AgentRequestDock } from "./agent-request-dock";
 import { ModelPick, OptionsPick } from "./composer-picks";
+import { PlusMenu } from "./plus-menu";
 import { QueuedInputs } from "./queued-inputs";
 import { WorkspaceDetailsTrigger } from "../workspace/details-trigger";
+
+/**
+ * Whether the `+` menu's MCP servers row works while the composer answers an
+ * agent's question. It edits the thread's list, not the answer, so it does.
+ * Set it to `false` to draw the row off, as the attach row is while
+ * answering, with `SERVERS_OFF_WHILE_ANSWERING` as the reason. This is the
+ * one place that decides it. Decided by Rogier, 2026-11-22 (spec 17, the `+`
+ * menu, answer mode).
+ */
+const SERVERS_WORK_WHILE_ANSWERING = true;
+const SERVERS_OFF_WHILE_ANSWERING = "Not while answering a question";
 
 /** What one send carried: the request, and the images and picks it was built from. */
 interface SentSubmission {
@@ -86,7 +98,8 @@ interface SentSubmission {
  * - the dock, while the session waits on a Request, with the pager line
  *   above it when there is one, see `AgentRequestDock`;
  * - the card: the shelf of attached images, the message field, then a row
- *   with Attach, the access mode,
+ *   with the `+` menu (Attach an image, and the thread's MCP servers, see
+ *   `PlusMenu`), the access mode,
  *   the model options when the model has any, the model, Dictate, and Send,
  *   or Stop while a turn runs;
  * - the lip under the card: where the thread works, and on which machine.
@@ -322,6 +335,15 @@ export function ThreadComposer({
           : undefined
       }
       step={answer?.step}
+      renderPlus={(attach) => (
+        <PlusMenu
+          target={{ kind: "started", session }}
+          attach={attach}
+          serversOff={
+            answer !== null && !SERVERS_WORK_WHILE_ANSWERING ? SERVERS_OFF_WHILE_ANSWERING : null
+          }
+        />
+      )}
       historyKey={answer?.historyKey ?? MESSAGE_HISTORY_KEY}
       onFieldBlur={guard.release}
       // Only a composition in the Message Draft holds off a question. While

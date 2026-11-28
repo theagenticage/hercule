@@ -13,6 +13,7 @@ import {
   Plugins,
   registry,
   type RegisteredHarness,
+  type RegisteredMcpServer,
   type RegisteredProvider,
 } from "./index";
 import { asUser, buildPluginStack } from "./testing";
@@ -52,6 +53,7 @@ const SHIPPED = [
         mcpPassthrough: "native",
         disallowedTools: "native",
         structuredOutput: "supported",
+        textGeneration: "supported",
       },
       runs: [
         {
@@ -91,6 +93,7 @@ const SHIPPED = [
         mcpPassthrough: "native",
         disallowedTools: "unsupported",
         structuredOutput: "supported",
+        textGeneration: "supported",
       },
       runs: [
         {
@@ -122,9 +125,10 @@ const SHIPPED = [
           auto: "unsupported",
           "full-access": "native",
         },
-        mcpPassthrough: "unsupported",
+        mcpPassthrough: "native",
         disallowedTools: "native",
         structuredOutput: "supported",
+        textGeneration: "supported",
       },
       runs: [
         {
@@ -198,6 +202,41 @@ const SHIPPED = [
             },
           ],
           models: "own-list",
+        },
+      ],
+    },
+  },
+  {
+    id: "antigravity",
+    displayName: "Antigravity",
+    definition: {
+      id: "antigravity/antigravity",
+      displayName: "Antigravity",
+      binaryName: "agy",
+      releaseSource: {
+        kind: "github-releases",
+        repository: "google-antigravity/antigravity-cli",
+      },
+      declared: {
+        steering: "native",
+        fork: "unsupported",
+        modelSwitch: "in-session",
+        accessModes: {
+          "approval-required": "native",
+          "auto-accept-edits": "native",
+          auto: "unsupported",
+          "full-access": "native",
+        },
+        mcpPassthrough: "native",
+        disallowedTools: "unsupported",
+        structuredOutput: "unsupported",
+        textGeneration: "unsupported",
+      },
+      runs: [
+        {
+          providerId: "google/google",
+          kinds: [{ kind: "subscription-per-machine", modelArgument: "{model}" }],
+          models: "all",
         },
       ],
     },
@@ -436,11 +475,34 @@ const SHIPPED_PROVIDERS = [
       suggestedTextGenerationModel: "MiniMax-M2.7",
     },
   },
+  {
+    id: "google",
+    displayName: "Google",
+    definition: {
+      id: "google/google",
+      displayName: "Google",
+      kinds: [
+        {
+          id: "subscription-per-machine",
+          title: "Google subscription, signed in on each machine",
+          description:
+            "Uses your Google plan through Antigravity. You sign in to Antigravity once on each machine that runs it.",
+          setup: [{ kind: "harness-login", method: "sign-in" }],
+          harnesses: ["antigravity/antigravity"],
+        },
+      ],
+      defaultHarnessId: "antigravity/antigravity",
+      catalogSource: { kind: "harness-probe", harnessId: "antigravity/antigravity" },
+      defaultSelection: "current-models",
+      defaultSelectionMaker: "Google",
+    },
+  },
 ];
 
 let details: ReadonlyArray<PluginDetail>;
 let harnesses: ReadonlyArray<RegisteredHarness>;
 let providers: ReadonlyArray<RegisteredProvider>;
+let mcpServers: ReadonlyArray<RegisteredMcpServer>;
 
 describe("the shipped registry after a boot", () => {
   beforeAll(async () => {
@@ -450,18 +512,21 @@ describe("the shipped registry after a boot", () => {
         yield* host.boot(registry);
         harnesses = yield* host.harnesses();
         providers = yield* host.providers();
+        mcpServers = yield* host.listMcpServers();
         return yield* Effect.flatMap(Plugins, (plugins) => plugins.query());
       }),
     );
   });
 
-  it("holds the three harness plugins, the six provider plugins and the github, sentry and linear plugins, in registry order", () => {
+  it("holds the four harness plugins, the seven provider plugins and the github, sentry and linear plugins, in registry order", () => {
     expect(details.map((detail) => detail.id)).toEqual([
       "claude-code",
       "codex",
       "pi",
+      "antigravity",
       "anthropic",
       "openai",
+      "google",
       "zai",
       "openrouter",
       "opencode",
@@ -512,6 +577,14 @@ describe("the shipped registry after a boot", () => {
     expect(checked.mark?.paths).toHaveLength(1);
     // The host keeps the mark it was given, so the apps draw it.
     expect(details.find((one) => one.id === id)?.mark).toEqual(plugin?.manifest.mark);
+  });
+
+  it("builds every MCP server's URL on the origin it declares", () => {
+    expect(mcpServers.length).toBeGreaterThan(0);
+    for (const server of mcpServers) {
+      const { url } = server.buildUpstreamRequest({ credentials: {}, config: {} });
+      expect(new URL(url).origin, server.id).toBe(server.origin);
+    }
   });
 
   it("agrees with itself: every provider a harness runs lists that harness, and every harness a provider lists runs it", () => {

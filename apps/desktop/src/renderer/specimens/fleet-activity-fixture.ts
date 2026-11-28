@@ -7,7 +7,7 @@
  * The times are fixed instants before the specimen's clock, Tuesday
  * 29 September 2026, 09:41 UTC, so the page's day headings never change.
  */
-import type { EventWithFacts } from "@hercule/contract";
+import type { ListedEvent } from "@hercule/contract";
 
 /** The ids of the sessions and the run that the log's entries name. */
 export interface ActivityNames {
@@ -20,13 +20,13 @@ export interface ActivityNames {
 }
 
 /** One log entry before it is numbered: when it happened (UTC), what it was, and who did it. */
-type Entry = readonly [at: string, kind: string, payload: EventWithFacts["payload"], actor: string];
+type Entry = readonly [at: string, kind: string, payload: ListedEvent["payload"], actor: string];
 
 const USER = "user";
 const SYSTEM = "system";
 
 /** Builds an audit log entry the controller received at `at`. */
-const buildAuditEvent = (id: number, [at, kind, payload, actor]: Entry): EventWithFacts => ({
+const buildAuditEvent = (id: number, [at, kind, payload, actor]: Entry): ListedEvent => ({
   id,
   source: "platform",
   connectionId: null,
@@ -42,21 +42,18 @@ const buildAuditEvent = (id: number, [at, kind, payload, actor]: Entry): EventWi
   title: null,
   author: null,
   signals: [],
-  resolvedSignals: [],
-  ignoredBy: null,
-  tasks: [],
   knownBy: [],
 });
 
 /** Numbers `entries`, oldest first, and returns them as the controller does: newest first. */
-const buildAuditLog = (entries: ReadonlyArray<Entry>): ReadonlyArray<EventWithFacts> =>
+const buildAuditLog = (entries: ReadonlyArray<Entry>): ReadonlyArray<ListedEvent> =>
   entries.map((entry, index) => buildAuditEvent(index + 1, entry)).toReversed();
 
 /**
  * Returns the log of a machine that joined and has done nothing since: the
  * one entry every machine has. Its time is `at`.
  */
-export const buildJoinedLog = (at: string): ReadonlyArray<EventWithFacts> =>
+export const buildJoinedLog = (at: string): ReadonlyArray<ListedEvent> =>
   buildAuditLog([[at, "runner.joined", { reserved: false, becameDefaultRunner: false }, SYSTEM]]);
 
 /**
@@ -73,7 +70,7 @@ export const buildAtlasLog = ({
   providerAccountId,
   runId,
   sessionIds,
-}: ActivityNames): ReadonlyArray<EventWithFacts> => {
+}: ActivityNames): ReadonlyArray<ListedEvent> => {
   const session = (index: number): string => sessionIds[index % sessionIds.length]!;
   const run = `run:${runId}`;
   /** Twelve sessions spawned by one run in the same minute, a few seconds apart. */

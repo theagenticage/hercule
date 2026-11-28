@@ -18,6 +18,27 @@ const stubClient = (handler: Handler) => {
   return { fetch, client };
 };
 
+/** The mark of an archived Wiki Page. */
+const WIKI_ARCHIVED = { at: "2026-10-20T09:00:00.000Z", by: "user", reason: "Out of date" };
+
+/**
+ * Returns a Wiki Page summary with the id `id`, as `wikiPage.query` lists it:
+ * an archived page with `isArchived`.
+ */
+const buildWikiPage = (id: string, isArchived = false) => ({
+  id,
+  resourceId: buildId("0000be11"),
+  repository: "github.com/acme/web",
+  slug: "release-process",
+  title: "Release process",
+  summary: "How a release is cut",
+  revision: 3,
+  updatedAt: "2026-10-14T10:05:00.000Z",
+  updatedBy: "user",
+  createdAt: "2026-10-14T10:00:00.000Z",
+  ...(isArchived ? { archived: WIKI_ARCHIVED } : {}),
+});
+
 /** Returns a join token, as `runner join-token list` returns it. */
 const joinToken = (tail: string) => ({
   id: buildId(tail),
@@ -57,6 +78,7 @@ const buildSession = (tail: string) => ({
   exitedAt: null,
   lastActivityAt: "2026-09-15T10:00:00.000Z",
   unenforced: [],
+  mcpServers: [],
 });
 
 const buildInput = (inputId: string, sessionId: string) => ({
@@ -166,14 +188,10 @@ describe("a positional whose row resolves tails", () => {
     const signals = [buildSignal("ccccccc3"), buildSignal("ddddddd4")];
     const full = "0199e0e7-7b21-7000-8000-000000000001";
     const { fetch, client } = stubClient((request) =>
-      request.method === "GET" ? { items: signals } : { snoozed: [], skipped: [] },
+      request.method === "GET" ? { items: signals } : { done: [], skipped: [] },
     );
-    const command = lookUpCommand("signal", "snooze");
-    const args = await parseArguments(
-      command,
-      ["0ccccccc3", full, "0ddddddd4", "--until", "2026-10-13T09:00+02:00"],
-      refuseStdinRead,
-    );
+    const command = lookUpCommand("signal", "done");
+    const args = await parseArguments(command, ["0ccccccc3", full, "0ddddddd4"], refuseStdinRead);
 
     await execute(client, command, args);
 
@@ -181,33 +199,10 @@ describe("a positional whose row resolves tails", () => {
       { method: "GET", path: "/api/v1/signals" },
       {
         method: "POST",
-        path: "/api/v1/signals/snooze",
-        body: {
-          signalIds: [signals[0]!.id, full, signals[1]!.id],
-          // The CLI decodes the time to UTC, as the contract does.
-          until: "2026-10-13T07:00:00.000Z",
-        },
+        path: "/api/v1/signals/mark-done",
+        body: { signalIds: [signals[0]!.id, full, signals[1]!.id] },
       },
     ]);
-  });
-
-  it("resolves an unsnooze tail among the snoozed signals", async () => {
-    const signal = buildSignal("ccccccc3");
-    const { fetch, client } = stubClient((request) =>
-      request.method === "GET" ? { items: [signal] } : { unsnoozed: [signal.id], skipped: [] },
-    );
-    const command = lookUpCommand("signal", "unsnooze");
-    const args = await parseArguments(command, ["0ccccccc3"], refuseStdinRead);
-
-    await execute(client, command, args);
-
-    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/signals" });
-    expect(fetch.calls[0]!.query.get("view")).toBe("later");
-    expect(fetch.calls[1]).toMatchObject({
-      method: "POST",
-      path: "/api/v1/signals/unsnooze",
-      body: { signalIds: [signal.id] },
-    });
   });
 
   it("resolves an initiative tail among the open and the closed initiatives, for every command that takes one", async () => {
@@ -249,6 +244,58 @@ describe("a positional whose row resolves tails", () => {
         expect(fetch.calls.at(-1)!.path).toContain(initiative.id);
       }
     }
+  });
+
+  it("resolves a wiki page tail in one listing of every page, archived or not, in creation order", async () => {
+    const current = buildWikiPage("0199e0e7-7b21-7000-8000-0000aaaaaaa1");
+    const archived = buildWikiPage("0199e0e7-7b21-7000-8000-0000bbbbbbb2", true);
+    for (const [verb, extra, method] of [
+      ["read", [], "GET"],
+      ["update", ["--expected-revision", "3"], "PATCH"],
+      ["archive", ["--expected-revision", "3", "--reason", "Out of date"], "POST"],
+      ["restore", [], "POST"],
+    ] as const) {
+      for (const page of [current, archived]) {
+        const { fetch, client } = stubClient((request) =>
+          request.path === "/api/v1/wiki-pages" && request.method === "GET"
+            ? { items: [current, archived] }
+            : verb === "read"
+              ? { page: { ...page, body: "Text." }, revisions: [] }
+              : { ...page, body: "Text." },
+        );
+        const command = lookUpCommand("wiki-page", verb);
+        // Only `update` reads stdin: the page's new body is piped in.
+        const args = await parseArguments(command, [page.id.slice(-8), ...extra], () =>
+          Promise.resolve("New text."),
+        );
+
+        await execute(client, command, args);
+
+        // One listing, not one per state: a page archived or restored between
+        // two listings would be in neither.
+        const listed = fetch.calls.filter((call) => call.path === "/api/v1/wiki-pages");
+        expect(listed.map((call) => [...call.query.entries()])).toEqual([
+          [
+            ["archived", "include"],
+            ["sort", "createdAt:asc"],
+          ],
+        ]);
+        expect(fetch.calls.at(-1), `${verb} ${page.id}`).toMatchObject({ method });
+        expect(fetch.calls.at(-1)!.path).toContain(page.id);
+      }
+    }
+  });
+
+  it("refuses a wiki page tail that a current and an archived page share, and writes nothing", async () => {
+    const current = buildWikiPage("0199e0e7-7b21-7000-8000-0000aaaaaaa1");
+    const archivedTwin = buildWikiPage("0199e0e7-7b21-7000-8000-1111aaaaaaa1", true);
+    const { fetch, client } = stubClient(() => ({ items: [current, archivedTwin] }));
+    const restore = lookUpCommand("wiki-page", "restore");
+
+    await expect(
+      execute(client, restore, await parseArguments(restore, ["aaaaaaa1"], refuseStdinRead)),
+    ).rejects.toThrow(/aaaaaaa1 matches 2 wiki-page ids/);
+    expect(fetch.calls.every((call) => call.method === "GET")).toBe(true);
   });
 
   it("resolves each tail of the sessions that session done and session reopen take", async () => {
@@ -372,7 +419,13 @@ describe("a flag that names a Model Profile", () => {
     createdAt: AT,
     updatedAt: AT,
   };
-  const project = { id: buildId("bbbbbbb2"), name: "Hercule v1", createdAt: AT, updatedAt: AT };
+  const project = {
+    id: buildId("bbbbbbb2"),
+    name: "Hercule v1",
+    mcpServerIds: [],
+    createdAt: AT,
+    updatedAt: AT,
+  };
 
   /** Answers the list of Model Profiles with one whose id ends in `aaaaaaa1`, and any write with a valid record. */
   const stubServer = () =>
@@ -847,5 +900,204 @@ describe("runner metrics", () => {
     const query = fetch.calls[0]!.query;
     expect(query.get("runnerId")).toBeNull();
     expect(query.get("resolution")).toBe("hour");
+  });
+});
+
+/** Returns a Connection, as `connection list` returns it. */
+const buildConnection = (id: string) => ({
+  id,
+  type: "sentry",
+  label: "Work",
+  displayName: "work",
+  status: "connected",
+  labels: [],
+  config: {},
+  feedIntervals: {},
+  credentials: [],
+  createdAt: "2026-09-15T10:00:00.000Z",
+  updatedAt: "2026-09-15T10:00:00.000Z",
+});
+
+// Tests an id tail given to a flag that fills one key of an object field.
+describe("a flag that fills one key of an object", () => {
+  it("resolves a Connection tail and sends the whole source object", async () => {
+    const connectionId = buildId("ccccccc3");
+    const { fetch, client } = stubClient((request) =>
+      request.path === "/api/v1/connections" && request.method === "GET"
+        ? { items: [buildConnection(connectionId)] }
+        : {
+            id: buildId("aaaaaaa1"),
+            name: "work_sentry",
+            source: { kind: "plugin", contributionId: "sentry/sentry", connectionId },
+            enabled: false,
+            status: "checking",
+            statusDetail: null,
+            tools: [],
+            checkedAt: null,
+            createdAt: "2026-09-15T10:00:00.000Z",
+            updatedAt: "2026-09-15T10:00:00.000Z",
+          },
+    );
+    const command = lookUpCommand("mcp-server", "create");
+    const args = await parseArguments(
+      command,
+      ["--plugin", "sentry/sentry", "--connection", "0ccccccc3", "--name", "work_sentry"],
+      refuseStdinRead,
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/connections" });
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/mcp-servers",
+      body: {
+        source: {
+          kind: "plugin",
+          contributionId: "sentry/sentry",
+          connectionId,
+          name: "work_sentry",
+        },
+      },
+    });
+    expect(fetch.calls.length).toBe(2);
+  });
+
+  it("moves a server onto a plugin's Connection with update, resolving both tails, and sends no source with --enabled alone", async () => {
+    const connectionId = buildId("ccccccc3");
+    const serverId = buildId("aaaaaaa1");
+    const server = {
+      id: serverId,
+      name: "sentry",
+      source: { kind: "plugin", contributionId: "sentry/sentry", connectionId },
+      enabled: true,
+      status: "checking",
+      statusDetail: null,
+      tools: [],
+      checkedAt: null,
+      createdAt: "2026-09-15T10:00:00.000Z",
+      updatedAt: "2026-09-15T10:00:00.000Z",
+    };
+    const { fetch, client } = stubClient((request) => {
+      if (request.method !== "GET") return server;
+      return request.path === "/api/v1/connections"
+        ? { items: [buildConnection(connectionId)] }
+        : { items: [server] };
+    });
+    const command = lookUpCommand("mcp-server", "update");
+
+    await execute(
+      client,
+      command,
+      await parseArguments(
+        command,
+        ["aaaaaaa1", "--plugin", "sentry/sentry", "--connection", "0ccccccc3"],
+        refuseStdinRead,
+      ),
+    );
+    await execute(
+      client,
+      command,
+      await parseArguments(command, ["aaaaaaa1", "--enabled", "false"], refuseStdinRead),
+    );
+
+    const sent = fetch.calls.filter((call) => call.method === "PATCH");
+    expect(sent).toMatchObject([
+      {
+        path: `/api/v1/mcp-servers/${serverId}`,
+        body: { source: { kind: "plugin", contributionId: "sentry/sentry", connectionId } },
+      },
+      { path: `/api/v1/mcp-servers/${serverId}`, body: { enabled: false } },
+    ]);
+    expect(sent[1]?.body).not.toHaveProperty("source");
+  });
+
+  it("fails with not_found, and sends nothing, when no Connection ends with the tail", async () => {
+    const { fetch, client } = stubClient(() => ({ items: [] }));
+    const command = lookUpCommand("mcp-server", "create");
+    const args = await parseArguments(
+      command,
+      ["--plugin", "sentry/sentry", "--connection", "0ccccccc3"],
+      refuseStdinRead,
+    );
+
+    await expect(execute(client, command, args)).rejects.toThrow("no connection whose id ends");
+    expect(fetch.calls.map((call) => call.method)).toEqual(["GET"]);
+  });
+});
+
+// Tests the forms of `mcp-server create` that need no Connection, and `set-token`, through the whole request.
+describe("an MCP server added by its address", () => {
+  const serverId = buildId("aaaaaaa1");
+  const buildServer = () => ({
+    id: serverId,
+    name: "notion",
+    source: {
+      kind: "url",
+      url: "https://mcp.notion.com/mcp",
+      signIn: "token",
+      signInOffered: null,
+    },
+    enabled: true,
+    status: "checking",
+    statusDetail: null,
+    tools: [],
+    checkedAt: null,
+    createdAt: "2026-09-15T10:00:00.000Z",
+    updatedAt: "2026-09-15T10:00:00.000Z",
+  });
+
+  it("is created with the token read from stdin, and looks up no Connection", async () => {
+    const { fetch, client } = stubClient(buildServer);
+    const command = lookUpCommand("mcp-server", "create");
+    const args = await parseArguments(
+      command,
+      ["--url", "https://mcp.notion.com/mcp", "--token-stdin"],
+      () => Promise.resolve("s3cret-t0ken\n"),
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls.length).toBe(1);
+    expect(fetch.calls[0]).toMatchObject({
+      method: "POST",
+      path: "/api/v1/mcp-servers",
+      body: { source: { kind: "url", url: "https://mcp.notion.com/mcp", token: "s3cret-t0ken" } },
+    });
+  });
+
+  it("is refused when the flags of both forms are given, before stdin is read and with nothing sent", async () => {
+    const { fetch } = stubClient(buildServer);
+    const command = lookUpCommand("mcp-server", "create");
+
+    await expect(
+      parseArguments(
+        command,
+        ["--url", "https://mcp.notion.com/mcp", "--plugin", "sentry/sentry", "--token-stdin"],
+        refuseStdinRead,
+      ),
+    ).rejects.toThrow(UsageError);
+    expect(fetch.calls).toEqual([]);
+  });
+
+  it("gets a token from stdin with set-token, and resolves the id tail", async () => {
+    const { fetch, client } = stubClient((request) =>
+      request.path === "/api/v1/mcp-servers" && request.method === "GET"
+        ? { items: [buildServer()] }
+        : buildServer(),
+    );
+    const command = lookUpCommand("mcp-server", "set-token");
+    const args = await parseArguments(command, ["aaaaaaa1"], () =>
+      Promise.resolve("s3cret-t0ken\n"),
+    );
+
+    await execute(client, command, args);
+
+    expect(fetch.calls[0]).toMatchObject({ method: "GET", path: "/api/v1/mcp-servers" });
+    expect(fetch.calls[1]).toMatchObject({
+      method: "POST",
+      path: `/api/v1/mcp-servers/${serverId}/token`,
+      body: { token: "s3cret-t0ken" },
+    });
   });
 });

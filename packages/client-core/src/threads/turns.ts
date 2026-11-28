@@ -21,13 +21,17 @@ import { Schema } from "effect";
 import {
   Attachment,
   type ContextCompactionDetail,
+  type PromptContextBlock,
   type SessionStatus,
   type TodoListDetail,
   type TodoStep,
   type TranscriptRow,
 } from "@hercule/contract";
 import { readJsonObject } from "../json-shape";
+import type { McpServerWarningEntry } from "../mcp-servers/fix";
 import type { AgentState } from "./agent-state";
+import { findFirstMessageItemId, splitSentText } from "./first-message";
+import { readUserSender } from "./sender";
 import {
   describeCompactionTarget,
   describeWaitDuration,
@@ -117,16 +121,6 @@ const readUserSkills = (detail: unknown): readonly string[] => {
 };
 
 /**
- * Returns the id of the session whose agent sent a `user_message`, from its
- * detail's `senderSessionId`. Returns `undefined` for a message the session's
- * owner sent, which carries no sender.
- */
-export const readUserSender = (detail: unknown): string | undefined => {
-  const sender = readJsonObject(detail)?.senderSessionId;
-  return typeof sender === "string" && sender !== "" ? sender : undefined;
-};
-
-/**
  * Checks whether a `user_message` was steered into a turn that was already
  * running, from its detail's `steered`. Returns `false` for a message that
  * opened its turn.
@@ -136,7 +130,10 @@ const isSteeredUserMessage = (detail: unknown): boolean => readJsonObject(detail
 /** One message sent into a turn: by the session's owner, or by another session's agent. */
 export interface ThreadUserMessage {
   readonly itemId: string;
+  /** The user's words: the text as sent, without the context block that follows them. */
   readonly text: string;
+  /** The block that tells the agent about things, when the text ended in one. Absent otherwise. */
+  readonly context?: PromptContextBlock;
   /** The images sent with the message, in the order they were attached. Empty when none were. */
   readonly attachments: readonly Attachment[];
   /**
@@ -159,12 +156,15 @@ export interface ThreadUserMessage {
  * and its blocks both build their messages here, so the two never read a
  * message differently.
  */
-export const buildUserMessage = (event: ItemStarted): ThreadUserMessage => {
+export const buildUserMessage = (
+  event: ItemStarted,
+  isFirstMessage: boolean,
+): ThreadUserMessage => {
   const text = readJsonObject(event.detail)?.text;
   const senderSessionId = readUserSender(event.detail);
   return {
     itemId: event.itemId,
-    text: typeof text === "string" ? text : "",
+    ...splitSentText(typeof text === "string" ? text : "", isFirstMessage),
     attachments: readUserAttachments(event.detail),
     skills: readUserSkills(event.detail),
     steered: isSteeredUserMessage(event.detail),
@@ -185,6 +185,11 @@ export interface RuntimeNote {
   readonly severity: "error" | "warning" | "notice";
   readonly message: string;
   readonly at: string;
+  /**
+   * The MCP Servers a warning is about and why, as the controller wrote them.
+   * Absent for every note that is not a warning about MCP Servers.
+   */
+  readonly mcpServers?: readonly McpServerWarningEntry[];
 }
 
 /**
@@ -616,7 +621,13 @@ const buildRuntimeNote = (
     case "runtime.error":
       return { key, severity: "error", message: event.message ?? event.class, at: event.at };
     case "runtime.warning":
-      return { key, severity: "warning", message: event.message, at: event.at };
+      return {
+        key,
+        severity: "warning",
+        message: event.message,
+        at: event.at,
+        ...(event.mcpServers === undefined ? {} : { mcpServers: event.mcpServers }),
+      };
     case "runtime.notice":
       return { key, severity: "notice", message: event.message, at: event.at };
     case "unknown":
@@ -671,6 +682,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
 
   const outsideRuntimeNotes: OutsideRuntimeNote[] = [];
   let openTurnId: string | null = null;
+  const firstMessageItemId = findFirstMessageItemId(rows, agent);
 
   for (const row of rows) {
     const event: HarnessEvent = row.event;
@@ -709,7 +721,7 @@ export const buildTurns = (rows: readonly TranscriptRow[], agent: AgentState): T
       case "item.started": {
         const turn = findOrStartTurn(event.turnId, event.at);
         if (event.kind === "user_message") {
-          turn.userMessages.push(buildUserMessage(event));
+          turn.userMessages.push(buildUserMessage(event, event.itemId === firstMessageItemId));
         } else if (event.kind !== "assistant_message") {
           const { item, compaction } = buildStartedItem(event);
           turn.itemIndex.set(event.itemId, turn.items.length);

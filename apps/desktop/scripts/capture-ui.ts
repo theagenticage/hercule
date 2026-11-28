@@ -49,7 +49,7 @@
  * council's calibration images (docs/design/ui-council/BRIEF.md, section 9).
  * Those are the deliberately broken looks `max-contrast`, `cramped` and
  * `noisy` (see src/renderer/specimens/broken-variants.ts), each in Whitehaven
- * and Orient Express, on the thread, sidebar and intake screens, at 1x and
+ * and Orient Express, on the thread, sidebar and inbox screens, at 1x and
  * glass 40 %. It deletes `docs/design/ui-council/calibration/` and writes
  * there `broken-<variant>-<theme>-<screen>-1x.png` (18 files) and
  * `manifest.json`: the commit the images were made from, this command, and
@@ -87,7 +87,7 @@ const calibrationDir = fileURLToPath(
 const CALIBRATION_COMMAND = "pnpm --filter @hercule/desktop capture:ui --calibration";
 
 /** The screens of the calibration images. */
-const CALIBRATION_SCREENS = ["thread", "sidebar", "intake"];
+const CALIBRATION_SCREENS = ["thread", "sidebar", "inbox"];
 
 const outputDir = fileURLToPath(new URL("../out/ui/", import.meta.url));
 

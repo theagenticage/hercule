@@ -179,7 +179,7 @@ describe("buildProviderRows", () => {
     const row = buildProviderRow(WITH_CLAUDE, buildProviderAccount(OPENAI_IDENTITY, []));
 
     expect(row).toMatchObject({ install: "blocked", signIn: false, version: "not reported" });
-    expect(row.signedInAs).toBe("no adapter in this runner build");
+    expect(row.signedInAs).toBe("this machine's Hercule cannot run the harness");
   });
 
   it("reads the snapshot of the account's default harness only", () => {
@@ -257,7 +257,7 @@ describe("buildProviderRows for an account with a credentials step", () => {
     });
     expect(buildProviderRow(WITH_CLAUDE, buildKeyedProviderAccount(false))).toMatchObject({
       path: null,
-      location: "no adapter in this runner build",
+      location: "this machine's Hercule cannot run the harness",
     });
     const withPiAdapter: Runner = {
       ...WITH_CLAUDE,

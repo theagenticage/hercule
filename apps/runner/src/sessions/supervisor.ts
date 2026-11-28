@@ -676,9 +676,24 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
    * attached. Ignores any failure, not only a failed write. A frame that fails
    * to encode then loses one event instead of ending the watch, which would
    * silently drop every session's events for the rest of the process.
+   *
+   * An encoding failure is a defect, and the runner's log gets one warning
+   * for it with the frame's tags and the error's name. It never gets the error's
+   * message or the frame, because a schema message quotes the rejected value,
+   * which may be user text. A failed write is not logged: it only means the
+   * connection is going away.
    */
   const sendFrame = (frame: RunnerToController): Effect.Effect<void> =>
-    Effect.ignoreCause(Effect.suspend(() => attached?.send(frame) ?? Effect.void));
+    Effect.suspend(() => attached?.send(frame) ?? Effect.void).pipe(
+      Effect.catchDefect((defect) =>
+        Effect.logWarning(
+          `Dropped a ${frame._tag} frame${
+            frame._tag === "sessionEvent" ? ` (${frame.event._tag})` : ""
+          } that failed its protocol schema: ${defect instanceof Error ? defect.name : "unknown error"}`,
+        ),
+      ),
+      Effect.ignoreCause,
+    );
 
   /** Removes the scratch, image and marks directories of a session, those it has. */
   const removeSessionDirectories = (
@@ -2164,12 +2179,13 @@ export const makeSupervising = (adapters: ReadonlyArray<HarnessAdapter>): Superv
           ),
           forwardEvent,
         ),
-        Stream.runForEach(
-          Stream.mergeAll(
-            adapters.map((adapter) => adapter.usageReports),
-            { concurrency: "unbounded" },
-          ),
-          forwardUsageReport,
+        // One consumer per adapter, with no merged stream between: a merge
+        // reads ahead into a buffer, so an adapter's report could be handled
+        // long after the adapter handed it over, possibly on a later connection.
+        Effect.forEach(
+          adapters,
+          (adapter) => Stream.runForEach(adapter.usageReports, forwardUsageReport),
+          { concurrency: "unbounded", discard: true },
         ),
       ],
       { concurrency: "unbounded", discard: true },

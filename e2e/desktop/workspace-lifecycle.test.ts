@@ -708,14 +708,13 @@ it("onboards existing files, retains and resumes a local worktree, then inspects
     .locator(`a.side-row[href="/threads/${shared.id}"]`)
     .first()
     .click();
-  // The details button of the thread that was open before the click is still
-  // on screen until the page has moved to the new thread. A press on it then
-  // opens a dialog on a page that goes away, and the dialog goes with it.
-  await page
-    .getByRole("navigation", { name: "Threads", exact: true })
-    .locator(`a.side-row[href="/threads/${shared.id}"][aria-current="page"]`)
-    .first()
-    .waitFor();
+  // The sidebar marks the thread as soon as the click lands, but the route's
+  // loader is still reading it, and the previous thread's page stays on screen
+  // until the loader ends. A press on that page's details button opens a dialog
+  // that goes away with the page. The header of the main pane (not the
+  // sidebar) names the new thread only once the page is the new thread's, or
+  // its "Opening the thread" placeholder, which has no details button.
+  await page.locator("header.top").getByText("Share existing working files").first().waitFor();
   await page.getByRole("button", { name: /workspace.*details|details.*workspace/i }).click();
   const adoptedDetails = page.getByRole("dialog", { name: "Workspace details", exact: true });
   await adoptedDetails.waitFor().catch(async (error: unknown) => {

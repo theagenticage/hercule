@@ -1,24 +1,17 @@
 import type { PlanType } from "./generated";
 
 /**
- * Plan ids that Codex 0.167 can send but the generated `PlanType` (generated
- * from Codex 0.154) does not list yet. Delete an id here once regenerating
- * the bindings adds it to `PlanType`.
- */
-type NewerPlanType = "promax" | "sci" | "sci_plus";
-
-/**
  * The display name of each plan the account can have, as Codex's own `/status`
  * shows it. The app-server only sends the plan id, so the names come from the
  * table in Codex's terminal UI, kept in step with the latest Codex release:
- * https://github.com/openai/codex/blob/rust-v0.167.0/codex-rs/tui/src/subscription.rs#L12-L39
+ * https://github.com/openai/codex/blob/main/codex-rs/tui/src/subscription.rs
  *
  * Some names look odd (`business` is "Enterprise", `team` is "Business") but
  * they are what Codex shows, so they are copied as they are. `unknown` has no
  * name. The keys are typed so that regenerating the bindings with a new plan
  * id fails typecheck until the id gets a name here.
  */
-const PLAN_LABELS: Readonly<Record<Exclude<PlanType, "unknown"> | NewerPlanType, string>> = {
+const PLAN_LABELS: Readonly<Record<Exclude<PlanType, "unknown">, string>> = {
   free: "Free",
   go: "Go",
   plus: "Plus",

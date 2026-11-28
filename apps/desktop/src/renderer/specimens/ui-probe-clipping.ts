@@ -3,9 +3,18 @@
  * much of a piece of text the ancestors that cut or scroll leave out of
  * reach. Plain maths on rectangles in CSS pixels, measured from the top left
  * of the window; the probe reads the boxes and overflow from the page and
- * passes them in.
+ * passes them in. It also holds the one spacing-grid check, which the probe
+ * and the metrics both use.
  */
 import type { ProbeRect } from "./ui-probe-types";
+
+/** Spacing values within this many px of a multiple of 4 count as on the grid. */
+const GRID_TOLERANCE_PX = 0.01;
+
+/** Returns whether a spacing value, in px, lies on the 4px grid, within a hundredth of a pixel. */
+export function isOnSpacingGrid(value: number): boolean {
+  return Math.abs(value - 4 * Math.round(value / 4)) <= GRID_TOLERANCE_PX;
+}
 
 /** Returns the area of a rectangle in square pixels. */
 export function computeArea(rect: ProbeRect): number {

@@ -5,7 +5,7 @@
  * Linked section, Work's pane) words that claim here, so they all agree.
  */
 import type { EntityHint, EntityLink } from "@hercule/contract";
-import { namePlugin, type PluginName } from "../intake";
+import { namePlugin, type PluginName } from "../plugin-names";
 
 /**
  * Returns the sentence for a link's claim, for a hover or a small label:

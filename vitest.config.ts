@@ -1,5 +1,6 @@
 import { globSync, readFileSync } from "node:fs";
 import { defineConfig } from "vitest/config";
+import { WeighedShardSequencer } from "./scripts/test-shards.ts";
 
 /**
  * Seven projects: the React code of the web app and the UI library, everything
@@ -106,6 +107,7 @@ const binaryTests = [
   "e2e/skill-library-session.test.ts",
   "e2e/repository-skills-session.test.ts",
   "e2e/skill-references-session.test.ts",
+  "e2e/mcp-url-servers.test.ts",
   // upgrade.test.ts downloads the matching edge asset for this platform
   // (linux-x64, linux-arm64, or darwin-arm64) and runs it. Other platforms
   // fail in CI and skip locally.
@@ -167,6 +169,8 @@ const templateDatabaseSetup = "apps/controller/src/db/template.global-setup.ts";
 
 export default defineConfig({
   test: {
+    // `--shard` splits the files by their recorded run time, not by name.
+    sequence: { sequencer: WeighedShardSequencer },
     projects: [
       {
         test: {

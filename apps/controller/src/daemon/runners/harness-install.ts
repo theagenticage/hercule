@@ -72,7 +72,8 @@ const make = Effect.gen(function* () {
   ): Effect.Effect<void, NotFound | SqlError | Validation | InvalidState> =>
     Effect.gen(function* () {
       const registered = yield* host.harnesses();
-      if (!registered.some((candidate) => candidate.id === harnessId)) {
+      const harness = registered.find((candidate) => candidate.id === harnessId);
+      if (harness === undefined) {
         return yield* Effect.fail(
           createValidationError([
             {
@@ -82,7 +83,7 @@ const make = Effect.gen(function* () {
           ]),
         );
       }
-      yield* requireAdapter(yield* readRunner(runnerId), harnessId, "harnessId");
+      yield* requireAdapter(yield* readRunner(runnerId), harness, "harnessId");
     });
 
   return {

@@ -199,11 +199,24 @@ describe("hercule runner --local", () => {
 
   it("keeps trying to join a controller that is not listening yet", async () => {
     const token = "a-single-use-join-token";
-    // The controller spawns its runner before it binds its port, so nothing
-    // listens on the address for the first moments of the child's life.
-    const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
-    const port = Number(server.port);
-    await server.stop(true);
+    // The controller spawns its runner before it binds its port, so the first
+    // attempts fail to connect. The port is held by a socket server that drops
+    // every connection until the controller "starts". Freeing the port for the
+    // whole wait would let another test file's server, bound to a free port at
+    // the same moment, take it and answer the join with a refusal. The port is
+    // free only for the moment between stopping the dropper and `Bun.serve`
+    // below. That is acceptable: both calls are synchronous, so the gap is
+    // microseconds, and a join attempt landing in it only fails to connect and
+    // is retried like the earlier ones.
+    const dropper = Bun.listen({
+      hostname: "127.0.0.1",
+      port: 0,
+      socket: {
+        open: (socket) => void socket.end(),
+        data: () => undefined,
+      },
+    });
+    const port = dropper.port;
 
     const child = spawnLocalRunner(createTemporaryHome());
     let asked = 0;
@@ -217,8 +230,9 @@ describe("hercule runner --local", () => {
       );
       child.closeStdin();
 
-      // Long enough for the first attempts to fail with nothing listening.
+      // Long enough for the first attempts to fail while the port drops them.
       await delay(300);
+      dropper.stop(true);
       listener = Bun.serve({
         hostname: "127.0.0.1",
         port,
@@ -244,6 +258,7 @@ describe("hercule runner --local", () => {
       expect(asked, `it gave up before the controller started; stderr: ${child.err()}`).toBe(1);
     } finally {
       child.kill();
+      dropper.stop(true);
       await listener?.stop(true);
     }
   }, 30_000);

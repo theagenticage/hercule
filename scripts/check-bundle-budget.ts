@@ -66,6 +66,18 @@ const FIRST_SCREEN_BUDGET_BYTES = 250 * 1024;
 /** The largest main's startup file may be, minified (spec 17 §Performance, Budgets). */
 const MAIN_STARTUP_BUDGET_BYTES = 170 * 1024;
 
+/** Returns the size of `content` gzipped, the way the first-screen budget counts it. */
+export const measureGzipBytes = (content: Uint8Array<ArrayBuffer>): number =>
+  Bun.gzipSync(content).byteLength;
+
+/**
+ * A problem with the build that a check reports to the user, such as a
+ * missing route file. The helpers other scripts import throw it instead of
+ * exiting, so the caller can clean up; the command line prints its message and
+ * exits with code 1.
+ */
+export class BundleCheckError extends Error {}
+
 const formatKilobytes = (bytes: number): string => `${(bytes / 1024).toFixed(1)} kB`;
 
 /**
@@ -97,7 +109,7 @@ const STATIC_IMPORT = /\b(?:import|from)\s*"(\.{1,2}\/[^"]+\.js)"/g;
  * imported with a dynamic `import()` are left out, because they load when
  * main first uses them.
  */
-const findStartupFiles = (file: string): string[] => {
+export const findStartupFiles = (file: string): string[] => {
   const found = new Set<string>();
   const addFile = (path: string): void => {
     if (found.has(path)) return;
@@ -172,9 +184,9 @@ interface ManifestChunk {
 /**
  * Returns the build paths of the chunks the router split the given route files
  * into, and of every chunk those import, read from the build's Vite manifest.
- * A route that was not split lives in the entry chunk and adds nothing. Exits
- * the process with code 1 when a route file does not exist or the build has
- * no manifest.
+ * A route that was not split lives in the entry chunk and adds nothing. Throws
+ * a `BundleCheckError` when a route file does not exist or the build has no
+ * manifest.
  */
 const findRouteChunks = (dist: string, routeFiles: ReadonlyArray<string>): Set<string> => {
   const routeChunks = new Set<string>();
@@ -183,18 +195,18 @@ const findRouteChunks = (dist: string, routeFiles: ReadonlyArray<string>): Set<s
   // A misspelled route would otherwise count nothing and pass quietly.
   const missing = routeFiles.find((file) => !existsSync(file));
   if (missing !== undefined) {
-    console.error(`check-bundle-budget: there is no route file at ${relative(root, missing)}.`);
-    process.exit(1);
+    throw new BundleCheckError(
+      `check-bundle-budget: there is no route file at ${relative(root, missing)}.`,
+    );
   }
 
   const manifestPath = join(dist, ".vite/manifest.json");
   if (!existsSync(manifestPath)) {
-    console.error(
+    throw new BundleCheckError(
       `check-bundle-budget: the build in ${dist} has no Vite manifest, so the chunks of the ` +
         "routes named with --route cannot be found. Set `build.manifest: true` in the app's " +
         "Vite config and build again.",
     );
-    process.exit(1);
   }
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, ManifestChunk>;
 
@@ -212,6 +224,44 @@ const findRouteChunks = (dist: string, routeFiles: ReadonlyArray<string>): Set<s
     if (routeFiles.some((file) => file.endsWith(`/${source}`))) addChunk(key);
   }
   return routeChunks;
+};
+
+/**
+ * Returns the files the first screen of the build in `dist` loads: the first
+ * paint (the entry module and what `index.html` preloads), and the chunks of
+ * the given route files (see the top of this file). The paths are relative to
+ * `dist`. Throws a `BundleCheckError` when `index.html` has no script.
+ */
+export const findFirstScreenFiles = (
+  dist: string,
+  routeFiles: ReadonlyArray<string>,
+): { firstPaint: Set<string>; routeChunks: Set<string> } => {
+  const html = readFileSync(join(dist, "index.html"), "utf8");
+
+  /**
+   * Converts a `src` or `href` in `index.html` to a path inside the build
+   * folder. `index.html` sits at the folder's root, so an absolute
+   * `/assets/a.js`, which a server or the desktop app's `app://hercule/`
+   * scheme serves from that root, and a relative `./assets/a.js` both name
+   * `assets/a.js`.
+   */
+  const resolveBuildPath = (reference: string): string => reference.replace(/^\.?\//, "");
+
+  /** The files the page fetches before it can render: the entry module and its preloads. */
+  const firstPaint = new Set(
+    [
+      ...html.matchAll(/<script[^>]*\ssrc="([^"]+\.js)"/g),
+      ...html.matchAll(/<link[^>]*\srel="modulepreload"[^>]*\shref="([^"]+\.js)"/g),
+    ].map((match) => resolveBuildPath(match[1]!)),
+  );
+
+  if (firstPaint.size === 0) {
+    throw new BundleCheckError(
+      "check-bundle-budget: index.html has no script; the build produced no entry.",
+    );
+  }
+
+  return { firstPaint, routeChunks: findRouteChunks(dist, routeFiles) };
 };
 
 /**
@@ -235,31 +285,7 @@ const checkFirstScreen = (
     process.exit(1);
   }
 
-  const html = readFileSync(join(dist, "index.html"), "utf8");
-
-  /**
-   * Converts a `src` or `href` in `index.html` to a path inside the build
-   * folder. `index.html` sits at the folder's root, so an absolute
-   * `/assets/a.js`, which a server or the desktop app's `app://hercule/`
-   * scheme serves from that root, and a relative `./assets/a.js` both name
-   * `assets/a.js`.
-   */
-  const resolveBuildPath = (reference: string): string => reference.replace(/^\.?\//, "");
-
-  /** The files the page fetches before it can render: the entry module and its preloads. */
-  const firstPaint = new Set(
-    [
-      ...html.matchAll(/<script[^>]*\ssrc="([^"]+\.js)"/g),
-      ...html.matchAll(/<link[^>]*\srel="modulepreload"[^>]*\shref="([^"]+\.js)"/g),
-    ].map((match) => resolveBuildPath(match[1]!)),
-  );
-
-  if (firstPaint.size === 0) {
-    console.error("check-bundle-budget: index.html has no script; the build produced no entry.");
-    process.exit(1);
-  }
-
-  const routeChunks = findRouteChunks(dist, routeFiles);
+  const { firstPaint, routeChunks } = findFirstScreenFiles(dist, routeFiles);
   const counted = new Set([...firstPaint, ...routeChunks]);
 
   const readBuildFile = (buildPath: string) => readFileSync(join(dist, buildPath));
@@ -290,7 +316,7 @@ const checkFirstScreen = (
   const chunks = [...builtPaths]
     .map((buildPath) => ({
       buildPath,
-      bytes: Bun.gzipSync(readBuildFile(buildPath)).byteLength,
+      bytes: measureGzipBytes(readBuildFile(buildPath)),
       countedAs: firstPaint.has(buildPath)
         ? "first paint"
         : routeChunks.has(buildPath)
@@ -347,13 +373,21 @@ const parseArguments = () => {
   }
 };
 
-const { values, positionals } = parseArguments();
-if (values["main-startup"] !== undefined) {
-  checkMainStartup(resolve(values["main-startup"]), values.guide);
-} else {
-  checkFirstScreen(
-    resolve(positionals[0] ?? join(root, "apps/web/dist")),
-    (values.route ?? []).map((file) => resolve(file)),
-    values.guide,
-  );
+if (import.meta.main) {
+  try {
+    const { values, positionals } = parseArguments();
+    if (values["main-startup"] !== undefined) {
+      checkMainStartup(resolve(values["main-startup"]), values.guide);
+    } else {
+      checkFirstScreen(
+        resolve(positionals[0] ?? join(root, "apps/web/dist")),
+        (values.route ?? []).map((file) => resolve(file)),
+        values.guide,
+      );
+    }
+  } catch (error) {
+    if (!(error instanceof BundleCheckError)) throw error;
+    console.error(error.message);
+    process.exit(1);
+  }
 }

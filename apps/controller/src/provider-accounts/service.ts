@@ -73,6 +73,7 @@ import { ProviderKeyRequests } from "./provider-key-requests";
 import type { StoredModelCatalogSummary } from "./model-catalog-repository";
 import { ModelCatalogs } from "./model-catalogs";
 import { ModelProfileMembership } from "./model-profile-membership";
+import { ProviderAccountObserver } from "./observer";
 import { ProviderAccountProbes, type ReadStamp } from "./probes";
 import {
   providerAccountRepository,
@@ -178,6 +179,7 @@ const make = Effect.gen(function* () {
   const accountRunners = yield* ProviderAccountRunners;
   const membership = yield* ModelProfileMembership;
   const probes = yield* ProviderAccountProbes;
+  const observer = yield* ProviderAccountObserver;
 
   /**
    * Stores or clears (`null`) the account's credential expiry, and wakes the
@@ -331,9 +333,11 @@ const make = Effect.gen(function* () {
     harnessId: string,
     field: string,
   ): Effect.Effect<void, NotFound | SqlError | Validation | InvalidState> =>
-    Effect.flatMap(readRunnerOrFail(runnerId), (runner) =>
-      requireAdapter(runner, harnessId, field),
-    );
+    Effect.gen(function* () {
+      const runner = yield* readRunnerOrFail(runnerId);
+      const harness = yield* readHarnessDefinitionOrFail(harnessId);
+      yield* requireAdapter(runner, harness, field);
+    });
 
   /**
    * Returns the account's kind and what its sign-in produces (the `method` of
@@ -818,6 +822,10 @@ const make = Effect.gen(function* () {
      * The caller probes the account again on every connected runner after a
      * new credential, because the stored snapshots were taken with the old
      * one. A label change leaves the snapshots true, so it probes nothing.
+     *
+     * When the default harness really changes, it tells `ProviderAccountObserver`
+     * once the update commits: the default is the harness of every Agent that
+     * has none of its own, so stored workflows are validated again.
      */
     update: (
       input: UpdateInput,
@@ -846,7 +854,7 @@ const make = Effect.gen(function* () {
           const { provider, kind } = yield* validateCredentials(existing, patch.credentials);
           yield* checkKey(provider, kind, patch.credentials);
         }
-        const updated = yield* withTransaction(
+        const { updated, defaultHarnessChanged } = yield* withTransaction(
           sql,
           Effect.gen(function* () {
             const at = yield* nowIso;
@@ -906,11 +914,17 @@ const make = Effect.gen(function* () {
             });
             // Read back rather than merged in memory, so the caller gets the
             // row as it was written, whatever the update changed.
-            return yield* readProviderAccountOrFail(id);
+            return {
+              updated: yield* readProviderAccountOrFail(id),
+              defaultHarnessChanged:
+                patch.defaultHarnessId !== undefined &&
+                patch.defaultHarnessId !== before.defaultHarnessId,
+            };
           }),
           // Field names come from the kind's declaration, which the plugin host
           // rejects at registration if one contains `|`, so this cannot fail.
         ).pipe(Effect.catchTag("SecretNameError", Effect.die));
+        if (defaultHarnessChanged) yield* observer.defaultHarnessChanged();
         return updated;
       }),
 
@@ -1385,4 +1399,5 @@ export const ProviderAccountServiceLayer: Layer.Layer<
   | ProviderAccountRunners
   | ModelProfileMembership
   | ProviderAccountProbes
+  | ProviderAccountObserver
 > = Layer.effect(ProviderAccountService)(make);

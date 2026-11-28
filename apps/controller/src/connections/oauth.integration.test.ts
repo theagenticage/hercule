@@ -754,7 +754,7 @@ describe("the access token a plugin asks the core for", () => {
         access_token: FIRST_TOKEN,
         refresh_token: "refresh-1",
         token_type: "bearer",
-        expires_in: 1,
+        expires_in: 0,
       });
   };
 
@@ -1173,7 +1173,7 @@ describe("a redirect flow with a public client", () => {
     await withOAuth(async ({ base }, registry, token, provider) => {
       await setUnusedPluginClient(base, token);
       provider.answers["authorization_code"] = () =>
-        buildJsonResponse({ access_token: FIRST_TOKEN, refresh_token: "refresh-1", expires_in: 1 });
+        buildJsonResponse({ access_token: FIRST_TOKEN, refresh_token: "refresh-1", expires_in: 0 });
       const one = await connectPublic(base, token);
 
       const refreshed = await Effect.runPromise(

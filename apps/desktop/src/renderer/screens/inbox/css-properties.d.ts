@@ -2,9 +2,9 @@ import "react";
 
 declare module "react" {
   interface CSSProperties {
-    /** A card's place in its surface or list, which sets when its words fade in after the first read. */
-    "--arrive-step"?: number;
-    /** A surface's or a column's place on the page, which sets when its cards' words fade in. */
-    "--arrive-block"?: number;
+    /** How long the empty state's sunrise waits before it draws, such as `240ms`. */
+    "--sun-wait"?: string;
+    /** How many rays from the middle one a sunrise ray is; the farther, the later it draws. */
+    "--ray"?: number;
   }
 }

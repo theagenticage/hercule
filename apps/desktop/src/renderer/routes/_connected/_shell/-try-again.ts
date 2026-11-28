@@ -6,8 +6,7 @@
  * client's mutation cache, not in a component. A component forgets them: the
  * user can leave Work, or open another Task, while a request is on its way,
  * and a rebuilt screen that forgot it would let a second press start a second
- * run on the same Task. This is the lock `useRerunTracking` keeps for Intake
- * (`screens/intake/use-rerun-tracking.ts`), with the same rules:
+ * run on the same Task. The lock follows these rules:
  *
  * - The mutation never goes out of the cache by time (`gcTime: Infinity`).
  * - The lock ends when the board no longer shows that run as the Task's
@@ -146,26 +145,27 @@ export const useTryAgain = (
       const words = describeTryAgain(title);
       callbacks.sayWithUndo(`${words}.`, {
         words,
-        undo: async () => {
-          try {
-            const answer = await client.task.undoTryAgain({
+        undo: () =>
+          client.task
+            .undoTryAgain({
               params: { id: taskId },
               payload: { runId: started.runId },
-            });
-            const result = describeTryAgainUndo(answer);
-            if (result.kind === "stayed") throw new Error(result.reason);
-            if (scope.isCurrent()) callbacks.onUndone(taskId);
-            return undefined;
-          } finally {
-            // The failure is back, or the Task stays as it is: either way the
-            // run is no longer one to wait for.
-            releaseRequest(queryClient, request);
-            if (scope.isCurrent()) {
-              invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
-              invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
-            }
-          }
-        },
+            })
+            .then((answer) => {
+              const result = describeTryAgainUndo(answer);
+              if (result.kind === "stayed") throw new Error(result.reason);
+              if (scope.isCurrent()) callbacks.onUndone(taskId);
+              return undefined;
+            })
+            .finally(() => {
+              // The failure is back, or the Task stays as it is: either way the
+              // run is no longer one to wait for.
+              releaseRequest(queryClient, request);
+              if (scope.isCurrent()) {
+                invalidateWithoutCancelling(queryClient, queryKeys.workBoard());
+                invalidateWithoutCancelling(queryClient, queryKeys.taskDetail(taskId));
+              }
+            }),
       });
       callbacks.onStarted(taskId);
     },

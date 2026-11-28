@@ -537,7 +537,7 @@ describe("the Overview's view pill", () => {
 
   it("is what the sidebar's Overview row opens again", async () => {
     const { user, router } = await openOffice();
-    await act(() => router.navigate({ to: "/intake" }));
+    await act(() => router.navigate({ to: "/inbox" }));
     await user.click(await screen.findByRole("link", { name: "Overview" }));
 
     await waitFor(() => {

@@ -57,12 +57,16 @@ import {
   type MemoryEntry,
   type MemoryMatch,
   type WikiPage,
+  type WikiPageSummary,
   type WikiPageWithRevisions,
   type Notification,
+  type EntityBlocks,
   type NotificationAction,
   type OpenRequest,
   type OperationId,
   type MintedPromotionToken,
+  type EntityLinkResult,
+  type InboxGroupDetail,
   type Post,
   type Resolution,
   type Run,
@@ -72,12 +76,9 @@ import {
   type SessionSkillList,
   type Signal,
   type SignalAction,
-  type SignalLowerPriorityResult,
   type SignalMarkDoneResult,
   type SignalRaiseResult,
   type SignalResolution,
-  type SignalSnoozeResult,
-  type SignalUnsnoozeResult,
   type TaskChangeResult,
   type Skill,
   type SkillDetail,
@@ -843,9 +844,9 @@ const renderNotificationDecided = (
 
 /**
  * Returns a signal as a row of `signal list`: its id, kind, priority, title,
- * who waits on the user, where the question is asked, its age, and, for a
- * snoozed signal still in Later, when it comes back. The blocks and the
- * actions are left to `signal read`, because they do not fit on one line.
+ * who waits on the user, where the question is asked, and its age. The
+ * blocks and the actions are left to `signal read`, because they do not fit
+ * on one line.
  */
 const summarizeSignal = (signal: Signal, now: Date): Record<string, unknown> => ({
   id: signal.id,
@@ -855,11 +856,6 @@ const summarizeSignal = (signal: Signal, now: Date): Record<string, unknown> => 
   asker: signal.asker,
   place: signal.place,
   age: formatAge(signal.createdAt, now),
-  // A snooze whose time has passed stays on the signal until it is resolved,
-  // and that signal is back on To do, so only a future time is printed.
-  ...(signal.snooze !== undefined && Date.parse(signal.snooze.until) > now.getTime()
-    ? { back: signal.snooze.until }
-    : {}),
 });
 
 /** Returns the rows of a page of `signal list` as a table. */
@@ -912,9 +908,8 @@ const renderSignalHandedOff = (signal: ResolvedSignal): ReadonlyArray<string> =>
 };
 
 /**
- * Returns the lines printed after `signal done`, `signal snooze`, `signal
- * unsnooze` and `signal lower-priority`: one line per signal the command
- * changed, such as "signal 0b1c2d3e snoozed", then one per signal it skipped
+ * Returns the lines printed after `signal done`: one line per signal the
+ * command changed, such as "signal 0b1c2d3e done", then one per signal it skipped
  * because the signal was already resolved. A call that changed nothing and
  * skipped nothing prints one line saying so, because no output at all reads
  * like a failure.
@@ -1142,6 +1137,25 @@ const renderTaskEntityLinked = (
   words: { readonly done: string; readonly nothing: string },
 ): ReadonlyArray<string> => [`task ${toIdTail(task.id)}: ${changed ? words.done : words.nothing}`];
 
+/**
+ * Returns the lines of `entity group`: the label, one line per member (the
+ * ref, then its title or "restricted"), then one line per link with who
+ * claims it. A cut group says so on the last line.
+ */
+const renderInboxGroup = (group: InboxGroupDetail): ReadonlyArray<string> => [
+  `group  ${group.label} (${String(group.members.length)} ${group.members.length === 1 ? "thing" : "things"})`,
+  ...group.members.map((member) =>
+    `  ${member.ref}  ${member.restricted ? "restricted" : (member.title ?? "")}`.trimEnd(),
+  ),
+  ...(group.links.length === 0 ? [] : ["links"]),
+  ...group.links.map((link) => {
+    const by = link.claim.type === "source" ? `source ${link.claim.plugin ?? ""}`.trim() : "you";
+    const also = link.claim.type === "source" && link.hasPersonClaim ? ", you too" : "";
+    return `  ${link.fromRef} - ${link.toRef}  ${by}${also}`;
+  }),
+  ...(group.complete ? [] : ["the group is larger than this reply: members or links were cut"]),
+];
+
 /** Returns the line printed after `discussion post`, with the new Post's full id. */
 const renderPosted = (post: Post): ReadonlyArray<string> => [
   `post ${post.id} added to discussion ${formatCell(post.discussionId)}`,
@@ -1168,8 +1182,8 @@ const renderMemorySaved = (
 
 /**
  * Returns a Wiki Page as `wiki-page read` prints it: its title, summary and
- * revision, then its body between two marker lines, then one line per listed
- * revision. The markers show an agent where text another agent wrote starts
+ * revision, and for an archived page who archived it, when and why; then its
+ * body between two marker lines, then one line per listed revision. The markers show an agent where text another agent wrote starts
  * and ends (spec 19 section 3.5).
  */
 const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArray<string> => {
@@ -1185,6 +1199,12 @@ const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArr
         page.revision === current
           ? String(page.revision)
           : `${String(page.revision)}, not the current one (${String(current)})`,
+      // The reason is text another agent wrote, so it is kept on its one line.
+      ...(page.archived === undefined
+        ? {}
+        : {
+            archived: `${page.archived.at} by ${formatActor(page.archived.by)}: ${keepOnOneLine(page.archived.reason)}`,
+          }),
     }),
     "",
     `--- wiki page ${page.slug}, revision ${String(page.revision)}, by ${formatActor(page.updatedBy)} ---`,
@@ -1208,6 +1228,20 @@ const renderWikiPage = ({ page, revisions }: WikiPageWithRevisions): ReadonlyArr
  */
 const renderWikiPageWritten = (page: WikiPage): ReadonlyArray<string> => [
   `wrote wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}: revision ${String(page.revision)}`,
+];
+
+/**
+ * Returns the line printed after `wiki-page archive`: the page, its
+ * repository, and how to bring it back. The command to copy carries the full
+ * id, so it needs no listing to resolve and no `wiki.read`.
+ */
+const renderWikiPageArchived = (page: WikiPageSummary): ReadonlyArray<string> => [
+  `archived wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}; bring it back with \`hercule wiki-page restore ${page.id}\``,
+];
+
+/** Returns the line printed after `wiki-page restore`: the page, its repository and its revision. */
+const renderWikiPageRestored = (page: WikiPageSummary): ReadonlyArray<string> => [
+  `restored wiki page ${page.slug} (${formatCell(page.id)}) in ${page.repository}: revision ${String(page.revision)}`,
 ];
 
 /** Returns each matching document's name, with its snippets indented under it. */
@@ -1345,13 +1379,14 @@ const renderSkillDetail = (detail: SkillDetail): ReadonlyArray<string> => {
  * skill that stopped the command, if one did, then the lock file line when a
  * `.skill-lock.json` could not be read:
  *
- * - a skill the controller took: `grilling: created`, `revised` or
- *   `unchanged`, with one indented warning line under it per approval effect
- *   its current revision now has;
+ * - a skill the controller took: `grilling: created`, `revised`,
+ *   `proposed` or `unchanged`, with one indented warning line under it per approval effect
+ *   its current revision now has (none under `proposed`: a proposal changes
+ *   no current revision);
  * - a refused skill: `teach: refused: ` and why, with each issue of a
  *   validation error indented under it;
- * - the skill that stopped the command: `teach: refused, so the import
- *   stopped: ` and the controller's message, or `teach: failed, so the import
+ * - the skill that stopped the command: `teach: refused, so the command
+ *   stopped: ` and the controller's message, or `teach: failed, so the command
  *   stopped: ` and the error, such as a controller that cannot be reached.
  */
 const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): ReadonlyArray<string> => {
@@ -1361,9 +1396,13 @@ const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): Readon
       if ("answer" in skill) {
         return [
           `${skill.name}: ${skill.answer.result}`,
-          ...listSkillApprovalWarnings(skill.name, skill.answer.skill.currentApprovalEffects).map(
-            (warning) => `  ${warning}`,
-          ),
+          // A proposal changes no current revision, so the current revision's
+          // approval effects are not what was proposed.
+          ...(skill.answer.result === "proposed"
+            ? []
+            : listSkillApprovalWarnings(skill.name, skill.answer.skill.currentApprovalEffects).map(
+                (warning) => `  ${warning}`,
+              )),
         ];
       }
       const { refusal } = skill;
@@ -1374,10 +1413,10 @@ const renderSentSkills = (outcome: Extract<Outcome, { kind: "skills" }>): Readon
       ? []
       : stopped.error instanceof ApiError
         ? [
-            `${stopped.name}: refused, so the import stopped: ${stopped.error.message}`,
+            `${stopped.name}: refused, so the command stopped: ${stopped.error.message}`,
             ...indentIssues(stopped.error),
           ]
-        : [`${stopped.name}: failed, so the import stopped: ${readErrorMessage(stopped.error)}`]),
+        : [`${stopped.name}: failed, so the command stopped: ${readErrorMessage(stopped.error)}`]),
     ...(outcome.lockFileProblem === null ? [] : [outcome.lockFileProblem]),
   ];
 };
@@ -1463,6 +1502,15 @@ const VALUE_RENDERERS: Partial<
       done: "taken away and kept away",
       nothing: "does not link it, nothing changed",
     }),
+  "externalEntity.readInboxGroup": (value) => renderInboxGroup(value as InboxGroupDetail),
+  "externalEntity.link": (value) => {
+    const { created } = value as EntityLinkResult;
+    return [
+      created.length === 0
+        ? "Already linked. Nothing changed."
+        : `Linked ${String(created.length)}: ${created.join(", ")}.`,
+    ];
+  },
   "memory.list": (value) =>
     renderTableColumns(value as ReadonlyArray<MemoryEntry>, ["name", "size", "gist"]),
   "memory.search": (value) => renderMemoryMatches(value as ReadonlyArray<MemoryMatch>),
@@ -1484,6 +1532,8 @@ const VALUE_RENDERERS: Partial<
   },
   "wikiPage.create": (value) => renderWikiPageWritten(value as WikiPage),
   "wikiPage.update": (value) => renderWikiPageWritten(value as WikiPage),
+  "wikiPage.archive": (value) => renderWikiPageArchived(value as WikiPageSummary),
+  "wikiPage.restore": (value) => renderWikiPageRestored(value as WikiPageSummary),
   // A create or an update prints no source, because the caller has just sent it.
   "workflow.read": (value) => renderWorkflowSource(value as Workflow),
   "workflow.create": (value) => renderWorkflowSaveResult(value as WorkflowSaveResult),
@@ -1497,6 +1547,10 @@ const VALUE_RENDERERS: Partial<
   "notification.act": (value) =>
     renderNotificationDecided(value as Notification & { readonly resolution: Resolution }),
   "signal.read": (value) => renderSignal(value as Signal),
+  "externalEntity.readBlocks": (value) => {
+    const { blocks } = value as EntityBlocks;
+    return blocks.length === 0 ? ["no blocks"] : formatBlocksAsText(blocks).split("\n");
+  },
   "signal.raise": (value) => renderSignalRaised(value as SignalRaiseResult),
   "signal.act": (value) => renderSignalResolved(value as ResolvedSignal),
   "signal.handOff": (value) => renderSignalHandedOff(value as ResolvedSignal),
@@ -1504,18 +1558,6 @@ const VALUE_RENDERERS: Partial<
   "signal.markDone": (value) => {
     const { done, skipped } = value as SignalMarkDoneResult;
     return renderSignalsMoved("done", done, skipped);
-  },
-  "signal.snooze": (value) => {
-    const { snoozed, skipped } = value as SignalSnoozeResult;
-    return renderSignalsMoved("snoozed", snoozed, skipped);
-  },
-  "signal.unsnooze": (value) => {
-    const { unsnoozed, skipped } = value as SignalUnsnoozeResult;
-    return renderSignalsMoved("unsnoozed", unsnoozed, skipped);
-  },
-  "signal.lowerPriority": (value) => {
-    const { lowered, skipped } = value as SignalLowerPriorityResult;
-    return renderSignalsMoved("lowered", lowered, skipped);
   },
   "session.spawn": (value) => renderSpawnedSession(value as Session),
   "session.read": (value) => renderSession(value as Session),
