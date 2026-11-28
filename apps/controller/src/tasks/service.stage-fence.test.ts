@@ -190,7 +190,7 @@ const deliverFact = (
     const tasks = yield* TaskService;
     const { by = "run", ...fields } = options;
     return yield* tasks
-      .update({ id: taskId, stage, stageFactId: factId, ...fields })
+      .update({ taskId: taskId, stage, stageFactId: factId, ...fields })
       .pipe(Effect.provideService(CurrentActor, ACTORS[by]));
   });
 
@@ -398,7 +398,7 @@ const ROWS: ReadonlyArray<Row> = [
         yield* arrange(open(1));
         const task = yield* createTaskAt("building", pr(1));
         yield* writeEntities([pr(1)], setLifecycle(pr(1), "completed")); // fact 2
-        yield* tasks.update({ id: task.id, stage: "done" });
+        yield* tasks.update({ taskId: task.id, stage: "done" });
         yield* deliver(task.id, deliverFact(task.id, 2, "in-review"));
         return task.id;
       }),
@@ -603,7 +603,7 @@ const ROWS: ReadonlyArray<Row> = [
         yield* arrange(open(1));
         const task = yield* createTaskAt("building", pr(1));
         yield* writeEntities([pr(1)], setLifecycle(pr(1), "completed")); // fact 2
-        yield* tasks.update({ id: task.id, stage: "building" });
+        yield* tasks.update({ taskId: task.id, stage: "building" });
         yield* deliver(task.id, deliverFact(task.id, 2, "in-review"));
         return task.id;
       }),
@@ -634,7 +634,7 @@ const ROWS: ReadonlyArray<Row> = [
         yield* arrange(open(1));
         const task = yield* createTaskAt("building", pr(1));
         yield* writeEntities([pr(1)], setLifecycle(pr(1), "completed")); // fact 2
-        yield* tasks.update({ id: task.id, status: "open" }); // building to planned
+        yield* tasks.update({ taskId: task.id, status: "open" }); // building to planned
         yield* deliver(task.id, deliverFact(task.id, 2, "in-review"));
         return task.id;
       }),
@@ -649,7 +649,7 @@ const ROWS: ReadonlyArray<Row> = [
         yield* arrange(open(1));
         const task = yield* createTaskAt("building", pr(1));
         yield* writeEntities([pr(1)], setLifecycle(pr(1), "completed")); // fact 2
-        yield* tasks.update({ id: task.id, status: "in-progress" }); // building stays
+        yield* tasks.update({ taskId: task.id, status: "in-progress" }); // building stays
         yield* deliver(task.id, deliverFact(task.id, 2, "in-review"));
         return task.id;
       }),
@@ -805,7 +805,7 @@ describe("a stage write that counts the links it adds", () => {
         const task = yield* createTaskAt("in-review", pr(1)); // fact 1
         yield* TestClock.adjust(A_MINUTE);
         const written = yield* tasks.update({
-          id: task.id,
+          taskId: task.id,
           stage: "landed",
           stageFactId: 1,
           onlyWhenLinkedWorkFinished: true,
@@ -830,7 +830,7 @@ describe("a stage write that counts the links it adds", () => {
         const task = yield* createTaskAt("in-review", pr(1)); // fact 1
         yield* TestClock.adjust(A_MINUTE);
         return (yield* tasks.update({
-          id: task.id,
+          taskId: task.id,
           stage: "landed",
           stageFactId: 1,
           onlyWhenLinkedWorkFinished: true,

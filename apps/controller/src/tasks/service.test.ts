@@ -154,7 +154,7 @@ describe("task.create", () => {
           // rejected by the rule about the task's total, not the rule about
           // one call.
           overflow: yield* Effect.flip(
-            tasks.update({ id: created.id, addLabels: [buildLabel(MAX_TASK_LABELS)] }),
+            tasks.update({ taskId: created.id, addLabels: [buildLabel(MAX_TASK_LABELS)] }),
           ),
         };
       }),
@@ -173,7 +173,7 @@ describe("task.update", () => {
         yield* TestClock.adjust(A_MINUTE);
         return {
           before: created,
-          after: yield* tasks.update({ id: created.id, description: "new" }),
+          after: yield* tasks.update({ taskId: created.id, description: "new" }),
         };
       }),
     );
@@ -191,7 +191,7 @@ describe("task.update", () => {
         yield* TestClock.adjust(A_MINUTE);
         return {
           before: created,
-          after: yield* tasks.update({ id: created.id, status: "in-progress" }),
+          after: yield* tasks.update({ taskId: created.id, status: "in-progress" }),
         };
       }),
     );
@@ -209,9 +209,9 @@ describe("task.update", () => {
           description: "d",
           priority: "high",
         });
-        const added = yield* tasks.update({ id: created.id, addLabels: ["proposed", "code"] });
-        const twice = yield* tasks.update({ id: created.id, addLabels: ["code"] });
-        const removed = yield* tasks.update({ id: created.id, removeLabels: ["proposed"] });
+        const added = yield* tasks.update({ taskId: created.id, addLabels: ["proposed", "code"] });
+        const twice = yield* tasks.update({ taskId: created.id, addLabels: ["code"] });
+        const removed = yield* tasks.update({ taskId: created.id, removeLabels: ["proposed"] });
         return { added, twice, removed };
       }),
     );
@@ -234,7 +234,7 @@ describe("task.update", () => {
           description: "d",
           provenance: [{ ref: ISSUE_REF }],
         });
-        return yield* tasks.update({ id: created.id, provenance: [{ eventId: 7 }] });
+        return yield* tasks.update({ taskId: created.id, provenance: [{ eventId: 7 }] });
       }),
     );
     expect(task.provenance).toHaveLength(2);
@@ -244,7 +244,7 @@ describe("task.update", () => {
 
   it("returns not_found for an id that does not exist", async () => {
     const error = await runError(
-      Effect.flatMap(TaskService, (tasks) => tasks.update({ id: UNKNOWN_ID, title: "x" })),
+      Effect.flatMap(TaskService, (tasks) => tasks.update({ taskId: UNKNOWN_ID, title: "x" })),
     );
     expect(error).toMatchObject({ error: { code: "not_found" } });
   });
@@ -253,7 +253,7 @@ describe("task.update", () => {
     const error = await runError(
       Effect.flatMap(TaskService, (tasks) =>
         Effect.flatMap(tasks.create({ title: "Unchanged", description: "d" }), (created) =>
-          tasks.update({ id: created.id }),
+          tasks.update({ taskId: created.id }),
         ),
       ),
     );
@@ -334,7 +334,7 @@ describe("the stage of a task", () => {
           const tasks = yield* TaskService;
           const created = yield* tasks.create({ title: "Moving", description: "", stage: from });
           yield* TestClock.adjust(A_MINUTE);
-          const after = yield* tasks.update({ id: created.id, ...patch });
+          const after = yield* tasks.update({ taskId: created.id, ...patch });
           return { before: created, after, events: yield* readEventsOfKind("task.updated") };
         }),
       );
@@ -354,9 +354,9 @@ describe("the stage of a task", () => {
         const tasks = yield* TaskService;
         const created = yield* tasks.create({ title: "Timed", description: "", stage: "building" });
         yield* TestClock.adjust(A_MINUTE);
-        const withinStatus = yield* tasks.update({ id: created.id, stage: "in-review" });
+        const withinStatus = yield* tasks.update({ taskId: created.id, stage: "in-review" });
         yield* TestClock.adjust(A_MINUTE);
-        const acrossStatus = yield* tasks.update({ id: created.id, stage: "done" });
+        const acrossStatus = yield* tasks.update({ taskId: created.id, stage: "done" });
         return { created, withinStatus, acrossStatus };
       }),
     );
@@ -372,7 +372,7 @@ describe("the stage of a task", () => {
         const tasks = yield* TaskService;
         const created = yield* tasks.create({ title: "Both", description: "" });
         const error = yield* Effect.flip(
-          tasks.update({ id: created.id, stage: "in-review", status: "done" }),
+          tasks.update({ taskId: created.id, stage: "in-review", status: "done" }),
         );
         return {
           error,
@@ -486,13 +486,13 @@ const withThreeTasks = Effect.gen(function* () {
     description: "d",
     labels: ["code", "ops"],
   });
-  yield* tasks.update({ id: running.id, status: "in-progress" });
+  yield* tasks.update({ taskId: running.id, status: "in-progress" });
   const done = yield* tasks.create({
     title: "done and unlabelled",
     description: "d",
     provenance: [{ ref: THREAD_REF }],
   });
-  yield* tasks.update({ id: done.id, status: "done" });
+  yield* tasks.update({ taskId: done.id, status: "done" });
   return tasks;
 });
 
@@ -613,7 +613,7 @@ describe("full-text search", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const task = yield* tasks.create({ title: "hydrology survey", description: "" });
-        yield* tasks.update({ id: task.id, title: "limnology survey" });
+        yield* tasks.update({ taskId: task.id, title: "limnology survey" });
         return {
           before: yield* tasks.query({ text: "hydrology" }),
           after: yield* tasks.query({ text: "limnology" }),
@@ -841,7 +841,7 @@ describe("provenance", () => {
           const tasks = yield* TaskService;
           const created = yield* tasks.create({ title: "t", description: "d" });
           const updated = yield* Effect.provideService(
-            tasks.update({ id: created.id, status: "done" }),
+            tasks.update({ taskId: created.id, status: "done" }),
             CurrentActor,
             RUN,
           );
@@ -932,7 +932,7 @@ describe("the event log", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const created = yield* tasks.create({ title: "Before", description: "d" });
-        const updated = yield* tasks.update({ id: created.id, title: "After" });
+        const updated = yield* tasks.update({ taskId: created.id, title: "After" });
         return {
           created,
           updated,
@@ -968,7 +968,7 @@ describe("the event log", () => {
         const created = yield* tasks.create({ title: "Before", description: "d" });
         yield* TestClock.adjust(A_MINUTE);
         yield* tasks.update({
-          id: created.id,
+          taskId: created.id,
           title: "After",
           addLabels: ["code"],
           provenance: [{ ref: ISSUE_REF }],
@@ -1015,7 +1015,7 @@ describe("the event log", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         yield* Effect.ignore(tasks.create({ title: "", description: "d" }));
-        yield* Effect.ignore(tasks.update({ id: UNKNOWN_ID, title: "x" }));
+        yield* Effect.ignore(tasks.update({ taskId: UNKNOWN_ID, title: "x" }));
         yield* Effect.ignore(tasks.delete(UNKNOWN_ID));
         return {
           created: yield* readEventsOfKind("task.created"),
@@ -1060,7 +1060,7 @@ describe("the changes a task write announces", () => {
       Effect.gen(function* () {
         const tasks = yield* TaskService;
         const created = yield* tasks.create({ title: "Announce me", description: "" });
-        return yield* tasks.update({ id: created.id, status: "done" });
+        return yield* tasks.update({ taskId: created.id, status: "done" });
       }),
     );
     expect(announced).toEqual([
@@ -1074,7 +1074,7 @@ describe("the changes a task write announces", () => {
   it("announces nothing when the write fails", async () => {
     const { announced } = await runRecordingAnnouncements(
       Effect.flatMap(TaskService, (tasks) =>
-        Effect.ignore(tasks.update({ id: UNKNOWN_ID, title: "x" })),
+        Effect.ignore(tasks.update({ taskId: UNKNOWN_ID, title: "x" })),
       ),
     );
     expect(announced).toEqual([]);
@@ -1190,7 +1190,7 @@ describe("an update that changes nothing", () => {
         const before = yield* tasks.create({ title: "Steady", description: "d" });
         yield* TestClock.adjust(A_MINUTE);
         const after = yield* tasks.update({
-          id: before.id,
+          taskId: before.id,
           title: "Steady",
           status: "open",
           projectId: null,
@@ -1213,7 +1213,7 @@ describe("an update that changes nothing", () => {
           labels: ["code"],
         });
         const task = yield* tasks.update({
-          id: created.id,
+          taskId: created.id,
           addLabels: ["code"],
           removeLabels: ["code"],
         });
@@ -1441,7 +1441,7 @@ describe("the status order", () => {
         const tasks = yield* TaskService;
         for (const status of ["done", "cancelled", "open", "in-progress"] as const) {
           const task = yield* tasks.create({ title: status, description: "d" });
-          if (status !== "open") yield* tasks.update({ id: task.id, status });
+          if (status !== "open") yield* tasks.update({ taskId: task.id, status });
         }
         return yield* walkPages(tasks, { limit: 1, sort: [{ field: "status", direction: "asc" }] });
       }),

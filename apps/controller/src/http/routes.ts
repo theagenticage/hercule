@@ -316,7 +316,7 @@ const taskRoutes = HttpApiBuilder.group(api, "task", (handlers) =>
       .handle("read", ({ params }) => withApiErrors(tasks.read(params.id)))
       .handle("create", ({ payload }) => withApiErrors(tasks.create(payload)))
       .handle("update", ({ params, payload }) =>
-        withApiErrors(tasks.update({ id: params.id, ...payload })),
+        withApiErrors(tasks.update({ taskId: params.id, ...payload })),
       )
       .handle("move", ({ params, payload }) =>
         withApiErrors(tasks.move({ id: params.id, ...payload })),

@@ -108,8 +108,7 @@ const make = Effect.gen(function* () {
     Effect.Effect<RunStarted | undefined, BoundOperationError>
   > = {
     "task.create": (input) => Effect.as(tasks.create(input), undefined),
-    "task.update": ({ taskId, ...changes }) =>
-      Effect.as(tasks.update({ id: taskId, ...changes }), undefined),
+    "task.update": (call) => Effect.as(tasks.update(call), undefined),
     "run.start": (input) => runs.start(input),
     "signal.handOff": (input) => handoffs.handOff(input),
     "session.input": ({ sessionId, ...input }) =>

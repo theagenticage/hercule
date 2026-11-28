@@ -375,7 +375,7 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
         yield* arrangeBranch({ branch: "shared", taskIds: [first.id] });
         yield* arrangeBranch({ branch: "shared", taskIds: [second.id] });
         yield* scan(pullRequest(1, { branch: "shared" }));
-        yield* tasks.update({ id: second.id, stage: "dropped" });
+        yield* tasks.update({ taskId: second.id, stage: "dropped" });
         yield* scan(pullRequest(1, { branch: "shared" }));
         return [yield* readLinkedRefs(first.id), yield* readLinkedRefs(second.id)];
       }),
@@ -572,7 +572,7 @@ describe("linking a pull request to the Task whose branch it comes from", () => 
         const deleted = yield* createTask("Deleted");
         yield* arrangeBranch({ branch: "one", taskIds: [finished.id] });
         yield* arrangeBranch({ branch: "two", taskIds: [deleted.id] });
-        yield* tasks.update({ id: finished.id, stage: "done" });
+        yield* tasks.update({ taskId: finished.id, stage: "done" });
         yield* tasks.delete(deleted.id);
         yield* scan(pullRequest(1, { branch: "one" }), pullRequest(2, { branch: "two" }));
         const sql = yield* SqlClient.SqlClient;
@@ -733,7 +733,7 @@ describe("the branches a plugin is asked to look up", () => {
           taskIds: [task.id],
         });
         yield* arrangeBranch({ branch: "done", remoteBranches: ["done"], taskIds: [finished.id] });
-        yield* tasks.update({ id: finished.id, stage: "done" });
+        yield* tasks.update({ taskId: finished.id, stage: "done" });
         return yield* askTracked();
       }),
     );
