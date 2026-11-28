@@ -70,6 +70,7 @@ const buildRevision = (over: Partial<SkillRevision> & Pick<SkillRevision, "revis
   fileCount: 2,
   sizeBytes: 6656,
   description: "Grills you about a plan until it holds.",
+  approvalEffects: { allowedTools: null, hooks: null },
   createdAt: "2026-09-28T10:15:00.000Z",
   createdBy: "user" as const,
   appliedAt: "2026-09-28T10:15:00.000Z",
@@ -102,7 +103,11 @@ const GRILLING_DETAIL: SkillDetail = {
     "Read [the reference](reference.md), then [the docs](https://example.com/docs).",
   ].join("\n"),
   history: [
-    buildRevision({ revisionHash: "c".repeat(64), appliedAt: "2026-09-29T10:15:00.000Z" }),
+    buildRevision({
+      revisionHash: "c".repeat(64),
+      approvalEffects: GRILLING.currentApprovalEffects!,
+      appliedAt: "2026-09-29T10:15:00.000Z",
+    }),
     buildRevision({
       revisionHash: "d".repeat(64),
       description: "An older description.",
@@ -949,7 +954,17 @@ describe("Settings > Skills, updates", () => {
       skills: [GRILLING_UPDATED],
       handlers: {
         "GET /api/v1/skills/grilling": {
-          body: { ...GRILLING_DETAIL, skill: GRILLING_UPDATED },
+          body: {
+            ...GRILLING_DETAIL,
+            skill: GRILLING_UPDATED,
+            availableRevision: buildRevision({
+              revisionHash: UPDATE,
+              origin: "github",
+              approvalEffects: GRILLING_UPDATED.availableApprovalEffects!,
+              appliedAt: null,
+              appliedBy: null,
+            }),
+          },
         },
         [`GET ${DIFF_PATH}`]: { body: GRILLING_DIFF },
         ...handlers,
@@ -1265,6 +1280,10 @@ describe("Settings > Skills, proposed revisions", () => {
     proposedBy: PROPOSER,
     createdBy: PROPOSER,
   });
+  // The revision records carry these, so the page draws the warning lines
+  // without the diff, which the same effects also appear in.
+  const SHIP_EFFECTS = { allowedTools: "Bash(git tag:*)", hooks: null };
+  const NEW_EFFECTS = { allowedTools: null, hooks: "{}" };
   const proposal = (revisionHash: string, over: Partial<SkillRevision> = {}) =>
     buildRevision({
       revisionHash,
@@ -1274,6 +1293,7 @@ describe("Settings > Skills, proposed revisions", () => {
       appliedAt: null,
       appliedBy: null,
       description: "Takes a branch to a merged pull request.",
+      approvalEffects: SHIP_EFFECTS,
       ...over,
     });
   const SHIP_DETAIL: SkillDetail = {
@@ -1291,13 +1311,18 @@ describe("Settings > Skills, proposed revisions", () => {
     history: [],
     availableRevision: null,
     proposedRevisions: [
-      proposal(FIRST, { description: "Walks through a release.", fileCount: 2, sizeBytes: 2316 }),
+      proposal(FIRST, {
+        description: "Walks through a release.",
+        fileCount: 2,
+        sizeBytes: 2316,
+        approvalEffects: NEW_EFFECTS,
+      }),
     ],
   };
   const diffPath = (name: string, revisionHash: string) =>
     `/api/v1/skills/${name}/revisions/${revisionHash}/diff`;
   const SHIP_DIFF = {
-    approvalEffects: { allowedTools: "Bash(git tag:*)", hooks: null },
+    approvalEffects: SHIP_EFFECTS,
     files: [
       {
         path: "SKILL.md",
@@ -1309,7 +1334,7 @@ describe("Settings > Skills, proposed revisions", () => {
     ],
   };
   const NEW_DIFF = {
-    approvalEffects: { allowedTools: null, hooks: "{}" },
+    approvalEffects: NEW_EFFECTS,
     files: [
       {
         path: "SKILL.md",
@@ -1528,6 +1553,17 @@ describe("Settings > Skills, proposed revisions", () => {
       expect(screen.queryByRole("heading", { name: heading })).toBeNull();
     }
     expect(screen.queryByRole("button", { name: "Upload new version" })).toBeNull();
+  });
+
+  it("draws a proposal's warning line from its record, not from its diff", async () => {
+    // The diff here holds no effects, so only the revision record can name the hooks.
+    await openNewSkill({
+      [`GET ${diffPath("release-checklist", FIRST)}`]: {
+        body: { ...NEW_DIFF, approvalEffects: { allowedTools: null, hooks: null } },
+      },
+    });
+
+    expect(await screen.findByText("Has hooks, which run without asking")).toBeTruthy();
   });
 
   it("goes to the list when the last proposal of a new skill is rejected", async () => {

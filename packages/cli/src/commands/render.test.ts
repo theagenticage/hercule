@@ -2146,6 +2146,7 @@ describe("hercule skill", () => {
     fileCount: 2,
     sizeBytes: 6656,
     description: "Interviews the user.",
+    approvalEffects: { allowedTools: null, hooks: null },
     createdAt: "2026-10-18T09:00:00.000Z",
     createdBy: "user",
     appliedAt,

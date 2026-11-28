@@ -84,12 +84,7 @@ import {
   type CommittedSkillChange,
   type SkillFileError,
 } from "./files";
-import {
-  skillRepository,
-  type SkillChange,
-  type SkillRevisionWithEffects,
-  type StoredSkill,
-} from "./repository";
+import { skillRepository, type SkillChange, type StoredSkill } from "./repository";
 import { isSameSource } from "./source";
 import { makeSkillUpdateChecks } from "./update-check";
 
@@ -167,10 +162,7 @@ const describeUnknownRevision = (name: string, hash: string): string =>
  * Returns why `skill.apply` refuses a revision that is neither available nor
  * proposed, or undefined when the revision waits to be applied.
  */
-const describeRevisionNotWaiting = (
-  skill: Skill,
-  { revision }: SkillRevisionWithEffects,
-): string | undefined => {
+const describeRevisionNotWaiting = (skill: Skill, revision: SkillRevision): string | undefined => {
   const hash = revision.revisionHash;
   if (hash === skill.availableRevisionHash) return undefined;
   if (isProposed(revision)) return undefined;
@@ -232,7 +224,7 @@ const make = Effect.gen(function* () {
   const findRevisionOrFail = (
     stored: StoredSkill,
     hash: string,
-  ): Effect.Effect<SkillRevisionWithEffects, NotFound | SqlError> =>
+  ): Effect.Effect<SkillRevision, NotFound | SqlError> =>
     Effect.flatMap(
       skills.findRevision(stored.id, hash),
       Option.match({
@@ -849,9 +841,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             const stored = yield* findOrFail(input.name);
             const revision = yield* skills.findRevision(stored.id, input.revisionHash);
-            yield* refuseTaintedCaller(
-              Option.isSome(revision) && isProposed(revision.value.revision),
-            );
+            yield* refuseTaintedCaller(Option.isSome(revision) && isProposed(revision.value));
             if (Option.isNone(revision)) {
               // A check that finds a newer update deletes the one it replaces,
               // so the update the user chose may be gone.
@@ -895,7 +885,7 @@ const make = Effect.gen(function* () {
             yield* refuseTaintedCaller();
             const stored = yield* findOrFail(input.name);
             const { id, skill } = stored;
-            const { revision } = yield* findRevisionOrFail(stored, input.revisionHash);
+            const revision = yield* findRevisionOrFail(stored, input.revisionHash);
             if (!isProposed(revision)) {
               return yield* Effect.fail(
                 createInvalidStateError(

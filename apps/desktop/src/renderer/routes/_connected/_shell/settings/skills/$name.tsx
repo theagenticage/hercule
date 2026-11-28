@@ -98,7 +98,7 @@ function SkillPage(): JSX.Element {
   const timezone = resolveDisplayTimezone(
     useSuspenseQuery(settingsQuery(client)).data.user.timezone,
   );
-  const { skill, files, skillMd, history, proposedRevisions } = detail;
+  const { skill, files, skillMd, history, availableRevision, proposedRevisions } = detail;
   const current = findCurrentSkillRevision(detail);
   const isNewSkill = skill.currentRevisionHash === null;
   const now = new Date(query.dataUpdatedAt);
@@ -129,14 +129,12 @@ function SkillPage(): JSX.Element {
           </>
         ) : (
           <>
-            {current !== undefined && (
-              <SkillLead
-                skill={skill}
-                revision={current}
-                approvalEffects={skill.currentApprovalEffects}
-              />
-            )}
-            <SkillUpdateSection key={skill.availableRevisionHash} skill={skill} />
+            {current !== undefined && <SkillLead skill={skill} revision={current} />}
+            <SkillUpdateSection
+              key={skill.availableRevisionHash}
+              skill={skill}
+              availableRevision={availableRevision}
+            />
             {proposedRevisions.map((revision) => (
               <Proposal
                 key={revision.revisionHash}

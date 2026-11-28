@@ -189,6 +189,12 @@ export const SkillRevision = Schema.Struct({
   sizeBytes: Schema.Int,
   /** The `description` in its `SKILL.md` frontmatter. */
   description: Schema.String,
+  /**
+   * What in its `SKILL.md` frontmatter can change approvals on Claude Code,
+   * read once when its content was checked. A client draws the revision's
+   * warning line from it, without reading a diff.
+   */
+  approvalEffects: SkillApprovalEffects,
   createdAt: Timestamp,
   /** `system` for a revision an update check stored. */
   createdBy: Actor,

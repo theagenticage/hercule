@@ -540,6 +540,7 @@ const revision = (hash: string, description: string): SkillRevision => ({
   fileCount: 2,
   sizeBytes: 6656,
   description,
+  approvalEffects: { allowedTools: null, hooks: null },
   createdAt: "2026-10-18T10:00:00Z",
   createdBy: "user",
   appliedAt: "2026-10-18T10:00:00Z",
