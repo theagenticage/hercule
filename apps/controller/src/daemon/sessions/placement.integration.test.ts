@@ -9,7 +9,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import * as SqlClient from "effect/sql/SqlClient";
-import type { Session } from "@hercule/contract";
+import type { Session, TranscriptRow } from "@hercule/contract";
 import type { Plugin, HarnessDefinition } from "@hercule/plugin-host";
 import {
   MAX_OUTPUT_SCHEMA_LENGTH,
@@ -82,6 +82,16 @@ const UNSTRUCTURED: HarnessDefinition = buildHarnessDefinition("unstructured", [
   structuredOutput: "unsupported",
 });
 
+/** A harness that has no Auto mode, so a session that asks for Auto runs in Auto-accept edits. */
+const WITHOUT_AUTO: HarnessDefinition = buildHarnessDefinition("without-auto", [], {
+  accessModes: {
+    "approval-required": "native",
+    "auto-accept-edits": "native",
+    auto: "unsupported",
+    "full-access": "native",
+  },
+});
+
 /** What both multi-harness harnesses run: one provider's subscription, signed in on each machine. */
 const MULTI_RUN = {
   providerId: "multi/multi",
@@ -96,7 +106,14 @@ const DELTA = buildHarnessDefinition("delta", [MULTI_RUN]);
 const EPSILON = buildHarnessDefinition("epsilon", [MULTI_RUN]);
 
 const buildPlugins = (): ReadonlyArray<Plugin> => [
-  buildPluginWithProviderPerHarness("harnesses", [ALPHA, BETA, GAMMA, UNFORKABLE, UNSTRUCTURED]),
+  buildPluginWithProviderPerHarness("harnesses", [
+    ALPHA,
+    BETA,
+    GAMMA,
+    UNFORKABLE,
+    UNSTRUCTURED,
+    WITHOUT_AUTO,
+  ]),
   // One provider that two harnesses run, so one account can be placed in either.
   createPluginFixture({
     id: "multi",
@@ -136,6 +153,7 @@ const FACTS: RunnerFacts = {
     "harnesses/gamma",
     "harnesses/unforkable",
     "harnesses/unstructured",
+    "harnesses/without-auto",
     "multi/delta",
     "multi/epsilon",
   ],
@@ -233,6 +251,33 @@ describe("placeSession", () => {
         providerAccountId: beta,
         modelSelection: { model: "fast", options: {} },
         accessMode: "auto",
+      });
+    });
+  });
+
+  it("tells the user when the harness runs the session in another access mode than the default asked for", async () => {
+    await withFleet(async (arranged) => {
+      await setThreadDefaults(arranged, {
+        "thread.providerAccountId": findProviderAccountId(arranged, "harnesses/without-auto"),
+        "thread.accessMode": "auto",
+      });
+
+      const session = await spawnSessionOrFail(arranged, { prompt: "hello" });
+
+      expect(session.requestedAccessMode).toBe("auto");
+      expect(session.accessMode).toBe("auto-accept-edits");
+      const transcript = await send(
+        "GET",
+        arranged.harness.base,
+        `/api/v1/sessions/${session.id}/transcript`,
+        { token: arranged.token },
+      );
+      expect(transcript.status).toBe(200);
+      const rows = ((await transcript.json()) as { readonly items: ReadonlyArray<TranscriptRow> })
+        .items;
+      expect(rows[0]?.event).toMatchObject({
+        _tag: "runtime.notice",
+        message: "Runs in Auto-accept edits, because this harness does not support Auto.",
       });
     });
   });

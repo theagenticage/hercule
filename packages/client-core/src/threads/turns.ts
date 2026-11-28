@@ -175,9 +175,10 @@ export const buildUserMessage = (
 /**
  * A `runtime.error`, `runtime.warning`, `runtime.notice` or `unknown` row: something
  * reported around the work. An error or a warning is something that went wrong,
- * such as a harness that is not installed. A notice is neutral: a note from the
- * runner, or an event this client has no arm for. The message is shown as the
- * runner wrote it, and may hold a command between backticks.
+ * such as a harness that is not installed. A notice is neutral: a note from a
+ * harness adapter or the controller, or an event this client has no arm for.
+ * The message is shown as it was stored, and may hold a command between
+ * backticks.
  */
 export interface RuntimeNote {
   /** Unique within one transcript: the row's position, with its severity. */

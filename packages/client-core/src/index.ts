@@ -624,6 +624,8 @@ export {
 } from "./text-generation";
 export { findTimeOfDayError, formatTimeOfDay } from "./time-of-day";
 export { countUsedTokens, describeTokenUsage } from "./token-usage";
+// The name lives in contract so the controller and the CLI can use it. The web
+// app and the desktop app import their display helpers from here.
 export { formatAccessMode } from "@hercule/contract";
 export type { AccessModeMenuItem } from "./threads/access-modes";
 export { describeAge, findNextAgeChange, formatAge } from "./threads/age";

@@ -992,23 +992,24 @@ const ITEMS_RENDERERS: Partial<Record<OperationId, ItemsRenderer>> = {
 
 /**
  * Returns the lines printed after `session spawn`: the session, the access
- * mode fallback when the session runs in another mode than it asked for, and a
- * hint with the command that reads its transcript. The hint is the only one
- * this build prints after a command. A caller who has just spawned a session wants
- * to watch it. The hint does not suggest a subscription on the session: no
- * platform event about a session is emitted yet, so the controller would
+ * mode fallback when the session runs in another mode than it asked for, and
+ * a hint with the command that reads its transcript. The hint is the only one
+ * this build prints after a command. A caller who has just spawned a session
+ * wants to watch it. The hint does not suggest a subscription on the session:
+ * no platform event about a session is emitted yet, so the controller would
  * reject it. It points at the transcript, which the caller can already read.
  * `transcript read` returns the rows so far and does not follow the session,
  * so the hint uses "read", not "watch".
  */
-const renderSpawnedSession = (session: Session): ReadonlyArray<string> => [
-  ...renderSession(session),
-  ...(session.requestedAccessMode === session.accessMode
-    ? []
-    : ["", describeAccessModeFallback(session.requestedAccessMode, session.accessMode)]),
-  "",
-  `read what it has done so far with \`hercule transcript read ${formatCell(session.id)}\``,
-];
+const renderSpawnedSession = (session: Session): ReadonlyArray<string> => {
+  const fallback = describeAccessModeFallback(session.requestedAccessMode, session.accessMode);
+  return [
+    ...renderSession(session),
+    ...(fallback === undefined ? [] : ["", fallback]),
+    "",
+    `read what it has done so far with \`hercule transcript read ${formatCell(session.id)}\``,
+  ];
+};
 
 /**
  * Returns a workflow's source unchanged, so the output can be edited and

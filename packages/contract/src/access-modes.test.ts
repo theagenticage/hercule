@@ -22,4 +22,8 @@ describe("describeAccessModeFallback", () => {
       "Runs in Auto-accept edits, because this harness does not support Auto.",
     );
   });
+
+  it("returns nothing when the session runs in the mode it asked for", () => {
+    expect(describeAccessModeFallback("auto", "auto")).toBeUndefined();
+  });
 });

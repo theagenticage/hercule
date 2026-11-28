@@ -56,13 +56,19 @@ export const formatAccessMode = (mode: AccessMode): string => LABELS[mode];
 /**
  * Returns the sentence that tells the user a session runs in a different
  * access mode than the one it asked for, such as "Runs in Auto-accept edits,
- * because this harness does not support Auto.".
+ * because this harness does not support Auto.". Returns `undefined` when
+ * `requested` and `effective` are the same mode, because then there is
+ * nothing to tell.
  *
- * Call it only when `requested` and `granted` differ. The controller writes
- * the sentence as a Runtime Notice into the session's stream, and
- * `hercule session spawn` prints it, so both show the same words. It names no
- * harness because the CLI knows only the harness id, and the two lines must be
- * identical.
+ * The controller writes the sentence as a Runtime Notice into the session's
+ * stream, and `hercule session spawn` prints it, so both show the same words.
+ * It names no harness because the CLI knows only the harness id, and the two
+ * lines must be identical.
  */
-export const describeAccessModeFallback = (requested: AccessMode, granted: AccessMode): string =>
-  `Runs in ${formatAccessMode(granted)}, because this harness does not support ${formatAccessMode(requested)}.`;
+export const describeAccessModeFallback = (
+  requested: AccessMode,
+  effective: AccessMode,
+): string | undefined =>
+  requested === effective
+    ? undefined
+    : `Runs in ${formatAccessMode(effective)}, because this harness does not support ${formatAccessMode(requested)}.`;

@@ -2862,7 +2862,7 @@ describe("the notice that a session runs in another access mode than it asked fo
 
   const buildCreateRequest = (
     requestedAccessMode: AccessMode,
-    grantedAccessMode: AccessMode,
+    effectiveAccessMode: AccessMode,
   ): CreateRequest => ({
     id: mintId(),
     permissionProfileId: mintId(),
@@ -2873,7 +2873,7 @@ describe("the notice that a session runs in another access mode than it asked fo
     harnessId: HARNESS_ID,
     requestedAccessMode,
     parentSessionId: undefined,
-    spec: { ...buildSpec(mintId(), "clever"), accessMode: grantedAccessMode },
+    spec: { ...buildSpec(mintId(), "clever"), accessMode: effectiveAccessMode },
     prompt: "begin",
     attachments: [],
     title: undefined,
@@ -2888,11 +2888,11 @@ describe("the notice that a session runs in another access mode than it asked fo
   });
 
   /** Creates a session with the two modes and returns the notices of its stream. */
-  const createWithModes = (requested: AccessMode, granted: AccessMode) =>
+  const createWithModes = (requested: AccessMode, effective: AccessMode) =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
       const sessions = yield* SessionService;
-      const request = buildCreateRequest(requested, granted);
+      const request = buildCreateRequest(requested, effective);
       yield* withTransaction(
         sql,
         Effect.provideService(sessions.create(request), CurrentActor, USER),

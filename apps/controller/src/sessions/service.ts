@@ -2724,12 +2724,12 @@ const make = Effect.gen(function* () {
         });
         // The stream is new, so this notice is its first event. A fork has a
         // stream of its own and gets its own notice.
-        if (open.requestedAccessMode !== open.spec.accessMode) {
-          yield* appendRuntimeNotice(
-            open.id,
-            describeAccessModeFallback(open.requestedAccessMode, open.spec.accessMode),
-            open.at,
-          );
+        const fallbackNotice = describeAccessModeFallback(
+          open.requestedAccessMode,
+          open.spec.accessMode,
+        );
+        if (fallbackNotice !== undefined) {
+          yield* appendRuntimeNotice(open.id, fallbackNotice, open.at);
         }
         if (open.mcpServerIds !== undefined && open.mcpServerIds.length > 0) {
           yield* sessions.replaceMcpServers(open.id, open.mcpServerIds);
@@ -3538,9 +3538,10 @@ const make = Effect.gen(function* () {
      *
      * When the resume changes what the session asked for or got, and the
      * harness runs it under a different mode than it asked for, the call also
-     * writes a Runtime Notice saying so. A resume that changes neither writes
-     * nothing, because an assistant's session unloads and resumes often and
-     * would repeat the same notice each time.
+     * writes a Runtime Notice saying so. A resume that changes neither still
+     * saves the access and the profile but appends no Runtime Notice, because
+     * an assistant's session unloads and resumes often and would repeat the
+     * same notice each time.
      *
      * It checks no grant. The caller is the controller daemon, resuming an
      * assistant's session under the assistant's current settings.
@@ -3551,12 +3552,12 @@ const make = Effect.gen(function* () {
         const changed =
           access.requestedAccessMode !== session.requestedAccessMode ||
           access.accessMode !== session.accessMode;
-        if (changed && access.requestedAccessMode !== access.accessMode) {
-          yield* appendRuntimeNotice(
-            session.id,
-            describeAccessModeFallback(access.requestedAccessMode, access.accessMode),
-            yield* nowIso,
-          );
+        const fallbackNotice = describeAccessModeFallback(
+          access.requestedAccessMode,
+          access.accessMode,
+        );
+        if (changed && fallbackNotice !== undefined) {
+          yield* appendRuntimeNotice(session.id, fallbackNotice, yield* nowIso);
         }
       }),
 
